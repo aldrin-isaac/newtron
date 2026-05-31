@@ -2377,36 +2377,39 @@ Two exceptions, narrowly scoped:
    between binaries that ship as a coordinated set) do not need the
    version segment — §40's "change it everywhere" rule applies.
 
-## 40.1 Prefer composition over service registration at single-process scale
+## 40.1 Compose engines in one process while the footprint is small
 
-The project runs multiple HTTP-serving engines (newtron, newtrun,
-newtlab). In production they live in one process — `bin/newt-server`
-imports each engine's `pkg/<name>/api/` package and mounts its handler
-on a shared mux. No registry, no reverse proxy between engines, no
-HTTP hop between newt-server and an engine running in the same
-process.
+`bin/newt-server` runs every engine (newtron, newtrun, newtlab) in
+one process by importing each `pkg/<name>/api/` package and mounting
+its handler on a shared mux. There are four reasons today, none of
+them inherent virtues of composition over service meshes:
 
-The temptation to build a service mesh (registry + heartbeats +
-reverse proxy + retry) is real. It buys flexibility — language
-independence, cross-host scaling, runtime registration. None of those
-flexibility points apply at the project's current scale:
+1. **The footprint is small.** Three engines, all in this repo. The
+   composition is fifty lines; a registry + reverse proxy + retry
+   protocol is several hundred. The smaller code is easier to read
+   for the same outcome.
 
-- Engines are Go packages in this repo. They are not third-party
-  services to be discovered at runtime.
-- Single-machine deployment is the norm. Cross-host is not on the
-  roadmap.
-- Restarts happen in the same commit. Independent upgrade has no
-  caller demand today.
+2. **One entry point simplifies the client side.** newtcon, operator
+   scripts, and external integrations hit one URL. Without
+   aggregation, every consumer carries a service-to-port map and
+   reconciles which port answers which path.
 
-Composition gets compile-time checked dispatch (the mux knows every
-route at build time), zero IPC overhead (one process, one call
-stack), and ~50 lines of binary code instead of ~700 lines of mesh
-infrastructure that mostly catches problems composition doesn't have.
+3. **SSL and SSO will terminate once, not three times.** When TLS
+   and authentication land (post-v1), wiring them at one front is
+   straightforward. Wiring them at three independent backends, each
+   with its own TLS context and auth chain, multiplies the surface
+   area and the configuration.
 
-If the project later deploys engines on separate hosts, the right
-move is NATS or gRPC or a real service mesh — *not* the half-built
-HTTP registry that's tempting to write first. Compose now; mesh
-when the deployment shape actually demands it.
+4. **Scaling is not the current cost.** Cross-host deployment,
+   independent upgrade, third-party engines, language-agnostic
+   plug-ins — all have real cost-benefit answers when they become
+   real requirements. Today none of them is a requirement. Build
+   the cheapest thing that works; revisit when the shape changes.
+
+If the deployment shape later separates engines across hosts, the
+right move is a real service mesh (NATS, gRPC, a sidecar proxy) —
+selected on the requirements that emerged, not preemptively against
+a hypothetical future.
 
 ---
 

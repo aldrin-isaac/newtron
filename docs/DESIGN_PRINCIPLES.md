@@ -2438,28 +2438,39 @@ Two exceptions, narrowly scoped:
    coordinated set does not need the segment — the "change it
    everywhere" rule applies.
 
-## 38.1 Prefer composition over service registration at single-process scale
+## 38.1 Compose services in one process while the footprint is small
 
-When a project's HTTP surface is several services that all ship from
-one repository onto one machine, compose them in one process: each
+When a project's HTTP surface is several services shipped from one
+repository onto one machine, mount them in one process: each
 service's `pkg/<name>/api/` exports an `http.Handler`; the aggregator
-binary mounts each on a shared mux. Dispatch is compile-time checked
-through Go's type system; the call from the aggregator to a service
-handler is a function call, not an HTTP request.
+binary registers each on a shared mux. The reasons are practical,
+not architectural:
 
-The temptation to build a service mesh (registry, reverse proxy,
-heartbeat, retry, eviction) is real. It buys flexibility — language
-independence, cross-host scaling, runtime registration — for
-problems the project does not have at this scale. The cost is
-hundreds of lines of infrastructure that mostly catches failure
-modes composition does not produce (registration races, eviction
-TTL tuning, proxy-upstream connection pool tuning, dead-backend
-detection).
+1. **The footprint is small.** Few services, all in one repo. The
+   composition is a handful of mux registrations; a registry plus
+   reverse proxy plus retry plus eviction is hundreds of lines. The
+   smaller code is easier to read for the same outcome.
 
-If the deployment shape later demands engines on separate hosts, the
-right move is a real service mesh (NATS, gRPC, a sidecar proxy) —
-not a half-built HTTP registry that mimics it on loopback. Compose
-now; mesh when the deployment shape actually demands it.
+2. **One entry point simplifies every client.** Browser frontends,
+   operator scripts, and external integrations target one URL.
+   Without aggregation, every consumer carries a service-to-port
+   map and reconciles which port answers which path.
+
+3. **TLS and auth terminate once.** When TLS and authentication
+   land, wiring them at one front is straightforward. Wiring them
+   at N independent services, each with its own TLS context and
+   auth chain, multiplies the surface area and the configuration.
+
+4. **Scaling is not the current cost.** Cross-host deployment,
+   independent upgrade, third-party services, language-agnostic
+   plug-ins — each has its own cost-benefit answer when it becomes
+   a real requirement. Building for hypothetical future requirements
+   pays cost today against benefit that may never arrive.
+
+When deployment shape later splits services across hosts or trust
+boundaries, the right move is a real service mesh (NATS, gRPC, a
+sidecar proxy) — selected against the requirements that emerged,
+not preemptively against a hypothetical future.
 
 ---
 

@@ -66,24 +66,29 @@ A request to `:18080/newtlab/v1/topologies` hits the mux, matches the
 call stack as the HTTP request. No JSON marshaling between engines,
 no localhost TCP, no IPC.
 
-## Why this shape (and not a service mesh)
+## Why one process
 
-The first draft of this aggregation work was a separate process
-called `newtser` that ran a registry + reverse proxy and required
-backends to register over HTTP at startup. That design added ~700
-lines of infrastructure (registry, proxy, heartbeat, eviction,
-retry, deregister) for capabilities the project does not need at
-this scale: cross-host backends, third-party plugins, independent
-process upgrade, language-agnostic registration. It was discarded
-in favor of the composition shape documented above.
+Four pragmatic reasons, not architectural ones:
 
-`DESIGN_PRINCIPLES_NEWTRON.md` §40.1 codifies the rule: prefer
-composition over service registration at single-process scale. Today
-the project is single-machine; everything runs in one process group;
-engines ship from one repo. Composition is enough.
+1. **Footprint is small.** Three engines, all in this repo. Composing
+   them in one process is fifty lines.
+2. **One entry point** simplifies every client. newtcon, operator
+   scripts, and future external integrations hit one URL without
+   carrying a service-to-port map.
+3. **TLS and auth will terminate once.** When TLS and authentication
+   land (post-v1), they wire at one front instead of three independent
+   backends each with their own TLS context.
+4. **Scaling cost is not the current cost.** Cross-host deployment,
+   independent upgrade, third-party engines — each has a real
+   cost-benefit answer when it becomes a real requirement. Today none
+   is. The cheapest thing that works is the right thing.
 
-If the project later deploys engines on separate hosts, the right
-answer is a real service mesh (NATS, gRPC, Envoy) — not a
-half-built HTTP registry that mimics one on loopback. This document
-marks the choice explicitly so the next person reading the code
-knows the decision was deliberate, not accidental.
+An earlier draft of this work — `newtser` — built service-mesh
+infrastructure (~700 lines of registry, proxy, heartbeat, eviction,
+retry, deregister). It was discarded in favor of the composition
+shape above. If the deployment shape later splits engines across
+hosts or trust boundaries, the right move is a real service mesh
+(NATS, gRPC, a sidecar proxy) — selected against the requirements
+that emerged, not preemptively. See
+[`DESIGN_PRINCIPLES_NEWTRON.md`](DESIGN_PRINCIPLES_NEWTRON.md) §40.1
+for the codified rule.
