@@ -46,13 +46,13 @@ pkg/newtrun/                  # Engine (HTTP-agnostic orchestration core)
   errors.go                   # InfraError, StepError, PauseError
   report.go                   # ScenarioResult, StepResult, ReportGenerator (markdown + JUnit)
 
-pkg/newtrun/api/              # HTTP server package
+pkg/newtrun/api/v1/              # HTTP server package
   server.go                   # Server, Config, route registration, handleHealth, listSubdirs
   middleware.go               # withRequestID, withLogger, withRecovery
   runs.go                     # All run handlers + reconcileStaleStatus + finalizers + newRunID
-  suites.go                   # /api/suites endpoints + list-scenarios + nameRE
+  suites.go                   # /api/v1/suites endpoints + list-scenarios + nameRE
   scenarios.go                # GET/PUT/DELETE per-scenario + atomic write + path resolution
-  topologies.go               # GET /api/topologies
+  topologies.go               # GET /api/v1/topologies
   registry.go                 # RunRegistry, RegistryEntry, AlreadyRunningError
   safety.go                   # InlineSafetyPolicy, SafetyViolation
   reporter.go                 # HTTPReporter (implements ProgressReporter, publishes to broker)
@@ -66,14 +66,14 @@ cmd/newtrun/                  # CLI binary (thin HTTP-client surface)
   main.go                     # Root command, --newtrun-server flag, --verbose
   clientutil.go               # newClient factory, requireServer probe
   helpers.go                  # resolveSuite, resolveTopologyFromState
-  cmd_start.go                # POST /api/runs + SSE event renderer
-  cmd_pause.go                # POST /api/runs/{suite}/pause
+  cmd_start.go                # POST /api/v1/runs + SSE event renderer
+  cmd_pause.go                # POST /api/v1/runs/{suite}/pause
   cmd_stop.go                 # multi-step orchestration: stop + destroy + delete
   cmd_status.go               # GET-based status display, --monitor auto-refresh
-  cmd_list.go                 # list suites and scenarios via GET /api/suites/...
-  cmd_suites.go               # GET /api/suites
+  cmd_list.go                 # list suites and scenarios via GET /api/v1/suites/...
+  cmd_suites.go               # GET /api/v1/suites
   cmd_scenario.go             # scenario CRUD subcommands + suite create/delete
-  cmd_topologies.go           # GET /api/topologies
+  cmd_topologies.go           # GET /api/v1/topologies
   cmd_actions.go              # static action vocabulary help
   scenario_e2e_test.go        # CLI→server E2E tests
 
@@ -81,7 +81,7 @@ cmd/newtrun-server/           # Server binary entry point
   main.go                     # --listen, --suites-base, --topologies-base
 ```
 
-The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client → pkg/newtrun/api → pkg/newtrun`. `pkg/newtrun/` is HTTP-agnostic — it knows nothing about the server. `pkg/newtrun/api/` adapts the engine to HTTP. `pkg/newtrun/client/` consumes the HTTP surface.
+The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client → pkg/newtrun/api → pkg/newtrun`. `pkg/newtrun/` is HTTP-agnostic — it knows nothing about the server. `pkg/newtrun/api/v1/` adapts the engine to HTTP. `pkg/newtrun/client/` consumes the HTTP surface.
 
 ---
 
@@ -235,7 +235,7 @@ Reads the YAML file at `path`, unmarshals into a `Scenario`, validates required 
 func ParseScenarioBytes(data []byte) (*Scenario, error)
 ```
 
-The bytes-in variant. Used by `PUT /api/suites/{suite}/scenarios/{name}` to validate the request body before any disk write — the server is the single point that knows the accept set.
+The bytes-in variant. Used by `PUT /api/v1/suites/{suite}/scenarios/{name}` to validate the request body before any disk write — the server is the single point that knows the accept set.
 
 ### 3.3 ParseAllScenarios
 
@@ -243,7 +243,7 @@ The bytes-in variant. Used by `PUT /api/suites/{suite}/scenarios/{name}` to vali
 func ParseAllScenarios(dir string) ([]*Scenario, error)
 ```
 
-Reads every `*.yaml` file in `dir`, parses each, and returns the list. Used by `GET /api/suites/{suite}/scenarios` and by the Runner at startup.
+Reads every `*.yaml` file in `dir`, parses each, and returns the list. Used by `GET /api/v1/suites/{suite}/scenarios` and by the Runner at startup.
 
 ### 3.4 Validation rules
 
@@ -556,7 +556,7 @@ The one callback with no current producer in the Runner. Reserved for the per-de
 
 ---
 
-## 7. HTTP Server Package (`pkg/newtrun/api/`)
+## 7. HTTP Server Package (`pkg/newtrun/api/v1/`)
 
 ### 7.1 Server
 
@@ -702,22 +702,22 @@ type Client struct {
 
 | Method | Endpoint |
 |--------|----------|
-| `Health(ctx)` | GET /api/health |
-| `ListRuns(ctx)` | GET /api/runs |
-| `GetRun(ctx, suite)` | GET /api/runs/{suite} |
-| `StartRun(ctx, req)` | POST /api/runs |
-| `PauseRun(ctx, suite)` | POST /api/runs/{suite}/pause |
-| `StopRun(ctx, suite)` | POST /api/runs/{suite}/stop |
-| `DeleteRun(ctx, suite)` | DELETE /api/runs/{suite} |
-| `StreamEvents(ctx, suite, handle)` | GET /api/runs/{suite}/events (SSE) |
-| `ListSuites(ctx)` | GET /api/suites |
-| `ListSuiteScenarios(ctx, suite)` | GET /api/suites/{suite}/scenarios |
-| `CreateSuite(ctx, name)` | POST /api/suites |
-| `DeleteSuite(ctx, name)` | DELETE /api/suites/{suite} |
-| `GetScenario(ctx, suite, name)` | GET /api/suites/{suite}/scenarios/{name} |
-| `PutScenario(ctx, suite, name, body)` | PUT /api/suites/{suite}/scenarios/{name} |
-| `DeleteScenario(ctx, suite, name)` | DELETE /api/suites/{suite}/scenarios/{name} |
-| `ListTopologies(ctx)` | GET /api/topologies |
+| `Health(ctx)` | GET /api/v1/health |
+| `ListRuns(ctx)` | GET /api/v1/runs |
+| `GetRun(ctx, suite)` | GET /api/v1/runs/{suite} |
+| `StartRun(ctx, req)` | POST /api/v1/runs |
+| `PauseRun(ctx, suite)` | POST /api/v1/runs/{suite}/pause |
+| `StopRun(ctx, suite)` | POST /api/v1/runs/{suite}/stop |
+| `DeleteRun(ctx, suite)` | DELETE /api/v1/runs/{suite} |
+| `StreamEvents(ctx, suite, handle)` | GET /api/v1/runs/{suite}/events (SSE) |
+| `ListSuites(ctx)` | GET /api/v1/suites |
+| `ListSuiteScenarios(ctx, suite)` | GET /api/v1/suites/{suite}/scenarios |
+| `CreateSuite(ctx, name)` | POST /api/v1/suites |
+| `DeleteSuite(ctx, name)` | DELETE /api/v1/suites/{suite} |
+| `GetScenario(ctx, suite, name)` | GET /api/v1/suites/{suite}/scenarios/{name} |
+| `PutScenario(ctx, suite, name, body)` | PUT /api/v1/suites/{suite}/scenarios/{name} |
+| `DeleteScenario(ctx, suite, name)` | DELETE /api/v1/suites/{suite}/scenarios/{name} |
+| `ListTopologies(ctx)` | GET /api/v1/topologies |
 
 ### 8.2 Transport helpers
 
@@ -739,7 +739,7 @@ func (c *Client) StreamEvents(
 ) error
 ```
 
-Opens a long-running GET to `/api/runs/{suite}/events`, parses the SSE frame stream line-by-line, decodes each `data:` line as an `Event`, and calls `handle(ev)`. Returns when the context is canceled or the connection closes.
+Opens a long-running GET to `/api/v1/runs/{suite}/events`, parses the SSE frame stream line-by-line, decodes each `data:` line as an `Event`, and calls `handle(ev)`. Returns when the context is canceled or the connection closes.
 
 SSE comment lines (those starting with `:`) are silently skipped — they're heartbeats and subscription confirmations.
 
@@ -901,15 +901,15 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 
 | Command | Endpoint | Notes |
 |---------|----------|-------|
-| `start <suite>` | POST /api/runs + SSE | Streams events; exits on terminal SuiteEnd. |
-| `pause <suite>` | POST /api/runs/{suite}/pause | Returns when pause signal lands. |
+| `start <suite>` | POST /api/v1/runs + SSE | Streams events; exits on terminal SuiteEnd. |
+| `pause <suite>` | POST /api/v1/runs/{suite}/pause | Returns when pause signal lands. |
 | `stop <suite>` | GET + POST /stop + newtlab.Destroy + DELETE | Multi-step orchestration. |
-| `status [-s <pattern>]` | GET /api/runs + /api/runs/{suite} | Lists all suites; `-s/--suite <pattern>` filters by substring match. `--monitor` auto-refreshes. |
-| `list [suite]` | GET /api/suites + /api/suites/{suite}/scenarios | Lists suites; with a suite name lists its scenarios. |
-| `suites` | GET /api/suites | Hidden alias of `list`. |
-| `suite create/delete <name>` | POST/DELETE /api/suites | Per [§7](#7-http-server-package-pkgnewtrunapi). |
-| `scenario list/get/put/delete` | /api/suites/{suite}/scenarios* | Per [§7](#7-http-server-package-pkgnewtrunapi). |
-| `topologies` | GET /api/topologies | List server-visible topologies. |
+| `status [-s <pattern>]` | GET /api/v1/runs + /api/v1/runs/{suite} | Lists all suites; `-s/--suite <pattern>` filters by substring match. `--monitor` auto-refreshes. |
+| `list [suite]` | GET /api/v1/suites + /api/v1/suites/{suite}/scenarios | Lists suites; with a suite name lists its scenarios. |
+| `suites` | GET /api/v1/suites | Hidden alias of `list`. |
+| `suite create/delete <name>` | POST/DELETE /api/v1/suites | Per [§7](#7-http-server-package-pkgnewtrunapi). |
+| `scenario list/get/put/delete` | /api/v1/suites/{suite}/scenarios* | Per [§7](#7-http-server-package-pkgnewtrunapi). |
+| `topologies` | GET /api/v1/topologies | List server-visible topologies. |
 | `actions` | static | Help text describing the action vocabulary. |
 | `version` | static | Build info. |
 
@@ -925,7 +925,7 @@ Exit codes:
 
 ```go
 func newClient() *client.Client        // builds Client from --newtrun-server / env
-func requireServer(ctx, c) error       // probes GET /api/health; clean error on connection refused
+func requireServer(ctx, c) error       // probes GET /api/v1/health; clean error on connection refused
 func notFoundIsNil(err) bool           // ServerError 404 → nil for absent-state reads
 func fetchRunStateViaClient(suite) (*newtrun.RunState, error)
 func listSuiteNamesViaClient() ([]string, error)
@@ -965,7 +965,7 @@ newtrun scenario put <suite> <name> [--file <path>]
 newtrun scenario delete <suite> <name>
 ```
 
-`put` defaults to stdin if `--file` is not given; the body is sent raw to `PUT /api/suites/{suite}/scenarios/{name}` and validated server-side.
+`put` defaults to stdin if `--file` is not given; the body is sent raw to `PUT /api/v1/suites/{suite}/scenarios/{name}` and validated server-side.
 
 ---
 
@@ -979,10 +979,10 @@ Three flags:
 | `--suites-base` | `newtrun/suites` | Directory containing suite subdirectories. |
 | `--topologies-base` | `newtrun/topologies` | Directory containing topology subdirectories. |
 
-The Config struct has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), but the current binary registers no CLI flag or env-var binding for either. The values can only be overridden per-request via the `newtron_server` and `network_id` fields on `POST /api/runs`. Adding a flag or env-var to the server binary is a small follow-on if operators need to point a whole instance at a non-default newtron-server.
+The Config struct has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), but the current binary registers no CLI flag or env-var binding for either. The values can only be overridden per-request via the `newtron_server` and `network_id` fields on `POST /api/v1/runs`. Adding a flag or env-var to the server binary is a small follow-on if operators need to point a whole instance at a non-default newtron-server.
 
 The server installs a SIGTERM handler that calls `Stop(ctx)` — cancels every in-flight run, waits up to 5 seconds for them to drain, then shuts down the HTTP listener. The Runner's ctx-cancel check ([§5.4](#54-iteratescenarios)) is what makes the drain produce honest status (`aborted`) instead of synthetic FAIL events.
 
 ---
 
-*Source-traced against `pkg/newtrun/`, `pkg/newtrun/api/`, `pkg/newtrun/client/`, `cmd/newtrun/`, and `cmd/newtrun-server/`. Type definitions are exact; method signatures are exact. If you find a discrepancy, the code is the authority — please open an issue or PR.*
+*Source-traced against `pkg/newtrun/`, `pkg/newtrun/api/v1/`, `pkg/newtrun/client/`, `cmd/newtrun/`, and `cmd/newtrun-server/`. Type definitions are exact; method signatures are exact. If you find a discrepancy, the code is the authority — please open an issue or PR.*

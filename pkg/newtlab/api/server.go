@@ -1,8 +1,6 @@
 package api
 
 import (
-	"context"
-	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -21,13 +19,15 @@ type Config struct {
 	Logger *log.Logger
 }
 
-// Server is the newtlab HTTP server.
+// Server is the newtlab HTTP server. The HTTP listener lifecycle
+// (Start / Stop) comes from the embedded *httputil.Server; this type
+// holds only newtlab-specific state.
 type Server struct {
-	cfg        Config
-	logger     *log.Logger
-	httpServer *http.Server
-	broker     *httputil.Broker[Event]
-	registry   *DeployRegistry
+	*httputil.Server
+	cfg      Config
+	logger   *log.Logger
+	broker   *httputil.Broker[Event]
+	registry *DeployRegistry
 }
 
 // NewServer constructs a server with the given config. The HTTP
@@ -45,12 +45,16 @@ func NewServer(cfg Config) *Server {
 		broker:   httputil.NewBroker[Event](),
 		registry: NewDeployRegistry(),
 	}
-	s.httpServer = &http.Server{
-		Handler:      s.buildHandler(),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0, // 0 = no per-request write deadline (SSE friendly)
-		IdleTimeout:  120 * time.Second,
-	}
+	s.Server = httputil.NewServer(s.buildHandler(), cfg.Logger,
+		httputil.ServerLabel("newtlab-server"),
+		// SSE-friendly: no per-request write deadline.
+		httputil.WriteTimeout(0),
+		// On shutdown, cancel every in-flight deploy with a 5s drain
+		// window before the HTTP listener closes.
+		httputil.OnShutdown(func() {
+			s.registry.CancelAll(5 * time.Second)
+		}),
+	)
 	return s
 }
 
@@ -68,24 +72,5 @@ func (s *Server) Registry() *DeployRegistry {
 // Handler returns the fully-wired http.Handler. Tests mount this into
 // httptest.Server without needing to bind a real port.
 func (s *Server) Handler() http.Handler {
-	return s.buildHandler()
-}
-
-// Start begins listening on addr. Blocks until the server stops.
-func (s *Server) Start(addr string) error {
-	s.httpServer.Addr = addr
-	s.logger.Printf("newtlab-server listening on %s", addr)
-	err := s.httpServer.ListenAndServe()
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
-}
-
-// Stop gracefully shuts down the server. Cancels every in-flight
-// deploy, waits up to 5s for goroutines to drain, then shuts down the
-// HTTP listener.
-func (s *Server) Stop(ctx context.Context) error {
-	s.registry.CancelAll(5 * time.Second)
-	return s.httpServer.Shutdown(ctx)
+	return s.HTTPServer().Handler
 }

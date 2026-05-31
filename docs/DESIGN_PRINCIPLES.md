@@ -2409,15 +2409,34 @@ Before implementing a SONiC feature:
 
 A greenfield system has no installed base. When a format or API changes,
 change it everywhere in one commit. No compatibility shims, no
-deprecated aliases, no dual-format detection. The public API (§33) has
-one version: current. The initialization command scrubs factory state
-once; after that, no operation checks for legacy formats.
+deprecated aliases, no dual-format detection. The initialization command
+scrubs factory state once; after that, no operation checks for legacy
+formats.
 
 **Write code for the system as it is today, not as it was yesterday.**
 
-Exception: SONiC releases change schemas and daemon behavior. The system
-must support multiple releases — this is multi-platform support (§39),
-not backwards compatibility.
+Two exceptions, narrowly scoped:
+
+1. **External platform releases.** Underlying platforms (kernels,
+   distributions, hardware) change schemas and daemon behavior between
+   releases. A greenfield project still has to ride those changes —
+   this is multi-platform support (§39), not backwards compatibility.
+
+2. **External HTTP API contracts.** When the project's HTTP API has
+   external consumers (a browser frontend, operator scripts, third-
+   party tools) whose release cadence is independent of the server's,
+   routes carry a `/api/v<n>/` version segment. The version is *the*
+   breaking-change escape hatch: when the wire shape changes
+   incompatibly, `/api/v(n+1)/` ships alongside `/api/v<n>/` so
+   consumers do not break in lockstep with a server upgrade. Each
+   independently-deployed HTTP server runs at its own version.
+
+   Inside the binary, this is still greenfield: one current version,
+   no compatibility shims, no aliases. The version segment is the
+   *only* concession. Internal callers update in the same commit as
+   the server. Internal RPC between binaries that ship as a
+   coordinated set does not need the segment — the "change it
+   everywhere" rule applies.
 
 ---
 

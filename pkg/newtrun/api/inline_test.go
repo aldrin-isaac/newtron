@@ -29,7 +29,7 @@ steps:
 func postInline(t *testing.T, ts *httptest.Server, req InlineRunRequest) (*http.Response, *httputil.APIResponse) {
 	t.Helper()
 	body, _ := json.Marshal(req)
-	resp, err := http.Post(ts.URL+"/api/runs/inline", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(ts.URL+"/api/v1/runs/inline", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestInlineDeleteUnreachableUntilTerminal(t *testing.T) {
 	}
 
 	// DELETE should clean the inline state.
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/runs/"+runID, nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/runs/"+runID, nil)
 	delResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
@@ -257,7 +257,7 @@ func TestInlineGetRunResolvesInlineID(t *testing.T) {
 	}
 
 	// GET /api/runs/{runID} should resolve through LoadAnyRunState.
-	getResp, err := http.Get(ts.URL + "/api/runs/" + runID)
+	getResp, err := http.Get(ts.URL + "/api/v1/runs/" + runID)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}

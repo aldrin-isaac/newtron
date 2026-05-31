@@ -36,7 +36,7 @@ func TestStartRunRejectsMissingSuite(t *testing.T) {
 	defer ts.Close()
 
 	body, _ := json.Marshal(StartRunRequest{Suite: ""})
-	resp, err := http.Post(ts.URL+"/api/runs", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(ts.URL+"/api/v1/runs", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestStartRunRejectsUnknownSuite(t *testing.T) {
 	defer ts.Close()
 
 	body, _ := json.Marshal(StartRunRequest{Suite: "does-not-exist"})
-	resp, err := http.Post(ts.URL+"/api/runs", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(ts.URL+"/api/v1/runs", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestStartRunSameSuiteRejected409(t *testing.T) {
 	defer ts.Close()
 
 	body, _ := json.Marshal(StartRunRequest{Suite: "blocked-suite"})
-	resp, err := http.Post(ts.URL+"/api/runs", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(ts.URL+"/api/v1/runs", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestStartRunReturns202AndRegistersEntry(t *testing.T) {
 	defer ts.Close()
 
 	body, _ := json.Marshal(StartRunRequest{Suite: "blocked-suite", NoDeploy: true})
-	resp, err := http.Post(ts.URL+"/api/runs", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(ts.URL+"/api/v1/runs", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestStopRunReturns404ForUnknownSuite(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/api/runs/no-such/stop", "application/json", nil)
+	resp, err := http.Post(ts.URL+"/api/v1/runs/no-such/stop", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestStopRunCallsRegistryCancel(t *testing.T) {
 	entry.Cancel = func() { canceled = true }
 	defer srv.Registry().Release("cancel-target", &RunResult{})
 
-	resp, err := http.Post(ts.URL+"/api/runs/cancel-target/stop", "application/json", nil)
+	resp, err := http.Post(ts.URL+"/api/v1/runs/cancel-target/stop", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestDeleteRunRejectsActiveRun(t *testing.T) {
 	_, _ = srv.Registry().Acquire("active")
 	defer srv.Registry().Release("active", &RunResult{})
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/runs/active", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/runs/active", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
@@ -199,7 +199,7 @@ func TestDeleteRunRemovesState(t *testing.T) {
 		t.Fatalf("SaveRunState: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/runs/to-delete", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/runs/to-delete", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
@@ -231,7 +231,7 @@ func TestPauseRunWritesPausingStatus(t *testing.T) {
 		t.Fatalf("SaveRunState: %v", err)
 	}
 
-	resp, err := http.Post(ts.URL+"/api/runs/paused-target/pause", "application/json", nil)
+	resp, err := http.Post(ts.URL+"/api/v1/runs/paused-target/pause", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}

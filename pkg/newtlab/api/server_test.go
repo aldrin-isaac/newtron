@@ -28,7 +28,7 @@ func TestHealthEndpointReturnsOK(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Get(ts.URL + "/api/health")
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/health")
 	if err != nil {
 		t.Fatalf("GET /api/health: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestListTopologiesEmptyWhenNoLabsDeployed(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Get(ts.URL + "/api/topologies")
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/topologies")
 	if err != nil {
 		t.Fatalf("GET /api/topologies: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestStatusMissingTopologyReturns404(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Get(ts.URL + "/api/topologies/no-such-topo/status")
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/topologies/no-such-topo/status")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestDeployMissingNameReturns404(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Post(ts.URL+"/api/topologies//deploy", "application/json", nil)
+	resp, err := ts.Client().Post(ts.URL+"/api/v1/topologies//deploy", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestUnknownRouteReturns404(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Get(ts.URL + "/api/does-not-exist")
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/does-not-exist")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}

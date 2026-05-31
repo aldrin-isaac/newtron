@@ -63,14 +63,14 @@ func (e *ServerError) Error() string {
 // the server isn't running.
 func (c *Client) Health(ctx context.Context) (api.HealthResponse, error) {
 	var resp api.HealthResponse
-	err := c.get(ctx, "/api/health", &resp)
+	err := c.get(ctx, "/api/v1/health", &resp)
 	return resp, err
 }
 
 // ListRuns returns the summary list of suite-runs known to the server.
 func (c *Client) ListRuns(ctx context.Context) ([]api.RunInfo, error) {
 	var resp []api.RunInfo
-	err := c.get(ctx, "/api/runs", &resp)
+	err := c.get(ctx, "/api/v1/runs", &resp)
 	return resp, err
 }
 
@@ -78,7 +78,7 @@ func (c *Client) ListRuns(ctx context.Context) ([]api.RunInfo, error) {
 // when the server returns 404.
 func (c *Client) GetRun(ctx context.Context, suite string) (*newtrun.RunState, error) {
 	var resp newtrun.RunState
-	err := c.get(ctx, "/api/runs/"+suite, &resp)
+	err := c.get(ctx, "/api/v1/runs/"+suite, &resp)
 	if err != nil {
 		var se *ServerError
 		if errorsAs(err, &se) && se.StatusCode == http.StatusNotFound {
@@ -92,7 +92,7 @@ func (c *Client) GetRun(ctx context.Context, suite string) (*newtrun.RunState, e
 // StartRun starts a server-side run of a file-backed suite.
 func (c *Client) StartRun(ctx context.Context, req api.StartRunRequest) (*api.StartRunResponse, error) {
 	var resp api.StartRunResponse
-	err := c.post(ctx, "/api/runs", req, &resp)
+	err := c.post(ctx, "/api/v1/runs", req, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -101,26 +101,26 @@ func (c *Client) StartRun(ctx context.Context, req api.StartRunRequest) (*api.St
 
 // PauseRun requests a graceful pause for the named suite's active run.
 func (c *Client) PauseRun(ctx context.Context, suite string) error {
-	return c.post(ctx, "/api/runs/"+suite+"/pause", nil, nil)
+	return c.post(ctx, "/api/v1/runs/"+suite+"/pause", nil, nil)
 }
 
 // StopRun cancels the named suite's active run.
 func (c *Client) StopRun(ctx context.Context, suite string) error {
-	return c.post(ctx, "/api/runs/"+suite+"/stop", nil, nil)
+	return c.post(ctx, "/api/v1/runs/"+suite+"/stop", nil, nil)
 }
 
 // DeleteRun removes the persistent state for the named suite. The server
 // rejects with 409 if the run is still active; callers should StopRun
 // first when transitioning.
 func (c *Client) DeleteRun(ctx context.Context, suite string) error {
-	return c.do(ctx, http.MethodDelete, "/api/runs/"+suite, nil, nil)
+	return c.do(ctx, http.MethodDelete, "/api/v1/runs/"+suite, nil, nil)
 }
 
 // ListSuites returns the suite names discoverable under the server's
 // SuitesBase.
 func (c *Client) ListSuites(ctx context.Context) ([]string, error) {
 	var resp api.SuitesResponse
-	if err := c.get(ctx, "/api/suites", &resp); err != nil {
+	if err := c.get(ctx, "/api/v1/suites", &resp); err != nil {
 		return nil, err
 	}
 	return resp.Suites, nil
@@ -131,7 +131,7 @@ func (c *Client) ListSuites(ctx context.Context) ([]string, error) {
 // the suite directory doesn't exist on the server.
 func (c *Client) ListSuiteScenarios(ctx context.Context, suite string) (*api.SuiteScenariosResponse, error) {
 	var resp api.SuiteScenariosResponse
-	if err := c.get(ctx, "/api/suites/"+suite+"/scenarios", &resp); err != nil {
+	if err := c.get(ctx, "/api/v1/suites/"+suite+"/scenarios", &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -140,38 +140,38 @@ func (c *Client) ListSuiteScenarios(ctx context.Context, suite string) (*api.Sui
 // CreateSuite creates an empty suite directory on the server. 409 if
 // the suite already exists.
 func (c *Client) CreateSuite(ctx context.Context, name string) error {
-	return c.do(ctx, http.MethodPost, "/api/suites", api.CreateSuiteRequest{Name: name}, nil)
+	return c.do(ctx, http.MethodPost, "/api/v1/suites", api.CreateSuiteRequest{Name: name}, nil)
 }
 
 // DeleteSuite removes an empty suite directory. Returns 409 if the
 // suite still contains scenarios.
 func (c *Client) DeleteSuite(ctx context.Context, name string) error {
-	return c.do(ctx, http.MethodDelete, "/api/suites/"+name, nil, nil)
+	return c.do(ctx, http.MethodDelete, "/api/v1/suites/"+name, nil, nil)
 }
 
 // GetScenario returns the raw scenario YAML body. 404 if no file
 // matches <name>.yaml or *-<name>.yaml in the suite directory.
 func (c *Client) GetScenario(ctx context.Context, suite, name string) ([]byte, error) {
-	return c.getRaw(ctx, "/api/suites/"+suite+"/scenarios/"+name)
+	return c.getRaw(ctx, "/api/v1/suites/"+suite+"/scenarios/"+name)
 }
 
 // PutScenario creates or updates a scenario. The body must be raw YAML
 // whose name: field matches the URL name; ParseScenarioBytes on the
 // server is the validation gate.
 func (c *Client) PutScenario(ctx context.Context, suite, name string, body []byte) error {
-	return c.putRaw(ctx, "/api/suites/"+suite+"/scenarios/"+name, body)
+	return c.putRaw(ctx, "/api/v1/suites/"+suite+"/scenarios/"+name, body)
 }
 
 // DeleteScenario removes a scenario file.
 func (c *Client) DeleteScenario(ctx context.Context, suite, name string) error {
-	return c.do(ctx, http.MethodDelete, "/api/suites/"+suite+"/scenarios/"+name, nil, nil)
+	return c.do(ctx, http.MethodDelete, "/api/v1/suites/"+suite+"/scenarios/"+name, nil, nil)
 }
 
 // ListTopologies returns the topology names discoverable under the
 // server's TopologiesBase.
 func (c *Client) ListTopologies(ctx context.Context) ([]string, error) {
 	var resp api.TopologiesResponse
-	if err := c.get(ctx, "/api/topologies", &resp); err != nil {
+	if err := c.get(ctx, "/api/v1/topologies", &resp); err != nil {
 		return nil, err
 	}
 	return resp.Topologies, nil
@@ -182,7 +182,7 @@ func (c *Client) ListTopologies(ctx context.Context) ([]string, error) {
 // the connection closes (caller cancels the context) or on a network
 // error. Heartbeat comment lines are silently skipped.
 func (c *Client) StreamEvents(ctx context.Context, suite string, handle func(api.Event)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/runs/"+suite+"/events", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/runs/"+suite+"/events", nil)
 	if err != nil {
 		return err
 	}

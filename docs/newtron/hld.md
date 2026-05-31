@@ -447,7 +447,7 @@ A concrete trace of `newtron leaf1 vlan create 100 --name servers -x` from keyst
 
 ```
 CLI (cmd/newtron)
-  │  Sends POST /network/default/node/leaf1/vlan
+  │  Sends POST /api/v1/network/default/node/leaf1/vlan
   │  Body: {"id": 100, "name": "servers"}
   │  Query: ?execute=true
   │

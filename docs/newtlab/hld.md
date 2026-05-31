@@ -864,15 +864,15 @@ Default bind: `127.0.0.1:18082` — joins the `:18080` (newtron-server) / `:1808
 
 | Method | Path | Wraps |
 |---|---|---|
-| `GET` | `/api/health` | — |
-| `GET` | `/api/topologies` | `newtlab.ListLabs()` |
-| `GET` | `/api/topologies/{name}/status` | `Lab.Status()` |
-| `POST` | `/api/topologies/{name}/deploy` (async) | `Lab.Deploy()` + optional `Lab.Provision()` |
-| `POST` | `/api/topologies/{name}/destroy` | `Lab.Destroy()` |
-| `POST` | `/api/topologies/{name}/provision` | `Lab.Provision()` |
-| `POST` | `/api/topologies/{name}/nodes/{node}/start` | `Lab.Start(node)` |
-| `POST` | `/api/topologies/{name}/nodes/{node}/stop` | `Lab.Stop(node)` |
-| `GET` | `/api/topologies/{name}/events` (SSE) | `Lab.OnProgress` phase callbacks |
+| `GET` | `/api/v1/health` | — |
+| `GET` | `/api/v1/topologies` | `newtlab.ListLabs()` |
+| `GET` | `/api/v1/topologies/{name}/status` | `Lab.Status()` |
+| `POST` | `/api/v1/topologies/{name}/deploy` (async) | `Lab.Deploy()` + optional `Lab.Provision()` |
+| `POST` | `/api/v1/topologies/{name}/destroy` | `Lab.Destroy()` |
+| `POST` | `/api/v1/topologies/{name}/provision` | `Lab.Provision()` |
+| `POST` | `/api/v1/topologies/{name}/nodes/{node}/start` | `Lab.Start(node)` |
+| `POST` | `/api/v1/topologies/{name}/nodes/{node}/stop` | `Lab.Stop(node)` |
+| `GET` | `/api/v1/topologies/{name}/events` (SSE) | `Lab.OnProgress` phase callbacks |
 
 Concurrency: one async deploy per topology at a time (second concurrent request returns 409). Destroy / start / stop / provision are synchronous. See [`api.md`](api.md) for endpoint-level reference.
 

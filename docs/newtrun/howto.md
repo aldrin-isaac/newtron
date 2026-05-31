@@ -49,7 +49,7 @@ Download a SONiC community image (one-time):
 
 ```bash
 mkdir -p ~/.newtlab/images
-curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
+curl -fSL "https://sonic-build.azurewebsites.net/api/v1/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
   | gunzip > ~/.newtlab/images/sonic-vs.qcow2
 ```
 
@@ -203,7 +203,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
-| newtrun-server up on `--newtrun-server` URL | `curl http://localhost:18081/api/health` | Start with `bin/newtrun-server &` |
+| newtrun-server up on `--newtrun-server` URL | `curl http://localhost:18081/api/v1/health` | Start with `bin/newtrun-server &` |
 | newtron-server up on `--server` URL | `curl http://localhost:18080/network` (lists registered networks; any 2xx confirms the server is up — newtron-server has no dedicated health endpoint) | Start with `bin/newtron-server --spec-dir <path> &` |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
@@ -312,7 +312,7 @@ newtrun: 2node-vs-primitive
 The CLI uses Server-Sent Events under the hood; you can subscribe yourself with curl for debugging:
 
 ```bash
-curl -N http://localhost:18081/api/runs/2node-vs-primitive/events
+curl -N http://localhost:18081/api/v1/runs/2node-vs-primitive/events
 ```
 
 Each frame has an `event: <type>` and `data: <json>` line. See the [API reference §5](api.md#5-run-events-sse) and [§10 SSE Event Reference](api.md#10-sse-event-reference) for the payload schemas.
@@ -373,10 +373,10 @@ bin/newtrun stop 2node-vs-primitive
 The CLI:
 
 1. Reads the suite's state via HTTP to recover the topology + spec-dir.
-2. POSTs to `/api/runs/{suite}/stop` — cancels the Runner's context.
+2. POSTs to `/api/v1/runs/{suite}/stop` — cancels the Runner's context.
 3. Waits for the Runner goroutine to exit.
 4. Calls the `newtlab.Lab.Destroy` Go API in-process to tear down VMs (no `bin/newtlab` subprocess; `cmd/newtrun/cmd_stop.go:51`).
-5. Sends `DELETE /api/runs/{suite}` to clear the state file.
+5. Sends `DELETE /api/v1/runs/{suite}` to clear the state file.
 
 If the suite isn't currently active (no Registry entry, but state exists from a previous run), steps 2 and 3 are skipped — only the topology destroy and state cleanup run.
 
@@ -702,12 +702,12 @@ Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (c
 URLs start from the path after the network segment. The `/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
 
 ```yaml
-url: /node/{{device}}/health             # → /network/<id>/node/switch1/health
-url: /node/{{device}}/bgp/check          # → /network/<id>/node/switch1/bgp/check
-url: /node/{{device}}/create-vlan        # → /network/<id>/node/switch1/create-vlan
+url: /node/{{device}}/health             # → /api/v1/network/<id>/node/switch1/health
+url: /node/{{device}}/bgp/check          # → /api/v1/network/<id>/node/switch1/bgp/check
+url: /node/{{device}}/create-vlan        # → /api/v1/network/<id>/node/switch1/create-vlan
 ```
 
-newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
+newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/v1/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
 
 If the URL contains `{{device}}`, the call runs in parallel across target devices. If not, it runs once with no device scoping (network-level operations like creating specs).
 
@@ -869,7 +869,7 @@ bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:18080
 
 ### 11.7 Common operations
 
-The `newtron` action covers every operation exposed by newtron-server. The recipes below show real endpoint shapes — copy the URL form, not the YAML structure. Verify against `pkg/newtron/api/handler.go` before authoring against newer endpoints.
+The `newtron` action covers every operation exposed by newtron-server. The recipes below show real endpoint shapes — copy the URL form, not the YAML structure. Verify against `pkg/newtron/api/v1/handler.go` before authoring against newer endpoints.
 
 **SSH command on a device:**
 
@@ -1189,14 +1189,14 @@ The `if: always()` ensures the reports upload even when the suite fails. The tes
 
 ### 14.1 `newtrun-server is not running`
 
-The CLI's `requireServer` probe (`GET /api/health`) returned a connection error. Either the server isn't running, or you're pointing at the wrong URL.
+The CLI's `requireServer` probe (`GET /api/v1/health`) returned a connection error. Either the server isn't running, or you're pointing at the wrong URL.
 
 ```bash
 # Is it running?
 pgrep -f "bin/newtrun-server"
 
 # Is the URL correct?
-curl http://localhost:18081/api/health
+curl http://localhost:18081/api/v1/health
 
 # Override the URL
 bin/newtrun start <suite> --newtrun-server http://other-host:18081
@@ -1282,12 +1282,12 @@ Another run for the same suite is already active in the registry:
 bin/newtrun status --suite <name>
 ```
 
-If status shows `running` but no Runner goroutine is live in the server, `reconcileStaleStatus` (`pkg/newtrun/api/runs.go`) rewrites the response to `aborted` on read — but the on-disk state file still says `running`. Force-clear:
+If status shows `running` but no Runner goroutine is live in the server, `reconcileStaleStatus` (`pkg/newtrun/api/v1/runs.go`) rewrites the response to `aborted` on read — but the on-disk state file still says `running`. Force-clear:
 
 ```bash
 bin/newtrun stop <name>
 # or
-curl -X DELETE http://localhost:18081/api/runs/<name>
+curl -X DELETE http://localhost:18081/api/v1/runs/<name>
 ```
 
 ### 14.9 Scenario fails at deploy (newtlab couldn't bring up VMs)

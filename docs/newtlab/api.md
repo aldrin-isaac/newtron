@@ -62,7 +62,7 @@ Source: [`docs/diagrams/newtlab-api-workflow.dot`](../diagrams/newtlab-api-workf
 ┌───────────────────────────────┐
 │                               │
 │      1. List topologies       │
-│     (GET /api/topologies)     │
+│     (GET /api/v1/topologies)     │
 │                               │
 └───────────────────────────────┘
   │
@@ -98,7 +98,7 @@ Source: [`docs/diagrams/newtlab-api-workflow.dot`](../diagrams/newtlab-api-workf
 
 ## 3. Server Management
 
-### `GET /api/health`
+### `GET /api/v1/health`
 
 Returns server status. No authentication, no side effects.
 
@@ -114,14 +114,14 @@ Returns server status. No authentication, no side effects.
 
 | Method | Path | Status | Purpose |
 |--------|------|--------|---------|
-| `GET` | `/api/topologies` | 200 | List labs known to newtlab |
-| `GET` | `/api/topologies/{name}/status` | 200 / 404 | Read `LabState` |
-| `POST` | `/api/topologies/{name}/deploy` | 202 / 404 / 409 | Start an async deploy |
-| `POST` | `/api/topologies/{name}/destroy` | 200 / 404 | Tear down VMs (synchronous) |
-| `POST` | `/api/topologies/{name}/provision` | 200 / 404 | Run the post-deploy provisioning pass |
-| `GET` | `/api/topologies/{name}/events` | 200 (SSE) | Subscribe to deploy phase events |
+| `GET` | `/api/v1/topologies` | 200 | List labs known to newtlab |
+| `GET` | `/api/v1/topologies/{name}/status` | 200 / 404 | Read `LabState` |
+| `POST` | `/api/v1/topologies/{name}/deploy` | 202 / 404 / 409 | Start an async deploy |
+| `POST` | `/api/v1/topologies/{name}/destroy` | 200 / 404 | Tear down VMs (synchronous) |
+| `POST` | `/api/v1/topologies/{name}/provision` | 200 / 404 | Run the post-deploy provisioning pass |
+| `GET` | `/api/v1/topologies/{name}/events` | 200 (SSE) | Subscribe to deploy phase events |
 
-### `GET /api/topologies` — list deployed labs
+### `GET /api/v1/topologies` — list deployed labs
 
 Returns one entry per lab with a state directory under `~/.newtlab/labs/`. Running and stopped labs are both included; call `/status` for per-node state.
 
@@ -136,7 +136,7 @@ Returns one entry per lab with a state directory under `~/.newtlab/labs/`. Runni
 }
 ```
 
-### `GET /api/topologies/{name}/status` — read LabState
+### `GET /api/v1/topologies/{name}/status` — read LabState
 
 Returns the canonical [`LabState`](../../pkg/newtlab/state.go) for a deployed topology, including per-node PID / status / phase / SSH port / console port, link wiring, and bridge metadata.
 
@@ -164,7 +164,7 @@ Returns the canonical [`LabState`](../../pkg/newtlab/state.go) for a deployed to
 
 **Error:** 404 if the topology doesn't exist under the configured `--topologies-base`.
 
-### `POST /api/topologies/{name}/deploy` — async deploy
+### `POST /api/v1/topologies/{name}/deploy` — async deploy
 
 Starts an asynchronous deploy. Returns 202 immediately; subscribe to `/events` for phase updates, or poll `/status` for terminal state.
 
@@ -194,13 +194,13 @@ All four are also accepted as query parameters (`?provision=true&force=true`) so
 - 404 — no `topology.json` under `<topologies-base>/<name>/specs/`.
 - 409 — another deploy of `{name}` is already in flight. The error message includes the in-flight start time.
 
-### `POST /api/topologies/{name}/destroy`
+### `POST /api/v1/topologies/{name}/destroy`
 
 Synchronously tears down the lab: stops every QEMU node, removes overlay disks, stops bridge workers, deletes the state directory. Returns when the operation completes.
 
 **Response:** `{ "data": { "topology": "<name>", "status": "destroyed" } }`
 
-### `POST /api/topologies/{name}/provision`
+### `POST /api/v1/topologies/{name}/provision`
 
 Runs the post-deploy provisioning pass on an already-deployed lab. Synchronous.
 
@@ -211,11 +211,11 @@ Runs the post-deploy provisioning pass on an already-deployed lab. Synchronous.
 
 ## 5. Node Control
 
-### `POST /api/topologies/{name}/nodes/{node}/start`
+### `POST /api/v1/topologies/{name}/nodes/{node}/start`
 
 Restarts a stopped node by re-spawning its QEMU process from `state.json`. Synchronous.
 
-### `POST /api/topologies/{name}/nodes/{node}/stop`
+### `POST /api/v1/topologies/{name}/nodes/{node}/stop`
 
 Sends SIGTERM to a running node's QEMU process. Synchronous.
 
@@ -231,7 +231,7 @@ Sends SIGTERM to a running node's QEMU process. Synchronous.
 
 ## 6. Events (SSE)
 
-### `GET /api/topologies/{name}/events`
+### `GET /api/v1/topologies/{name}/events`
 
 Subscribes to the phase event stream for `{name}`. Standard `text/event-stream` format. The stream stays open until the client disconnects or the server shuts down. A 30-second heartbeat comment line (`:` prefix) keeps proxies and load balancers from idling out the connection.
 

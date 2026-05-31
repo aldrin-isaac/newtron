@@ -2346,15 +2346,36 @@ drift.
 
 newtron has no installed base. When a format or API changes, change it
 everywhere in one commit. No compatibility shims, no deprecated
-aliases, no dual-format detection. The public API (§33) has one
-version: current. `newtron init` scrubs factory state once; after init,
-no operation checks for legacy formats.
+aliases, no dual-format detection. `newtron init` scrubs factory
+state once; after init, no operation checks for legacy formats.
 
 **Write code for the system as it is today, not as it was yesterday.**
 
-Exception: SONiC releases change schemas and daemon behavior. newtron
-must support multiple releases — this is multi-platform support (§41),
-not backwards compatibility.
+Two exceptions, narrowly scoped:
+
+1. **SONiC releases.** SONiC platforms change schemas and daemon
+   behavior between releases. newtron must support multiple
+   releases — this is multi-platform support (§41), not backwards
+   compatibility.
+
+2. **External HTTP API contracts.** Each HTTP server (newtron-server,
+   newtrun-server, newtlab-server) carries a `/api/v1/` version
+   segment on its routes. The version is *the* breaking-change
+   escape hatch for external consumers: when the wire shape changes
+   incompatibly, `/api/v2/` ships alongside `/api/v1/` so a
+   browser frontend (newtcon) or operator script does not break in
+   lockstep with a server upgrade. Each server is at its own
+   independent version — newtron-server `v1` and newtrun-server `v2`
+   can coexist.
+
+   Inside the binary, this is still §40: one current version, no
+   compatibility shims, no aliases. The `/api/v1/` segment is the
+   *only* concession. Internal callers (the Go client packages in
+   this repo) update in the same commit as the server.
+
+   Internal HTTP APIs (server-to-server within one process, or RPC
+   between binaries that ship as a coordinated set) do not need the
+   version segment — §40's "change it everywhere" rule applies.
 
 ---
 

@@ -1,24 +1,26 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
-// Server is the HTTP API server for newtron.
+// Server is the HTTP API server for newtron. The HTTP listener
+// lifecycle (Start / Stop) comes from the embedded *httputil.Server;
+// this type holds only newtron-specific state.
 type Server struct {
+	*httputil.Server
+
 	mu       sync.RWMutex
 	networks map[string]*networkEntry
 
 	idleTimeout time.Duration
-	httpServer  *http.Server
 	logger      *log.Logger
 }
 
@@ -43,33 +45,22 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration) *Server {
 		idleTimeout: idleTimeout,
 		logger:      logger,
 	}
-	mux := s.buildMux()
-	s.httpServer = &http.Server{
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Minute,
-		IdleTimeout:  120 * time.Second,
-	}
+	s.Server = httputil.NewServer(s.buildMux(), logger,
+		httputil.ServerLabel("newtron-server"),
+		// newtron handlers can do long device-facing operations; a
+		// finite write timeout caps them. Different from newtrun /
+		// newtlab which keep WriteTimeout=0 for SSE.
+		httputil.WriteTimeout(5*time.Minute),
+		httputil.OnShutdown(func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			for _, entry := range s.networks {
+				entry.actor.stop()
+			}
+			s.networks = make(map[string]*networkEntry)
+		}),
+	)
 	return s
-}
-
-// Start begins listening on the given address.
-func (s *Server) Start(addr string) error {
-	s.httpServer.Addr = addr
-	s.logger.Printf("newtron-server listening on %s", addr)
-	return s.httpServer.ListenAndServe()
-}
-
-// Stop gracefully shuts down the server.
-func (s *Server) Stop(ctx context.Context) error {
-	s.mu.Lock()
-	for _, entry := range s.networks {
-		entry.actor.stop()
-	}
-	s.networks = make(map[string]*networkEntry)
-	s.mu.Unlock()
-
-	return s.httpServer.Shutdown(ctx)
 }
 
 // RegisterNetwork loads a Network from specDir and registers it under the given ID.
