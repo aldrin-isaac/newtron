@@ -197,7 +197,7 @@ Six built-in actions:
 | `newtron` | Make an arbitrary newtron-server HTTP call with optional polling, batch, and jq expectations |
 | `newtron-cli` | Run the newtron CLI as a subprocess (used for testing CLI behavior specifically) |
 
-The `newtron` action is the most flexible. URLs use Go template syntax (`{{device}}`, `{{network}}`) expanded per target. Polling, batched call sequences, and `jq` expectations on the response let one action cover most operational and verification patterns.
+The `newtron` action is the most flexible. URLs use a single template placeholder `{{device}}` that the per-device executor expands; URLs without it are treated as network-scoped and dispatched once. The network ID itself is set on the run, not in the URL — the `/network/<id>/` prefix is prepended by the client. Polling, batched call sequences, and `jq` expectations on the response let one action cover most operational and verification patterns.
 
 ### 5.3 Inline scenarios
 
@@ -290,27 +290,27 @@ Sonic-vs variants of the 2node-ngdp topologies. Same logical structure, using th
 One spine connecting two leaves, one host per leaf (source: `docs/diagrams/newtrun-topology-3node-ngdp.dot`):
 
 ```
-┌───────┐         ┌───────┐
-│       │         │       │
-│ leaf2 │  Eth1   │ spine │
-│       │ ─────── │       │
-└───────┘         └───────┘
-  │                 │
-  │ Eth1            │ Eth0
-  │                 │
-┌───────┐         ┌───────┐
-│       │         │       │
-│ host2 │         │ leaf1 │
-│       │         │       │
-└───────┘         └───────┘
-                    │
-                    │ Eth1
-                    │
-                  ┌───────┐
-                  │       │
-                  │ host1 │
-                  │       │
-                  └───────┘
+┌──────────────────────────┐                            ┌──────────────────────────┐
+│                          │                            │                          │
+│          leaf2           │  spine:Eth1 — leaf2:Eth0   │          spine           │
+│                          │ ────────────────────────── │                          │
+└──────────────────────────┘                            └──────────────────────────┘
+  │                                                       │
+  │ leaf2:Eth1 — host2:eth0                               │ spine:Eth0 — leaf1:Eth0
+  │                                                       │
+┌──────────────────────────┐                            ┌──────────────────────────┐
+│                          │                            │                          │
+│          host2           │                            │          leaf1           │
+│                          │                            │                          │
+└──────────────────────────┘                            └──────────────────────────┘
+                                                          │
+                                                          │ leaf1:Eth1 — host1:eth0
+                                                          │
+                                                        ┌──────────────────────────┐
+                                                        │                          │
+                                                        │          host1           │
+                                                        │                          │
+                                                        └──────────────────────────┘
 ```
 
 Exercises EVPN L2/L3 forwarding across a two-leaf fabric with real data-plane verification between hosts.
@@ -327,7 +327,7 @@ Each topology directory contains:
 |------|---------|----------|
 | `topology.json` | newtlab + newtron | Devices, interfaces, links, newtlab settings |
 | `network.json` | newtron | Services, filters, VPNs, zones |
-| `platforms.json` | newtlab | Platform definitions with VM settings |
+| `platforms.json` | newtlab + newtron | Platform definitions: VM settings consumed by newtlab; HWSKU, dataplane capability, and port count consumed by newtron's spec loader. |
 | `profiles/*.json` | newtlab + newtron | Per-device settings, EVPN config |
 
 ### 6.3 Custom topologies
@@ -461,37 +461,37 @@ A "run" goes through a small set of named states. The state machine differs slig
 Source: `docs/diagrams/newtrun-suite-statemachine.dot`. Re-render with `graph-easy --from=dot --boxart < docs/diagrams/newtrun-suite-statemachine.dot`.
 
 ```
-                                               ┌────────────────────┐
-                                               │                    │
-                                               │       start        │
-                                               │                    │
-                                               └────────────────────┘
-                                                 │
-                                                 │ POST /api/runs
-                                                 ▼
-┌───────────────────┐                          ┌──────────────────────────────────────────────────────────────────────┐
-│                   │                          │                                                                      │
-│ complete / failed │  all scenarios end       │                               running                                │
-│                   │ ◀─────────────────────── │                                                                      │
-└───────────────────┘                          └──────────────────────────────────────────────────────────────────────┘
-                                                 │                     │                     ▲
-                                                 │ pause               │                     │ POST /api/runs (resume)
-                                                 ▼                     │                     │
-┌───────────────────┐                          ┌────────────────────┐  │                     │
-│                   │                          │                    │  │                     │
-│      paused       │  current scenario ends   │      pausing       │  │                     │
-│                   │ ◀─────────────────────── │                    │  │                     │
-└───────────────────┘                          └────────────────────┘  │ stop / ctx cancel   │
-  │                                              │                     │                     │
-  │                                              │ stop / ctx cancel   │                     │
-  │                                              ▼                     │                     │
-  │                                            ┌────────────────────┐  │                     │
-  │                                            │                    │  │                     │
-  │                                            │      aborted       │  │                     │
-  │                                            │                    │ ◀┘                     │
-  │                                            └────────────────────┘                        │
-  │                                                                                          │
-  └──────────────────────────────────────────────────────────────────────────────────────────┘
+                                      ┌────────────────────┐
+                                      │                    │
+                                      │       start        │
+                                      │                    │
+                                      └────────────────────┘
+                                        │
+                                        │ POST /api/runs
+                                        ▼
+┌──────────┐                          ┌──────────────────────────────────────────────────────────────────────┐                      ┌────────┐
+│          │                          │                                                                      │                      │        │
+│ complete │  all scenarios PASS      │                               running                                │  any scenario FAIL   │ failed │
+│          │ ◀─────────────────────── │                                                                      │ ───────────────────▶ │        │
+└──────────┘                          └──────────────────────────────────────────────────────────────────────┘                      └────────┘
+                                        │                     │                     ▲
+                                        │ pause               │                     │ POST /api/runs (resume)
+                                        ▼                     │                     │
+┌──────────┐                          ┌────────────────────┐  │                     │
+│          │                          │                    │  │                     │
+│  paused  │  current scenario ends   │      pausing       │  │                     │
+│          │ ◀─────────────────────── │                    │  │                     │
+└──────────┘                          └────────────────────┘  │ stop / ctx cancel   │
+  │                                     │                     │                     │
+  │                                     │ stop / ctx cancel   │                     │
+  │                                     ▼                     │                     │
+  │                                   ┌────────────────────┐  │                     │
+  │                                   │                    │  │                     │
+  │                                   │      aborted       │  │                     │
+  │                                   │                    │ ◀┘                     │
+  │                                   └────────────────────┘                        │
+  │                                                                                 │
+  └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **running**: Runner goroutine is active in the server's process.
@@ -620,7 +620,7 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `newtrun start <suite>` | `POST /api/runs` + SSE | Streams events; exits on terminal SuiteEnd. Resumes if the suite is paused. |
 | `newtrun pause <suite>` | `POST /api/runs/{suite}/pause` | Returns when the pause signal lands; Runner exits between scenarios |
 | `newtrun stop <suite>` | `GET` + `POST /stop` + newtlab.Destroy + `DELETE` | Multi-step: cancel runner, destroy topology, clean state |
-| `newtrun status [suite]` | `GET /api/runs` + `GET /api/runs/{suite}` | All suites or one; `--monitor` auto-refreshes |
+| `newtrun status [-s <pattern>]` | `GET /api/runs` + `GET /api/runs/{suite}` | Lists all suites; `-s/--suite <pattern>` filters by substring match; `--monitor` auto-refreshes |
 | `newtrun list [suite]` | `GET /api/suites` + `GET /api/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
 | `newtrun suites` | `GET /api/suites` | Lists suite directories under the server's suites base |
 | `newtrun suite create <name>` | `POST /api/suites` | Creates an empty suite directory on the server |

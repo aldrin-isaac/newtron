@@ -1,7 +1,7 @@
 graph {
     rankdir=TB;
-    "\n  spine  \n\n" -- "\n  leaf1  \n\n" [label="Eth0"];
-    "\n  spine  \n\n" -- "\n  leaf2  \n\n" [label="Eth1"];
-    "\n  leaf1  \n\n" -- "\n  host1  \n\n" [label="Eth1"];
-    "\n  leaf2  \n\n" -- "\n  host2  \n\n" [label="Eth1"];
+    "\n  spine  \n\n" -- "\n  leaf1  \n\n" [label="spine:Eth0 — leaf1:Eth0"];
+    "\n  spine  \n\n" -- "\n  leaf2  \n\n" [label="spine:Eth1 — leaf2:Eth0"];
+    "\n  leaf1  \n\n" -- "\n  host1  \n\n" [label="leaf1:Eth1 — host1:eth0"];
+    "\n  leaf2  \n\n" -- "\n  host2  \n\n" [label="leaf2:Eth1 — host2:eth0"];
 }

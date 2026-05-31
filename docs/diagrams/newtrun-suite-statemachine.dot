@@ -4,7 +4,8 @@ digraph {
     "\n  running  \n\n" -> "\n  pausing  \n\n" [label="pause"];
     "\n  pausing  \n\n" -> "\n  paused  \n\n" [label="current scenario ends"];
     "\n  paused  \n\n" -> "\n  running  \n\n" [label="POST /api/runs (resume)"];
-    "\n  running  \n\n" -> "\n  complete / failed  \n\n" [label="all scenarios end"];
+    "\n  running  \n\n" -> "\n  complete  \n\n" [label="all scenarios PASS"];
+    "\n  running  \n\n" -> "\n  failed  \n\n" [label="any scenario FAIL"];
     "\n  running  \n\n" -> "\n  aborted  \n\n" [label="stop / ctx cancel"];
     "\n  pausing  \n\n" -> "\n  aborted  \n\n" [label="stop / ctx cancel"];
 }

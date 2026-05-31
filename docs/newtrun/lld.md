@@ -247,15 +247,16 @@ Reads every `*.yaml` file in `dir`, parses each, and returns the list. Used by `
 
 ### 3.4 Validation rules
 
-Per-action requirements enforced by `validateStepFields`:
+Per-action requirements enforced by `validateStepFields` (the `stepValidations` table at `pkg/newtrun/parser.go:94`):
 
-| Action | Required step fields |
-|--------|----------------------|
-| `newtron` | `url` (with optional `method`, `body`) OR `batch` (mutually exclusive with `url`) |
-| `newtron-cli` | `command`, `devices` |
-| `host-exec` | `command`, `devices` |
-| `wait` | `duration` |
-| `topology-reconcile` | `devices` |
+| Action | Enforced by validator | Notes |
+|--------|----------------------|-------|
+| `newtron` | `url` or `batch` (custom check; mutually exclusive with each other in practice) | Devices, method, body are unconstrained at parse time. |
+| `newtron-cli` | — | Not in `stepValidations`; `command` is unchecked at parse time and fails at the executor if missing. |
+| `host-exec` | `command`; exactly **one** device (`singleDevice: true`) | Multi-device steps are rejected with "host-exec requires exactly one device". |
+| `wait` | `duration` (custom check) | |
+| `topology-reconcile` | `devices` (`needsDevices: true`) | |
+| `verify-topology` | `devices` (`needsDevices: true`) | |
 
 Cross-step rules in `ValidateDependencyGraph`:
 - Names in `requires` and `after` must reference scenarios that exist in the suite.
@@ -551,7 +552,7 @@ The one callback with no current producer in the Runner. Reserved for the per-de
 
 ### 6.4 SuiteEnd carries status
 
-The interface added a `SuiteStatus` parameter in PR #35 so the wire event distinguishes "the suite ran and N scenarios failed" from "the server died mid-run". All implementations honor it; the `SuiteEndPayload` JSON field carries the same value.
+`SuiteEnd` carries a `SuiteStatus` so the wire event distinguishes "the suite ran and N scenarios failed" from "the server died mid-run". All `ProgressReporter` implementations honor it; the `SuiteEndPayload` JSON field carries the same value.
 
 ---
 
@@ -650,7 +651,7 @@ func (s *Server) reconcileStaleStatus(state *newtrun.RunState, runKey string)
 
 The server-restart-honesty rule ([HLD §9.3](hld.md)). When `handleGetRun` or `handleListRuns` loads a `state.json` that claims `running` or `pausing` but the registry has no live entry, the in-memory copy is relabeled to `aborted` before serialization. The disk file is not rewritten — the next finalizer write applies the canonical status.
 
-Called from both `handleGetRun` and `handleListRuns` via this helper (per §7 of the design principles — second instance of the same rule must consolidate).
+Called from both `handleGetRun` and `handleListRuns` via this helper (per `docs/ai-instructions.md` §7 — second instance of a pattern must consolidate).
 
 ### 7.7 InlineSafetyPolicy
 
@@ -683,7 +684,7 @@ Run after the Runner goroutine returns. Both delegate to `SuiteStatusFromOutcome
 
 ### 7.9 Route registration
 
-`buildHandler()` (in `server.go`) registers 17 routes against `http.ServeMux`. See [api.md](api.md) for the canonical list; the handler functions are spread across `runs.go` / `suites.go` / `scenarios.go` / `topologies.go` per §28 (file-level feature cohesion).
+`buildHandler()` (in `server.go`) registers the HTTP routes against `http.ServeMux`. See [api.md](api.md) for the canonical list; the handler functions are spread across `runs.go` / `suites.go` / `scenarios.go` / `topologies.go` per `docs/DESIGN_PRINCIPLES.md` §28 (file-level feature cohesion).
 
 ---
 
@@ -762,7 +763,7 @@ Source files: `steps.go`, `steps_newtron.go`, `steps_cli.go`, `steps_host.go`.
 
 ### 9.1 newtronExecutor
 
-Action: `newtron`. Dispatches one HTTP call per device (or one global call for non-device-scoped URLs). Per-device URL expansion replaces `{device}` in `step.URL`. Response is matched against `step.Expect` and optionally polled via `step.Poll`.
+Action: `newtron`. Dispatches one HTTP call per device (or one global call for non-device-scoped URLs). Per-device URL expansion replaces `{{device}}` in `step.URL` via `strings.ReplaceAll` in `expandURL` (`pkg/newtrun/steps_newtron.go:225`). Response is matched against `step.Expect` and optionally polled via `step.Poll`.
 
 `batch`-mode runs N URLs per device in sequence before the expect; useful for setting up preconditions.
 
@@ -903,7 +904,7 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 | `start <suite>` | POST /api/runs + SSE | Streams events; exits on terminal SuiteEnd. |
 | `pause <suite>` | POST /api/runs/{suite}/pause | Returns when pause signal lands. |
 | `stop <suite>` | GET + POST /stop + newtlab.Destroy + DELETE | Multi-step orchestration. |
-| `status [suite]` | GET /api/runs + /api/runs/{suite} | All suites or one; `--monitor` auto-refresh. |
+| `status [-s <pattern>]` | GET /api/runs + /api/runs/{suite} | Lists all suites; `-s/--suite <pattern>` filters by substring match. `--monitor` auto-refreshes. |
 | `list [suite]` | GET /api/suites + /api/suites/{suite}/scenarios | Lists suites; with a suite name lists its scenarios. |
 | `suites` | GET /api/suites | Hidden alias of `list`. |
 | `suite create/delete <name>` | POST/DELETE /api/suites | Per [§7](#7-http-server-package-pkgnewtrunapi). |

@@ -139,8 +139,9 @@ When the suite finishes, exit code is 0 (all PASS). State persists at `~/.newtro
 Tear down:
 
 ```bash
-bin/newtrun stop 2node-vs-primitive   # cancel + destroy topology + clear state
-kill %1 %2                            # stop newtron-server + newtrun-server
+bin/newtrun stop 2node-vs-primitive            # cancel + destroy topology + clear state
+pkill -f "bin/newtron-server"                  # stop newtron-server
+pkill -f "bin/newtrun-server"                  # stop newtrun-server
 ```
 
 ---
@@ -159,7 +160,8 @@ The CLI POSTs to `newtrun-server`, which spawns a Runner goroutine and starts st
 |-------------------|-----------|--------|
 | All scenarios PASS | 0 | summary line |
 | Any FAIL or ERROR | 1 | summary line |
-| newtrun-server connection lost mid-run | 2 | `infrastructure error: newtrun-server connection lost mid-run; check state.json for the last persisted status` |
+| TCP connection dropped mid-stream | 2 | `infrastructure error: newtrun-server connection lost mid-run; check state.json for the last persisted status` |
+| Stream closed cleanly but SuiteEnd never arrived (server reaped between events) | 2 | `infrastructure error: stream ended without SuiteEnd; the server may have been shut down mid-run` |
 | SuiteEnd carried `status: aborted` (server SIGTERMed) | 2 | `infrastructure error: run was aborted (server shut down)` |
 
 ### 4.2 Suite selection
@@ -203,7 +205,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
 | newtrun-server up on `--newtrun-server` URL | `curl http://localhost:8081/api/health` | Start with `bin/newtrun-server &` |
-| newtron-server up on `--server` URL | `curl http://localhost:8080/health` | Start with `bin/newtron-server --spec-dir <path> &` |
+| newtron-server up on `--server` URL | `curl http://localhost:8080/network` (lists registered networks; any 2xx confirms the server is up — newtron-server has no dedicated health endpoint) | Start with `bin/newtron-server --spec-dir <path> &` |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
@@ -1365,7 +1367,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 
 | Command | Purpose |
 |---------|---------|
-| `newtrun start <suite> [--scenario \| --target \| --all]` | Start (or resume) a run. |
+| `newtrun start <suite> [--scenario <name> \| --target <name>]` | Start (or resume) a run. With neither flag, runs all scenarios in dependency order. |
 | `newtrun pause <suite>` | Request graceful pause at next scenario boundary. |
 | `newtrun stop <suite>` | Cancel runner, destroy topology, clear state. |
 | `newtrun status [--suite <pattern>] [--monitor] [--detail] [--json]` | Read run state. |
