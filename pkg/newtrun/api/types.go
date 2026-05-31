@@ -20,13 +20,6 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
-// APIResponse is the standard envelope for all newtrun-server JSON responses.
-// Mirrors the newtron-server convention.
-type APIResponse struct {
-	Data  any    `json:"data,omitempty"`
-	Error string `json:"error,omitempty"`
-}
-
 // EventType identifies the SSE event kind. Mirrors the ProgressReporter
 // callback names directly.
 type EventType string
@@ -42,11 +35,19 @@ const (
 )
 
 // Event is one SSE event the server emits on GET /api/runs/{runKey}/events.
-// Type discriminates the Payload's concrete shape.
+// Type discriminates the Payload's concrete shape. Satisfies
+// httputil.Eventable so the generic SSE writer emits Type as the
+// `event:` token and Payload as the JSON `data:` body.
 type Event struct {
 	Type    EventType `json:"type"`
 	Payload any       `json:"payload"`
 }
+
+// Kind satisfies httputil.Eventable.
+func (e Event) Kind() string { return string(e.Type) }
+
+// Body satisfies httputil.Eventable.
+func (e Event) Body() any { return e.Payload }
 
 // SuiteStartPayload mirrors ProgressReporter.SuiteStart([]*Scenario).
 // Scenarios are summarized to name + step count rather than serialized in

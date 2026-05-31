@@ -15,14 +15,6 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
-// APIResponse is the standard envelope for all newtlab-server JSON
-// responses. Mirrors the newtron-server and newtrun-server convention so
-// clients can use one parser across all three.
-type APIResponse struct {
-	Data  any    `json:"data,omitempty"`
-	Error string `json:"error,omitempty"`
-}
-
 // HealthResponse is the GET /api/health payload.
 type HealthResponse struct {
 	Status  string `json:"status"`
@@ -101,11 +93,20 @@ const (
 
 // Event is one SSE event the server emits on
 // GET /api/topologies/{name}/events. Type discriminates Payload's
-// concrete shape.
+// concrete shape. Implements httputil.Eventable so the generic SSE
+// stream writer can emit Type as the SSE `event:` token and Payload
+// as the `data:` JSON body.
 type Event struct {
 	Type    EventType `json:"type"`
 	Payload any       `json:"payload"`
 }
+
+// Kind satisfies httputil.Eventable — returns the SSE event-type token.
+func (e Event) Kind() string { return string(e.Type) }
+
+// Body satisfies httputil.Eventable — returns the value to JSON-encode
+// after the SSE `data:` prefix.
+func (e Event) Body() any { return e.Payload }
 
 // PhasePayload is the payload for EventPhase. Mirrors the
 // `phase, detail` arguments of newtlab.Lab.OnProgress directly.

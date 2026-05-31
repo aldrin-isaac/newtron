@@ -4,12 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
 func TestReporterCallbacksProduceCorrectEventTypes(t *testing.T) {
-	b := NewEventBroker()
+	b := httputil.NewBroker[Event]()
 	events, unsub := b.Subscribe("test-suite")
 	defer unsub()
 
@@ -72,7 +73,7 @@ func TestReporterSuiteEndCarriesStatus(t *testing.T) {
 	}
 	for _, status := range cases {
 		t.Run(string(status), func(t *testing.T) {
-			b := NewEventBroker()
+			b := httputil.NewBroker[Event]()
 			events, unsub := b.Subscribe("test-suite")
 			defer unsub()
 			r := NewHTTPReporter(b, "test-suite", nil)
@@ -94,7 +95,7 @@ func TestReporterSuiteEndCarriesStatus(t *testing.T) {
 }
 
 func TestReporterChainsToInner(t *testing.T) {
-	b := NewEventBroker()
+	b := httputil.NewBroker[Event]()
 	inner := &capturingReporter{}
 	r := NewHTTPReporter(b, "test-suite", inner)
 
@@ -110,7 +111,7 @@ func TestReporterChainsToInner(t *testing.T) {
 }
 
 func TestReporterScenarioEndCarriesResultFields(t *testing.T) {
-	b := NewEventBroker()
+	b := httputil.NewBroker[Event]()
 	events, unsub := b.Subscribe("test-suite")
 	defer unsub()
 	r := NewHTTPReporter(b, "test-suite", nil)

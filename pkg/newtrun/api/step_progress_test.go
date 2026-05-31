@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
@@ -21,7 +22,7 @@ func stubOp(seq int, kind, result string) *sonic.DeviceOp {
 }
 
 func TestHTTPReporterStepProgressPublishesEvent(t *testing.T) {
-	b := NewEventBroker()
+	b := httputil.NewBroker[Event]()
 	events, unsub := b.Subscribe("test-suite")
 	defer unsub()
 
@@ -54,7 +55,7 @@ func TestHTTPReporterStepProgressPublishesEvent(t *testing.T) {
 }
 
 func TestHTTPReporterStepProgressNilOpNoEvent(t *testing.T) {
-	b := NewEventBroker()
+	b := httputil.NewBroker[Event]()
 	events, unsub := b.Subscribe("test-suite")
 	defer unsub()
 
@@ -72,7 +73,7 @@ func TestHTTPReporterStepProgressNilOpNoEvent(t *testing.T) {
 }
 
 func TestHTTPReporterStepProgressChainsToInner(t *testing.T) {
-	b := NewEventBroker()
+	b := httputil.NewBroker[Event]()
 	inner := &capturingReporter{}
 	r := NewHTTPReporter(b, "test-suite", inner)
 	step := &newtrun.Step{Name: "apply", Action: newtrun.ActionNewtron}

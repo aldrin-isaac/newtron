@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,12 +36,12 @@ func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	path, err := resolveScenarioPath(s.cfg.SuitesBase, suite, name)
 	if err != nil {
-		writeError(w, mapFSErrorToStatus(err), err)
+		httputil.WriteError(w, mapFSErrorToStatus(err), err)
 		return
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("read scenario: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("read scenario: %w", err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")
@@ -68,22 +70,22 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := os.Stat(filepath.Join(s.cfg.SuitesBase, suite)); err != nil {
-		writeError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
+		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("read body: %w", err))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("read body: %w", err))
 		return
 	}
 	parsed, err := newtrun.ParseScenarioBytes(body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid scenario YAML: %w", err))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid scenario YAML: %w", err))
 		return
 	}
 	if parsed.Name != name {
-		writeError(w, http.StatusBadRequest,
+		httputil.WriteError(w, http.StatusBadRequest,
 			fmt.Errorf("body name field %q does not match URL name %q", parsed.Name, name))
 		return
 	}
@@ -93,15 +95,15 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 	// <name>.yaml for a fresh scenario.
 	destPath, status, err := resolveDestPath(s.cfg.SuitesBase, suite, name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	if err := atomicWriteFile(destPath, body); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("write scenario: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("write scenario: %w", err))
 		return
 	}
-	writeJSON(w, status, map[string]string{
+	httputil.WriteJSON(w, status, map[string]string{
 		"suite": suite,
 		"name":  name,
 		"path":  filepath.Base(destPath),
@@ -119,11 +121,11 @@ func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	path, err := resolveScenarioPath(s.cfg.SuitesBase, suite, name)
 	if err != nil {
-		writeError(w, mapFSErrorToStatus(err), err)
+		httputil.WriteError(w, mapFSErrorToStatus(err), err)
 		return
 	}
 	if err := os.Remove(path); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("remove scenario: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("remove scenario: %w", err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -138,11 +140,11 @@ func requireScenarioParams(w http.ResponseWriter, r *http.Request) (suite, name 
 	suite = r.PathValue("suite")
 	name = r.PathValue("name")
 	if !nameRE.MatchString(suite) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return "", "", false
 	}
 	if !nameRE.MatchString(name) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid scenario name %q", name))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid scenario name %q", name))
 		return "", "", false
 	}
 	return suite, name, true

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -32,10 +33,10 @@ type CreateSuiteRequest struct {
 func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
 	names, err := listSubdirs(s.cfg.SuitesBase)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, SuitesResponse{Suites: names})
+	httputil.WriteJSON(w, http.StatusOK, SuitesResponse{Suites: names})
 }
 
 // handleCreateSuite creates an empty suite directory. Used by newtcon
@@ -45,23 +46,23 @@ func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 	var req CreateSuiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
 	if !nameRE.MatchString(req.Name) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q: must match %s", req.Name, nameRE))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q: must match %s", req.Name, nameRE))
 		return
 	}
 	dir := filepath.Join(s.cfg.SuitesBase, req.Name)
 	if _, err := os.Stat(dir); err == nil {
-		writeError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
+		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
 		return
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 // handleDeleteSuite removes an empty suite directory. Refuses to
@@ -72,25 +73,25 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 	suite := r.PathValue("suite")
 	if !nameRE.MatchString(suite) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return
 	}
 	dir := filepath.Join(s.cfg.SuitesBase, suite)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
+			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if len(entries) > 0 {
-		writeError(w, http.StatusConflict, fmt.Errorf("suite %q is not empty (%d entries); delete scenarios first", suite, len(entries)))
+		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q is not empty (%d entries); delete scenarios first", suite, len(entries)))
 		return
 	}
 	if err := os.Remove(dir); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("remove suite dir: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("remove suite dir: %w", err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -106,17 +107,17 @@ func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request) {
 	suite := r.PathValue("suite")
 	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
 		return
 	}
 	dir := filepath.Join(s.cfg.SuitesBase, suite)
 	scenarios, err := newtrun.ParseAllScenarios(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
+			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if newtrun.HasRequires(scenarios) {
@@ -139,5 +140,5 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 			Requires:    sc.Requires,
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }

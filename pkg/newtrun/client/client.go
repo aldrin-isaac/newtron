@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
@@ -300,7 +301,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	if out == nil {
 		return nil
 	}
-	var envelope api.APIResponse
+	var envelope httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		return fmt.Errorf("decoding response: %w", err)
 	}
@@ -321,7 +322,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 }
 
 func readServerError(resp *http.Response) error {
-	var envelope api.APIResponse
+	var envelope httputil.APIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&envelope)
 	msg := envelope.Error
 	if msg == "" {

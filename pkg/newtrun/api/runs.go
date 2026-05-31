@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -23,15 +24,15 @@ import (
 func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	var req StartRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
 	if req.Suite == "" && req.SuiteDir == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite or suite_dir is required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite or suite_dir is required"))
 		return
 	}
 	if req.Suite != "" && req.SuiteDir != "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite and suite_dir are mutually exclusive"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite and suite_dir are mutually exclusive"))
 		return
 	}
 	// Default: All=true when neither Scenario nor Target is set, matching
@@ -54,7 +55,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		suiteKey = req.Suite
 	}
 	if !isDirectory(suiteDir) {
-		writeError(w, http.StatusNotFound, fmt.Errorf("suite directory not found: %s", suiteDir))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite directory not found: %s", suiteDir))
 		return
 	}
 
@@ -63,10 +64,10 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var already *AlreadyRunningError
 		if errors.As(err, &already) {
-			writeError(w, http.StatusConflict, err)
+			httputil.WriteError(w, http.StatusConflict, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -112,7 +113,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := newtrun.SaveRunState(state); err != nil {
 		s.registry.Release(suiteKey, &RunResult{Err: err})
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("persisting initial state: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("persisting initial state: %w", err))
 		return
 	}
 
@@ -157,7 +158,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		s.registry.Release(suiteKey, &RunResult{Scenarios: results, Err: runErr})
 	}()
 
-	writeJSON(w, http.StatusAccepted, StartRunResponse{
+	httputil.WriteJSON(w, http.StatusAccepted, StartRunResponse{
 		Suite:   suiteKey,
 		Started: entry.Started,
 	})
@@ -170,30 +171,30 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePauseRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("suite")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
 	if s.registry.Get(id) == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no active run %q", id))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("no active run %q", id))
 		return
 	}
 	state, err := newtrun.LoadAnyRunState(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if state == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no state file for run %q", id))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("no state file for run %q", id))
 		return
 	}
 	state.Status = newtrun.SuiteStatusPausing
 	// Persist back to whichever namespace it came from.
 	saveErr := persistAnyRunState(id, state)
 	if saveErr != nil {
-		writeError(w, http.StatusInternalServerError, saveErr)
+		httputil.WriteError(w, http.StatusInternalServerError, saveErr)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "pausing"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "pausing"})
 }
 
 // persistAnyRunState saves state back to whichever namespace the id
@@ -213,18 +214,18 @@ func persistAnyRunState(id string, state *newtrun.RunState) error {
 func (s *Server) handleStopRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("suite")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
 	entry := s.registry.Get(id)
 	if entry == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no active run %q", id))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("no active run %q", id))
 		return
 	}
 	if entry.Cancel != nil {
 		entry.Cancel()
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
 
 // handleDeleteRun removes the persistent state for a run. The run must
@@ -234,18 +235,18 @@ func (s *Server) handleStopRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("suite")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
 	if s.registry.Get(id) != nil {
-		writeError(w, http.StatusConflict, fmt.Errorf("run %q is active; stop it first", id))
+		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("run %q is active; stop it first", id))
 		return
 	}
 	if err := newtrun.RemoveAnyRunState(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // finalizeRunState writes the terminal status to state.json after the
@@ -288,11 +289,11 @@ func isDirectory(path string) bool {
 func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	var req InlineRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
 	if req.ScenarioYAML == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("scenario_yaml is required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("scenario_yaml is required"))
 		return
 	}
 
@@ -301,7 +302,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	// before the safety policy sees anything.
 	scenario, err := newtrun.ParseScenarioBytes([]byte(req.ScenarioYAML))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("scenario_yaml parse: %w", err))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("scenario_yaml parse: %w", err))
 		return
 	}
 
@@ -318,7 +319,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if violation := policy.Validate(scenario); violation != nil {
-		writeError(w, http.StatusBadRequest, violation)
+		httputil.WriteError(w, http.StatusBadRequest, violation)
 		return
 	}
 
@@ -327,7 +328,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.registry.Acquire(runID)
 	if err != nil {
 		// Collision on UUID is astronomically unlikely but handle defensively.
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("allocating run id: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("allocating run id: %w", err))
 		return
 	}
 
@@ -340,7 +341,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := newtrun.SaveInlineRunState(state); err != nil {
 		s.registry.Release(runID, &RunResult{Err: err})
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("persisting initial state: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("persisting initial state: %w", err))
 		return
 	}
 
@@ -376,7 +377,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		cancelTimeout()
 		s.registry.Release(runID, &RunResult{Err: err})
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("staging scenario: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("staging scenario: %w", err))
 		return
 	}
 
@@ -401,7 +402,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 		s.registry.Release(runID, &RunResult{Scenarios: results, Err: runErr})
 	}()
 
-	writeJSON(w, http.StatusAccepted, InlineRunResponse{
+	httputil.WriteJSON(w, http.StatusAccepted, InlineRunResponse{
 		RunID:   runID,
 		Started: entry.Started,
 	})
@@ -487,7 +488,7 @@ func (s *Server) reconcileStaleStatus(state *newtrun.RunState, runKey string) {
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	suites, err := newtrun.ListSuiteStates()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 	infos := make([]RunInfo, 0, len(suites))
@@ -505,7 +506,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		s.reconcileStaleStatus(state, suite)
 		infos = append(infos, runInfoFrom(state))
 	}
-	writeJSON(w, http.StatusOK, infos)
+	httputil.WriteJSON(w, http.StatusOK, infos)
 }
 
 // handleGetRun returns the full RunState for one run. Accepts either a
@@ -513,75 +514,33 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("suite")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
 	state, err := newtrun.LoadAnyRunState(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if state == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no state for run %q", id))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("no state for run %q", id))
 		return
 	}
 	s.reconcileStaleStatus(state, id)
 	// Per §46 the wire shape mirrors the substrate: RunState has JSON tags
 	// already; serialize it directly without a wrapper type.
-	writeJSON(w, http.StatusOK, state)
+	httputil.WriteJSON(w, http.StatusOK, state)
 }
 
-// handleRunEvents opens a Server-Sent Events stream for the given suite.
-// The connection stays open until the client disconnects or the server
-// shuts down. Heartbeat comments every 30s keep intermediaries from
-// timing out the connection during quiet periods.
+// handleRunEvents opens a Server-Sent Events stream for the given
+// suite. The SSE framing — initial subscribe comment, 30s heartbeat,
+// chunked write with flush — lives in httputil.WriteSSEStream. This
+// handler does only the run-key extraction.
 func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	suite := r.PathValue("suite")
 	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
 		return
 	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	// Send an initial comment line so the client knows the connection is open
-	// even when no events arrive. SSE comment lines start with ":".
-	fmt.Fprintf(w, ": subscribed to %s\n\n", suite)
-	flusher.Flush()
-
-	events, unsub := s.broker.Subscribe(suite)
-	defer unsub()
-
-	heartbeat := time.NewTicker(30 * time.Second)
-	defer heartbeat.Stop()
-
-	ctx := r.Context()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-heartbeat.C:
-			fmt.Fprintf(w, ": heartbeat\n\n")
-			flusher.Flush()
-		case ev, ok := <-events:
-			if !ok {
-				return
-			}
-			payload, err := json.Marshal(ev.Payload)
-			if err != nil {
-				s.logger.Printf("sse marshal: %v", err)
-				continue
-			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, payload)
-			flusher.Flush()
-		}
-	}
+	httputil.WriteSSEStream(w, r, s.broker, suite, s.logger)
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
@@ -187,10 +188,10 @@ func (s *Server) buildMux() http.Handler {
 	// Apply middleware chain: recovery → logger → requestID → timeout → mode → mux
 	var handler http.Handler = mux
 	handler = withMode(handler)
-	handler = withTimeout(5 * time.Minute)(handler)
-	handler = withRequestID(handler)
-	handler = withLogger(s.logger)(handler)
-	handler = withRecovery(s.logger)(handler)
+	handler = httputil.Timeout(5 * time.Minute)(handler)
+	handler = httputil.RequestID(handler)
+	handler = httputil.Logger(s.logger)(handler)
+	handler = httputil.Recovery(s.logger)(handler)
 
 	return handler
 }
@@ -198,13 +199,6 @@ func (s *Server) buildMux() http.Handler {
 // ============================================================================
 // JSON helpers
 // ============================================================================
-
-// writeJSON writes a JSON response with the given status code.
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(APIResponse{Data: data})
-}
 
 // writeError writes a JSON error response.
 //
@@ -216,7 +210,7 @@ func writeError(w http.ResponseWriter, err error) {
 	status := httpStatusFromError(err)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	envelope := APIResponse{Error: err.Error()}
+	envelope := httputil.APIResponse{Error: err.Error()}
 	var verFailed *newtron.VerificationFailedError
 	if errors.As(err, &verFailed) && verFailed.Result != nil {
 		envelope.Data = verFailed.Result

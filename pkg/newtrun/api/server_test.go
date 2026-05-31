@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -82,7 +83,7 @@ func TestHealth(t *testing.T) {
 		t.Errorf("status: got %d, want 200", resp.StatusCode)
 	}
 
-	var body APIResponse
+	var body httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestListRunsReturnsSeededSuites(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var body APIResponse
+	var body httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestGetRunReturnsFullState(t *testing.T) {
 		t.Errorf("status: got %d, want 200", resp.StatusCode)
 	}
 
-	var body APIResponse
+	var body httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestListTopologiesEmptyBaseReturnsEmptyList(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var body APIResponse
+	var body httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestListTopologiesReturnsSubdirs(t *testing.T) {
 		t.Fatalf("GET: %v", err)
 	}
 	defer resp.Body.Close()
-	var body APIResponse
+	var body httputil.APIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&body)
 	data := body.Data.(map[string]any)
 	tops := data["topologies"].([]any)

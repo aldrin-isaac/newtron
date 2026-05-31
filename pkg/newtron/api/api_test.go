@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
@@ -328,12 +329,12 @@ func TestAPICompleteness(t *testing.T) {
 // against a topology-mode network (no device connection required).
 // ============================================================================
 
-// decodeAPIResponse decodes the body into APIResponse and fails on parse error.
-func decodeAPIResponse(t *testing.T, w *httptest.ResponseRecorder) APIResponse {
+// decodeAPIResponse decodes the body into httputil.APIResponse and fails on parse error.
+func decodeAPIResponse(t *testing.T, w *httptest.ResponseRecorder) httputil.APIResponse {
 	t.Helper()
-	var resp APIResponse
+	var resp httputil.APIResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode APIResponse: %v; body: %s", err, w.Body.String())
+		t.Fatalf("decode httputil.APIResponse: %v; body: %s", err, w.Body.String())
 	}
 	return resp
 }
@@ -519,7 +520,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 		t.Errorf("status = %d, want 409 (Conflict) for VerificationFailedError", w.Code)
 	}
 
-	var resp APIResponse
+	var resp httputil.APIResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
 	}
