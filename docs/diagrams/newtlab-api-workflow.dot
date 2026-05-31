@@ -1,0 +1,6 @@
+digraph {
+    rankdir=TB;
+    "\n  1. List topologies  \n  (GET /api/topologies)  \n\n" -> "\n  2. Deploy a topology  \n  (POST /topologies/{n}/deploy)  \n\n";
+    "\n  2. Deploy a topology  \n  (POST /topologies/{n}/deploy)  \n\n" -> "\n  3. Subscribe to phase events  \n  (GET /topologies/{n}/events)  \n\n" [label="202"];
+    "\n  3. Subscribe to phase events  \n  (GET /topologies/{n}/events)  \n\n" -> "\n  4. Verify final status  \n  (GET /topologies/{n}/status)  \n\n";
+}
