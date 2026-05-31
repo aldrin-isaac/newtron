@@ -22,7 +22,7 @@ import (
 
 // DefaultBaseURL is the default newtrun-server URL when neither flag nor
 // environment variable supplies one.
-const DefaultBaseURL = "http://127.0.0.1:8081"
+const DefaultBaseURL = "http://127.0.0.1:18081"
 
 // Client is the HTTP client for newtrun-server.
 type Client struct {

@@ -67,13 +67,13 @@ Available settings:
   specs          - Specification directory (-S flag default for newtron and newtlab)
   suite          - Default newtrun suite directory (--dir flag default)
   topologies_dir - Base directory for newtrun topologies
-  server         - newtron-server HTTP address (default: http://localhost:8080)
+  server         - newtron-server HTTP address (default: http://localhost:18080)
   network_id     - Network identifier for server operations (default: "default")
 
 Examples:
   newtron settings set network production
   newtron settings set specs /etc/newtron
-  newtron settings set server http://10.0.0.1:8080
+  newtron settings set server http://10.0.0.1:18080
   newtron settings set network_id lab1`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {

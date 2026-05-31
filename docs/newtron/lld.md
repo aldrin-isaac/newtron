@@ -1730,7 +1730,7 @@ The CLI (`cmd/newtron/`) is an HTTP client — it sends requests to newtron-serv
 
 | Flag | Purpose | Default |
 |------|---------|---------|
-| `-s, --server` | Server URL | `http://localhost:8080` |
+| `-s, --server` | Server URL | `http://localhost:18080` |
 | `-n, --network` | Network ID | `default` |
 | `-x, --execute` | Apply changes (vs dry-run) | false |
 | `--no-save` | Skip config save after apply | false |

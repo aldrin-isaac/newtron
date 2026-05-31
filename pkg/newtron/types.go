@@ -1007,7 +1007,7 @@ func (us *UserSettings) GetAuditMaxBackups() int {
 }
 
 // DefaultServerURL is the default newtron-server address.
-const DefaultServerURL = "http://localhost:8080"
+const DefaultServerURL = "http://localhost:18080"
 
 // DefaultNetworkID is the default network identifier.
 const DefaultNetworkID = "default"

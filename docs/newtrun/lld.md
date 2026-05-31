@@ -587,7 +587,7 @@ type Server struct {
 |-------|---------|
 | `SuitesBase` | `newtrun/suites` |
 | `TopologiesBase` | `newtrun/topologies` |
-| `NewtronServer` | `http://127.0.0.1:8080` |
+| `NewtronServer` | `http://127.0.0.1:18080` |
 | `NetworkID` | `default` |
 | `InlineURLPrefix` | empty (no URL restriction enforced by default; see [§7.7](#77-inlinesafetypolicy)) |
 | `Logger` | `log.Default()` |
@@ -897,7 +897,7 @@ The CLI also has two sentinel errors in `cmd/newtrun/main.go`: `errInfraError` a
 
 ### 13.1 main.go
 
-Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERVER`, default: `http://127.0.0.1:8081`). Subcommands:
+Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERVER`, default: `http://127.0.0.1:18081`). Subcommands:
 
 | Command | Endpoint | Notes |
 |---------|----------|-------|
@@ -975,11 +975,11 @@ Three flags:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--listen` | `127.0.0.1:8081` | Bind address. Non-loopback values trigger a startup warning that there is no built-in authentication. |
+| `--listen` | `127.0.0.1:18081` | Bind address. Non-loopback values trigger a startup warning that there is no built-in authentication. |
 | `--suites-base` | `newtrun/suites` | Directory containing suite subdirectories. |
 | `--topologies-base` | `newtrun/topologies` | Directory containing topology subdirectories. |
 
-The Config struct has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:8080` and `default`), but the current binary registers no CLI flag or env-var binding for either. The values can only be overridden per-request via the `newtron_server` and `network_id` fields on `POST /api/runs`. Adding a flag or env-var to the server binary is a small follow-on if operators need to point a whole instance at a non-default newtron-server.
+The Config struct has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), but the current binary registers no CLI flag or env-var binding for either. The values can only be overridden per-request via the `newtron_server` and `network_id` fields on `POST /api/runs`. Adding a flag or env-var to the server binary is a small follow-on if operators need to point a whole instance at a non-default newtron-server.
 
 The server installs a SIGTERM handler that calls `Stop(ctx)` — cancels every in-flight run, waits up to 5 seconds for them to drain, then shuts down the HTTP listener. The Runner's ctx-cancel check ([§5.4](#54-iteratescenarios)) is what makes the drain produce honest status (`aborted`) instead of synthetic FAIL events.
 

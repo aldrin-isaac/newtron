@@ -25,7 +25,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
 
-const defaultListen = "127.0.0.1:8081"
+const defaultListen = "127.0.0.1:18081"
 
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")

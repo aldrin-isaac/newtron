@@ -88,9 +88,9 @@ When `newtrun-server` shuts down, the registry cancels every in-flight runner's 
 
 ### 3.4 URL resolution
 
-The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:8081`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /api/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:8080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
+The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:18081`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /api/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:18080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
 
-The two servers have different default bind addresses. `newtrun-server` defaults to loopback (`127.0.0.1:8081`); non-loopback values trigger a startup warning that there is no built-in authentication. `newtron-server` defaults to all interfaces on port `8080` so single-node lab automation can reach it from inside containers and VMs without a flag — operators that need to restrict exposure pass `--addr 127.0.0.1:8080` explicitly. Neither server has built-in TLS or authentication; operators who need either wrap the server with a reverse proxy.
+The two servers have different default bind addresses. `newtrun-server` defaults to loopback (`127.0.0.1:18081`); non-loopback values trigger a startup warning that there is no built-in authentication. `newtron-server` defaults to all interfaces on port `8080` so single-node lab automation can reach it from inside containers and VMs without a flag — operators that need to restrict exposure pass `--addr 127.0.0.1:18080` explicitly. Neither server has built-in TLS or authentication; operators who need either wrap the server with a reverse proxy.
 
 ## 4. Directory Structure
 
@@ -559,11 +559,11 @@ A concrete trace of `bin/newtrun start 2node-ngdp-primitive` from operator keyst
 ### 12.1 Operator runs the CLI
 
 ```
-$ NEWTRUN_SERVER=http://127.0.0.1:8081 bin/newtrun start 2node-ngdp-primitive
+$ NEWTRUN_SERVER=http://127.0.0.1:18081 bin/newtrun start 2node-ngdp-primitive
 ```
 
 `cmd_start.go`:
-1. Reads the persistent `--server` flag and the `NEWTRUN_SERVER` env var, settles on `http://127.0.0.1:8081`.
+1. Reads the persistent `--server` flag and the `NEWTRUN_SERVER` env var, settles on `http://127.0.0.1:18081`.
 2. Constructs a `client.Client` targeting that URL.
 3. Probes `GET /api/health` to confirm the server is running. If not, exits with a "start newtrun-server first" hint.
 4. Sends `POST /api/runs` with body `{"suite": "2node-ngdp-primitive", "all": true, ...}`.
