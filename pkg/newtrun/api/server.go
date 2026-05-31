@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,12 +15,12 @@ import (
 type Config struct {
 	// SuitesBase is the directory under which suite directories live. Defaults
 	// to "newtrun/suites" relative to the working directory. The server reads
-	// it on GET /api/suites and validates file-backed suite names against it
-	// when handling POST /api/runs.
+	// it on GET /newtrun/v1/suites and validates file-backed suite names against
+	// it when handling POST /newtrun/v1/runs.
 	SuitesBase string
 
 	// TopologiesBase is the directory under which topology directories live.
-	// Defaults to "newtrun/topologies". Returned by GET /api/topologies.
+	// Defaults to "newtrun/topologies". Returned by GET /newtrun/v1/topologies.
 	TopologiesBase string
 
 	// NewtronServer is the newtron-server URL the server-side runners
@@ -44,17 +43,18 @@ type Config struct {
 	Logger *log.Logger
 }
 
-// Server is the newtrun HTTP server.
+// Server is the newtrun HTTP server. The HTTP listener lifecycle
+// (Start / Stop) comes from the embedded *httputil.Server.
 type Server struct {
-	cfg        Config
-	logger     *log.Logger
-	httpServer *http.Server
-	broker     *httputil.Broker[Event]
-	registry   *RunRegistry
+	*httputil.Server
+	cfg      Config
+	logger   *log.Logger
+	broker   *httputil.Broker[Event]
+	registry *RunRegistry
 }
 
-// NewServer constructs a server with the given config. The HTTP listener is
-// not started until Start is called.
+// NewServer constructs a server with the given config. The HTTP
+// listener is not started until Start is called.
 func NewServer(cfg Config) *Server {
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
@@ -77,75 +77,60 @@ func NewServer(cfg Config) *Server {
 		broker:   httputil.NewBroker[Event](),
 		registry: NewRunRegistry(),
 	}
-	s.httpServer = &http.Server{
-		Handler: s.buildHandler(),
-		// SSE connections can be long-lived; the server-wide WriteTimeout
-		// must accommodate this. Per-request handler timeouts apply to
-		// non-SSE endpoints via http.TimeoutHandler in buildHandler if
-		// needed; the simpler approach for v0 is a generous server-wide
-		// WriteTimeout and rely on context cancellation from the client.
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0, // 0 = no per-request write deadline (SSE friendly)
-		IdleTimeout:  120 * time.Second,
-	}
+	s.Server = httputil.NewServer(s.buildHandler(), cfg.Logger,
+		httputil.ServerLabel("newtrun-server"),
+		// SSE-friendly: no per-request write deadline.
+		httputil.WriteTimeout(0),
+		httputil.OnShutdown(func() {
+			s.registry.CancelAll(5 * time.Second)
+		}),
+	)
 	return s
 }
 
-// Broker exposes the server's httputil.Broker[Event]. PR 2 wires server-side Runner
-// invocations to publish events through this broker; PR 1 leaves it idle.
+// Broker exposes the server's event broker.
 func (s *Server) Broker() *httputil.Broker[Event] {
 	return s.broker
 }
 
-// Start begins listening on the given address. Blocks until the server stops.
-func (s *Server) Start(addr string) error {
-	s.httpServer.Addr = addr
-	s.logger.Printf("newtrun-server listening on %s", addr)
-	return s.httpServer.ListenAndServe()
-}
-
-// Stop gracefully shuts down the server. Cancels every in-flight run,
-// waits up to 5 seconds for them to drain, then shuts down the HTTP
-// listener.
-func (s *Server) Stop(ctx context.Context) error {
-	s.registry.CancelAll(5 * time.Second)
-	return s.httpServer.Shutdown(ctx)
-}
-
-// Registry exposes the run registry. Tests use this to inspect in-flight
-// state; PR 3's inline-runs handler will use it directly.
+// Registry exposes the run registry.
 func (s *Server) Registry() *RunRegistry {
 	return s.registry
 }
 
-// Handler returns the fully-wired http.Handler (mux + middleware). Used
-// by external CLI E2E tests to mount the real server into an
-// httptest.Server without needing to spawn a subprocess — the binary
-// being tested points its client at the httptest URL via NEWTRUN_SERVER.
+// Handler returns the fully-wired http.Handler. Used by external CLI
+// E2E tests to mount the real server into an httptest.Server without
+// spawning a subprocess.
 func (s *Server) Handler() http.Handler {
-	return s.buildHandler()
+	return s.HTTPServer().Handler
 }
 
 // buildHandler wires the mux with middleware.
+//
+// All routes live under /newtrun/v1/. The version prefix is the breaking-
+// change escape hatch: v2/ ships alongside v1/ when the wire shape
+// changes. Per DESIGN_PRINCIPLES_NEWTRON §40 (Greenfield), version
+// segments are reserved for external HTTP contracts — newtcon and
+// other browser/script consumers — not for internal use.
 func (s *Server) buildHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.HandleFunc("GET /api/runs", s.handleListRuns)
-	mux.HandleFunc("POST /api/runs", s.handleStartRun)
-	mux.HandleFunc("POST /api/runs/inline", s.handleStartInlineRun)
-	mux.HandleFunc("GET /api/runs/{suite}", s.handleGetRun)
-	mux.HandleFunc("DELETE /api/runs/{suite}", s.handleDeleteRun)
-	mux.HandleFunc("POST /api/runs/{suite}/pause", s.handlePauseRun)
-	mux.HandleFunc("POST /api/runs/{suite}/stop", s.handleStopRun)
-	mux.HandleFunc("GET /api/runs/{suite}/events", s.handleRunEvents)
-	mux.HandleFunc("GET /api/topologies", s.handleListTopologies)
-	mux.HandleFunc("GET /api/suites", s.handleListSuites)
-	mux.HandleFunc("POST /api/suites", s.handleCreateSuite)
-	mux.HandleFunc("DELETE /api/suites/{suite}", s.handleDeleteSuite)
-	mux.HandleFunc("GET /api/suites/{suite}/scenarios", s.handleListSuiteScenarios)
-	mux.HandleFunc("GET /api/suites/{suite}/scenarios/{name}", s.handleGetScenario)
-	mux.HandleFunc("PUT /api/suites/{suite}/scenarios/{name}", s.handlePutScenario)
-	mux.HandleFunc("DELETE /api/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
+	mux.HandleFunc("GET /newtrun/v1/health", s.handleHealth)
+	mux.HandleFunc("GET /newtrun/v1/runs", s.handleListRuns)
+	mux.HandleFunc("POST /newtrun/v1/runs", s.handleStartRun)
+	mux.HandleFunc("POST /newtrun/v1/runs/inline", s.handleStartInlineRun)
+	mux.HandleFunc("GET /newtrun/v1/runs/{suite}", s.handleGetRun)
+	mux.HandleFunc("DELETE /newtrun/v1/runs/{suite}", s.handleDeleteRun)
+	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/pause", s.handlePauseRun)
+	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/stop", s.handleStopRun)
+	mux.HandleFunc("GET /newtrun/v1/runs/{suite}/events", s.handleRunEvents)
+	mux.HandleFunc("GET /newtrun/v1/topologies", s.handleListTopologies)
+	mux.HandleFunc("GET /newtrun/v1/suites", s.handleListSuites)
+	mux.HandleFunc("POST /newtrun/v1/suites", s.handleCreateSuite)
+	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}", s.handleDeleteSuite)
+	mux.HandleFunc("GET /newtrun/v1/suites/{suite}/scenarios", s.handleListSuiteScenarios)
+	mux.HandleFunc("GET /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleGetScenario)
+	mux.HandleFunc("PUT /newtrun/v1/suites/{suite}/scenarios/{name}", s.handlePutScenario)
+	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)
@@ -183,4 +168,3 @@ func listSubdirs(base string) ([]string, error) {
 	}
 	return names, nil
 }
-

@@ -1,14 +1,12 @@
-// Package main is the newtrun HTTP server entry point.
+// Package main is the standalone newtrun-server entry point.
 //
-// newtrun-server hosts the long-lived HTTP API that the newtcon browser
-// frontend and the newtrun CLI consume. It mirrors newtron-server's shape:
-// loopback default, --listen flag for explicit non-loopback exposure, no
-// built-in authentication (operators wrap with a reverse proxy if they need
-// TLS or auth).
+// Use this binary when iterating on newtrun code in isolation. For
+// production / aggregated deployment, see cmd/newt-server/, which
+// mounts every engine on one port.
 //
-// In PR 1 the server exposes read-only endpoints over existing newtrun
-// state files. PR 2 adds server-side scenario execution; PR 3 adds the
-// inline compose-and-run write surface.
+// Conventions: loopback default, --listen flag for explicit
+// non-loopback exposure, no built-in authentication (operators wrap
+// with a reverse proxy if they need TLS or auth).
 package main
 
 import (
@@ -25,7 +23,8 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
 
-const defaultListen = "127.0.0.1:18081"
+// defaultListen — loopback-only; newt-server fronts external traffic on :18080.
+const defaultListen = "127.0.0.1:19081"
 
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")

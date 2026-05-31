@@ -1,25 +1,41 @@
+// Package main is the standalone newtron-server entry point.
+//
+// Use this binary when iterating on newtron code in isolation
+// (rebuild + restart only newtron without disturbing other engines'
+// in-memory state, e.g. SSH-tunnel caches in a different newtron
+// instance). For production / aggregated deployment, see
+// cmd/newt-server/, which mounts every engine on one port.
 package main
 
 import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
+// defaultListen — loopback-only; newt-server fronts external traffic on :18080.
+const defaultListen = "127.0.0.1:19080"
+
 func main() {
-	addr := flag.String("addr", ":18080", "listen address")
+	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	specDir := flag.String("spec-dir", "", "spec directory to auto-register as 'default' network")
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout (default 5m, negative to disable caching)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
+
+	if err := warnIfNonLoopback(*listen, logger); err != nil {
+		logger.Fatalf("invalid --listen %q: %v", *listen, err)
+	}
 
 	srv := api.NewServer(logger, *idleTimeout)
 
@@ -29,13 +45,12 @@ func main() {
 		}
 	}
 
-	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- srv.Start(*addr)
+		errCh <- srv.Start(*listen)
 	}()
 
 	select {
@@ -50,4 +65,23 @@ func main() {
 		}
 		logger.Println("shutdown complete")
 	}
+}
+
+// warnIfNonLoopback emits an explicit acknowledgment in the startup
+// log when the operator binds to a non-loopback interface. newtron-server
+// has no built-in authentication; non-loopback exposure is the
+// operator's deliberate choice.
+func warnIfNonLoopback(listen string, logger *log.Logger) error {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return err
+	}
+	host = strings.TrimSpace(host)
+	switch host {
+	case "", "127.0.0.1", "localhost", "::1":
+		return nil
+	}
+	logger.Printf("WARNING: --listen=%s binds to a non-loopback address; this server has no built-in authentication.", listen)
+	logger.Printf("WARNING: wrap with a reverse proxy (TLS + auth) before exposing on a shared network.")
+	return nil
 }

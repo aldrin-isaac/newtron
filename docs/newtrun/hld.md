@@ -34,7 +34,7 @@ newtrun is split into two binaries: a thin HTTP client (`bin/newtrun`) and a lon
 ┌──────────────┐                  ┌────────────────────┐          ┌─────────────────────────┐                     ┌──────────┐         ┌─────────────────┐
 │              │                  │                    │          │                         │                     │          │         │                 │
 │ bin/newtrun  │  HTTP            │ bin/newtrun-server │          │         Runner          │                     │ newtlab  │         │    QEMU VMs     │
-│ (CLI client) │  /api/runs etc   │      (engine)      │  spawn   │ (per run, in goroutine) │  Go API             │ (Go API) │  QEMU   │ (SONiC + hosts) │
+│ (CLI client) │  /newtrun/v1/runs etc   │      (engine)      │  spawn   │ (per run, in goroutine) │  Go API             │ (Go API) │  QEMU   │ (SONiC + hosts) │
 │              │ ───────────────▶ │                    │ ───────▶ │                         │ ──────────────────▶ │          │ ──────▶ │                 │
 └──────────────┘                  └────────────────────┘          └─────────────────────────┘                     └──────────┘         └─────────────────┘
                                                                     │                                                                    ▲
@@ -54,7 +54,7 @@ newtrun is split into two binaries: a thin HTTP client (`bin/newtrun`) and a lon
 
 **`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to newtrun-server. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or `newtrun/suites/` directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newtrun-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
 
-**`bin/newtrun-server` — the engine.** A long-lived process. Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP server that exposes all of it. Each `POST /api/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
+**`bin/newtrun-server` — the engine.** A long-lived process. Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP server that exposes all of it. Each `POST /newtrun/v1/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
 
 ### 3.2 The Runner
 
@@ -80,21 +80,23 @@ The server tracks active runs in an in-memory `RunRegistry` keyed by run identit
 
 **Concurrency rules:**
 
-- **Same-suite re-run blocked.** Two `POST /api/runs` requests for the same suite collide on the registry key; the second returns `409 Conflict` with the active run's age in the error message.
+- **Same-suite re-run blocked.** Two `POST /newtrun/v1/runs` requests for the same suite collide on the registry key; the second returns `409 Conflict` with the active run's age in the error message.
 - **Different suites concurrent.** No contention between distinct suites.
-- **Inline runs always concurrent.** Each `POST /api/runs/inline` allocates a fresh UUID; UUIDs never collide.
+- **Inline runs always concurrent.** Each `POST /newtrun/v1/runs/inline` allocates a fresh UUID; UUIDs never collide.
 
 When `newtrun-server` shuts down, the registry cancels every in-flight runner's context and waits up to 5 seconds for them to drain before the HTTP listener stops.
 
 ### 3.4 URL resolution
 
-The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:18081`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /api/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:18080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
+The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:18080`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /newtrun/v1/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:18080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
 
-The two servers have different default bind addresses. `newtrun-server` defaults to loopback (`127.0.0.1:18081`); non-loopback values trigger a startup warning that there is no built-in authentication. `newtron-server` defaults to all interfaces on port `8080` so single-node lab automation can reach it from inside containers and VMs without a flag — operators that need to restrict exposure pass `--addr 127.0.0.1:18080` explicitly. Neither server has built-in TLS or authentication; operators who need either wrap the server with a reverse proxy.
+The standard production stack runs `bin/newt-server` on `127.0.0.1:18080`. newt-server hosts the newtron, newtrun, and newtlab engines in one process; consumers (including this CLI) target `:18080` and the aggregator routes by URL prefix (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). For dev iteration on a single engine, the standalone binaries (`bin/newtron-server`, `bin/newtrun-server`, `bin/newtlab-server`) are still built and serve their own loopback ports (`:19080`, `:19081`, `:19082`); point the CLI at one via `--newtrun-server http://127.0.0.1:19081`. See [`docs/newt-server.md`](../newt-server.md) for the composition rationale.
+
+Non-loopback exposure (any binding other than `127.0.0.1`) on any server emits a startup warning since there is no built-in authentication. Operators who need TLS or auth wrap newt-server with a reverse proxy — one bind point, one termination point.
 
 ## 4. Directory Structure
 
-newtrun's code lives in three places: CLI client (`cmd/newtrun/`), server entry point (`cmd/newtrun-server/`), and core library (`pkg/newtrun/` plus `pkg/newtrun/api/` and `pkg/newtrun/client/`). Test assets live at the repo root under `newtrun/`.
+newtrun's code lives in three places: CLI client (`cmd/newtrun/`), server entry point (`cmd/newtrun-server/`), and core library (`pkg/newtrun/` plus `pkg/newtrun/newtrun/v1/` and `pkg/newtrun/client/`). Test assets live at the repo root under `newtrun/`.
 
 ```
 newtron/
@@ -103,14 +105,14 @@ newtron/
 │   │   ├── main.go               # Root command, --newtrun-server flag, --verbose
 │   │   ├── clientutil.go         # newClient factory, requireServer probe
 │   │   ├── helpers.go            # resolveSuite, resolveTopologyFromState
-│   │   ├── cmd_start.go          # POST /api/runs + SSE event renderer
-│   │   ├── cmd_pause.go          # POST /api/runs/{suite}/pause
+│   │   ├── cmd_start.go          # POST /newtrun/v1/runs + SSE event renderer
+│   │   ├── cmd_pause.go          # POST /newtrun/v1/runs/{suite}/pause
 │   │   ├── cmd_stop.go           # multi-step orchestration: stop + destroy + delete
-│   │   ├── cmd_status.go         # GET /api/runs + /api/runs/{suite} display
-│   │   ├── cmd_list.go           # list suites and scenarios via GET /api/suites/...
-│   │   ├── cmd_suites.go         # GET /api/suites
+│   │   ├── cmd_status.go         # GET /newtrun/v1/runs + /newtrun/v1/runs/{suite} display
+│   │   ├── cmd_list.go           # list suites and scenarios via GET /newtrun/v1/suites/...
+│   │   ├── cmd_suites.go         # GET /newtrun/v1/suites
 │   │   ├── cmd_scenario.go       # scenario CRUD + suite create/delete subcommands
-│   │   ├── cmd_topologies.go     # GET /api/topologies
+│   │   ├── cmd_topologies.go     # GET /newtrun/v1/topologies
 │   │   ├── cmd_actions.go        # static action vocabulary help
 │   │   └── scenario_e2e_test.go  # CLI→server E2E: scenario lifecycle, bad-YAML rejection
 │   └── newtrun-server/           # Server entry point
@@ -131,13 +133,13 @@ newtron/
 │   ├── errors.go                 # InfraError, StepError, PauseError
 │   └── report.go                 # ScenarioResult, StepResult, ReportGenerator
 │
-├── pkg/newtrun/api/              # HTTP server package
+├── pkg/newtrun/newtrun/v1/              # HTTP server package
 │   ├── server.go                 # Server, Config, route registration, handleHealth, shared response helpers
 │   ├── middleware.go             # withRequestID, withLogger, withRecovery
 │   ├── runs.go                   # ALL run endpoints (start/inline/pause/stop/delete/list/get/events) + reconcileStaleStatus
-│   ├── suites.go                 # GET/POST/DELETE /api/suites + list scenarios + nameRE validation
+│   ├── suites.go                 # GET/POST/DELETE /newtrun/v1/suites + list scenarios + nameRE validation
 │   ├── scenarios.go              # GET/PUT/DELETE per-scenario; ParseScenarioBytes gate + atomic write
-│   ├── topologies.go             # GET /api/topologies
+│   ├── topologies.go             # GET /newtrun/v1/topologies
 │   ├── registry.go               # RunRegistry, RegistryEntry, AlreadyRunningError
 │   ├── safety.go                 # InlineSafetyPolicy, SafetyViolation
 │   ├── reporter.go               # HTTPReporter (implements ProgressReporter)
@@ -152,7 +154,7 @@ newtron/
     └── suites/                   # Per-suite scenario YAMLs
 ```
 
-The split between `pkg/newtrun/`, `pkg/newtrun/api/`, and `pkg/newtrun/client/` enforces a one-way import direction: `client` → `api` → `newtrun`. The engine package is HTTP-agnostic; the server package adapts the engine to HTTP; the client package consumes the HTTP surface.
+The split between `pkg/newtrun/`, `pkg/newtrun/newtrun/v1/`, and `pkg/newtrun/client/` enforces a one-way import direction: `client` → `api` → `newtrun`. The engine package is HTTP-agnostic; the server package adapts the engine to HTTP; the client package consumes the HTTP surface.
 
 ## 5. Scenarios and Steps
 
@@ -201,7 +203,7 @@ The `newtron` action is the most flexible. URLs use a single template placeholde
 
 ### 5.3 Inline scenarios
 
-Browser frontends submit scenarios inline through `POST /api/runs/inline` rather than authoring suite directories. The YAML body is parsed by the same `ParseScenarioBytes` the file-backed parser uses, then validated against the **inline safety policy** before the Runner starts:
+Browser frontends submit scenarios inline through `POST /newtrun/v1/runs/inline` rather than authoring suite directories. The YAML body is parsed by the same `ParseScenarioBytes` the file-backed parser uses, then validated against the **inline safety policy** before the Runner starts:
 
 - **Self-contained**: `requires` and `after` rejected — inline scenarios stand alone.
 - **Action allow-list**: defaults to `newtron` and `wait` only. `host-exec` and `newtron-cli` are excluded by default because they shell out.
@@ -353,7 +355,7 @@ Each scenario can declare `requires_features: [acl, macvpn, ...]`. The platform'
 
 ## 8. Execution Model
 
-The Runner is a per-run orchestrator that lives inside the server. Each `POST /api/runs` request constructs one Runner in its own goroutine, with its own context, its own newtron client, its own lab and host connections.
+The Runner is a per-run orchestrator that lives inside the server. Each `POST /newtrun/v1/runs` request constructs one Runner in its own goroutine, with its own context, its own newtron client, its own lab and host connections.
 
 ### 8.1 The run lifecycle
 
@@ -368,8 +370,8 @@ The Runner is a per-run orchestrator that lives inside the server. Each `POST /a
                                                 ▼                                            │
                                               ┌──────────────────────────┐                   │
                                               │                          │                   │
-                                              │      POST /api/runs      │                   │
-                                              │   or /api/runs/inline    │                   │
+                                              │      POST /newtrun/v1/runs      │                   │
+                                              │   or /newtrun/v1/runs/inline    │                   │
                                               │                          │                   │
                                               └──────────────────────────┘                   │
                                                 │                                            │
@@ -412,7 +414,7 @@ The Runner is a per-run orchestrator that lives inside the server. Each `POST /a
   ▼                                                                                          │
 ┌──────────────────────────────┐                                                             │
 │                              │                                                             │
-│  GET /api/runs/{id}/events   │                                                             │
+│  GET /newtrun/v1/runs/{id}/events   │                                                             │
 │      (SSE subscribers)       │                                                             │
 │                              │ ────────────────────────────────────────────────────────────┘
 └──────────────────────────────┘
@@ -422,7 +424,7 @@ The Runner is a per-run orchestrator that lives inside the server. Each `POST /a
 
 The flow:
 
-1. **Client submits.** `POST /api/runs` (file-backed) or `POST /api/runs/inline` (with scenario YAML in the body) hits the server.
+1. **Client submits.** `POST /newtrun/v1/runs` (file-backed) or `POST /newtrun/v1/runs/inline` (with scenario YAML in the body) hits the server.
 2. **Registry acquire.** The server reserves the run key (suite name or fresh UUID). Same-suite collision returns 409 immediately.
 3. **State persisted.** Initial `RunState` written to `~/.newtron/newtrun/<key>/state.json` (suite namespace) or `~/.newtron/newtrun/_inline/<uuid>/state.json` (inline namespace).
 4. **Runner spawned.** A goroutine constructs a Runner, attaches the reporter chain (HTTPReporter wrapping StateReporter), and calls `Runner.Run(ctx, opts)`. The HTTP handler returns 202 immediately with the run identity.
@@ -467,7 +469,7 @@ Source: `docs/diagrams/newtrun-suite-statemachine.dot`. Re-render with `graph-ea
                                       │                    │
                                       └────────────────────┘
                                         │
-                                        │ POST /api/runs
+                                        │ POST /newtrun/v1/runs
                                         ▼
 ┌──────────┐                          ┌──────────────────────────────────────────────────────────────────────┐                      ┌────────┐
 │          │                          │                                                                      │                      │        │
@@ -475,7 +477,7 @@ Source: `docs/diagrams/newtrun-suite-statemachine.dot`. Re-render with `graph-ea
 │          │ ◀─────────────────────── │                                                                      │ ───────────────────▶ │        │
 └──────────┘                          └──────────────────────────────────────────────────────────────────────┘                      └────────┘
                                         │                     │                     ▲
-                                        │ pause               │                     │ POST /api/runs (resume)
+                                        │ pause               │                     │ POST /newtrun/v1/runs (resume)
                                         ▼                     │                     │
 ┌──────────┐                          ┌────────────────────┐  │                     │
 │          │                          │                    │  │                     │
@@ -496,7 +498,7 @@ Source: `docs/diagrams/newtrun-suite-statemachine.dot`. Re-render with `graph-ea
 
 - **running**: Runner goroutine is active in the server's process.
 - **pausing**: Pause was requested. Runner picks up the signal at the next scenario boundary and transitions to paused.
-- **paused**: Runner exited cleanly between scenarios. State preserved; `POST /api/runs` against the same suite resumes from where it stopped.
+- **paused**: Runner exited cleanly between scenarios. State preserved; `POST /newtrun/v1/runs` against the same suite resumes from where it stopped.
 - **complete**: All scenarios ran successfully.
 - **failed**: At least one scenario failed.
 - **aborted**: Context cancellation (stop endpoint or server shutdown) before completion.
@@ -505,12 +507,12 @@ Source: `docs/diagrams/newtrun-suite-statemachine.dot`. Re-render with `graph-ea
 
 | Verb | Endpoint | What it does |
 |------|----------|--------------|
-| Start | `POST /api/runs` | Create a new run, or resume a paused suite |
-| Pause | `POST /api/runs/{id}/pause` | Write `pausing` to state; Runner exits cleanly between scenarios |
-| Stop | `POST /api/runs/{id}/stop` | Cancel the Runner's context immediately |
-| Delete | `DELETE /api/runs/{id}` | Remove persistent state (rejected while active) |
-| Read | `GET /api/runs/{id}` | Current `RunState` |
-| Stream | `GET /api/runs/{id}/events` | SSE event stream |
+| Start | `POST /newtrun/v1/runs` | Create a new run, or resume a paused suite |
+| Pause | `POST /newtrun/v1/runs/{id}/pause` | Write `pausing` to state; Runner exits cleanly between scenarios |
+| Stop | `POST /newtrun/v1/runs/{id}/stop` | Cancel the Runner's context immediately |
+| Delete | `DELETE /newtrun/v1/runs/{id}` | Remove persistent state (rejected while active) |
+| Read | `GET /newtrun/v1/runs/{id}` | Current `RunState` |
+| Stream | `GET /newtrun/v1/runs/{id}/events` | SSE event stream |
 
 The CLI verbs (`newtrun start`, `newtrun pause`, `newtrun stop`) translate one-to-one to these endpoints. `newtrun stop` additionally calls `newtlab.Destroy` to tear down the topology before sending `DELETE`.
 
@@ -540,11 +542,11 @@ The server is the source of truth for run state. Multiple consumers can read the
 
 ### 11.1 Live observation via SSE
 
-`GET /api/runs/{id}/events` opens a Server-Sent Events stream. The CLI's `newtrun start` subscribes and renders one line per scenario / step / suite event to the terminal. Browser frontends subscribe through the same endpoint. The stream's initial event is a comment line confirming subscription; heartbeats every 30 seconds prevent intermediaries from timing out the connection.
+`GET /newtrun/v1/runs/{id}/events` opens a Server-Sent Events stream. The CLI's `newtrun start` subscribes and renders one line per scenario / step / suite event to the terminal. Browser frontends subscribe through the same endpoint. The stream's initial event is a comment line confirming subscription; heartbeats every 30 seconds prevent intermediaries from timing out the connection.
 
 ### 11.2 Persistent state file
 
-`~/.newtron/newtrun/<key>/state.json` (suite namespace) or `~/.newtron/newtrun/_inline/<uuid>/state.json` (inline namespace) is updated after every callback. The file is a complete `RunState` snapshot — operators can `cat` it directly or fetch it via `GET /api/runs/{id}`. Mid-flight, the file reflects the current step's status; after termination, it reflects the final result.
+`~/.newtron/newtrun/<key>/state.json` (suite namespace) or `~/.newtron/newtrun/_inline/<uuid>/state.json` (inline namespace) is updated after every callback. The file is a complete `RunState` snapshot — operators can `cat` it directly or fetch it via `GET /newtrun/v1/runs/{id}`. Mid-flight, the file reflects the current step's status; after termination, it reflects the final result.
 
 ### 11.3 Reports and live monitor
 
@@ -559,20 +561,20 @@ A concrete trace of `bin/newtrun start 2node-ngdp-primitive` from operator keyst
 ### 12.1 Operator runs the CLI
 
 ```
-$ NEWTRUN_SERVER=http://127.0.0.1:18081 bin/newtrun start 2node-ngdp-primitive
+$ NEWTRUN_SERVER=http://127.0.0.1:18080 bin/newtrun start 2node-ngdp-primitive
 ```
 
 `cmd_start.go`:
-1. Reads the persistent `--server` flag and the `NEWTRUN_SERVER` env var, settles on `http://127.0.0.1:18081`.
+1. Reads the persistent `--server` flag and the `NEWTRUN_SERVER` env var, settles on `http://127.0.0.1:18080`.
 2. Constructs a `client.Client` targeting that URL.
-3. Probes `GET /api/health` to confirm the server is running. If not, exits with a "start newtrun-server first" hint.
-4. Sends `POST /api/runs` with body `{"suite": "2node-ngdp-primitive", "all": true, ...}`.
-5. Subscribes to `GET /api/runs/2node-ngdp-primitive/events` (SSE).
+3. Probes `GET /newtrun/v1/health` to confirm the server is running. If not, exits with a "start newtrun-server first" hint.
+4. Sends `POST /newtrun/v1/runs` with body `{"suite": "2node-ngdp-primitive", "all": true, ...}`.
+5. Subscribes to `GET /newtrun/v1/runs/2node-ngdp-primitive/events` (SSE).
 6. For each event received, renders it to the terminal.
 
 ### 12.2 Server accepts the request
 
-`pkg/newtrun/api/runs.go` `handleStartRun`:
+`pkg/newtrun/newtrun/v1/runs.go` `handleStartRun`:
 1. Decodes the `StartRunRequest`.
 2. Calls `s.registry.Acquire("2node-ngdp-primitive")`. If another run holds the key, returns 409.
 3. Constructs a `RunState`, calls `SaveRunState`.
@@ -617,19 +619,19 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 
 | Command | Endpoint(s) | Notes |
 |---------|-------------|-------|
-| `newtrun start <suite>` | `POST /api/runs` + SSE | Streams events; exits on terminal SuiteEnd. Resumes if the suite is paused. |
-| `newtrun pause <suite>` | `POST /api/runs/{suite}/pause` | Returns when the pause signal lands; Runner exits between scenarios |
+| `newtrun start <suite>` | `POST /newtrun/v1/runs` + SSE | Streams events; exits on terminal SuiteEnd. Resumes if the suite is paused. |
+| `newtrun pause <suite>` | `POST /newtrun/v1/runs/{suite}/pause` | Returns when the pause signal lands; Runner exits between scenarios |
 | `newtrun stop <suite>` | `GET` + `POST /stop` + newtlab.Destroy + `DELETE` | Multi-step: cancel runner, destroy topology, clean state |
-| `newtrun status [-s <pattern>]` | `GET /api/runs` + `GET /api/runs/{suite}` | Lists all suites; `-s/--suite <pattern>` filters by substring match; `--monitor` auto-refreshes |
-| `newtrun list [suite]` | `GET /api/suites` + `GET /api/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
-| `newtrun suites` | `GET /api/suites` | Lists suite directories under the server's suites base |
-| `newtrun suite create <name>` | `POST /api/suites` | Creates an empty suite directory on the server |
-| `newtrun suite delete <name>` | `DELETE /api/suites/{suite}` | Deletes an empty suite directory; 409 if scenarios remain |
-| `newtrun scenario list <suite>` | `GET /api/suites/{suite}/scenarios` | Same data as `list <suite>` |
-| `newtrun scenario get <suite> <name>` | `GET /api/suites/{suite}/scenarios/{name}` | Prints raw scenario YAML to stdout |
-| `newtrun scenario put <suite> <name>` | `PUT /api/suites/{suite}/scenarios/{name}` | Creates or updates a scenario from `--file` or stdin; validated via ParseScenarioBytes |
-| `newtrun scenario delete <suite> <name>` | `DELETE /api/suites/{suite}/scenarios/{name}` | Deletes a scenario file |
-| `newtrun topologies` | `GET /api/topologies` | Lists topology directories under the server's topologies base |
+| `newtrun status [-s <pattern>]` | `GET /newtrun/v1/runs` + `GET /newtrun/v1/runs/{suite}` | Lists all suites; `-s/--suite <pattern>` filters by substring match; `--monitor` auto-refreshes |
+| `newtrun list [suite]` | `GET /newtrun/v1/suites` + `GET /newtrun/v1/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
+| `newtrun suites` | `GET /newtrun/v1/suites` | Lists suite directories under the server's suites base |
+| `newtrun suite create <name>` | `POST /newtrun/v1/suites` | Creates an empty suite directory on the server |
+| `newtrun suite delete <name>` | `DELETE /newtrun/v1/suites/{suite}` | Deletes an empty suite directory; 409 if scenarios remain |
+| `newtrun scenario list <suite>` | `GET /newtrun/v1/suites/{suite}/scenarios` | Same data as `list <suite>` |
+| `newtrun scenario get <suite> <name>` | `GET /newtrun/v1/suites/{suite}/scenarios/{name}` | Prints raw scenario YAML to stdout |
+| `newtrun scenario put <suite> <name>` | `PUT /newtrun/v1/suites/{suite}/scenarios/{name}` | Creates or updates a scenario from `--file` or stdin; validated via ParseScenarioBytes |
+| `newtrun scenario delete <suite> <name>` | `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}` | Deletes a scenario file |
+| `newtrun topologies` | `GET /newtrun/v1/topologies` | Lists topology directories under the server's topologies base |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |
 

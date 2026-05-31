@@ -17,7 +17,7 @@ import (
 // ListNetworks returns all registered networks.
 func (c *Client) ListNetworks() ([]api.NetworkInfo, error) {
 	var result []api.NetworkInfo
-	if err := c.doGet("/network", &result); err != nil {
+	if err := c.doGet("/newtron/v1/network", &result); err != nil {
 		return nil, err
 	}
 	return result, nil

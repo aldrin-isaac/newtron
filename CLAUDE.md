@@ -18,6 +18,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtlab LLD | `docs/newtlab/lld.md` | Deploy phases, state persistence, multi-host |
 | newtlab HOWTO | `docs/newtlab/howto.md` | Deploying topologies, troubleshooting |
 | newtlab API | `docs/newtlab/api.md` | newtlab-server HTTP endpoint reference |
+| newt-server | `docs/newt-server.md` | Aggregated HTTP entry point — composes the three engines on one port |
 | RCA index | `docs/rca/` | root-cause analyses — SONiC pitfalls and workarounds |
 | AI Instructions | `docs/ai-instructions.md` | Behavioral directives scoped by activity phase |
 | Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
@@ -40,7 +41,7 @@ step progresses.
      | gunzip > ~/.newtlab/images/sonic-vs.qcow2
    ```
 4. Deploy a single-switch lab: `bin/newtlab deploy 1node-vs --monitor`
-5. Start the server: `bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &`
+5. Start the aggregated server: `bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; see [`docs/newt-server.md`](docs/newt-server.md))
 6. Run a first operation to prove it works:
    ```
    bin/newtron switch1 init
@@ -357,7 +358,7 @@ These are routine project commands that do not require confirmation:
 - `git mv`, `git rm`, `git format-patch`, `git reset`, `git am`
 
 ### Project Binaries
-- `bin/newtlab`, `bin/newtlab-server`, `bin/newtron`, `bin/newtron-server`, `bin/newtrun`, `bin/newtrun-server`, `bin/newtlink` (all subcommands)
+- `bin/newtlab`, `bin/newtlab-server`, `bin/newtron`, `bin/newtron-server`, `bin/newtrun`, `bin/newtrun-server`, `bin/newt-server`, `bin/newtlink` (all subcommands)
 
 ### Make
 - `make build`, `make test`, `make lint`, `make tools`

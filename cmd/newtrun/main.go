@@ -49,7 +49,7 @@ Discovery:
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
-	rootCmd.PersistentFlags().StringVar(&newtrunServerFlag, "newtrun-server", "", "newtrun-server URL (env: NEWTRUN_SERVER; default: http://127.0.0.1:18081)")
+	rootCmd.PersistentFlags().StringVar(&newtrunServerFlag, "newtrun-server", "", "URL of newtser (or newtrun-server directly). Default: http://127.0.0.1:18080 (newtser). Env: NEWTRUN_SERVER")
 
 	startCmd := newStartCmd()
 

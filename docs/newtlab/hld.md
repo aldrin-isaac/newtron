@@ -860,19 +860,19 @@ The LLD documents the complete flag set and topology resolution logic.
 
 `bin/newtlab-server` is a thin HTTP wrapper around the same `pkg/newtlab/` Go API that powers the CLI. It exists so consumers like the newtcon browser frontend can deploy and observe lab topologies without dropping to a shell.
 
-Default bind: `127.0.0.1:18082` — joins the `:18080` (newtron-server) / `:18081` (newtrun-server) loopback triplet. Non-loopback exposure requires an explicit `--listen` value and emits a startup warning (no built-in authentication).
+Default bind: `127.0.0.1:19082` — loopback-only. The standard production stack composes newtlab into `bin/newt-server` on `:18080`; the standalone `bin/newtlab-server` is built for dev iteration on the newtlab engine in isolation. Non-loopback exposure emits a startup warning (no built-in authentication; wrap with a reverse proxy if you need TLS or auth).
 
 | Method | Path | Wraps |
 |---|---|---|
-| `GET` | `/api/health` | — |
-| `GET` | `/api/topologies` | `newtlab.ListLabs()` |
-| `GET` | `/api/topologies/{name}/status` | `Lab.Status()` |
-| `POST` | `/api/topologies/{name}/deploy` (async) | `Lab.Deploy()` + optional `Lab.Provision()` |
-| `POST` | `/api/topologies/{name}/destroy` | `Lab.Destroy()` |
-| `POST` | `/api/topologies/{name}/provision` | `Lab.Provision()` |
-| `POST` | `/api/topologies/{name}/nodes/{node}/start` | `Lab.Start(node)` |
-| `POST` | `/api/topologies/{name}/nodes/{node}/stop` | `Lab.Stop(node)` |
-| `GET` | `/api/topologies/{name}/events` (SSE) | `Lab.OnProgress` phase callbacks |
+| `GET` | `/newtlab/v1/health` | — |
+| `GET` | `/newtlab/v1/topologies` | `newtlab.ListLabs()` |
+| `GET` | `/newtlab/v1/topologies/{name}/status` | `Lab.Status()` |
+| `POST` | `/newtlab/v1/topologies/{name}/deploy` (async) | `Lab.Deploy()` + optional `Lab.Provision()` |
+| `POST` | `/newtlab/v1/topologies/{name}/destroy` | `Lab.Destroy()` |
+| `POST` | `/newtlab/v1/topologies/{name}/provision` | `Lab.Provision()` |
+| `POST` | `/newtlab/v1/topologies/{name}/nodes/{node}/start` | `Lab.Start(node)` |
+| `POST` | `/newtlab/v1/topologies/{name}/nodes/{node}/stop` | `Lab.Stop(node)` |
+| `GET` | `/newtlab/v1/topologies/{name}/events` (SSE) | `Lab.OnProgress` phase callbacks |
 
 Concurrency: one async deploy per topology at a time (second concurrent request returns 409). Destroy / start / stop / provision are synchronous. See [`api.md`](api.md) for endpoint-level reference.
 

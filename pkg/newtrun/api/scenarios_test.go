@@ -79,7 +79,7 @@ func doRequest(t *testing.T, ts *httptest.Server, method, path string, body []by
 func TestScenario_PutCreatesFile(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
 	body := buildValidScenarioYAML("hello")
-	resp, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello", body)
+	resp, _ := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/hello", body)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT status: got %d, want 201", resp.StatusCode)
 	}
@@ -104,7 +104,7 @@ func TestScenario_PutUpdatesExisting(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	updated := append(buildValidScenarioYAML("hello"), []byte("# updated\n")...)
-	resp, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello", updated)
+	resp, _ := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/hello", updated)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status: got %d, want 200", resp.StatusCode)
 	}
@@ -129,11 +129,11 @@ func TestScenario_PutIsIdempotent(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
 	body := buildValidScenarioYAML("idempotent")
 
-	resp1, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/idempotent", body)
+	resp1, _ := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/idempotent", body)
 	if resp1.StatusCode != http.StatusCreated {
 		t.Fatalf("first PUT status: got %d, want 201", resp1.StatusCode)
 	}
-	resp2, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/idempotent", body)
+	resp2, _ := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/idempotent", body)
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("second PUT status: got %d, want 200", resp2.StatusCode)
 	}
@@ -151,7 +151,7 @@ func TestScenario_PutIsIdempotent(t *testing.T) {
 // suite directory.
 func TestScenario_PutRejectsBadYAML(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
-	resp, body := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello",
+	resp, body := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/hello",
 		[]byte("this is not valid yaml: : :"))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("PUT bad YAML status: got %d, want 400; body=%s", resp.StatusCode, body)
@@ -170,7 +170,7 @@ func TestScenario_PutRejectsBadYAML(t *testing.T) {
 // different scenario via a misaddressed PUT.
 func TestScenario_PutRejectsNameMismatch(t *testing.T) {
 	ts, _ := newScenarioTestServer(t)
-	resp, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello",
+	resp, _ := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/hello",
 		buildValidScenarioYAML("goodbye"))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("name-mismatch PUT status: got %d, want 400", resp.StatusCode)
@@ -186,7 +186,7 @@ func TestScenario_GetReturnsRawYAML(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(suiteDir, "readback.yaml"), body, 0644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	resp, got := doRequest(t, ts, http.MethodGet, "/api/suites/demo/scenarios/readback", nil)
+	resp, got := doRequest(t, ts, http.MethodGet, "/newtrun/v1/suites/demo/scenarios/readback", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET status: got %d, want 200", resp.StatusCode)
 	}
@@ -200,7 +200,7 @@ func TestScenario_GetReturnsRawYAML(t *testing.T) {
 
 func TestScenario_GetMissing(t *testing.T) {
 	ts, _ := newScenarioTestServer(t)
-	resp, _ := doRequest(t, ts, http.MethodGet, "/api/suites/demo/scenarios/nope", nil)
+	resp, _ := doRequest(t, ts, http.MethodGet, "/newtrun/v1/suites/demo/scenarios/nope", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("missing scenario GET: got %d, want 404", resp.StatusCode)
 	}
@@ -212,7 +212,7 @@ func TestScenario_Delete(t *testing.T) {
 	if err := os.WriteFile(path, buildValidScenarioYAML("doomed"), 0644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	resp, _ := doRequest(t, ts, http.MethodDelete, "/api/suites/demo/scenarios/doomed", nil)
+	resp, _ := doRequest(t, ts, http.MethodDelete, "/newtrun/v1/suites/demo/scenarios/doomed", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE status: got %d, want 204", resp.StatusCode)
 	}
@@ -246,7 +246,7 @@ steps:
 		go func(idx int) {
 			defer wg.Done()
 			resp, _ := doRequest(t, ts, http.MethodPut,
-				"/api/suites/demo/scenarios/race", bodies[idx])
+				"/newtrun/v1/suites/demo/scenarios/race", bodies[idx])
 			if resp.StatusCode >= 400 {
 				t.Errorf("writer %d: status %d", idx, resp.StatusCode)
 			}
@@ -289,7 +289,7 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, _ := doRequest(t, ts, http.MethodPost, "/api/suites",
+	resp, _ := doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
 		[]byte(`{"name":"fresh"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST status: got %d, want 201", resp.StatusCode)
@@ -299,23 +299,23 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 	}
 
 	// Duplicate POST → 409.
-	resp, _ = doRequest(t, ts, http.MethodPost, "/api/suites",
+	resp, _ = doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
 		[]byte(`{"name":"fresh"}`))
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("duplicate POST status: got %d, want 409", resp.StatusCode)
 	}
 
 	// Put a scenario, try to delete, expect 409.
-	doRequest(t, ts, http.MethodPut, "/api/suites/fresh/scenarios/blocker",
+	doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/fresh/scenarios/blocker",
 		buildValidScenarioYAML("blocker"))
-	resp, _ = doRequest(t, ts, http.MethodDelete, "/api/suites/fresh", nil)
+	resp, _ = doRequest(t, ts, http.MethodDelete, "/newtrun/v1/suites/fresh", nil)
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("non-empty suite DELETE: got %d, want 409", resp.StatusCode)
 	}
 
 	// Delete the scenario, then delete the suite, expect 204.
-	doRequest(t, ts, http.MethodDelete, "/api/suites/fresh/scenarios/blocker", nil)
-	resp, _ = doRequest(t, ts, http.MethodDelete, "/api/suites/fresh", nil)
+	doRequest(t, ts, http.MethodDelete, "/newtrun/v1/suites/fresh/scenarios/blocker", nil)
+	resp, _ = doRequest(t, ts, http.MethodDelete, "/newtrun/v1/suites/fresh", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("empty-suite DELETE: got %d, want 204", resp.StatusCode)
 	}
@@ -329,7 +329,7 @@ func TestSuite_RejectsBadName(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 	for _, bad := range []string{"../escape", "with/slash", "", "dot.name"} {
-		resp, _ := doRequest(t, ts, http.MethodPost, "/api/suites",
+		resp, _ := doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
 			[]byte(fmt.Sprintf(`{"name":%q}`, bad)))
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("POST name %q: got %d, want 400", bad, resp.StatusCode)
@@ -371,7 +371,7 @@ func TestScenario_RejectsBadName(t *testing.T) {
 		{"-leading-dash", http.StatusBadRequest, "reaches handler; nameRE requires alphanumeric first char"},
 	}
 	for _, tc := range cases {
-		path := "/api/suites/demo/scenarios/" + tc.input
+		path := "/newtrun/v1/suites/demo/scenarios/" + tc.input
 		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 			resp, _ := doRequest(t, ts, method, path, nil)
 			if resp.StatusCode != tc.want {

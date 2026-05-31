@@ -5,7 +5,7 @@ GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LDFLAGS := -X github.com/newtron-network/newtron/pkg/version.Version=$(VERSION) \
            -X github.com/newtron-network/newtron/pkg/version.GitCommit=$(GIT_COMMIT)
 
-BINARIES := newtron newtron-server newtlab newtlab-server newtrun newtrun-server newtlink
+BINARIES := newtron newtron-server newtlab newtlab-server newtrun newtrun-server newt-server newtlink
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 # Default test (unit tests only, no build tags)

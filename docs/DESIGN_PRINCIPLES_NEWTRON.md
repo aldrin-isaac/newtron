@@ -2346,17 +2346,36 @@ drift.
 
 newtron has no installed base. When a format or API changes, change it
 everywhere in one commit. No compatibility shims, no deprecated
-aliases, no dual-format detection. The public API (§33) has one
-version: current. `newtron init` scrubs factory state once; after init,
-no operation checks for legacy formats.
+aliases, no dual-format detection. `newtron init` scrubs factory
+state once; after init, no operation checks for legacy formats.
 
 **Write code for the system as it is today, not as it was yesterday.**
 
-Exception: SONiC releases change schemas and daemon behavior. newtron
-must support multiple releases — this is multi-platform support (§41),
-not backwards compatibility.
+Two exceptions, narrowly scoped:
 
----
+1. **SONiC releases.** SONiC platforms change schemas and daemon
+   behavior between releases. newtron must support multiple
+   releases — this is multi-platform support (§41), not backwards
+   compatibility.
+
+2. **External HTTP API contracts.** Each engine's HTTP surface
+   carries a `/<service>/v1/` version segment on its routes
+   (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). The
+   version is *the* breaking-change escape hatch for external
+   consumers: when the wire shape changes incompatibly,
+   `/<service>/v2/` ships alongside `/<service>/v1/` so a browser
+   frontend (newtcon) or operator script does not break in lockstep
+   with a server upgrade. Each engine is at its own independent
+   version — newtron `v1` and newtrun `v2` can coexist.
+
+   Inside the binary, this is still §40: one current version, no
+   compatibility shims, no aliases. The `/<service>/v1/` segment is the
+   *only* concession. Internal callers (the Go client packages in
+   this repo) update in the same commit as the engine.
+
+   Internal HTTP APIs (server-to-server within one process, or RPC
+   between binaries that ship as a coordinated set) do not need the
+   version segment — §40's "change it everywhere" rule applies.
 
 ## 41. Multi-Version Readiness — Version Differences as Data, Not Code
 

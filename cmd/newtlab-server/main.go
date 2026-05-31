@@ -1,8 +1,10 @@
-// Package main is the newtlab HTTP server entry point.
+// Package main is the standalone newtlab-server entry point.
 //
-// newtlab-server hosts the long-lived HTTP API that the newtcon browser
-// frontend consumes to deploy and observe lab topologies. It mirrors
-// newtrun-server's shape: loopback default, --listen flag for explicit
+// Use this binary when iterating on newtlab code in isolation. For
+// production / aggregated deployment, see cmd/newt-server/, which
+// mounts every engine on one port.
+//
+// Conventions: loopback default, --listen flag for explicit
 // non-loopback exposure, no built-in authentication (operators wrap
 // with a reverse proxy if they need TLS or auth).
 //
@@ -25,7 +27,8 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 )
 
-const defaultListen = "127.0.0.1:18082"
+// defaultListen — loopback-only; newt-server fronts external traffic on :18080.
+const defaultListen = "127.0.0.1:19082"
 
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
