@@ -1398,7 +1398,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | Command | Purpose |
 |---------|---------|
 | `newtrun topologies` | List topology directories visible to the server. |
-| `newtrun actions` | Print action help text. The metadata is stale (it predates the unified-action consolidation) and lists many entries that no longer parse — treat [§11 Step Action Reference](#11-step-action-reference) as authoritative for the six current actions. |
+| `newtrun actions` | List the six supported step actions (derived from `pkg/newtrun.StepAction`). `newtrun actions <name>` shows required fields, device semantics, and a YAML example. Mirrors [§11 Step Action Reference](#11-step-action-reference). |
 | `newtrun version` | Print build version. |
 
 ### 15.5 Flags on `start`
