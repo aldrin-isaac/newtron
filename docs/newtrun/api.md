@@ -76,28 +76,51 @@ Suite and scenario names match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`. Path travers
 
 ## 2. Typical Workflow
 
+Source: `docs/diagrams/newtrun-api-workflow.dot`. Re-render with `graph-easy --from=dot --boxart < docs/diagrams/newtrun-api-workflow.dot`.
+
 ```
-+--------------+      +----------------+      +----------------+
-| 1. Author    | ---> | 2. List/inspect| ---> | 3. Start a run |
-|    scenarios |      |    suites      |      |    (POST runs) |
-|    (PUT YAML)|      |    (GET suites)|      |                |
-+--------------+      +----------------+      +----------------+
-                                                      |
-                                              202 Accepted
-                                                      |
-                                                      v
-                                              +----------------+
-                                              | 4. Subscribe to|
-                                              |    SSE events  |
-                                              |    until end   |
-                                              +----------------+
-                                                      |
-                                                      v
-                                              +----------------+
-                                              | 5. Read final  |
-                                              |    state.json  |
-                                              |    via GET run |
-                                              +----------------+
+┌────────────────────────────────┐
+│                                │
+│      1. Author scenarios       │
+│           (PUT YAML)           │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│    2. List / inspect suites    │
+│       (GET /api/suites)        │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│         3. Start a run         │
+│     (POST /api/runs → 202)     │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│   4. Subscribe to SSE events   │
+│ (GET /api/runs/{suite}/events) │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│    5. Read final state.json    │
+│    (GET /api/runs/{suite})     │
+│                                │
+└────────────────────────────────┘
 ```
 
 The HLD ([§8 Execution Model](hld.md)) explains why each step exists. For browser-side clients, an alternative is to skip SSE and poll `GET /api/runs/{suite}` — coarser but simpler.
@@ -558,8 +581,6 @@ The complete record for one run. Returned by `GET /api/runs/{suite}` ([§4](#4-s
   "suite_dir": "newtrun/suites/1node-vs-config",
   "topology": "1node-vs",
   "platform": "sonic-vs",
-  "target": "",
-  "pid": 0,
   "status": "complete",
   "started": "2026-05-29T19:59:14-07:00",
   "updated": "2026-05-29T20:05:21-07:00",
@@ -567,6 +588,8 @@ The complete record for one run. Returned by `GET /api/runs/{suite}` ([§4](#4-s
   "scenarios": [ /* ScenarioState, one per scenario */ ]
 }
 ```
+
+`target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied. `pid` is no longer populated by the server (suite-backed runs are owned by goroutines, not OS processes) — older state files may still carry it but new ones omit it.
 
 `status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /api/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
 

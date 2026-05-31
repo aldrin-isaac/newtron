@@ -176,7 +176,7 @@ type ExpectBlock struct {
 | Action | Honors |
 |--------|--------|
 | `newtron` | `jq` (evaluated against response body) |
-| `newtron-cli` | `jq` (parses stdout as JSON when `--json` is in the command) |
+| `newtron-cli` | `jq` (parses stdout as JSON when `--json` is in the command), `contains` (substring of combined stdout+stderr) |
 | `host-exec` | `success_rate` (parsed from ping output), `contains` (substring of combined stdout+stderr) |
 
 `Timeout` and `PollInterval` are internal — `newtronExecutor.executePoll` bridges the YAML `poll:` block to a generic polling helper via this same struct.
@@ -214,7 +214,7 @@ The `newtron` action with `batch` runs N calls per device in sequence, collectin
 | `ActionNewtronCLI` | `newtron-cli` | Subprocess call to `bin/newtron`. Used for loopback testing. |
 | `ActionHostExec` | `host-exec` | SSH command on a host VM. Used for ping, traffic generation. |
 | `ActionWait` | `wait` | Sleep for `Duration`. |
-| `ActionProvision` | `topology-reconcile` | Composite call: deploy + reconcile + verify. High-impact; inline-runs require explicit opt-in. |
+| `ActionProvision` | `topology-reconcile` | Single `Client.Reconcile(name, "topology", ...)` call per device — the newtron-server performs ConfigReload, lock, ReplaceAll, and SaveConfig internally. High-impact; inline-runs require explicit opt-in. |
 | `ActionVerifyProvisioning` | `verify-topology` | Compute drift between device CONFIG_DB and the topology projection. Zero drift = pass. |
 
 ---
@@ -666,7 +666,7 @@ type InlineSafetyPolicy struct {
 | Field | Default | Override |
 |-------|---------|----------|
 | `AllowedActions` | `{newtron, wait}` | Per-policy, not per-request. |
-| `AllowedURLPrefixes` | `[server's newtron-server URL]` | Per-policy. |
+| `AllowedURLPrefixes` | `nil` (no URL restriction) — `handleStartInlineRun` overlays the server's configured `InlineURLPrefix` if set. | Per-policy. |
 | `AllowReconcile` | `false` | Request body `allow_reconcile: true`. |
 | `WallTimeBudget` | `60s` | Request body `timeout_seconds: N`. |
 
@@ -780,16 +780,16 @@ Honors `step.Expect.SuccessRate` for ping commands: parses the "N% packet loss" 
 
 ### 9.4 provisionExecutor
 
-Action: `topology-reconcile`. Calls `POST /network/{id}/topology/reconcile` on newtron-server. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
+Action: `topology-reconcile`. Calls `POST /network/{netID}/node/{device}/intent/reconcile?mode=topology` once per device through `Client.Reconcile`. The reconcile is one call — the newtron-server handles ConfigReload, lock, ReplaceAll, and SaveConfig internally — not deploy+reconcile+verify on the client side. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
 
 ### 9.5 Multi-device helpers
 
 ```go
-func resolveDevices(r *Runner, sc *Scenario, step *Step) ([]string, error)
-func runPerDevice(ctx, r, devices, fn) (DeviceResult, error)
+func (r *Runner) resolveDevices(step *Step) []string
+func (r *Runner) executeForDevices(step *Step, fn func(name string) (string, error)) *StepOutput
 ```
 
-`resolveDevices` resolves `step.Devices` against the topology's device list (filtered by host-or-switch when the executor cares). `runPerDevice` runs `fn` concurrently across devices and collects results.
+`resolveDevices` resolves `step.Devices` against the topology's device list. `executeForDevices` runs `fn` concurrently across devices, collects per-device results, and produces the merged `StepOutput`.
 
 ---
 

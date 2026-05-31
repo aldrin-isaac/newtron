@@ -1,8 +1,10 @@
 digraph {
     rankdir=TB;
-    "\n  start  \n\n" -> "\n  running  \n\n";
+    "\n  start  \n\n" -> "\n  running  \n\n" [label="POST /api/runs"];
     "\n  running  \n\n" -> "\n  pausing  \n\n" [label="pause"];
-    "\n  running  \n\n" -> "\n  complete / failed  \n\n" [label="scenario ends"];
-    "\n  pausing  \n\n" -> "\n  paused  \n\n" [label="current scenario\nends"];
-    "\n  paused  \n\n" -> "\n  running  \n\n" [label="start"];
+    "\n  pausing  \n\n" -> "\n  paused  \n\n" [label="current scenario ends"];
+    "\n  paused  \n\n" -> "\n  running  \n\n" [label="POST /api/runs (resume)"];
+    "\n  running  \n\n" -> "\n  complete / failed  \n\n" [label="all scenarios end"];
+    "\n  running  \n\n" -> "\n  aborted  \n\n" [label="stop / ctx cancel"];
+    "\n  pausing  \n\n" -> "\n  aborted  \n\n" [label="stop / ctx cancel"];
 }

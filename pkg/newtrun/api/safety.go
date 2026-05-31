@@ -37,7 +37,7 @@ type InlineSafetyPolicy struct {
 
 	// AllowReconcile, when true, permits ActionProvision (topology-
 	// reconcile) in the scenario. Default false — operators must opt in
-	// per-run via the ?allow_reconcile=true query parameter.
+	// per-run via the allow_reconcile body field on POST /run/inline.
 	AllowReconcile bool
 
 	// WallTimeBudget is the maximum duration the run may take before
