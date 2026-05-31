@@ -11,8 +11,7 @@ SONIC_VS_URL="https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchNa
 IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node-vs/specs"
-SERVER_PID=""        # newtron-server PID
-NEWTRUN_PID=""       # newtrun-server PID
+SERVER_PID=""        # newt-server PID (single process running all three engines)
 TOTAL_STEPS=12
 
 # ── Colors and formatting ────────────────────────────────────────────────────
@@ -42,10 +41,6 @@ H='─'  # horizontal
 TL='╭' TR='╮' BL='╰' BR='╯' V='│'
 
 cleanup() {
-    if [ -n "$NEWTRUN_PID" ] && kill -0 "$NEWTRUN_PID" 2>/dev/null; then
-        kill "$NEWTRUN_PID" 2>/dev/null || true
-        wait "$NEWTRUN_PID" 2>/dev/null || true
-    fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
@@ -136,10 +131,10 @@ if [ ! -f "Makefile" ] || [ ! -d "cmd/newtron" ]; then
     exit 1
 fi
 
-# Clean up any leftover state from a previous run. Both servers must be up
-# for `newtrun stop` to reach the runner registry; if either is missing,
-# fall through to newtlab destroy which doesn't depend on either server.
-pgrep -f "bin/newtrun-server" >/dev/null 2>&1 && \
+# Clean up any leftover state from a previous run. newt-server must be up
+# for `newtrun stop` to reach the runner registry; if it's down, fall
+# through to newtlab destroy which doesn't depend on the server.
+pgrep -f "bin/newt-server" >/dev/null 2>&1 && \
     bin/newtrun stop 1node-vs-basic &>/dev/null || true
 bin/newtlab destroy 1node-vs &>/dev/null || true
 
@@ -239,11 +234,11 @@ pause
 
 header 2 "Build"
 
-echo -e "  ${BLUE_BOLD}newtron${RESET} has five binaries, each with a distinct role:"
+echo -e "  ${BLUE_BOLD}newtron${RESET} ships eight binaries; the five you'll touch in this walkthrough are:"
 echo ""
 echo -e "    ${BLUE_BOLD}newtron${RESET}        CLI -- the command you type to configure switches"
-echo -e "    ${BLUE_BOLD}newtron-server${RESET} API server -- manages SSH connections to switches,"
-echo "                     loads specs, validates and applies config"
+echo -e "    ${BLUE_BOLD}newt-server${RESET}    Aggregated HTTP server -- runs newtron, newtrun,"
+echo "                     and newtlab engines in one process on :18080"
 echo -e "    ${BLUE_BOLD}newtlab${RESET}        Lab manager -- creates/destroys QEMU VMs, wires"
 echo "                     virtual links between them"
 echo -e "    ${BLUE_BOLD}newtrun${RESET}        Test runner -- executes YAML test scenarios"
@@ -280,30 +275,30 @@ run_cmd bin/newtlab deploy 1node-vs --monitor --force
 
 pause
 
-# ─── Step 4: Start newtron-server ─────────────────────────────────────────────
+# ─── Step 4: Start newt-server ────────────────────────────────────────────────
 
-header 4 "Start ${BLUE_BOLD}newtron-server${RESET}"
+header 4 "Start ${BLUE_BOLD}newt-server${RESET}"
 
 echo "  The architecture is:"
 echo ""
 echo -e "  ${GRAY}  You type:  bin/newtron switch1 service apply ...${RESET}"
 echo -e "  ${GRAY}       |${RESET}"
 echo -e "  ${GRAY}       v${RESET}"
-echo -e "  ${GRAY}  newtron CLI  --(HTTP)-->  newtron-server  --(SSH tunnel)-->  Redis${RESET}"
-echo -e "  ${GRAY}                                |                                |${RESET}"
-echo -e "  ${GRAY}                           loads specs,                    CONFIG_DB on${RESET}"
-echo -e "  ${GRAY}                           validates,                      the switch${RESET}"
-echo -e "  ${GRAY}                           computes entries${RESET}"
+echo -e "  ${GRAY}  newtron CLI  --(HTTP /newtron/v1/)-->  newt-server  --(in-process)-->  newtron engine${RESET}"
+echo -e "  ${GRAY}                                            |                                |${RESET}"
+echo -e "  ${GRAY}                                       one port,                       loads specs,${RESET}"
+echo -e "  ${GRAY}                                       three engines                   SSH-tunnels to Redis${RESET}"
 echo ""
-echo "  The server manages SSH connections (tunneled to Redis on port 6379)"
-echo "  and holds the spec files that define your network's services."
-echo "  The CLI is stateless -- it sends requests and displays results."
+echo "  newt-server runs newtron, newtrun, and newtlab in one process on"
+echo "  port 18080. Routes are dispatched by URL prefix: /newtron/v1/...,"
+echo "  /newtrun/v1/..., /newtlab/v1/.... See docs/newt-server.md for the"
+echo "  composition rationale."
 
-# Kill any leftover newtron-server from a previous run
-existing_pid=$(pgrep -f "newtron-server.*-spec-dir" || true)
+# Kill any leftover newt-server from a previous run
+existing_pid=$(pgrep -f "newt-server.*-spec-dir" || true)
 if [ -n "$existing_pid" ]; then
     echo ""
-    echo -e "  ${GRAY}Stopping leftover newtron-server (PID $existing_pid)...${RESET}"
+    echo -e "  ${GRAY}Stopping leftover newt-server (PID $existing_pid)...${RESET}"
     kill "$existing_pid" 2>/dev/null || true
     sleep 1
 fi
@@ -312,19 +307,19 @@ fi
 if ss -tlnH 'sport = :18080' 2>/dev/null | grep -q 8080; then
     echo ""
     echo "  Error: port 18080 is already in use." >&2
-    echo "  newtron-server needs port 18080. Stop whatever is using it and re-run." >&2
+    echo "  newt-server needs port 18080. Stop whatever is using it and re-run." >&2
     exit 1
 fi
 
 echo ""
-echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtron-server --spec-dir $SPEC_DIR &${RESET}"
+echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newt-server --spec-dir $SPEC_DIR &${RESET}"
 echo ""
-bin/newtron-server --spec-dir "$SPEC_DIR" > /tmp/newtron-server.log 2>&1 &
+bin/newt-server --spec-dir "$SPEC_DIR" > /tmp/newt-server.log 2>&1 &
 SERVER_PID=$!
 sleep 2
 
 if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "  Error: newtron-server failed to start." >&2
+    echo "  Error: newt-server failed to start." >&2
     SERVER_PID=""
     exit 1
 fi
@@ -542,38 +537,17 @@ echo -e "    ${WHITE}3.${RESET} ${BOLD}service-lifecycle${RESET}  Apply transit 
 echo -e "    ${WHITE}4.${RESET} ${BOLD}vlan-vrf${RESET}           Create VLAN 100, add member, create VRF, tear down"
 echo -e "    ${WHITE}5.${RESET} ${BOLD}verify-clean${RESET}       Assert zero leftover entries from any test"
 echo ""
-echo -e "  Each step calls ${BLUE_BOLD}newtron-server${RESET} via HTTP (same API the CLI uses)."
+echo -e "  Each step calls into newt-server via HTTP (same API the CLI uses)."
 echo "  The verify steps read CONFIG_DB entries and assert expected values."
 echo "  The final scenario confirms no test left orphaned config behind."
 echo ""
-echo -e "  ${BLUE_BOLD}newtrun-server${RESET} owns the run registry — every ${BLUE_BOLD}newtrun${RESET} CLI"
-echo "  command goes through it. Start it before the suite runs."
+echo "  newt-server hosts the run registry for newtrun — no separate server"
+echo "  process is needed; the newt-server started in Step 4 already serves"
+echo "  the /newtrun/v1/ routes that the CLI dials."
 echo ""
 echo -e "  The ${BOLD}--monitor${RESET} flag shows a live dashboard as steps execute."
 
 pause
-
-# Start newtrun-server on its loopback default (127.0.0.1:18081). Port and
-# spec/topology bases come from the binary's built-in defaults so the
-# command line stays short.
-if ss -tlnH 'sport = :18081' 2>/dev/null | grep -q 8081; then
-    echo ""
-    echo "  Error: port 18081 is already in use." >&2
-    echo "  newtrun-server needs port 18081. Stop whatever is using it and re-run." >&2
-    exit 1
-fi
-echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun-server &${RESET}"
-echo ""
-bin/newtrun-server > /tmp/newtrun-server.log 2>&1 &
-NEWTRUN_PID=$!
-sleep 2
-if ! kill -0 "$NEWTRUN_PID" 2>/dev/null; then
-    echo "  Error: newtrun-server failed to start. See /tmp/newtrun-server.log" >&2
-    NEWTRUN_PID=""
-    exit 1
-fi
-echo -e "  ${GREEN}newtrun-server started${RESET} (PID $NEWTRUN_PID)"
-echo ""
 
 run_cmd bin/newtrun start 1node-vs-basic --server http://localhost:18080 --monitor
 
@@ -590,23 +564,17 @@ echo "  Stop the servers and destroy the VM."
 echo ""
 
 # `newtrun stop <suite>` cancels the runner (if any), destroys the
-# topology, and clears suite state. It needs both servers up: the CLI
-# talks to newtrun-server, which calls newtlab and (via state) the
-# spec-dir that newtron-server was loaded with.
+# topology, and clears suite state. It needs newt-server up: the CLI
+# dials newt-server, which routes /newtrun/v1/ to the in-process
+# newtrun engine.
 echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun stop 1node-vs-basic${RESET}"
 echo ""
 bin/newtrun stop 1node-vs-basic 2>/dev/null || true
 
-# Now stop the servers — newtrun-server first (it has no SSH state to
-# drain), then newtron-server.
-if [ -n "$NEWTRUN_PID" ] && kill -0 "$NEWTRUN_PID" 2>/dev/null; then
-    echo -e "  ${GRAY}Stopping newtrun-server...${RESET}"
-    kill "$NEWTRUN_PID" 2>/dev/null || true
-    wait "$NEWTRUN_PID" 2>/dev/null || true
-    NEWTRUN_PID=""
-fi
+# Stop newt-server (single process; all three engines drain together
+# via the OnShutdown hooks registered in cmd/newt-server/main.go).
 if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo -e "  ${GRAY}Stopping newtron-server...${RESET}"
+    echo -e "  ${GRAY}Stopping newt-server...${RESET}"
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
     SERVER_PID=""
@@ -615,9 +583,8 @@ fi
 echo ""
 echo "  Verify everything is cleaned up:"
 echo ""
-# newtrun status now goes through newtrun-server, which is down. The
-# CLI prints the "newtrun-server is not running" hint, which is the
-# correct end state — both servers stopped, no suite active.
+# newtrun status now goes through newt-server, which is down. The
+# CLI prints "newtrun-server is not running" — the correct end state.
 run_cmd bin/newtrun status --suite 1node-vs-basic || true
 run_cmd bin/newtlab status 1node-vs || true
 

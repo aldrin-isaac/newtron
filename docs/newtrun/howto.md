@@ -2,7 +2,7 @@
 
 newtrun is an E2E testing orchestrator for SONiC network devices. It deploys VM topologies via newtlab, runs declarative YAML scenarios against newtron-managed switches, and reports results.
 
-**Architecture in one paragraph.** `bin/newtrun` is a thin CLI client. The actual work — parsing scenarios, deploying topologies, executing steps, streaming progress — happens server-side in `bin/newtrun-server`. The server, in turn, talks to `bin/newtron-server` for every device operation. Every CLI command requires the newtrun-server to be running; if it isn't, the CLI prints `newtrun-server is not running` and exits non-zero. See the [HLD](hld.md) for the architecture rationale, the [API reference](api.md) for endpoint shapes, and the [LLD](lld.md) for type definitions.
+**Architecture in one paragraph.** `bin/newtrun` is a thin CLI client. The actual work — parsing scenarios, deploying topologies, executing steps, streaming progress — happens in the newtrun engine, which is hosted by `bin/newt-server` (the aggregated server running newtron, newtrun, and newtlab engines on `:18080`). The newtrun engine calls newtron via HTTP for every device operation; in the aggregated process those HTTP calls land in the in-process newtron engine. Every CLI command requires a server to be running; if it isn't, the CLI prints `newtrun-server is not running` and exits non-zero. See the [HLD](hld.md) for the architecture rationale, the [API reference](api.md) for endpoint shapes, and the [LLD](lld.md) for type definitions.
 
 This guide is organized by how often you'll use each thing. Running an existing suite comes first (most common); writing your own scenarios from scratch comes later (less common); troubleshooting and command reference are at the end.
 
@@ -43,7 +43,7 @@ Build the binaries:
 make build
 ```
 
-This produces `bin/newtron`, `bin/newtron-server`, `bin/newtlab`, `bin/newtlink`, `bin/newtrun`, and `bin/newtrun-server`.
+This produces `bin/newtron`, `bin/newtron-server`, `bin/newtlab`, `bin/newtlab-server`, `bin/newtlink`, `bin/newtrun`, `bin/newtrun-server`, and `bin/newt-server`.
 
 Download a SONiC community image (one-time):
 
@@ -59,17 +59,14 @@ The [getting-started.sh](../../scripts/getting-started.sh) script automates all 
 
 ## 2. Quick Start
 
-The fastest path exercises the CLI's `--loopback` mode against an in-memory abstract node — no QEMU VMs required. Start both servers and run the loopback suite:
+The fastest path exercises the CLI's `--loopback` mode against an in-memory abstract node — no QEMU VMs required. Start newt-server and run the loopback suite:
 
 ```bash
-# 1. Start newtron-server (port 18080)
-bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &
+# 1. Start newt-server (port 18080 — runs newtron, newtrun, newtlab in one process)
+bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &
 
-# 2. Start newtrun-server (port 18081)
-bin/newtrun-server &
-
-# 3. Run the loopback suite (--no-deploy skips lab deployment)
-bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:18080
+# 2. Run the loopback suite (--no-deploy skips lab deployment)
+bin/newtrun start 1node-vs-config --no-deploy
 ```
 
 For suites that need real VMs (e.g., `2node-vs-primitive`, `2node-vs-service`), deploy the lab first with `bin/newtlab deploy <topology> --monitor` and drop `--no-deploy`.
@@ -94,14 +91,9 @@ newtrun: 17 scenarios — 17 passed, 0 failed, 0 errored, 0 skipped (1s)
 
 Exit code 0. Markdown report at `newtrun/.generated/report.md`.
 
-**Why two servers?**
+**Why one server?**
 
-| Server | Port | Owns | Why separate |
-|--------|------|------|--------------|
-| newtron-server | 18080 | SSH connections to SONiC, spec validation, CONFIG_DB writes | Single-device automation. Long-lived; expensive to restart. |
-| newtrun-server | 18081 | Run registry, scenario execution, SSE event stream | Test orchestration. Independent failure domain. |
-
-The CLI talks to **newtrun-server** (`--newtrun-server`, env `NEWTRUN_SERVER`). The scenarios it runs talk to **newtron-server** (`--server`, env `NEWTRON_SERVER`) for the actual device work.
+`bin/newt-server` runs the newtron, newtrun, and newtlab engines in one process on `:18080`. The aggregator mounts each engine's HTTP handler on a shared mux and dispatches by URL prefix (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). See [`docs/newt-server.md`](../newt-server.md) for the rationale. For dev iteration on a single engine without restarting the others, use the standalone binaries (`bin/newtron-server`, `bin/newtrun-server`, `bin/newtlab-server`) on their loopback defaults (`:19080`, `:19081`, `:19082`).
 
 ---
 
@@ -115,14 +107,11 @@ The full lifecycle of a real test, derived from the 2node-vs-primitive suite (21
 # 1. Deploy the lab (8 nodes; ~1 minute on first boot)
 bin/newtlab deploy 2node-vs --monitor
 
-# 2. Start newtron-server pointing at this topology's specs
-bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
+# 2. Start newt-server pointing at this topology's specs
+bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &
 
-# 3. Start newtrun-server
-bin/newtrun-server &
-
-# 4. Run the suite (deploys hosts via SSH; ~7 minutes)
-bin/newtrun start 2node-vs-primitive --server http://localhost:18080
+# 3. Run the suite (deploys hosts via SSH; ~7 minutes)
+bin/newtrun start 2node-vs-primitive
 ```
 
 While the suite runs, monitor in another terminal:
@@ -139,8 +128,7 @@ Tear down:
 
 ```bash
 bin/newtrun stop 2node-vs-primitive            # cancel + destroy topology + clear state
-pkill -f "bin/newtron-server"                  # stop newtron-server
-pkill -f "bin/newtrun-server"                  # stop newtrun-server
+pkill -f "bin/newt-server"                     # stop newt-server (one process)
 ```
 
 ---
@@ -203,8 +191,8 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
-| newtrun-server up on `--newtrun-server` URL | `curl http://localhost:18080/newtrun/v1/health` | Start with `bin/newtrun-server &` |
-| newtron-server up on `--server` URL | `curl http://localhost:18080/network` (lists registered networks; any 2xx confirms the server is up — newtron-server has no dedicated health endpoint) | Start with `bin/newtron-server --spec-dir <path> &` |
+| newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server --spec-dir <path> &` |
+| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/network` | Pass `--spec-dir <path>` when starting newt-server |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
@@ -1152,18 +1140,15 @@ Every `newtrun start` writes `newtrun/.generated/report.md` after the run finish
 The 2node-vs-primitive suite uses host-exec steps, so the runner host needs KVM/QEMU and the lab must be deployed before the suite starts. Self-hosted runners with `/dev/kvm` access are required — `ubuntu-latest` hosted runners cannot deploy.
 
 ```yaml
-- name: Start servers + deploy lab
+- name: Start newt-server + deploy lab
   run: |
-    bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
-    bin/newtrun-server &
+    bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &
     sleep 2
     bin/newtlab deploy 2node-vs --monitor
 
 - name: Run suite
   run: |
-    bin/newtrun start 2node-vs-primitive \
-        --junit results.xml \
-        --server http://localhost:18080
+    bin/newtrun start 2node-vs-primitive --junit results.xml
   timeout-minutes: 30
 
 - name: Upload JUnit

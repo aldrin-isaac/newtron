@@ -90,8 +90,9 @@ make build
 # 3. Deploy a single-switch lab
 bin/newtlab deploy 1node-vs --monitor  # live status during deploy
 
-# 4. Start the server, initialize the device, and apply a service
-bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &
+# 4. Start the aggregated server, initialize the device, apply a service
+#    newt-server runs newtron + newtrun + newtlab in one process on :18080.
+bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &
 bin/newtron switch1 init
 bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 ```
@@ -141,7 +142,7 @@ Tear down when done:
 bin/newtlab destroy 1node-vs
 ```
 
-**Next:** run a real test suite. See [`docs/newtrun/howto.md`](docs/newtrun/howto.md) §2 (Quick Start) — it walks through starting `newtrun-server`, picking a suite, and watching the run.
+**Next:** run a real test suite. See [`docs/newtrun/howto.md`](docs/newtrun/howto.md) §2 (Quick Start) — it walks through starting `newt-server`, picking a suite, and watching the run.
 
 ## Using Claude Code with newtron
 
@@ -172,7 +173,7 @@ specs, and browse:
 
 ```bash
 make build
-bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
+bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &
 
 bin/newtron service list                     # List defined services
 bin/newtron switch1 show                     # Show device profile
@@ -302,7 +303,7 @@ sequence of HTTP calls (provision a device, check BGP sessions, verify
 CONFIG_DB entries) and host commands (ping across VMs, run traffic
 generators) that exercise the primitives in concert.
 
-A full 2node-vs-service run looks like this. Prereqs: both servers running (`bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &` and `bin/newtrun-server &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
+A full 2node-vs-service run looks like this. Prereq: newt-server running (`bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
 
 ```
 $ bin/newtrun start 2node-vs-service --server http://localhost:18080

@@ -41,7 +41,7 @@ step progresses.
      | gunzip > ~/.newtlab/images/sonic-vs.qcow2
    ```
 4. Deploy a single-switch lab: `bin/newtlab deploy 1node-vs --monitor`
-5. Start the server: `bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &`
+5. Start the aggregated server: `bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; see [`docs/newt-server.md`](docs/newt-server.md))
 6. Run a first operation to prove it works:
    ```
    bin/newtron switch1 init

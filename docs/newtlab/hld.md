@@ -860,7 +860,7 @@ The LLD documents the complete flag set and topology resolution logic.
 
 `bin/newtlab-server` is a thin HTTP wrapper around the same `pkg/newtlab/` Go API that powers the CLI. It exists so consumers like the newtcon browser frontend can deploy and observe lab topologies without dropping to a shell.
 
-Default bind: `127.0.0.1:19082` — loopback-only, intended to live behind newt-server (`127.0.0.1:18080`) which fronts all backends. Operators that want standalone (no newt-server) hit newtlab-server directly on `:19082`; otherwise pass `--newt-server http://127.0.0.1:18080` to register and serve traffic through newt-server. Non-loopback exposure on either bind emits a startup warning (no built-in authentication; wrap with a reverse proxy if you need TLS or auth).
+Default bind: `127.0.0.1:19082` — loopback-only. The standard production stack composes newtlab into `bin/newt-server` on `:18080`; the standalone `bin/newtlab-server` is built for dev iteration on the newtlab engine in isolation. Non-loopback exposure emits a startup warning (no built-in authentication; wrap with a reverse proxy if you need TLS or auth).
 
 | Method | Path | Wraps |
 |---|---|---|
