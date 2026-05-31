@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -25,14 +26,14 @@ steps:
     duration: 10ms
 `
 
-func postInline(t *testing.T, ts *httptest.Server, req InlineRunRequest) (*http.Response, *APIResponse) {
+func postInline(t *testing.T, ts *httptest.Server, req InlineRunRequest) (*http.Response, *httputil.APIResponse) {
 	t.Helper()
 	body, _ := json.Marshal(req)
 	resp, err := http.Post(ts.URL+"/api/runs/inline", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	var env APIResponse
+	var env httputil.APIResponse
 	_ = json.NewDecoder(resp.Body).Decode(&env)
 	resp.Body.Close()
 	return resp, &env
@@ -264,7 +265,7 @@ func TestInlineGetRunResolvesInlineID(t *testing.T) {
 	if getResp.StatusCode != http.StatusOK {
 		t.Errorf("GET status: got %d, want 200", getResp.StatusCode)
 	}
-	var getEnv APIResponse
+	var getEnv httputil.APIResponse
 	_ = json.NewDecoder(getResp.Body).Decode(&getEnv)
 	state, ok := getEnv.Data.(map[string]any)
 	if !ok {

@@ -2,13 +2,14 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 )
 
 // Config is the construction-time configuration for the newtrun server.
@@ -48,7 +49,7 @@ type Server struct {
 	cfg        Config
 	logger     *log.Logger
 	httpServer *http.Server
-	broker     *EventBroker
+	broker     *httputil.Broker[Event]
 	registry   *RunRegistry
 }
 
@@ -73,7 +74,7 @@ func NewServer(cfg Config) *Server {
 	s := &Server{
 		cfg:      cfg,
 		logger:   cfg.Logger,
-		broker:   NewEventBroker(),
+		broker:   httputil.NewBroker[Event](),
 		registry: NewRunRegistry(),
 	}
 	s.httpServer = &http.Server{
@@ -90,9 +91,9 @@ func NewServer(cfg Config) *Server {
 	return s
 }
 
-// Broker exposes the server's EventBroker. PR 2 wires server-side Runner
+// Broker exposes the server's httputil.Broker[Event]. PR 2 wires server-side Runner
 // invocations to publish events through this broker; PR 1 leaves it idle.
-func (s *Server) Broker() *EventBroker {
+func (s *Server) Broker() *httputil.Broker[Event] {
 	return s.broker
 }
 
@@ -147,16 +148,16 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("DELETE /api/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
 	var handler http.Handler = mux
-	handler = withLogger(s.logger)(handler)
-	handler = withRequestID(handler)
-	handler = withRecovery(s.logger)(handler)
+	handler = httputil.Logger(s.logger)(handler)
+	handler = httputil.RequestID(handler)
+	handler = httputil.Recovery(s.logger)(handler)
 	return handler
 }
 
 // ----- handlers -----
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, HealthResponse{
+	httputil.WriteJSON(w, http.StatusOK, HealthResponse{
 		Status:  "ok",
 		Version: "0.1.0-dev",
 	})
@@ -183,16 +184,3 @@ func listSubdirs(base string) ([]string, error) {
 	return names, nil
 }
 
-// ----- response helpers -----
-
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(APIResponse{Data: data})
-}
-
-func writeError(w http.ResponseWriter, status int, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(APIResponse{Error: err.Error()})
-}

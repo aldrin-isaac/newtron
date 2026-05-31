@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
@@ -200,7 +201,7 @@ func (c *Client) RawRequest(method, path string, body any) (json.RawMessage, err
 		return nil, nil
 	}
 
-	var envelope api.APIResponse
+	var envelope httputil.APIResponse
 	if err := json.Unmarshal(respBody, &envelope); err != nil {
 		if resp.StatusCode >= 400 {
 			return nil, &ServerError{StatusCode: resp.StatusCode, Message: string(respBody)}
@@ -225,7 +226,7 @@ func (c *Client) RawRequest(method, path string, body any) (json.RawMessage, err
 
 // decodeResponse unwraps the APIResponse envelope.
 func (c *Client) decodeResponse(resp *http.Response, result any) error {
-	var envelope api.APIResponse
+	var envelope httputil.APIResponse
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)

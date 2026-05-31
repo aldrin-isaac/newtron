@@ -8,6 +8,8 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 )
 
 // handleListTopologies returns the topology names discoverable under
@@ -15,8 +17,8 @@ import (
 func (s *Server) handleListTopologies(w http.ResponseWriter, r *http.Request) {
 	names, err := listSubdirs(s.cfg.TopologiesBase)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, TopologiesResponse{Topologies: names})
+	httputil.WriteJSON(w, http.StatusOK, TopologiesResponse{Topologies: names})
 }

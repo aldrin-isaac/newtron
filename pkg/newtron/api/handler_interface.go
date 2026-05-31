@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
@@ -43,7 +44,7 @@ func (s *Server) handleApplyService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleRemoveService(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +65,7 @@ func (s *Server) handleRemoveService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleRefreshService(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +86,7 @@ func (s *Server) handleRefreshService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleUnconfigureInterface(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +107,7 @@ func (s *Server) handleUnconfigureInterface(w http.ResponseWriter, r *http.Reque
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleBindACL(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +133,7 @@ func (s *Server) handleBindACL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleUnbindACL(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +159,7 @@ func (s *Server) handleUnbindACL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleAddBGPPeer(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +185,7 @@ func (s *Server) handleAddBGPPeer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleRemoveBGPPeer(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +206,7 @@ func (s *Server) handleRemoveBGPPeer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleInterfaceSet(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +232,7 @@ func (s *Server) handleInterfaceSet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleClearProperty(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +262,7 @@ func (s *Server) handleClearProperty(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleApplyInterfaceQoS(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +288,7 @@ func (s *Server) handleApplyInterfaceQoS(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleConfigureInterface(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +316,7 @@ func (s *Server) handleConfigureInterface(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleRemoveInterfaceQoS(w http.ResponseWriter, r *http.Request) {
@@ -336,5 +337,5 @@ func (s *Server) handleRemoveInterfaceQoS(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }

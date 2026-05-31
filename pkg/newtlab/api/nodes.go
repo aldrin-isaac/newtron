@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 )
 
 // handleStartNode restarts a stopped node. Synchronous; the underlying
@@ -11,19 +13,19 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	node := r.PathValue("node")
 	if name == "" || node == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
 		return
 	}
 	lab, err := s.openLab(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
 	if err := lab.Start(r.Context(), node); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("start %s/%s: %w", name, node, err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("start %s/%s: %w", name, node, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{
 		"topology": name,
 		"node":     node,
 		"status":   "started",
@@ -36,19 +38,19 @@ func (s *Server) handleStopNode(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	node := r.PathValue("node")
 	if name == "" || node == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
 		return
 	}
 	lab, err := s.openLab(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
 	if err := lab.Stop(r.Context(), node); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("stop %s/%s: %w", name, node, err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("stop %s/%s: %w", name, node, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{
 		"topology": name,
 		"node":     node,
 		"status":   "stopped",

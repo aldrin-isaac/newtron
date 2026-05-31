@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
@@ -24,7 +25,7 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListInterfaces(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,7 @@ func (s *Server) handleListInterfaces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowInterface(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +56,7 @@ func (s *Server) handleShowInterface(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowServiceBinding(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +72,7 @@ func (s *Server) handleShowServiceBinding(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListVLANs(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +87,7 @@ func (s *Server) handleListVLANs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowVLAN(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +107,7 @@ func (s *Server) handleShowVLAN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListVRFs(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +122,7 @@ func (s *Server) handleListVRFs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowVRF(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +138,7 @@ func (s *Server) handleShowVRF(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListACLs(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +153,7 @@ func (s *Server) handleListACLs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowACL(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +169,7 @@ func (s *Server) handleShowACL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleBGPStatus(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +184,7 @@ func (s *Server) handleBGPStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleEVPNStatus(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +199,7 @@ func (s *Server) handleEVPNStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +214,7 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListLAGs(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +229,7 @@ func (s *Server) handleListLAGs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListNeighbors(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +244,7 @@ func (s *Server) handleListNeighbors(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleGetRoute(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +261,7 @@ func (s *Server) handleGetRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleGetRouteASIC(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +277,7 @@ func (s *Server) handleGetRouteASIC(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -305,7 +306,7 @@ func (s *Server) handleNodeBindMACVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleNodeUnbindMACVPN(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +331,7 @@ func (s *Server) handleNodeUnbindMACVPN(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +346,7 @@ func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +361,7 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleSSHCommand(w http.ResponseWriter, r *http.Request) {
@@ -388,7 +389,7 @@ func (s *Server) handleSSHCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreateVLAN(w http.ResponseWriter, r *http.Request) {
@@ -409,7 +410,7 @@ func (s *Server) handleCreateVLAN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleDeleteVLAN(w http.ResponseWriter, r *http.Request) {
@@ -432,7 +433,7 @@ func (s *Server) handleDeleteVLAN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleConfigureIRB(w http.ResponseWriter, r *http.Request) {
@@ -457,7 +458,7 @@ func (s *Server) handleConfigureIRB(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreateVRF(w http.ResponseWriter, r *http.Request) {
@@ -478,7 +479,7 @@ func (s *Server) handleCreateVRF(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleDeleteVRF(w http.ResponseWriter, r *http.Request) {
@@ -501,7 +502,7 @@ func (s *Server) handleDeleteVRF(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreateACL(w http.ResponseWriter, r *http.Request) {
@@ -527,7 +528,7 @@ func (s *Server) handleCreateACL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +551,7 @@ func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleAddACLRule(w http.ResponseWriter, r *http.Request) {
@@ -589,7 +590,7 @@ func (s *Server) handleAddACLRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleRemoveACLRule(w http.ResponseWriter, r *http.Request) {
@@ -613,7 +614,7 @@ func (s *Server) handleRemoveACLRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreatePortChannel(w http.ResponseWriter, r *http.Request) {
@@ -641,7 +642,7 @@ func (s *Server) handleCreatePortChannel(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleDeletePortChannel(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +665,7 @@ func (s *Server) handleDeletePortChannel(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleAddPortChannelMember(w http.ResponseWriter, r *http.Request) {
@@ -685,7 +686,7 @@ func (s *Server) handleAddPortChannelMember(w http.ResponseWriter, r *http.Reque
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleRemovePortChannelMember(w http.ResponseWriter, r *http.Request) {
@@ -706,7 +707,7 @@ func (s *Server) handleRemovePortChannelMember(w http.ResponseWriter, r *http.Re
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleUnconfigureIRB(w http.ResponseWriter, r *http.Request) {
@@ -727,7 +728,7 @@ func (s *Server) handleUnconfigureIRB(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -755,7 +756,7 @@ func (s *Server) handleBindIPVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
@@ -778,7 +779,7 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -803,7 +804,7 @@ func (s *Server) handleAddBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleRemoveBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
@@ -826,7 +827,7 @@ func (s *Server) handleRemoveBGPEVPNPeer(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleAddStaticRoute(w http.ResponseWriter, r *http.Request) {
@@ -847,7 +848,7 @@ func (s *Server) handleAddStaticRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleRemoveStaticRoute(w http.ResponseWriter, r *http.Request) {
@@ -871,7 +872,7 @@ func (s *Server) handleRemoveStaticRoute(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -899,7 +900,7 @@ func (s *Server) handleRestartDaemon(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
@@ -920,7 +921,7 @@ func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, val)
+	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
 // Diagnostics — ConfigDB / StateDB queries
@@ -943,7 +944,7 @@ func (s *Server) handleConfigDBSnapshot(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleQueryConfigDB(w http.ResponseWriter, r *http.Request) {
@@ -960,7 +961,7 @@ func (s *Server) handleQueryConfigDB(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleConfigDBTableKeys(w http.ResponseWriter, r *http.Request) {
@@ -976,7 +977,7 @@ func (s *Server) handleConfigDBTableKeys(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleConfigDBEntryExists(w http.ResponseWriter, r *http.Request) {
@@ -997,7 +998,7 @@ func (s *Server) handleConfigDBEntryExists(w http.ResponseWriter, r *http.Reques
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleQueryStateDB(w http.ResponseWriter, r *http.Request) {
@@ -1014,7 +1015,7 @@ func (s *Server) handleQueryStateDB(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -1033,7 +1034,7 @@ func (s *Server) handleCheckBGPSessions(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowLAGDetail(w http.ResponseWriter, r *http.Request) {
@@ -1049,7 +1050,7 @@ func (s *Server) handleShowLAGDetail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 
@@ -1072,7 +1073,7 @@ func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // handleProjectionDiff returns the projection delta that the supplied
@@ -1097,7 +1098,7 @@ func (s *Server) handleProjectionDiff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
@@ -1112,7 +1113,7 @@ func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
@@ -1127,7 +1128,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
@@ -1157,7 +1158,7 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, val)
+		httputil.WriteJSON(w, http.StatusOK, val)
 		return
 	}
 	reconcileOpts := newtron.ReconcileOpts{Mode: reconcileMode}
@@ -1168,7 +1169,7 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
@@ -1193,7 +1194,7 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
@@ -1219,7 +1220,7 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
@@ -1245,7 +1246,7 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 

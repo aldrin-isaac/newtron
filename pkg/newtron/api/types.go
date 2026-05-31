@@ -9,11 +9,6 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// APIResponse is the standard envelope for all API responses.
-type APIResponse struct {
-	Data  any    `json:"data,omitempty"`
-	Error string `json:"error,omitempty"`
-}
 
 // ============================================================================
 // HTTP Request Types — Network

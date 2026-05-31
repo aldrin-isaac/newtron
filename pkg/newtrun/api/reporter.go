@@ -3,12 +3,13 @@ package api
 import (
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
 // HTTPReporter implements newtrun.ProgressReporter and publishes each
-// callback as an Event to the EventBroker, keyed by the run's identity.
+// callback as an Event to the httputil.Broker[Event], keyed by the run's identity.
 //
 // One HTTPReporter is constructed per server-side run. The RunKey identifies
 // which run this reporter belongs to so the broker can route events to the
@@ -20,14 +21,14 @@ import (
 // typically wrapped around the existing StateReporter + consoleProgress chain
 // so events flow to all three sinks (state file, terminal, HTTP).
 type HTTPReporter struct {
-	Broker *EventBroker
+	Broker *httputil.Broker[Event]
 	RunKey string
 	Inner  newtrun.ProgressReporter // optional pass-through for chaining
 }
 
 // NewHTTPReporter constructs a reporter that publishes events for runKey to
 // the given broker, optionally forwarding to inner.
-func NewHTTPReporter(broker *EventBroker, runKey string, inner newtrun.ProgressReporter) *HTTPReporter {
+func NewHTTPReporter(broker *httputil.Broker[Event], runKey string, inner newtrun.ProgressReporter) *HTTPReporter {
 	return &HTTPReporter{
 		Broker: broker,
 		RunKey: runKey,

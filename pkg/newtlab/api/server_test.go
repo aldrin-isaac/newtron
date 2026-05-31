@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
@@ -37,7 +38,7 @@ func TestHealthEndpointReturnsOK(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 
-	var env APIResponse
+	var env httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestListTopologiesEmptyWhenNoLabsDeployed(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 
-	var env APIResponse
+	var env httputil.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

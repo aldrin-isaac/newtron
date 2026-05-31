@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
@@ -29,11 +30,11 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": req.ID})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"id": req.ID})
 }
 
 func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.listNetworks())
+	httputil.WriteJSON(w, http.StatusOK, s.listNetworks())
 }
 
 func (s *Server) handleUnregisterNetwork(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,7 @@ func (s *Server) handleUnregisterNetwork(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "unregistered"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "unregistered"})
 }
 
 func (s *Server) handleReloadNetwork(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +52,7 @@ func (s *Server) handleReloadNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 }
 
 // ============================================================================
@@ -70,7 +71,7 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +87,7 @@ func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // handleServiceProjection returns the per-Node projection slices the named
@@ -148,7 +149,7 @@ func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	httputil.WriteJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleListIPVPNs(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +164,7 @@ func (s *Server) handleListIPVPNs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowIPVPN(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +180,7 @@ func (s *Server) handleShowIPVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListMACVPNs(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +195,7 @@ func (s *Server) handleListMACVPNs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowMACVPN(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +211,7 @@ func (s *Server) handleShowMACVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListQoSPolicies(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +226,7 @@ func (s *Server) handleListQoSPolicies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowQoSPolicy(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +242,7 @@ func (s *Server) handleShowQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +257,7 @@ func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +273,7 @@ func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +288,7 @@ func (s *Server) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +304,7 @@ func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +319,7 @@ func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleListPrefixLists(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +334,7 @@ func (s *Server) handleListPrefixLists(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Request) {
@@ -348,7 +349,7 @@ func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Reques
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // handleTopology returns the full topology spec (devices + links + metadata)
@@ -370,7 +371,7 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -401,7 +402,7 @@ func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, req.Device)
+	httputil.WriteJSON(w, http.StatusCreated, req.Device)
 }
 
 // handleDeleteTopologyNode removes a device entry from topology.json. URL
@@ -424,7 +425,7 @@ func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	na.removeNodeActor(name) // clear stale cache; spec entry is gone
-	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"deleted": name})
 }
 
 // handleUpdateTopologyNode replaces the device entry at name with the body.
@@ -450,7 +451,7 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	na.removeNodeActor(name) // built node now reflects stale spec
-	writeJSON(w, http.StatusOK, &device)
+	httputil.WriteJSON(w, http.StatusOK, &device)
 }
 
 // handleCreateTopologyLink adds a link to topology.json. Body is the typed
@@ -473,7 +474,7 @@ func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, &link)
+	httputil.WriteJSON(w, http.StatusCreated, &link)
 }
 
 // handleDeleteTopologyLink removes the link containing the given endpoint
@@ -499,7 +500,7 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"deleted": endpoint})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"deleted": endpoint})
 }
 
 func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
@@ -521,7 +522,7 @@ func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleGetAllFeatures(w http.ResponseWriter, r *http.Request) {
@@ -536,7 +537,7 @@ func (s *Server) handleGetAllFeatures(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleGetFeatureDependencies(w http.ResponseWriter, r *http.Request) {
@@ -552,7 +553,7 @@ func (s *Server) handleGetFeatureDependencies(w http.ResponseWriter, r *http.Req
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================
@@ -577,7 +578,7 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
@@ -600,7 +601,7 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
@@ -621,7 +622,7 @@ func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
@@ -644,7 +645,7 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
@@ -665,7 +666,7 @@ func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
@@ -688,7 +689,7 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
@@ -709,7 +710,7 @@ func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
@@ -732,7 +733,7 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
@@ -753,7 +754,7 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]int{"queue_id": req.QueueID})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]int{"queue_id": req.QueueID})
 }
 
 func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
@@ -777,7 +778,7 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
@@ -798,7 +799,7 @@ func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
@@ -821,7 +822,7 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
@@ -842,7 +843,7 @@ func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]int{"seq": req.Sequence})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]int{"seq": req.Sequence})
 }
 
 func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) {
@@ -866,7 +867,7 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // ============================================================================
@@ -886,7 +887,7 @@ func (s *Server) handleShowPrefixList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) {
@@ -907,7 +908,7 @@ func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) {
@@ -930,7 +931,7 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request) {
@@ -951,7 +952,7 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"prefix": req.Prefix})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"prefix": req.Prefix})
 }
 
 func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Request) {
@@ -975,7 +976,7 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // ============================================================================
@@ -995,7 +996,7 @@ func (s *Server) handleShowRoutePolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request) {
@@ -1016,7 +1017,7 @@ func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request) {
@@ -1039,7 +1040,7 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
@@ -1060,7 +1061,7 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]int{"seq": req.Sequence})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]int{"seq": req.Sequence})
 }
 
 func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
@@ -1084,7 +1085,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // ============================================================================
@@ -1103,7 +1104,7 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
@@ -1119,7 +1120,7 @@ func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
@@ -1140,7 +1141,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
@@ -1164,7 +1165,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // ============================================================================
@@ -1183,7 +1184,7 @@ func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleShowZone(w http.ResponseWriter, r *http.Request) {
@@ -1199,7 +1200,7 @@ func (s *Server) handleShowZone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
@@ -1220,7 +1221,7 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
 func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
@@ -1243,7 +1244,7 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // ============================================================================
@@ -1264,7 +1265,7 @@ func (s *Server) handlePlatformSupportsFeature(w http.ResponseWriter, r *http.Re
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Request) {
@@ -1280,7 +1281,7 @@ func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Reques
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
@@ -1308,5 +1309,5 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, val)
 }

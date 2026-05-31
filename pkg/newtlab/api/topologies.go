@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
@@ -19,14 +20,14 @@ import (
 func (s *Server) handleListTopologies(w http.ResponseWriter, r *http.Request) {
 	names, err := newtlab.ListLabs()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("list labs: %w", err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("list labs: %w", err))
 		return
 	}
 	items := make([]TopologyListItem, 0, len(names))
 	for _, n := range names {
 		items = append(items, TopologyListItem{Name: n})
 	}
-	writeJSON(w, http.StatusOK, items)
+	httputil.WriteJSON(w, http.StatusOK, items)
 }
 
 // handleGetStatus returns the canonical LabState for a deployed
@@ -35,20 +36,20 @@ func (s *Server) handleListTopologies(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
 		return
 	}
 	lab, err := s.openLab(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
 	state, err := lab.Status()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("status %s: %w", name, err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("status %s: %w", name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, StatusResponse{LabState: state})
+	httputil.WriteJSON(w, http.StatusOK, StatusResponse{LabState: state})
 }
 
 // handleDeploy starts an async deploy. Returns 202 Accepted immediately
@@ -61,13 +62,13 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
 		return
 	}
 
 	var req DeployRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
 	// Query-string fallback so the simplest form
@@ -86,7 +87,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	lab, err := s.openLab(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
 	lab.Force = req.Force
@@ -100,10 +101,10 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var already *AlreadyDeployingError
 		if errors.As(err, &already) {
-			writeError(w, http.StatusConflict, already)
+			httputil.WriteError(w, http.StatusConflict, already)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -144,7 +145,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		s.broker.Publish(name, Event{Type: EventComplete, Payload: nil})
 	}()
 
-	writeJSON(w, http.StatusAccepted, DeployResponse{
+	httputil.WriteJSON(w, http.StatusAccepted, DeployResponse{
 		Topology: name,
 		Started:  started.Format(time.RFC3339),
 	})
@@ -156,19 +157,19 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
 		return
 	}
 	lab, err := s.openLab(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
 	if err := lab.Destroy(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("destroy %s: %w", name, err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("destroy %s: %w", name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "destroyed"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "destroyed"})
 }
 
 // handleProvision runs newtlab's post-deploy provisioning pass on an
@@ -177,7 +178,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
 		return
 	}
 	parallel := 1
@@ -188,14 +189,14 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	}
 	lab, err := s.openLab(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
 	if err := lab.Provision(r.Context(), parallel); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("provision %s: %w", name, err))
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("provision %s: %w", name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "provisioned"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "provisioned"})
 }
 
 // openLab resolves a topology name to a *newtlab.Lab. The name is looked
