@@ -35,7 +35,7 @@ The newtrun HTTP server (`newtrun-server`) is the canonical access point for eve
 
 ### Base URL
 
-Defaults to `http://127.0.0.1:18081`. Override at server start with `--listen <addr>`; clients pass the URL via `--newtrun-server <url>` or `NEWTRUN_SERVER`.
+Defaults to `http://127.0.0.1:18080`. Override at server start with `--listen <addr>`; clients pass the URL via `--newtrun-server <url>` or `NEWTRUN_SERVER`.
 
 Non-loopback binds require an explicit `--listen` value and the server logs a startup warning that there is no built-in authentication. Wrap with a reverse proxy if you need TLS or auth.
 
@@ -66,7 +66,7 @@ All JSON responses follow a single envelope:
 ### Content types
 
 - Request bodies: `application/json` for create/start endpoints; `application/yaml` (or any text) for scenario PUT, which is raw YAML.
-- Response bodies: `application/json` for everything except `GET /api/v1/suites/{suite}/scenarios/{name}` (raw YAML, `application/yaml`) and `GET /api/v1/runs/{suite}/events` (Server-Sent Events, `text/event-stream`).
+- Response bodies: `application/json` for everything except `GET /newtrun/v1/suites/{suite}/scenarios/{name}` (raw YAML, `application/yaml`) and `GET /newtrun/v1/runs/{suite}/events` (Server-Sent Events, `text/event-stream`).
 
 ### Name constraints
 
@@ -91,7 +91,7 @@ Source: `docs/diagrams/newtrun-api-workflow.dot`. Re-render with `graph-easy --f
 ┌────────────────────────────────┐
 │                                │
 │    2. List / inspect suites    │
-│       (GET /api/v1/suites)        │
+│       (GET /newtrun/v1/suites)        │
 │                                │
 └────────────────────────────────┘
   │
@@ -100,7 +100,7 @@ Source: `docs/diagrams/newtrun-api-workflow.dot`. Re-render with `graph-easy --f
 ┌────────────────────────────────┐
 │                                │
 │         3. Start a run         │
-│     (POST /api/v1/runs → 202)     │
+│     (POST /newtrun/v1/runs → 202)     │
 │                                │
 └────────────────────────────────┘
   │
@@ -109,7 +109,7 @@ Source: `docs/diagrams/newtrun-api-workflow.dot`. Re-render with `graph-easy --f
 ┌────────────────────────────────┐
 │                                │
 │   4. Subscribe to SSE events   │
-│ (GET /api/v1/runs/{suite}/events) │
+│ (GET /newtrun/v1/runs/{suite}/events) │
 │                                │
 └────────────────────────────────┘
   │
@@ -118,18 +118,18 @@ Source: `docs/diagrams/newtrun-api-workflow.dot`. Re-render with `graph-easy --f
 ┌────────────────────────────────┐
 │                                │
 │    5. Read final state.json    │
-│    (GET /api/v1/runs/{suite})     │
+│    (GET /newtrun/v1/runs/{suite})     │
 │                                │
 └────────────────────────────────┘
 ```
 
-The HLD ([§8 Execution Model](hld.md)) explains why each step exists. For browser-side clients, an alternative is to skip SSE and poll `GET /api/v1/runs/{suite}` — coarser but simpler.
+The HLD ([§8 Execution Model](hld.md)) explains why each step exists. For browser-side clients, an alternative is to skip SSE and poll `GET /newtrun/v1/runs/{suite}` — coarser but simpler.
 
 ---
 
 ## 3. Server Management
 
-### `GET /api/v1/health`
+### `GET /newtrun/v1/health`
 
 Returns server status. No authentication, no side effects, safe to call from probes and load balancers.
 
@@ -140,7 +140,7 @@ Returns server status. No authentication, no side effects, safe to call from pro
 { "data": { "status": "ok", "version": "0.1.0-dev" } }
 ```
 
-A non-200 from `/api/v1/health` means newtrun-server is not the process answering on that port (or is mid-shutdown). The CLI's `requireServer` probe uses this endpoint to decide whether to print "newtrun-server is not running".
+A non-200 from `/newtrun/v1/health` means newtrun-server is not the process answering on that port (or is mid-shutdown). The CLI's `requireServer` probe uses this endpoint to decide whether to print "newtrun-server is not running".
 
 ---
 
@@ -152,15 +152,15 @@ A "suite-backed run" is keyed by a suite name (the directory under `suites_base`
 
 | Method | Path | Status | Purpose |
 |--------|------|--------|---------|
-| `POST` | `/api/v1/runs` | 202 / 404 / 409 | Start or resume a run |
-| `GET` | `/api/v1/runs` | 200 | List runs visible on disk |
-| `GET` | `/api/v1/runs/{suite}` | 200 / 404 | Read one run's full state |
-| `DELETE` | `/api/v1/runs/{suite}` | 200 / 409 | Remove a terminal run's state |
-| `POST` | `/api/v1/runs/{suite}/pause` | 200 / 404 | Request graceful pause |
-| `POST` | `/api/v1/runs/{suite}/stop` | 200 / 404 | Cancel the runner's context |
-| `GET` | `/api/v1/runs/{suite}/events` | 200 (SSE) | Subscribe to progress events ([§5](#5-run-events-sse)) |
+| `POST` | `/newtrun/v1/runs` | 202 / 404 / 409 | Start or resume a run |
+| `GET` | `/newtrun/v1/runs` | 200 | List runs visible on disk |
+| `GET` | `/newtrun/v1/runs/{suite}` | 200 / 404 | Read one run's full state |
+| `DELETE` | `/newtrun/v1/runs/{suite}` | 200 / 409 | Remove a terminal run's state |
+| `POST` | `/newtrun/v1/runs/{suite}/pause` | 200 / 404 | Request graceful pause |
+| `POST` | `/newtrun/v1/runs/{suite}/stop` | 200 / 404 | Cancel the runner's context |
+| `GET` | `/newtrun/v1/runs/{suite}/events` | 200 (SSE) | Subscribe to progress events ([§5](#5-run-events-sse)) |
 
-### `POST /api/v1/runs` — start or resume a run
+### `POST /newtrun/v1/runs` — start or resume a run
 
 Constructs a `Runner` in a goroutine, returns 202 immediately. If a previous run for the same suite reached `paused` state, the server populates `opts.Resume = true` and `opts.Completed[name] = PASS` for each previously-passed scenario; the Runner then skips them and resumes from the next unprocessed one.
 
@@ -199,7 +199,7 @@ If another run holds the suite's registry slot, the response is 409 Conflict wit
 - 404 — `suite_dir` doesn't exist on the server.
 - 409 — registry already has an entry for this suite.
 
-### `GET /api/v1/runs` — list runs
+### `GET /newtrun/v1/runs` — list runs
 
 Returns one `RunInfo` per suite that has a `state.json` on disk under `~/.newtron/newtrun/`. Stale `running` / `pausing` states get reconciled to `aborted` on the fly when the registry has no live entry (the [HLD §9.3 server-restart honesty](hld.md) rule).
 
@@ -229,27 +229,27 @@ Returns one `RunInfo` per suite that has a `state.json` on disk under `~/.newtro
 
 `finished` is omitted when the run was aborted mid-flight (no clean terminal write). Empty array when nothing has been run.
 
-### `GET /api/v1/runs/{suite}` — read one run
+### `GET /newtrun/v1/runs/{suite}` — read one run
 
 Returns the full `RunState` ([§11](#11-types-reference)) including every scenario and step. Same reconcile-stale-status logic as the list endpoint.
 
 **Response:** 200 with `data` being a `RunState`; 404 if no state file matches `{suite}` in either the suite or `_inline` namespace.
 
-### `DELETE /api/v1/runs/{suite}` — remove state
+### `DELETE /newtrun/v1/runs/{suite}` — remove state
 
 Removes the suite's state directory from disk. Refuses (409) if the run is still active in the registry; call `/stop` first.
 
 **Response:** 200 with `{"data": {"status": "deleted"}}` or 409 on active run.
 
-### `POST /api/v1/runs/{suite}/pause` — graceful pause
+### `POST /newtrun/v1/runs/{suite}/pause` — graceful pause
 
-Writes `state.Status = pausing` to disk. The Runner picks up the pause signal at the next scenario boundary via `CheckPausing` and exits with `PauseError`. The eventual `state.Status` becomes `paused`. A subsequent `POST /api/v1/runs` for the same suite resumes from the next unprocessed scenario.
+Writes `state.Status = pausing` to disk. The Runner picks up the pause signal at the next scenario boundary via `CheckPausing` and exits with `PauseError`. The eventual `state.Status` becomes `paused`. A subsequent `POST /newtrun/v1/runs` for the same suite resumes from the next unprocessed scenario.
 
 Returns 200 immediately; the actual pause lands asynchronously.
 
 **Response:** 200 with `{"data": {"status": "pausing"}}` or 404 if no active run.
 
-### `POST /api/v1/runs/{suite}/stop` — cancel runner
+### `POST /newtrun/v1/runs/{suite}/stop` — cancel runner
 
 Cancels the run's context. The Runner's `iterateScenarios` exits via the ctx-check at the next iteration and emits `SuiteEnd` with `status = aborted` ([HLD §9.3](hld.md), implemented in PR #35). The `state.json` `status` becomes `aborted`.
 
@@ -259,7 +259,7 @@ Cancels the run's context. The Runner's `iterateScenarios` exits via the ctx-che
 
 ## 5. Run Events (SSE)
 
-### `GET /api/v1/runs/{suite}/events`
+### `GET /newtrun/v1/runs/{suite}/events`
 
 Opens a Server-Sent Events stream of progress events for the named run. The connection stays open until the client disconnects, the run terminates, or the server shuts down.
 
@@ -290,13 +290,13 @@ data: {"name":"setup-device","status":"PASS","duration":"1s","steps":[...],"inde
 
 **Drop-on-full semantics:** the broker's per-subscriber channel is buffered (64 events). If a slow consumer fills the buffer, additional events for that subscriber are silently dropped — SSE is best-effort delivery. Each event still reaches subscribers that are keeping up.
 
-**Late-subscribe race:** if a run completes before the client subscribes, no events arrive at all. The client should fall back to `GET /api/v1/runs/{suite}` to read the terminal state. The CLI's `start` command tracks whether `SuiteEnd` was ever seen and treats "no SuiteEnd" as an infrastructure error (exit 2 with the "connection lost" message).
+**Late-subscribe race:** if a run completes before the client subscribes, no events arrive at all. The client should fall back to `GET /newtrun/v1/runs/{suite}` to read the terminal state. The CLI's `start` command tracks whether `SuiteEnd` was ever seen and treats "no SuiteEnd" as an infrastructure error (exit 2 with the "connection lost" message).
 
 ---
 
 ## 6. Inline Runs
 
-### `POST /api/v1/runs/inline`
+### `POST /newtrun/v1/runs/inline`
 
 Submits a single scenario as inline YAML — no suite directory, no state-persistence in the suite namespace. The server allocates a fresh UUID, runs the scenario in a goroutine, and persists state under `~/.newtron/newtrun/_inline/<uuid>/`. Used by the browser frontend's compose-and-run flow and by automation that doesn't want to write to the suites tree.
 
@@ -322,7 +322,7 @@ Submits a single scenario as inline YAML — no suite directory, no state-persis
 }
 ```
 
-The `run_id` becomes the `{suite}` path parameter for subsequent calls to `/api/v1/runs/{suite}`, `/events`, etc. The inline and suite namespaces share the same handler routes — the server resolves both via `LoadAnyRunState`.
+The `run_id` becomes the `{suite}` path parameter for subsequent calls to `/newtrun/v1/runs/{suite}`, `/events`, etc. The inline and suite namespaces share the same handler routes — the server resolves both via `LoadAnyRunState`.
 
 **Error responses:**
 
@@ -334,12 +334,12 @@ The `run_id` becomes the `{suite}` path parameter for subsequent calls to `/api/
 
 | Method | Path | Status | Purpose |
 |--------|------|--------|---------|
-| `GET` | `/api/v1/suites` | 200 | List suite directories |
-| `POST` | `/api/v1/suites` | 201 / 409 | Create an empty suite |
-| `DELETE` | `/api/v1/suites/{suite}` | 204 / 404 / 409 | Delete an empty suite |
-| `GET` | `/api/v1/suites/{suite}/scenarios` | 200 / 404 | List scenarios in a suite |
+| `GET` | `/newtrun/v1/suites` | 200 | List suite directories |
+| `POST` | `/newtrun/v1/suites` | 201 / 409 | Create an empty suite |
+| `DELETE` | `/newtrun/v1/suites/{suite}` | 204 / 404 / 409 | Delete an empty suite |
+| `GET` | `/newtrun/v1/suites/{suite}/scenarios` | 200 / 404 | List scenarios in a suite |
 
-### `GET /api/v1/suites`
+### `GET /newtrun/v1/suites`
 
 Returns the names of immediate subdirectories under `suites_base`. Missing base directory returns an empty array, not 404.
 
@@ -349,7 +349,7 @@ Returns the names of immediate subdirectories under `suites_base`. Missing base 
 { "data": { "suites": ["1node-vs-config", "1node-vs-basic", "2node-vs-primitive"] } }
 ```
 
-### `POST /api/v1/suites`
+### `POST /newtrun/v1/suites`
 
 Creates an empty directory under `suites_base`.
 
@@ -361,13 +361,13 @@ Creates an empty directory under `suites_base`.
 
 **Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name, 409 if the directory already exists.
 
-### `DELETE /api/v1/suites/{suite}`
+### `DELETE /newtrun/v1/suites/{suite}`
 
 Removes the suite directory. **Refuses (409) if any files remain** — newtcon's UX is expected to delete scenarios individually first so the destructive action is explicit at the scenario level.
 
 **Response:** 204 on success, 404 if the suite doesn't exist, 409 if it has scenarios.
 
-### `GET /api/v1/suites/{suite}/scenarios`
+### `GET /newtrun/v1/suites/{suite}/scenarios`
 
 Returns the scenarios in a suite as summaries — `ScenarioSummary` ([§11](#11-types-reference)). Used by `newtrun list <suite>` and by the browser frontend's suite picker. Scenarios are topologically sorted by `requires`/`after` if any are present.
 
@@ -405,19 +405,19 @@ Returns the scenarios in a suite as summaries — `ScenarioSummary` ([§11](#11-
 
 | Method | Path | Content-Type | Status |
 |--------|------|-------------|--------|
-| `GET` | `/api/v1/suites/{suite}/scenarios/{name}` | `application/yaml` (response) | 200 / 404 |
-| `PUT` | `/api/v1/suites/{suite}/scenarios/{name}` | `text/*` (request) | 200 / 201 / 400 |
-| `DELETE` | `/api/v1/suites/{suite}/scenarios/{name}` | — | 204 / 404 |
+| `GET` | `/newtrun/v1/suites/{suite}/scenarios/{name}` | `application/yaml` (response) | 200 / 404 |
+| `PUT` | `/newtrun/v1/suites/{suite}/scenarios/{name}` | `text/*` (request) | 200 / 201 / 400 |
+| `DELETE` | `/newtrun/v1/suites/{suite}/scenarios/{name}` | — | 204 / 404 |
 
 The PUT path is the one with real behavior; the other two are uniform.
 
-### `GET /api/v1/suites/{suite}/scenarios/{name}` — read raw YAML
+### `GET /newtrun/v1/suites/{suite}/scenarios/{name}` — read raw YAML
 
 Resolves the on-disk file by either exact `{name}.yaml` or `*-{name}.yaml` (the lexical-prefix convention). Returns the raw bytes — no envelope.
 
 **Response:** 200 with `Content-Type: application/yaml` and the YAML body; 404 if no file matches.
 
-### `PUT /api/v1/suites/{suite}/scenarios/{name}` — create or update
+### `PUT /newtrun/v1/suites/{suite}/scenarios/{name}` — create or update
 
 Body is raw YAML. The server validates with `ParseScenarioBytes` (the same parser the rest of the framework uses) AND asserts the body's `name:` field matches the URL `{name}`. If either fails, the file is **never touched**. On success, the file is written atomically (same-directory tempfile + rename(2)) so concurrent readers never observe a partial write.
 
@@ -425,7 +425,7 @@ Body is raw YAML. The server validates with `ParseScenarioBytes` (the same parse
 
 **Response:** 201 on create, 200 on update, with `{"data": {"suite": "...", "name": "...", "path": "..."}}`. 400 on invalid YAML or name mismatch, 404 if the suite directory doesn't exist.
 
-### `DELETE /api/v1/suites/{suite}/scenarios/{name}`
+### `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}`
 
 Removes the file. Same lookup rule as GET.
 
@@ -435,7 +435,7 @@ Removes the file. Same lookup rule as GET.
 
 ## 9. Topologies
 
-### `GET /api/v1/topologies`
+### `GET /newtrun/v1/topologies`
 
 Returns the topology names discoverable under `topologies_base`. Missing base directory returns an empty array. Read-only; topology authoring is out of scope (issue #33 explicitly excluded it).
 
@@ -449,7 +449,7 @@ Returns the topology names discoverable under `topologies_base`. Missing base di
 
 ## 10. SSE Event Reference
 
-The stream from `/api/v1/runs/{suite}/events` carries seven event types in this order:
+The stream from `/newtrun/v1/runs/{suite}/events` carries seven event types in this order:
 
 ```
 suite_start  →  (scenario_start  →  (step_start  →  step_end)*  →  scenario_end)*  →  suite_end
@@ -573,7 +573,7 @@ Sent exactly once at the end of the run. The `status` field distinguishes termin
 
 ### `RunState`
 
-The complete record for one run. Returned by `GET /api/v1/runs/{suite}` ([§4](#4-suite-backed-run-lifecycle)).
+The complete record for one run. Returned by `GET /newtrun/v1/runs/{suite}` ([§4](#4-suite-backed-run-lifecycle)).
 
 ```json
 {
@@ -591,11 +591,11 @@ The complete record for one run. Returned by `GET /api/v1/runs/{suite}` ([§4](#
 
 `target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied. `pid` is no longer populated by the server (suite-backed runs are owned by goroutines, not OS processes) — older state files may still carry it but new ones omit it.
 
-`status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /api/v1/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
+`status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /newtrun/v1/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
 
 ### `RunInfo`
 
-The list-view summary of a run. Returned by `GET /api/v1/runs` ([§4](#4-suite-backed-run-lifecycle)).
+The list-view summary of a run. Returned by `GET /newtrun/v1/runs` ([§4](#4-suite-backed-run-lifecycle)).
 
 ```json
 {
@@ -610,7 +610,7 @@ The list-view summary of a run. Returned by `GET /api/v1/runs` ([§4](#4-suite-b
 
 ### `ScenarioSummary`
 
-The per-scenario summary used in `suite_start` events and `GET /api/v1/suites/{suite}/scenarios`.
+The per-scenario summary used in `suite_start` events and `GET /newtrun/v1/suites/{suite}/scenarios`.
 
 Fields: `name`, `description`, `topology`, `platform`, `step_count`, `requires`.
 
@@ -624,4 +624,4 @@ Single-field wrappers around the relevant array or scalar. See examples in [§3]
 
 ---
 
-*This document was source-traced against `pkg/newtrun/api/v1/server.go` (route table), `runs.go`, `suites.go`, `scenarios.go`, `topologies.go`, and `types.go`. Every endpoint claim was verified by reading the handler. If you find a discrepancy, the code is the authority — please open an issue or PR.*
+*This document was source-traced against `pkg/newtrun/newtrun/v1/server.go` (route table), `runs.go`, `suites.go`, `scenarios.go`, `topologies.go`, and `types.go`. Every endpoint claim was verified by reading the handler. If you find a discrepancy, the code is the authority — please open an issue or PR.*

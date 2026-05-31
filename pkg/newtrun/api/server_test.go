@@ -74,7 +74,7 @@ func TestHealth(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/health")
+	resp, err := http.Get(ts.URL + "/newtrun/v1/health")
 	if err != nil {
 		t.Fatalf("GET /api/health: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestListRunsReturnsSeededSuites(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/runs")
+	resp, err := http.Get(ts.URL + "/newtrun/v1/runs")
 	if err != nil {
 		t.Fatalf("GET /api/runs: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestGetRunReturnsFullState(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/runs/suite-a")
+	resp, err := http.Get(ts.URL + "/newtrun/v1/runs/suite-a")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestGetRunNotFound(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/runs/nonexistent")
+	resp, err := http.Get(ts.URL + "/newtrun/v1/runs/nonexistent")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestListTopologiesEmptyBaseReturnsEmptyList(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/topologies")
+	resp, err := http.Get(ts.URL + "/newtrun/v1/topologies")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestListTopologiesReturnsSubdirs(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/topologies")
+	resp, err := http.Get(ts.URL + "/newtrun/v1/topologies")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestSSEEndpointOpensConnectionAndSendsSubscribedComment(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/v1/runs/suite-a/events", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/newtrun/v1/runs/suite-a/events", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET events: %v", err)
@@ -263,7 +263,7 @@ func TestSSEEndpointStreamsBrokerEvents(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/v1/runs/suite-a/events", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/newtrun/v1/runs/suite-a/events", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET events: %v", err)

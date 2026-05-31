@@ -182,9 +182,9 @@ bin/newtron switch1 --topology intent drift  # Compare topology intent vs device
 The same operations are available as HTTP endpoints:
 
 ```bash
-curl localhost:18080/network/default/service                  # List services
-curl localhost:18080/network/default/node/switch1/interface     # List interfaces
-curl localhost:18080/network/default/topology/node              # List devices
+curl localhost:18080/newtron/v1/network/default/service                  # List services
+curl localhost:18080/newtron/v1/network/default/node/switch1/interface     # List interfaces
+curl localhost:18080/newtron/v1/network/default/topology/node              # List devices
 ```
 
 ## How It Works

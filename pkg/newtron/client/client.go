@@ -59,7 +59,7 @@ func (c *Client) RegisterNetwork(specDir string) error {
 		ID:      c.networkID,
 		SpecDir: specDir,
 	}
-	err := c.doPost("/api/v1/network", body, nil)
+	err := c.doPost("/newtron/v1/network", body, nil)
 	if err != nil {
 		if se, ok := err.(*ServerError); ok && se.StatusCode == http.StatusConflict {
 			return nil // already registered — idempotent
@@ -93,7 +93,7 @@ func (c *Client) ReloadNetwork() error {
 
 // networkPath returns the base path for network-scoped endpoints.
 func (c *Client) networkPath() string {
-	return "/api/v1/network/" + url.PathEscape(c.networkID)
+	return "/newtron/v1/network/" + url.PathEscape(c.networkID)
 }
 
 // nodePath returns the base path for node-scoped endpoints.

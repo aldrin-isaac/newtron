@@ -23,14 +23,17 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtser"
 )
 
-const defaultListen = "127.0.0.1:18081"
+// defaultListen — loopback-only since newtser fronts external traffic on :18080.
+const defaultListen = "127.0.0.1:19081"
 
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories")
 	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories")
+	newtserURL := flag.String("newtser", "", "register with newtser at this URL (e.g., http://127.0.0.1:18080); empty = standalone, no registration")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtrun-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -48,6 +51,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Optional: register with newtser. Keepalive goroutine retries on
+	// failure; Close() sends best-effort deregister on graceful shutdown.
+	var registration *newtser.Registration
+	if *newtserURL != "" {
+		registration = newtser.Register(ctx, newtser.Registration{
+			URL:      *newtserURL,
+			Name:     "newtrun",
+			Version:  "v1",
+			Upstream: "http://" + *listen,
+			Logger:   logger,
+		})
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.Start(*listen)
@@ -58,6 +74,9 @@ func main() {
 		logger.Fatalf("server error: %v", err)
 	case <-ctx.Done():
 		logger.Println("shutting down...")
+		if registration != nil {
+			registration.Close()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Stop(shutdownCtx); err != nil {

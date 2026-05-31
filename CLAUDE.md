@@ -18,6 +18,8 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtlab LLD | `docs/newtlab/lld.md` | Deploy phases, state persistence, multi-host |
 | newtlab HOWTO | `docs/newtlab/howto.md` | Deploying topologies, troubleshooting |
 | newtlab API | `docs/newtlab/api.md` | newtlab-server HTTP endpoint reference |
+| newtser HLD | `docs/newtser/hld.md` | Front-door registry + reverse proxy: design and lifecycle |
+| newtser API | `docs/newtser/api.md` | newtser HTTP endpoint reference (meta-routes + dispatch rule) |
 | RCA index | `docs/rca/` | root-cause analyses — SONiC pitfalls and workarounds |
 | AI Instructions | `docs/ai-instructions.md` | Behavioral directives scoped by activity phase |
 | Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
@@ -357,7 +359,7 @@ These are routine project commands that do not require confirmation:
 - `git mv`, `git rm`, `git format-patch`, `git reset`, `git am`
 
 ### Project Binaries
-- `bin/newtlab`, `bin/newtlab-server`, `bin/newtron`, `bin/newtron-server`, `bin/newtrun`, `bin/newtrun-server`, `bin/newtlink` (all subcommands)
+- `bin/newtlab`, `bin/newtlab-server`, `bin/newtron`, `bin/newtron-server`, `bin/newtrun`, `bin/newtrun-server`, `bin/newtser`, `bin/newtlink` (all subcommands)
 
 ### Make
 - `make build`, `make test`, `make lint`, `make tools`

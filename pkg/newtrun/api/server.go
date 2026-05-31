@@ -15,12 +15,12 @@ import (
 type Config struct {
 	// SuitesBase is the directory under which suite directories live. Defaults
 	// to "newtrun/suites" relative to the working directory. The server reads
-	// it on GET /api/v1/suites and validates file-backed suite names against
-	// it when handling POST /api/v1/runs.
+	// it on GET /newtrun/v1/suites and validates file-backed suite names against
+	// it when handling POST /newtrun/v1/runs.
 	SuitesBase string
 
 	// TopologiesBase is the directory under which topology directories live.
-	// Defaults to "newtrun/topologies". Returned by GET /api/v1/topologies.
+	// Defaults to "newtrun/topologies". Returned by GET /newtrun/v1/topologies.
 	TopologiesBase string
 
 	// NewtronServer is the newtron-server URL the server-side runners
@@ -107,30 +107,30 @@ func (s *Server) Handler() http.Handler {
 
 // buildHandler wires the mux with middleware.
 //
-// All routes live under /api/v1/. The version prefix is the breaking-
+// All routes live under /newtrun/v1/. The version prefix is the breaking-
 // change escape hatch: v2/ ships alongside v1/ when the wire shape
 // changes. Per DESIGN_PRINCIPLES_NEWTRON §40 (Greenfield), version
 // segments are reserved for external HTTP contracts — newtcon and
 // other browser/script consumers — not for internal use.
 func (s *Server) buildHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
-	mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
-	mux.HandleFunc("POST /api/v1/runs", s.handleStartRun)
-	mux.HandleFunc("POST /api/v1/runs/inline", s.handleStartInlineRun)
-	mux.HandleFunc("GET /api/v1/runs/{suite}", s.handleGetRun)
-	mux.HandleFunc("DELETE /api/v1/runs/{suite}", s.handleDeleteRun)
-	mux.HandleFunc("POST /api/v1/runs/{suite}/pause", s.handlePauseRun)
-	mux.HandleFunc("POST /api/v1/runs/{suite}/stop", s.handleStopRun)
-	mux.HandleFunc("GET /api/v1/runs/{suite}/events", s.handleRunEvents)
-	mux.HandleFunc("GET /api/v1/topologies", s.handleListTopologies)
-	mux.HandleFunc("GET /api/v1/suites", s.handleListSuites)
-	mux.HandleFunc("POST /api/v1/suites", s.handleCreateSuite)
-	mux.HandleFunc("DELETE /api/v1/suites/{suite}", s.handleDeleteSuite)
-	mux.HandleFunc("GET /api/v1/suites/{suite}/scenarios", s.handleListSuiteScenarios)
-	mux.HandleFunc("GET /api/v1/suites/{suite}/scenarios/{name}", s.handleGetScenario)
-	mux.HandleFunc("PUT /api/v1/suites/{suite}/scenarios/{name}", s.handlePutScenario)
-	mux.HandleFunc("DELETE /api/v1/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
+	mux.HandleFunc("GET /newtrun/v1/health", s.handleHealth)
+	mux.HandleFunc("GET /newtrun/v1/runs", s.handleListRuns)
+	mux.HandleFunc("POST /newtrun/v1/runs", s.handleStartRun)
+	mux.HandleFunc("POST /newtrun/v1/runs/inline", s.handleStartInlineRun)
+	mux.HandleFunc("GET /newtrun/v1/runs/{suite}", s.handleGetRun)
+	mux.HandleFunc("DELETE /newtrun/v1/runs/{suite}", s.handleDeleteRun)
+	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/pause", s.handlePauseRun)
+	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/stop", s.handleStopRun)
+	mux.HandleFunc("GET /newtrun/v1/runs/{suite}/events", s.handleRunEvents)
+	mux.HandleFunc("GET /newtrun/v1/topologies", s.handleListTopologies)
+	mux.HandleFunc("GET /newtrun/v1/suites", s.handleListSuites)
+	mux.HandleFunc("POST /newtrun/v1/suites", s.handleCreateSuite)
+	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}", s.handleDeleteSuite)
+	mux.HandleFunc("GET /newtrun/v1/suites/{suite}/scenarios", s.handleListSuiteScenarios)
+	mux.HandleFunc("GET /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleGetScenario)
+	mux.HandleFunc("PUT /newtrun/v1/suites/{suite}/scenarios/{name}", s.handlePutScenario)
+	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)

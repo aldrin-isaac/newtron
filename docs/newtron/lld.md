@@ -1407,7 +1407,7 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANOpts) (*Chan
 
 #### Worked Example: CreateVLAN End-to-End
 
-Tracing `POST /api/v1/network/default/node/leaf1/create-vlan` with `{"id": 100, "name": "servers"}` and `?execute=true` through every layer:
+Tracing `POST /newtron/v1/network/default/node/leaf1/create-vlan` with `{"id": 100, "name": "servers"}` and `?execute=true` through every layer:
 
 ```
 1. HTTP layer (handler_node.go)

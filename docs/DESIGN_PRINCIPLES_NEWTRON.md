@@ -2359,17 +2359,17 @@ Two exceptions, narrowly scoped:
    compatibility.
 
 2. **External HTTP API contracts.** Each HTTP server (newtron-server,
-   newtrun-server, newtlab-server) carries a `/api/v1/` version
+   newtrun-server, newtlab-server) carries a `/<service>/v1/` version
    segment on its routes. The version is *the* breaking-change
    escape hatch for external consumers: when the wire shape changes
-   incompatibly, `/api/v2/` ships alongside `/api/v1/` so a
+   incompatibly, `/<service>/v2/` ships alongside `/<service>/v1/` so a
    browser frontend (newtcon) or operator script does not break in
    lockstep with a server upgrade. Each server is at its own
    independent version — newtron-server `v1` and newtrun-server `v2`
    can coexist.
 
    Inside the binary, this is still §40: one current version, no
-   compatibility shims, no aliases. The `/api/v1/` segment is the
+   compatibility shims, no aliases. The `/<service>/v1/` segment is the
    *only* concession. Internal callers (the Go client packages in
    this repo) update in the same commit as the server.
 

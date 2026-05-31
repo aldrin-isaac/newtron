@@ -217,14 +217,14 @@ func evalJQ(expr string, data json.RawMessage, method, path string) (string, err
 }
 
 // expandURL substitutes {{device}} in a URL template and prepends the
-// /api/v1/network/<networkID> prefix. The api version + network prefix
+// /newtron/v1/network/<networkID> prefix. The api version + network prefix
 // is always implicit — URLs are relative to the network
 // (e.g., /node/{{device}}/create-vlan).
 // Both networkID and device are path-escaped for consistency with
 // client.nodePath/interfacePath.
 func expandURL(urlTemplate, networkID, device string) string {
 	path := strings.ReplaceAll(urlTemplate, "{{device}}", url.PathEscape(device))
-	return "/api/v1/network/" + url.PathEscape(networkID) + path
+	return "/newtron/v1/network/" + url.PathEscape(networkID) + path
 }
 
 // hasDeviceTemplate checks if a URL template contains {{device}}.
