@@ -1,0 +1,10 @@
+graph {
+    rankdir=TB;
+    "\n  switch1  \n\n" -- "\n  switch2  \n\n" [label="Eth0 / Eth4 / Eth5\n(3 inter-switch links)"];
+    "\n  switch1  \n\n" -- "\n  host1  \n\n" [label="Eth1"];
+    "\n  switch1  \n\n" -- "\n  host2  \n\n" [label="Eth2"];
+    "\n  switch1  \n\n" -- "\n  host3  \n\n" [label="Eth3"];
+    "\n  switch2  \n\n" -- "\n  host4  \n\n" [label="Eth1"];
+    "\n  switch2  \n\n" -- "\n  host5  \n\n" [label="Eth2"];
+    "\n  switch2  \n\n" -- "\n  host6  \n\n" [label="Eth3"];
+}

@@ -1,0 +1,7 @@
+digraph {
+    rankdir=TB;
+    "\n  1. Author scenarios  \n  (PUT YAML)  \n\n" -> "\n  2. List / inspect suites  \n  (GET /api/suites)  \n\n";
+    "\n  2. List / inspect suites  \n  (GET /api/suites)  \n\n" -> "\n  3. Start a run  \n  (POST /api/runs → 202)  \n\n";
+    "\n  3. Start a run  \n  (POST /api/runs → 202)  \n\n" -> "\n  4. Subscribe to SSE events  \n  (GET /api/runs/{suite}/events)  \n\n";
+    "\n  4. Subscribe to SSE events  \n  (GET /api/runs/{suite}/events)  \n\n" -> "\n  5. Read final state.json  \n  (GET /api/runs/{suite})  \n\n";
+}

@@ -76,28 +76,51 @@ Suite and scenario names match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`. Path travers
 
 ## 2. Typical Workflow
 
+Source: `docs/diagrams/newtrun-api-workflow.dot`. Re-render with `graph-easy --from=dot --boxart < docs/diagrams/newtrun-api-workflow.dot`.
+
 ```
-+--------------+      +----------------+      +----------------+
-| 1. Author    | ---> | 2. List/inspect| ---> | 3. Start a run |
-|    scenarios |      |    suites      |      |    (POST runs) |
-|    (PUT YAML)|      |    (GET suites)|      |                |
-+--------------+      +----------------+      +----------------+
-                                                      |
-                                              202 Accepted
-                                                      |
-                                                      v
-                                              +----------------+
-                                              | 4. Subscribe to|
-                                              |    SSE events  |
-                                              |    until end   |
-                                              +----------------+
-                                                      |
-                                                      v
-                                              +----------------+
-                                              | 5. Read final  |
-                                              |    state.json  |
-                                              |    via GET run |
-                                              +----------------+
+┌────────────────────────────────┐
+│                                │
+│      1. Author scenarios       │
+│           (PUT YAML)           │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│    2. List / inspect suites    │
+│       (GET /api/suites)        │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│         3. Start a run         │
+│     (POST /api/runs → 202)     │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│   4. Subscribe to SSE events   │
+│ (GET /api/runs/{suite}/events) │
+│                                │
+└────────────────────────────────┘
+  │
+  │
+  ▼
+┌────────────────────────────────┐
+│                                │
+│    5. Read final state.json    │
+│    (GET /api/runs/{suite})     │
+│                                │
+└────────────────────────────────┘
 ```
 
 The HLD ([§8 Execution Model](hld.md)) explains why each step exists. For browser-side clients, an alternative is to skip SSE and poll `GET /api/runs/{suite}` — coarser but simpler.
@@ -277,7 +300,7 @@ data: {"name":"setup-device","status":"PASS","duration":"1s","steps":[...],"inde
 
 Submits a single scenario as inline YAML — no suite directory, no state-persistence in the suite namespace. The server allocates a fresh UUID, runs the scenario in a goroutine, and persists state under `~/.newtron/newtrun/_inline/<uuid>/`. Used by the browser frontend's compose-and-run flow and by automation that doesn't want to write to the suites tree.
 
-**Safety policy:** inline runs go through `InlineSafetyPolicy`. The defaults block `topology-reconcile` (requires `?allow_reconcile=true`), restrict `newtron` URL prefixes to `/network/`, and impose a 60-second wall-time budget (`?timeout=<seconds>` overrides up to 600).
+**Safety policy:** inline runs go through `InlineSafetyPolicy`. The defaults block `topology-reconcile` (override via the `allow_reconcile: true` body field) and impose a 60-second wall-time budget (override via `timeout_seconds: N`). The `AllowedURLPrefixes` field exists for restricting `newtron` action URLs, but is **not populated by default** — operators who want URL restriction must build a wrapper that sets `cfg.InlineURLPrefix` before constructing the Server. As shipped, inline scenarios may call any newtron-server URL the server is configured to reach.
 
 **Request:** `application/json`, body is an `InlineRunRequest`:
 
@@ -483,7 +506,15 @@ Sent between `step_start` and `step_end` per device operation. Currently no prod
   "step": "create-vlan-with-changes",
   "action": "newtron-cli",
   "index": 0,
-  "op": { "kind": "redis_write", "table": "VLAN", "key": "Vlan100", "result": "applied" }
+  "op": {
+    "seq": 0,
+    "kind": "redis_write",
+    "table": "VLAN",
+    "key": "Vlan100",
+    "fields": { "vlanid": "100" },
+    "result": "applied",
+    "at": "2026-05-30T10:00:00-07:00"
+  }
 }
 ```
 
@@ -524,7 +555,7 @@ Sent at the end of each scenario with the full per-step result list.
 
 ### `suite_end`
 
-Sent exactly once at the end of the run. The `status` field distinguishes terminal modes; see [§7 (Server Shutdown Legibility)](hld.md).
+Sent exactly once at the end of the run. The `status` field distinguishes terminal modes; see [HLD §9.3 (server-restart honesty)](hld.md#93-server-restart-honesty).
 
 ```json
 {
@@ -550,8 +581,6 @@ The complete record for one run. Returned by `GET /api/runs/{suite}` ([§4](#4-s
   "suite_dir": "newtrun/suites/1node-vs-config",
   "topology": "1node-vs",
   "platform": "sonic-vs",
-  "target": "",
-  "pid": 0,
   "status": "complete",
   "started": "2026-05-29T19:59:14-07:00",
   "updated": "2026-05-29T20:05:21-07:00",
@@ -559,6 +588,8 @@ The complete record for one run. Returned by `GET /api/runs/{suite}` ([§4](#4-s
   "scenarios": [ /* ScenarioState, one per scenario */ ]
 }
 ```
+
+`target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied. `pid` is no longer populated by the server (suite-backed runs are owned by goroutines, not OS processes) — older state files may still carry it but new ones omit it.
 
 `status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /api/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
 

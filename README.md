@@ -102,17 +102,18 @@ By default, **newtron** shows what it _would_ write to CONFIG_DB — every table
 Operation: interface.apply-service
 Device: switch1
 Changes to CONFIG_DB:
-  [UPD] DEVICE_METADATA|localhost                        → map[bgp_asn:65001 type:LeafRouter]
-  [ADD] BGP_GLOBALS|default                              → map[local_asn:65001 router_id:10.0.0.1 ...]
-  [ADD] BGP_GLOBALS_AF|default|ipv4_unicast              → map[]
-  [ADD] ROUTE_REDISTRIBUTE|default|connected|bgp|ipv4    → map[]
-  [ADD] INTERFACE|Ethernet0                              → map[NULL:NULL]
-  [ADD] INTERFACE|Ethernet0|10.1.0.0/31                  → map[NULL:NULL]
-  [ADD] BGP_PEER_GROUP|default|TRANSIT                   → map[admin_status:true]
-  [ADD] BGP_PEER_GROUP_AF|default|TRANSIT|ipv4_unicast   → map[]
-  [ADD] BGP_NEIGHBOR|default|10.1.0.1                    → map[asn:65002 local_addr:10.1.0.0 admin_status:up peer_group_name:TRANSIT]
-  [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast    → map[admin_status:true]
-  [ADD] NEWTRON_INTENT|Ethernet0                         → map[operation:apply-service service_name:transit ...]
+  [MOD] DEVICE_METADATA|localhost                              → map[bgp_asn:65001 type:LeafRouter]
+  [ADD] BGP_GLOBALS|default                                    → map[local_asn:65001 router_id:10.0.0.1 ...]
+  [ADD] BGP_GLOBALS_AF|default|ipv4_unicast                    → map[]
+  [ADD] ROUTE_REDISTRIBUTE|default|connected|bgp|ipv4          → map[]
+  [ADD] INTERFACE|Ethernet0                                    → map[NULL:NULL]
+  [ADD] INTERFACE|Ethernet0|10.1.0.0/31                        → map[NULL:NULL]
+  [ADD] BGP_PEER_GROUP|default|TRANSIT                         → map[admin_status:true]
+  [ADD] BGP_PEER_GROUP_AF|default|TRANSIT|ipv4_unicast         → map[]
+  [ADD] BGP_NEIGHBOR|default|10.1.0.1                          → map[asn:65002 local_addr:10.1.0.0 admin_status:up peer_group_name:TRANSIT]
+  [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast          → map[admin_status:true]
+  [ADD] NEWTRON_INTENT|service|TRANSIT                         → map[operation:deploy-service ...]
+  [ADD] NEWTRON_INTENT|interface|Ethernet0                     → map[operation:apply-service service_name:TRANSIT ...]
 
 DRY-RUN: No changes applied. Use -x to execute.
 ```
@@ -128,7 +129,7 @@ Add `-x` to execute. **newtron** writes atomically, re-reads to verify, then per
 $ bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
 
 Changes applied successfully.
-Verifying... OK (11/11 entries verified)
+Verifying... OK (all entries verified)
 Config saved.
 ```
 
@@ -137,6 +138,8 @@ Tear down when done:
 ```bash
 bin/newtlab destroy 1node-vs
 ```
+
+**Next:** run a real test suite. See [`docs/newtrun/howto.md`](docs/newtrun/howto.md) §2 (Quick Start) — it walks through starting `newtrun-server`, picking a suite, and watching the run.
 
 ## Using Claude Code with newtron
 
@@ -202,7 +205,7 @@ specs/
 ```
 
 **What you can configure.** VLANs, VRFs, ACLs, QoS, LAGs, EVPN overlays,
-static routes, route policies, prefix filters. Each has one pattern — one
+static routes, route policies, prefix lists. Each has one pattern — one
 opinion about how that unit of configuration should look in CONFIG_DB.
 Routing currently uses all-eBGP — hop-by-hop for the underlay,
 loopback-to-loopback for EVPN peers. ASN assignment is per-profile:
@@ -297,8 +300,10 @@ sequence of HTTP calls (provision a device, check BGP sessions, verify
 CONFIG_DB entries) and host commands (ping across VMs, run traffic
 generators) that exercise the primitives in concert.
 
+A full 2node-vs-service run looks like this. Prereqs: both servers running (`bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &` and `bin/newtrun-server &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
+
 ```
-$ newtrun start 2node-vs-service --server http://localhost:8080
+$ bin/newtrun start 2node-vs-service --server http://localhost:8080
 newtrun: started suite 2node-vs-service at 2026-05-29T19:59:14-07:00
 newtrun: 6 scenarios
 
@@ -319,6 +324,8 @@ newtrun: 6 scenarios
 newtrun: 6 scenarios — 6 passed, 0 failed, 0 errored, 0 skipped (6m07s)
 ```
 
+See [`docs/newtrun/howto.md`](docs/newtrun/howto.md) §2 for the full Quick Start (commands to start each server, what `--server` flags mean, how to monitor a running suite).
+
 ### What Has Been Validated
 
 Shipped test suites, validated on the free community sonic-vs image:
@@ -326,6 +333,7 @@ Shipped test suites, validated on the free community sonic-vs image:
 | Suite | What it tests |
 |-------|---------------|
 | 1node-vs-architecture | Intent DAG, drift detection, reconciliation, dry-run, operational symmetry |
+| 1node-vs-basic | Boot, setup, service-lifecycle, VLAN/VRF, verify-clean, plus actuated-mode projection scenarios |
 | 1node-vs-config | CLI lifecycle: apply/remove/refresh services in loopback mode |
 | 2node-vs-primitive | Disaggregated operations: VLAN/VRF lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
 | 2node-vs-service | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |

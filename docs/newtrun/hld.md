@@ -88,9 +88,9 @@ When `newtrun-server` shuts down, the registry cancels every in-flight runner's 
 
 ### 3.4 URL resolution
 
-The CLI resolves the newtrun-server URL through a three-tier cascade: `--server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:8081`). The server resolves the newtron-server URL it talks to similarly: per-request `newtron_server` field → server's `--newtron-server` flag → built-in default (`http://127.0.0.1:8080`).
+The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:8081`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /api/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:8080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
 
-Both servers default to loopback binding. Non-loopback exposure requires an explicit `--listen <addr>` value and emits a startup warning that there is no built-in authentication. Operators who need TLS or authentication wrap the server with a reverse proxy.
+The two servers have different default bind addresses. `newtrun-server` defaults to loopback (`127.0.0.1:8081`); non-loopback values trigger a startup warning that there is no built-in authentication. `newtron-server` defaults to all interfaces on port `8080` so single-node lab automation can reach it from inside containers and VMs without a flag — operators that need to restrict exposure pass `--addr 127.0.0.1:8080` explicitly. Neither server has built-in TLS or authentication; operators who need either wrap the server with a reverse proxy.
 
 ## 4. Directory Structure
 
@@ -197,7 +197,7 @@ Six built-in actions:
 | `newtron` | Make an arbitrary newtron-server HTTP call with optional polling, batch, and jq expectations |
 | `newtron-cli` | Run the newtron CLI as a subprocess (used for testing CLI behavior specifically) |
 
-The `newtron` action is the most flexible. URLs use Go template syntax (`{{device}}`, `{{network}}`) expanded per target. Polling, batched call sequences, and `jq` expectations on the response let one action cover most operational and verification patterns.
+The `newtron` action is the most flexible. URLs use a single template placeholder `{{device}}` that the per-device executor expands; URLs without it are treated as network-scoped and dispatched once. The network ID itself is set on the run, not in the URL — the `/network/<id>/` prefix is prepended by the client. Polling, batched call sequences, and `jq` expectations on the response let one action cover most operational and verification patterns.
 
 ### 5.3 Inline scenarios
 
@@ -220,8 +220,10 @@ Topologies are pre-defined spec directories checked into the repo. Each contains
 | Topology | Devices | Purpose |
 |----------|---------|---------|
 | **1node-vs** | switch1 | Single-switch basic operations (sonic-vs) |
+| **1node-vjunos** | r1 | Single vJunos-router smoke tests (opennetconf via `--newtlab`) |
 | **2node-ngdp** | switch1, switch2 + host1–host6 | Disaggregated primitive testing |
 | **2node-ngdp-service** | switch1, switch2 + host1–host8 | Service lifecycle with dataplane verification |
+| **2node-vjunos** | r1, r2 across two parallel links | Aggregate / ECMP scenarios on vJunos-router |
 | **2node-vs** | switch1, switch2 + host1–host6 | Disaggregated primitive testing (sonic-vs) |
 | **2node-vs-service** | switch1, switch2 + host1–host8 | Service lifecycle, drift, orphan cleanup (sonic-vs) |
 | **3node-ngdp** | spine, leaf1, leaf2 + host1, host2 | EVPN L2/L3 dataplane across a two-leaf fabric |
@@ -229,34 +231,55 @@ Topologies are pre-defined spec directories checked into the repo. Each contains
 
 #### 2node-ngdp
 
-Two switches with three inter-switch links and three hosts per switch:
+Two switches with three inter-switch links and three hosts per switch (source: `docs/diagrams/newtrun-topology-2node-ngdp.dot`):
 
 ```
-                switch1 ─── Eth0 ─── switch2
-                   │    ─── Eth4 ───    │
-                   │    ─── Eth5 ───    │
-                   │                    │
-            Eth1 Eth2 Eth3       Eth1 Eth2 Eth3
-             │    │    │          │    │    │
-           host1 host2 host3   host4 host5 host6
+                  ┌─────────────────────────┐
+                  │                         │
+                  │          host3          │
+                  │                         │
+                  └─────────────────────────┘
+                    │
+                    │ Eth3
+                    │
+┌───────┐         ┌─────────────────────────┐         ┌───────┐
+│       │         │                         │         │       │
+│ host1 │  Eth1   │         switch1         │  Eth2   │ host2 │
+│       │ ─────── │                         │ ─────── │       │
+└───────┘         └─────────────────────────┘         └───────┘
+                    │
+                    │ Eth0 / Eth4 / Eth5
+                    │ (3 inter-switch links)
+                    │
+┌───────┐         ┌─────────────────────────┐         ┌───────┐
+│       │         │                         │         │       │
+│ host5 │  Eth2   │         switch2         │  Eth3   │ host6 │
+│       │ ─────── │                         │ ─────── │       │
+└───────┘         └─────────────────────────┘         └───────┘
+                    │
+                    │ Eth1
+                    │
+                  ┌─────────────────────────┐
+                  │                         │
+                  │          host4          │
+                  │                         │
+                  └─────────────────────────┘
 ```
 
 No pre-configured services — interfaces are clean slates for disaggregated operation testing.
 
 #### 2node-ngdp-service
 
-Same switch pair with service-annotated interfaces:
+Same switch pair with service-annotated interfaces. Each interface has a pre-assigned service in the topology spec; provisioning applies all services atomically. The extra host pair (host7/host8) exercises EVPN IRB overlay scenarios.
 
-```
-switch1:Eth0 ── transit ── switch2:Eth0
-switch1:Eth1 ── local-irb ── host1      switch2:Eth1 ── local-irb ── host4
-switch1:Eth2 ── local-bridge ── host2   switch2:Eth2 ── local-bridge ── host5
-switch1:Eth3 ── l2-extend ── host3      switch2:Eth3 ── l2-extend ── host6
-switch1:Eth4 ── overlay-irb-a ── host7  switch2:Eth4 ── overlay-irb-b ── host8
-switch1:Eth5 ──────────────────────── switch2:Eth5   (inter-switch, no service)
-```
-
-Each interface has a pre-assigned service in the topology spec. Provisioning applies all services atomically. The extra host pair exercises EVPN IRB overlay scenarios.
+| switch1 port | service | host | switch2 port | service | host |
+|--------------|---------|------|--------------|---------|------|
+| Eth0 | transit | (peer Eth0) | Eth0 | transit | (peer Eth0) |
+| Eth1 | local-irb | host1 | Eth1 | local-irb | host4 |
+| Eth2 | local-bridge | host2 | Eth2 | local-bridge | host5 |
+| Eth3 | l2-extend | host3 | Eth3 | l2-extend | host6 |
+| Eth4 | overlay-irb-a | host7 | Eth4 | overlay-irb-b | host8 |
+| Eth5 | — (inter-switch, no service) | (peer Eth5) | Eth5 | — | (peer Eth5) |
 
 #### 2node-vs / 2node-vs-service
 
@@ -264,18 +287,30 @@ Sonic-vs variants of the 2node-ngdp topologies. Same logical structure, using th
 
 #### 3node-ngdp
 
-One spine connecting two leaves, one host per leaf:
+One spine connecting two leaves, one host per leaf (source: `docs/diagrams/newtrun-topology-3node-ngdp.dot`):
 
 ```
-             spine
-            ╱     ╲
-       Eth0         Eth1
-        │             │
-      leaf1         leaf2
-        │             │
-      Eth1          Eth1
-        │             │
-      host1         host2
+┌──────────────────────────┐                            ┌──────────────────────────┐
+│                          │                            │                          │
+│          leaf2           │  spine:Eth1 — leaf2:Eth0   │          spine           │
+│                          │ ────────────────────────── │                          │
+└──────────────────────────┘                            └──────────────────────────┘
+  │                                                       │
+  │ leaf2:Eth1 — host2:eth0                               │ spine:Eth0 — leaf1:Eth0
+  │                                                       │
+┌──────────────────────────┐                            ┌──────────────────────────┐
+│                          │                            │                          │
+│          host2           │                            │          leaf1           │
+│                          │                            │                          │
+└──────────────────────────┘                            └──────────────────────────┘
+                                                          │
+                                                          │ leaf1:Eth1 — host1:eth0
+                                                          │
+                                                        ┌──────────────────────────┐
+                                                        │                          │
+                                                        │          host1           │
+                                                        │                          │
+                                                        └──────────────────────────┘
 ```
 
 Exercises EVPN L2/L3 forwarding across a two-leaf fabric with real data-plane verification between hosts.
@@ -292,7 +327,7 @@ Each topology directory contains:
 |------|---------|----------|
 | `topology.json` | newtlab + newtron | Devices, interfaces, links, newtlab settings |
 | `network.json` | newtron | Services, filters, VPNs, zones |
-| `platforms.json` | newtlab | Platform definitions with VM settings |
+| `platforms.json` | newtlab + newtron | Platform definitions: VM settings consumed by newtlab; HWSKU, dataplane capability, and port count consumed by newtron's spec loader. |
 | `profiles/*.json` | newtlab + newtron | Per-device settings, EVPN config |
 
 ### 6.3 Custom topologies
@@ -423,21 +458,40 @@ A "run" goes through a small set of named states. The state machine differs slig
 
 ### 9.1 State machine
 
+Source: `docs/diagrams/newtrun-suite-statemachine.dot`. Re-render with `graph-easy --from=dot --boxart < docs/diagrams/newtrun-suite-statemachine.dot`.
+
 ```
-                    ┌──────────┐
-              ┌────▶│ running  │──── terminal ────┐
-              │     └──────────┘                  │
-   POST       │           │                       ▼
-   /api/runs ─┤           │ pause request    ┌──────────┐
-              │           ▼                  │ complete │
-              │     ┌──────────┐ stop /      │ failed   │
-              │     │ pausing  │ ctx cancel  │ aborted  │
-              │     └──────────┘             └──────────┘
-              │           │                       ▲
-              │           ▼                       │
-              │     ┌──────────┐ resume           │
-              └─────│  paused  │──────────────────┘
-                    └──────────┘
+                                      ┌────────────────────┐
+                                      │                    │
+                                      │       start        │
+                                      │                    │
+                                      └────────────────────┘
+                                        │
+                                        │ POST /api/runs
+                                        ▼
+┌──────────┐                          ┌──────────────────────────────────────────────────────────────────────┐                      ┌────────┐
+│          │                          │                                                                      │                      │        │
+│ complete │  all scenarios PASS      │                               running                                │  any scenario FAIL   │ failed │
+│          │ ◀─────────────────────── │                                                                      │ ───────────────────▶ │        │
+└──────────┘                          └──────────────────────────────────────────────────────────────────────┘                      └────────┘
+                                        │                     │                     ▲
+                                        │ pause               │                     │ POST /api/runs (resume)
+                                        ▼                     │                     │
+┌──────────┐                          ┌────────────────────┐  │                     │
+│          │                          │                    │  │                     │
+│  paused  │  current scenario ends   │      pausing       │  │                     │
+│          │ ◀─────────────────────── │                    │  │                     │
+└──────────┘                          └────────────────────┘  │ stop / ctx cancel   │
+  │                                     │                     │                     │
+  │                                     │ stop / ctx cancel   │                     │
+  │                                     ▼                     │                     │
+  │                                   ┌────────────────────┐  │                     │
+  │                                   │                    │  │                     │
+  │                                   │      aborted       │  │                     │
+  │                                   │                    │ ◀┘                     │
+  │                                   └────────────────────┘                        │
+  │                                                                                 │
+  └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **running**: Runner goroutine is active in the server's process.
@@ -566,7 +620,7 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `newtrun start <suite>` | `POST /api/runs` + SSE | Streams events; exits on terminal SuiteEnd. Resumes if the suite is paused. |
 | `newtrun pause <suite>` | `POST /api/runs/{suite}/pause` | Returns when the pause signal lands; Runner exits between scenarios |
 | `newtrun stop <suite>` | `GET` + `POST /stop` + newtlab.Destroy + `DELETE` | Multi-step: cancel runner, destroy topology, clean state |
-| `newtrun status [suite]` | `GET /api/runs` + `GET /api/runs/{suite}` | All suites or one; `--monitor` auto-refreshes |
+| `newtrun status [-s <pattern>]` | `GET /api/runs` + `GET /api/runs/{suite}` | Lists all suites; `-s/--suite <pattern>` filters by substring match; `--monitor` auto-refreshes |
 | `newtrun list [suite]` | `GET /api/suites` + `GET /api/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
 | `newtrun suites` | `GET /api/suites` | Lists suite directories under the server's suites base |
 | `newtrun suite create <name>` | `POST /api/suites` | Creates an empty suite directory on the server |

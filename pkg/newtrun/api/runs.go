@@ -256,6 +256,12 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
 	state.Finished = time.Now()
 	state.Status = newtrun.SuiteStatusFromOutcome(runErr, results)
+	// The runner discovers the topology from the connected newtron-server
+	// after handleStartRun returns; mirror it into the persisted state so
+	// `newtrun status` and `GET /run/{id}` can report it.
+	if state.Topology == "" && len(results) > 0 {
+		state.Topology = results[0].Topology
+	}
 	if err := newtrun.SaveRunState(state); err != nil {
 		// Best-effort: log via the package-level logger if needed.
 		_ = err
