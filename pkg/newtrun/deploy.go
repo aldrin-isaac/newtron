@@ -7,9 +7,10 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
-// DeployTopology deploys a VM topology using newtlab.
-func DeployTopology(ctx context.Context, specDir string) (*newtlab.Lab, error) {
-	lab, err := newtlab.NewLab(specDir)
+// DeployTopology deploys a VM topology using newtlab. Spec data flows
+// from newtron via the provided client (§27 — newtron owns spec files).
+func DeployTopology(ctx context.Context, client newtlab.SpecClient, topologyName string) (*newtlab.Lab, error) {
+	lab, err := newtlab.NewLab(ctx, client, topologyName)
 	if err != nil {
 		return nil, fmt.Errorf("newtrun: load topology: %w", err)
 	}
@@ -22,8 +23,8 @@ func DeployTopology(ctx context.Context, specDir string) (*newtlab.Lab, error) {
 
 // EnsureTopology reuses an existing lab if all nodes are running, otherwise
 // deploys fresh.
-func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, error) {
-	lab, err := newtlab.NewLab(specDir)
+func EnsureTopology(ctx context.Context, client newtlab.SpecClient, topologyName string) (*newtlab.Lab, error) {
+	lab, err := newtlab.NewLab(ctx, client, topologyName)
 	if err != nil {
 		return nil, fmt.Errorf("newtrun: load topology: %w", err)
 	}

@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
 func newProvisionCmd() *cobra.Command {
@@ -27,12 +25,7 @@ CONFIG_DB projection to the device. Equivalent to the --provision flag on
   newtlab provision 2node-ngdp --parallel 4      # parallel provisioning`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir, err := resolveSpecDir(args)
-			if err != nil {
-				return err
-			}
-
-			lab, err := newtlab.NewLab(dir)
+			lab, err := prepareLab(cmd.Context(), args)
 			if err != nil {
 				return err
 			}

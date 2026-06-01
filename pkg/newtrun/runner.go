@@ -328,16 +328,26 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 // deployTopology deploys the lab topology using lifecycle mode (EnsureTopology)
 // or standalone mode (DeployTopology). It returns a cleanup function that should
 // be deferred by the caller; the cleanup is nil when no teardown is needed.
+//
+// specDir is no longer used to load specs (§27 — newtron owns spec files);
+// it is the path passed to newtron-server during network registration so
+// the engine can serve it. The Lab itself consumes spec data via the
+// already-constructed r.Client.
 func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
+	if specDir != "" {
+		if regErr := r.Client.RegisterNetwork(specDir); regErr != nil {
+			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", specDir, regErr)
+		}
+	}
 	if opts.Suite != "" {
-		lab, err := EnsureTopology(ctx, specDir)
+		lab, err := EnsureTopology(ctx, r.Client, r.Topology)
 		if err != nil {
 			return nil, err
 		}
 		r.Lab = lab
 		return nil, nil // lifecycle mode: stop command handles teardown
 	}
-	lab, err := DeployTopology(ctx, specDir)
+	lab, err := DeployTopology(ctx, r.Client, r.Topology)
 	if err != nil {
 		return nil, err
 	}

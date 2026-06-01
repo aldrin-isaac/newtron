@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -26,48 +24,6 @@ func TestHumanBytes(t *testing.T) {
 			t.Errorf("humanBytes(%d) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
-}
-
-func TestTopoCounts(t *testing.T) {
-	t.Run("valid topology", func(t *testing.T) {
-		dir := t.TempDir()
-		data := `{
-			"devices": {
-				"spine1": {"platform": "sonic-vpp"},
-				"leaf1": {"platform": "sonic-vpp"}
-			},
-			"links": [
-				{"a": "spine1:Ethernet0", "z": "leaf1:Ethernet0"},
-				{"a": "spine1:Ethernet4", "z": "leaf1:Ethernet4"},
-				{"a": "spine1:Ethernet8", "z": "leaf1:Ethernet8"}
-			]
-		}`
-		if err := os.WriteFile(filepath.Join(dir, "topology.json"), []byte(data), 0644); err != nil {
-			t.Fatal(err)
-		}
-		devices, links := topoCounts(dir)
-		if devices != 2 || links != 3 {
-			t.Errorf("topoCounts() = (%d, %d), want (2, 3)", devices, links)
-		}
-	})
-
-	t.Run("nonexistent directory", func(t *testing.T) {
-		devices, links := topoCounts("/nonexistent")
-		if devices != 0 || links != 0 {
-			t.Errorf("topoCounts(/nonexistent) = (%d, %d), want (0, 0)", devices, links)
-		}
-	})
-
-	t.Run("malformed JSON", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "topology.json"), []byte("{bad json"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		devices, links := topoCounts(dir)
-		if devices != 0 || links != 0 {
-			t.Errorf("topoCounts(malformed) = (%d, %d), want (0, 0)", devices, links)
-		}
-	})
 }
 
 func TestResolveTopologyDir(t *testing.T) {

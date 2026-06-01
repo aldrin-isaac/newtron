@@ -101,9 +101,10 @@ func (c *Client) ListProfiles() ([]string, error) {
 	return result, nil
 }
 
-// ShowProfile returns details of a named device profile.
-func (c *Client) ShowProfile(name string) (*newtron.DeviceProfileDetail, error) {
-	var result newtron.DeviceProfileDetail
+// ShowProfile returns the canonical *spec.DeviceProfile (§46) for a
+// single device.
+func (c *Client) ShowProfile(name string) (*spec.DeviceProfile, error) {
+	var result spec.DeviceProfile
 	if err := c.doGet(c.networkPath()+"/profile/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
@@ -263,18 +264,19 @@ func (c *Client) ShowFilter(name string) (*newtron.FilterDetail, error) {
 	return &result, nil
 }
 
-// ListPlatforms returns all platform specs keyed by name.
-func (c *Client) ListPlatforms() (map[string]*newtron.PlatformDetail, error) {
-	var result map[string]*newtron.PlatformDetail
+// ListPlatforms returns the canonical *spec.PlatformSpecFile (§46).
+func (c *Client) ListPlatforms() (*spec.PlatformSpecFile, error) {
+	var result spec.PlatformSpecFile
 	if err := c.doGet(c.networkPath()+"/platform", &result); err != nil {
 		return nil, err
 	}
-	return result, nil
+	return &result, nil
 }
 
-// ShowPlatform returns details of a named platform.
-func (c *Client) ShowPlatform(name string) (*newtron.PlatformDetail, error) {
-	var result newtron.PlatformDetail
+// ShowPlatform returns the canonical *spec.PlatformSpec (§46) for a
+// single platform.
+func (c *Client) ShowPlatform(name string) (*spec.PlatformSpec, error) {
+	var result spec.PlatformSpec
 	if err := c.doGet(c.networkPath()+"/platform/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
