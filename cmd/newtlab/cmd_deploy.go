@@ -29,12 +29,7 @@ func newDeployCmd() *cobra.Command {
   newtlab deploy 2node-ngdp --provision`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir, err := resolveSpecDir(args)
-			if err != nil {
-				return err
-			}
-
-			lab, err := newtlab.NewLab(dir)
+			lab, err := prepareLab(cmd.Context(), args)
 			if err != nil {
 				return err
 			}

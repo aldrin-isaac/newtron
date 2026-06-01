@@ -10,12 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/aldrin-isaac/newtron/pkg/cli"
-	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
-	"github.com/aldrin-isaac/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -372,19 +369,11 @@ func resolveScenarioFilePath(suiteDir, name string) string {
 }
 
 func checkTopologyStatus(topology string) string {
-	topologiesDir := resolveTopologiesDir()
-	specDir := filepath.Join(topologiesDir, topology, "specs")
-
-	// Suppress info logs from NewLab (e.g., "derived N links").
-	prev := util.Logger.GetLevel()
-	util.Logger.SetLevel(logrus.WarnLevel)
-	lab, err := newtlab.NewLab(specDir)
-	util.Logger.SetLevel(prev)
-	if err != nil {
-		return "not found"
-	}
-
-	state, err := lab.Status()
+	// Topology name is the lab name (per the same convention newtron
+	// uses). Load newtlab's persisted state directly — this function
+	// reports deployment state, which is newtlab's own data object;
+	// it does not need to consult newtron for spec data.
+	state, err := newtlab.LoadState(topology)
 	if err != nil {
 		return "not deployed"
 	}

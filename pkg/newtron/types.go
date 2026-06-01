@@ -544,44 +544,9 @@ type FilterRuleEntry struct {
 	CoS           string `json:"cos,omitempty"`
 }
 
-// PlatformDetail is the API view of a platform definition.
-type PlatformDetail struct {
-	Name                string   `json:"name"`
-	HWSKU               string   `json:"hwsku"`
-	Description         string   `json:"description,omitempty"`
-	DeviceType          string   `json:"device_type,omitempty"`
-	Dataplane           string   `json:"dataplane,omitempty"`
-	DefaultSpeed        string   `json:"default_speed"`
-	PortCount           int      `json:"port_count"`
-	Breakouts           []string `json:"breakouts,omitempty"`
-	UnsupportedFeatures []string `json:"unsupported_features,omitempty"`
-}
-
 // ============================================================================
 // Profile and Zone Detail Types
 // ============================================================================
-
-// DeviceProfileDetail is the API view of a device profile. SSH port
-// is runtime state owned by newtlab (§27) — not part of the profile
-// spec; consumers fetch it from newtlab's API.
-type DeviceProfileDetail struct {
-	Name        string      `json:"name"`
-	MgmtIP      string      `json:"mgmt_ip"`
-	LoopbackIP  string      `json:"loopback_ip"`
-	Zone        string      `json:"zone"`
-	Platform    string      `json:"platform,omitempty"`
-	MAC         string      `json:"mac,omitempty"`
-	UnderlayASN int         `json:"underlay_asn,omitempty"`
-	SSHUser     string      `json:"ssh_user,omitempty"`
-	EVPN        *EVPNDetail `json:"evpn,omitempty"`
-}
-
-// EVPNDetail is the API view of EVPN peering config within a profile.
-type EVPNDetail struct {
-	Peers          []string `json:"peers,omitempty"`
-	RouteReflector bool     `json:"route_reflector,omitempty"`
-	ClusterID      string   `json:"cluster_id,omitempty"`
-}
 
 // RouteReflectorPeer describes a BGP peer for route reflector configuration.
 type RouteReflectorPeer struct {

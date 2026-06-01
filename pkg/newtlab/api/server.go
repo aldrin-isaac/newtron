@@ -6,17 +6,27 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
 // Config is the construction-time configuration for the newtlab server.
 type Config struct {
 	// TopologiesBase is the directory under which topology spec
 	// directories live. Defaults to "newtrun/topologies" relative to
-	// the working directory.
+	// the working directory. This path is sent to newtron-server during
+	// registration so newtron knows where to read the spec files
+	// (DESIGN_PRINCIPLES §27 — newtron owns spec files).
 	TopologiesBase string
 
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
+
+	// NewtronClient is the HTTP client newtlab uses to consume specs
+	// from newtron-server. Required for topology lifecycle operations
+	// (deploy / status / start / stop) — newtlab no longer reads spec
+	// JSON files directly per §27. Composed in by cmd/newtlab-server
+	// or cmd/newt-server.
+	NewtronClient newtlab.SpecClient
 }
 
 // Server is the newtlab HTTP server. The HTTP listener lifecycle

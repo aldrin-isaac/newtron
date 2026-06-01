@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,15 +95,19 @@ the search to a specific lab.
 // findNodeState searches all labs for a node by name.
 func findNodeState(nodeName string) (*newtlab.LabState, string, error) {
 	if specDir != "" {
-		lab, err := newtlab.NewLab(specDir)
+		// Derive lab name from path; load the existing state file
+		// directly (this is newtlab's own runtime state, not newtron's
+		// spec — no HTTP call needed).
+		absDir, err := filepath.Abs(specDir)
 		if err != nil {
 			return nil, "", err
 		}
-		state, err := lab.Status()
+		name := topologyNameFromPath(absDir)
+		state, err := newtlab.LoadState(name)
 		if err != nil {
 			return nil, "", err
 		}
-		return state, lab.Name, nil
+		return state, name, nil
 	}
 
 	labs, err := newtlab.ListLabs()

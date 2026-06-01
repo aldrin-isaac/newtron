@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -39,7 +38,7 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
 		return
 	}
-	lab, err := s.openLab(name)
+	lab, err := s.openLab(r.Context(), name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return
@@ -85,7 +84,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	lab, err := s.openLab(name)
+	lab, err := s.openLab(r.Context(), name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return
@@ -160,7 +159,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
 		return
 	}
-	lab, err := s.openLab(name)
+	lab, err := s.openLab(r.Context(), name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return
@@ -187,7 +186,7 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 			parallel = n
 		}
 	}
-	lab, err := s.openLab(name)
+	lab, err := s.openLab(r.Context(), name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return
@@ -199,11 +198,14 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "provisioned"})
 }
 
-// openLab resolves a topology name to a *newtlab.Lab. The name is looked
-// up under TopologiesBase as <base>/<name>/specs.
-func (s *Server) openLab(name string) (*newtlab.Lab, error) {
-	specDir := filepath.Join(s.cfg.TopologiesBase, name, "specs")
-	lab, err := newtlab.NewLab(specDir)
+// openLab resolves a topology name to a *newtlab.Lab. Spec data is
+// consumed from newtron-server via the configured NewtronClient
+// (§27 — newtron owns spec files).
+func (s *Server) openLab(ctx context.Context, name string) (*newtlab.Lab, error) {
+	if s.cfg.NewtronClient == nil {
+		return nil, fmt.Errorf("newtlab-server has no newtron client configured; pass --newtron-server when starting")
+	}
+	lab, err := newtlab.NewLab(ctx, s.cfg.NewtronClient, name)
 	if err != nil {
 		return nil, fmt.Errorf("topology %q: %w", name, err)
 	}
