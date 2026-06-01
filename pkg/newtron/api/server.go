@@ -10,7 +10,16 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
+
+// PortResolver is newtron's public contract for resolving runtime
+// SSH port allocations at Device.Connect time. It is a type alias
+// for the internal sonic.PortResolver so external callers (cmd,
+// tests) reference only newtron's public API surface (DESIGN_PRINCIPLES
+// §33). The newtlab-backed implementation lives in pkg/newtlab/client
+// and satisfies this contract structurally.
+type PortResolver = sonic.PortResolver
 
 // Server is the HTTP API server for newtron. The HTTP listener
 // lifecycle (Start / Stop) comes from the embedded *httputil.Server;
@@ -23,6 +32,12 @@ type Server struct {
 
 	idleTimeout time.Duration
 	logger      *log.Logger
+
+	// portResolver supplies per-device SSH port allocations at
+	// Connect time. Composed in from cmd/ (the only layer that knows
+	// which engine provides the implementation — newtlab today).
+	// Nil disables resolver consultation (tests, real-hardware).
+	portResolver PortResolver
 }
 
 // networkEntry pairs a NetworkActor with its registration metadata.
@@ -34,7 +49,13 @@ type networkEntry struct {
 // NewServer creates a new API server. idleTimeout controls how long SSH
 // connections to devices are cached between requests. Use 0 for the default
 // (5 minutes). Use a negative value to disable caching (connect per request).
-func NewServer(logger *log.Logger, idleTimeout time.Duration) *Server {
+//
+// portResolver supplies per-device SSH port allocations at Device.Connect
+// time. Pass nil to disable (real-hardware deployments, tests). The
+// newtlab-backed implementation is constructed in cmd/ and injected here;
+// the api package itself does not know about newtlab (DESIGN_PRINCIPLES
+// §33, §34).
+func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortResolver) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -42,9 +63,10 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration) *Server {
 		idleTimeout = DefaultIdleTimeout
 	}
 	s := &Server{
-		networks:    make(map[string]*networkEntry),
-		idleTimeout: idleTimeout,
-		logger:      logger,
+		networks:     make(map[string]*networkEntry),
+		idleTimeout:  idleTimeout,
+		logger:       logger,
+		portResolver: portResolver,
 	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),
@@ -72,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	return s.HTTPServer().Handler
 }
 
+
 // RegisterNetwork loads a Network from specDir and registers it under the given ID.
 func (s *Server) RegisterNetwork(id, specDir string) error {
 	s.mu.Lock()
@@ -81,7 +104,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		return &alreadyRegisteredError{id: id}
 	}
 
-	net, err := newtron.LoadNetwork(specDir)
+	net, err := newtron.LoadNetwork(specDir, topologyName(specDir), s.portResolver)
 	if err != nil {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
@@ -126,7 +149,7 @@ func (s *Server) ReloadNetwork(id string) error {
 	entry.actor.stop()
 
 	// Reload specs from disk
-	net, err := newtron.LoadNetwork(entry.specDir)
+	net, err := newtron.LoadNetwork(entry.specDir, topologyName(entry.specDir), s.portResolver)
 	if err != nil {
 		return fmt.Errorf("reloading specs from %s: %w", entry.specDir, err)
 	}

@@ -153,8 +153,8 @@ service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 
 **Cross-engine data objects:**
 
-- **Specs** (network.json, topology.json, platforms.json, profiles/*.json) — newtron is the owner; consumers call `/newtron/v1/network/...`. No engine opens spec files directly.
-- **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers call `/newtlab/v1/topologies/...`. No engine reads `~/.newtlab/labs/<name>/state.json` directly.
+- **Specs** (network.json, topology.json, platforms.json, profiles/*.json) — newtron is the owner; consumers reach the data through `/newtron/v1/network/...`. Opening the JSON files from another engine is the §27 violation.
+- **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers reach the data through `/newtlab/v1/topologies/...`. Reading `~/.newtlab/labs/<name>/state.json` from another engine is the §27 violation.
 - **Test run state** — newtrun is the owner; consumers call `/newtrun/v1/runs/...`.
 
 When adding new state of any kind — new CONFIG_DB writes, new spec fields, new runtime allocations — check who already owns it. Never add a second writer.
@@ -477,7 +477,7 @@ Tracking what was working (update this as test suites are validated):
 - `CLI lifecycle (1node-vs-config)`: WORKS — 13/13 scenarios (loopback mode, Apr 2026)
 - `1node-vs-architecture`: VALIDATED — 32/32 PASS (re-run 2026-05-31 against main @ ec16631 with bin/newt-server on :18080; 47m33s on the deployed 1node-vs lab)
 - `2node-vs-primitive`: DEFERRED RE-RUN — last validation 21/21 PASS (Apr 2026). Re-run attempted 2026-05-30 was blocked by a bridge-stats port conflict (newtlab allocates `link_port_base - 1` = 9999, already held by the running 2node-vs-service lab). Workarounds (port-shifted spec copy, lab-state surgery) hit naming dead-ends. To re-validate: stop the running 2node-vs-service lab, run the suite, then redeploy. Suite contents have not changed since Apr; the blocker is environmental.
-- `2node-vs-service`: VALIDATED — 6/6 PASS (re-run 2026-05-31 against main @ ec16631 with bin/newt-server on :18080; 4m39s in lifecycle mode on the running lab. Note: `--no-deploy` skips host SSH connections, so host-exec scenarios require lifecycle mode or a fresh deploy. After redeploy, newtlab.PatchProfiles writes ssh_port/console_port into the profile JSON files — those patches must remain present for runs against an already-deployed lab.)
+- `2node-vs-service`: VALIDATED — 6/6 PASS (re-run 2026-05-31 against main @ ec16631 with bin/newt-server on :18080; 4m39s in lifecycle mode on the running lab. Note: `--no-deploy` skips host SSH connections, so host-exec scenarios require lifecycle mode or a fresh deploy.)
 
 ## Feature Implementation Protocol (SONiC CONFIG_DB)
 

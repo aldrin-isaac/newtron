@@ -908,12 +908,6 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 		return nil
 	})
 
-	if patchErr := PatchProfiles(l); patchErr != nil {
-		if err == nil {
-			err = patchErr
-		}
-	}
-
 	return err
 }
 
@@ -967,11 +961,6 @@ func (l *Lab) Destroy(ctx context.Context) error {
 
 	// Clean up remote state directories
 	errs = append(errs, cleanupAllRemoteHosts(l.Name, state)...)
-
-	// Restore profiles
-	if err := RestoreProfiles(l); err != nil {
-		errs = append(errs, fmt.Errorf("restore profiles: %w", err))
-	}
 
 	// Remove local state directory
 	if err := RemoveState(l.Name); err != nil {
@@ -1271,11 +1260,6 @@ func cleanupAllRemoteHosts(labName string, state *LabState) []error {
 // destroyExisting tears down a stale deployment found via state.json.
 // Collects all errors instead of logging to stderr.
 func (l *Lab) destroyExisting(existing *LabState) error {
-	old := &Lab{
-		Name:    l.Name,
-		SpecDir: existing.SpecDir,
-		State:   existing,
-	}
 	var errs []error
 
 	// Kill QEMU processes (skip virtual host entries)
@@ -1295,11 +1279,6 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 
 	// Clean up remote state directories
 	errs = append(errs, cleanupAllRemoteHosts(l.Name, existing)...)
-
-	// Restore profiles
-	if err := RestoreProfiles(old); err != nil {
-		errs = append(errs, fmt.Errorf("restore profiles: %w", err))
-	}
 
 	// Remove local state
 	if err := RemoveState(l.Name); err != nil {

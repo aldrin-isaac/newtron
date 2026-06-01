@@ -68,7 +68,7 @@ func (tp *TopologyProvisioner) BuildAbstractNode(deviceName string) (*node.Node,
 
 	// Create abstract node with empty projection.
 	// Operations build desired state; Reconcile delivers it.
-	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved)
+	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved, tp.network.topologyName, tp.network.portResolver)
 
 	// Register physical ports (enables GetInterface for interface-scoped steps)
 	for portName, fields := range topoDev.Ports {
@@ -118,7 +118,7 @@ func (tp *TopologyProvisioner) BuildEmptyAbstractNode(deviceName string) (*node.
 	resolvedSpecs := tp.network.buildResolvedSpecs(profile)
 
 	// Create abstract node with empty projection.
-	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved)
+	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved, tp.network.topologyName, tp.network.portResolver)
 
 	// Register physical ports (enables GetInterface for interface-scoped steps)
 	for portName, fields := range topoDev.Ports {

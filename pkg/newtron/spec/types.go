@@ -372,13 +372,13 @@ type DeviceProfile struct {
 
 	OverridableSpecs // Embedded — node-level overrides
 
-	// OPTIONAL - SSH access for Redis tunnel
+	// OPTIONAL - SSH credentials for Redis tunnel. SSH port is runtime
+	// state owned by newtlab (§27) — not stored here; resolved through
+	// newtron's PortResolver at Connect time.
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPass string `json:"ssh_pass,omitempty"`
-	SSHPort int    `json:"ssh_port,omitempty"` // 0 means default (22)
 
 	// OPTIONAL - newtlab per-device overrides
-	ConsolePort int    `json:"console_port,omitempty"`
 	VMMemory    int    `json:"vm_memory,omitempty"`
 	VMCPUs      int    `json:"vm_cpus,omitempty"`
 	VMImage     string `json:"vm_image,omitempty"`
@@ -415,13 +415,11 @@ type ResolvedProfile struct {
 	// From profile (optional)
 	MAC string
 
-	// SSH access (for Redis tunnel)
+	// SSH credentials for Redis tunnel. SSH port is runtime state
+	// owned by newtlab (§27) — resolved through newtron's PortResolver
+	// at Connect time; not part of ResolvedProfile.
 	SSHUser string
 	SSHPass string
-	SSHPort int // 0 means default (22)
-
-	// newtlab runtime (written by newtlab, read by newtron)
-	ConsolePort int
 
 	// BGP AS number (required in all-eBGP design)
 	UnderlayASN int

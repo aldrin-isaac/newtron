@@ -54,6 +54,15 @@ type Node struct {
 	profile  *spec.DeviceProfile
 	resolved *spec.ResolvedProfile
 
+	// Runtime infrastructure plumbed from Network. topology and
+	// portResolver are forwarded to sonic.Device at Connect time so
+	// the Device resolves its SSH port from an injected source rather
+	// than from the spec layer (DESIGN_PRINCIPLES §33, §40). The
+	// resolver's implementation is unknown here — Node sees only the
+	// interface contract.
+	topology     string
+	portResolver sonic.PortResolver
+
 	// Child objects - Interfaces created in this Node's context
 	interfaces map[string]*Interface
 
@@ -77,12 +86,19 @@ type Node struct {
 }
 
 // New creates a new Node with the given SpecProvider and profile.
-func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile) *Node {
+//
+// topology and pr are forwarded to sonic.Device at Connect time so
+// SSH port allocation flows from the injected resolver, not from
+// the spec layer. Pass "" and nil for tests and real-hardware
+// deployments.
+func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile, topology string, pr sonic.PortResolver) *Node {
 	return &Node{
 		SpecProvider: sp,
 		name:         name,
 		profile:      profile,
 		resolved:     resolved,
+		topology:     topology,
+		portResolver: pr,
 		interfaces:   make(map[string]*Interface),
 	}
 }
@@ -93,17 +109,19 @@ func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *sp
 //
 // Usage:
 //
-//	n := node.NewAbstract(specs, "switch1", profile, resolved)
+//	n := node.NewAbstract(specs, "switch1", profile, resolved, topology, resolver)
 //	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 //	iface, _ := n.GetInterface("Ethernet0")
 //	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
 //	n.Drift(ctx) // or n.Reconcile(ctx, ReconcileOpts{Mode: "full"})
-func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile) *Node {
+func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile, topology string, pr sonic.PortResolver) *Node {
 	return &Node{
 		SpecProvider: sp,
 		name:         name,
 		profile:      profile,
 		resolved:     resolved,
+		topology:     topology,
+		portResolver: pr,
 		interfaces:   make(map[string]*Interface),
 		configDB:     sonic.NewConfigDB(),
 	}
@@ -877,6 +895,8 @@ func (n *Node) ConnectForSetup(ctx context.Context) error {
 	}
 
 	n.conn = sonic.NewDevice(n.name, n.resolved)
+	n.conn.Topology = n.topology
+	n.conn.PortResolver = n.portResolver
 	n.conn.SkipFrrcfgdCheck = true
 	if err := n.conn.Connect(ctx); err != nil {
 		return err
@@ -901,6 +921,8 @@ func (n *Node) ConnectTransport(ctx context.Context) error {
 	}
 
 	n.conn = sonic.NewDevice(n.name, n.resolved)
+	n.conn.Topology = n.topology
+	n.conn.PortResolver = n.portResolver
 	if err := n.conn.Connect(ctx); err != nil {
 		return err
 	}

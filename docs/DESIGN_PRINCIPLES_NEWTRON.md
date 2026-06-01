@@ -2009,21 +2009,24 @@ service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 **Specs (network.json, topology.json, platforms.json, profiles/\*.json).**
 newtron is the owner — it writes the files and exposes their contents
 through `/newtron/v1/network/...`. Sibling engines (newtlab, newtrun)
-and external consumers (newtcon, scripts) call the API. None of them
-open the JSON files directly.
+and external consumers (newtcon, scripts) reach the data through the
+API. Opening the JSON files from another engine — even when they sit
+on the same filesystem — is the §27 violation.
 
 **Lab runtime state (LabState, NodeState, LinkState).** newtlab is the
-owner. SSH ports, console ports, VM PIDs, link bytes/packets — all
-exposed through `/newtlab/v1/topologies/...`. newtron consumes
-per-device SSH port through the API at Device.Connect time; no other
-engine reaches into `~/.newtlab/labs/<name>/state.json`.
+owner. Allocations (SSH ports, console ports, VM PIDs) and link
+counters are exposed through `/newtlab/v1/topologies/...`. Sibling
+engines reach per-node runtime state through that API; reading
+`~/.newtlab/labs/<name>/state.json` from another engine is the
+violation.
 
 **Test run state (RunState, scenario results).** newtrun is the owner.
-Other engines and operators call `/newtrun/v1/runs/...`.
+Other engines and operators reach the data through `/newtrun/v1/runs/...`.
 
 **Device CONFIG_DB and NEWTRON_INTENT.** The device is the owner of its
 own runtime state (§5). newtron reads through its SSH-tunneled Redis
-connection; no other tool reaches into the device's Redis.
+connection; reaching into the device's Redis from any other tool is
+the violation.
 
 Locality does not grant ownership. The fact that `pkg/newtlab/` can
 `fopen("topology.json")` and parse it does not make newtlab a co-owner

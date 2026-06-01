@@ -516,7 +516,7 @@ func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	val, err := na.do(r.Context(), func() (any, error) {
-		return na.net.GetHostProfile(name)
+		return na.net.GetHostProfile(r.Context(), name)
 	})
 	if err != nil {
 		writeError(w, err)

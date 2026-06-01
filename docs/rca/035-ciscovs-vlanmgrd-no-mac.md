@@ -9,19 +9,17 @@
 
 ---
 
-**Resolution (Feb 2026):** This problem is solved by two changes:
+**Resolution (Feb 2026, refined May 2026):** This problem is solved by merge-based
+`ReplaceAll` — `ConfigDBClient.ReplaceAll()` only deletes stale keys (present in DB
+but absent from composite). Factory defaults — including MAC — survive provisioning
+even when the composite doesn't explicitly set `DEVICE_METADATA|localhost.mac`.
 
-1. **Profile-based MAC**: newtlab `PatchProfiles()` calls `GenerateMAC(name, 0)` at deploy
-   time, writing a deterministic MAC into the device profile JSON. The MAC flows through
-   `profile → resolved specs → composite → DEVICE_METADATA|localhost.mac`, so it is
-   always present after provisioning.
-
-2. **Merge-based ReplaceAll**: `ConfigDBClient.ReplaceAll()` now only deletes stale keys
-   (present in DB but absent from composite). Factory defaults — including MAC — survive
-   provisioning even if the composite doesn't explicitly set them.
-
-Together these eliminate the original failure mode: DEVICE_METADATA always has a MAC field
-after provisioning, and vlanmgrd starts cleanly.
+The original Feb 2026 fix also included profile-based MAC generation via newtlab's
+`PatchProfiles()`. That mechanism was removed in May 2026 along with all of
+`pkg/newtlab/profile.go` (runtime profile mutation was a §27 violation — newtlab
+writing into spec files newtron read). The merge-based `ReplaceAll` alone is
+sufficient to keep the factory MAC in CONFIG_DB across provisioning, so the
+PatchProfiles removal did not regress the vlanmgrd-no-MAC failure mode.
 
 ## Problem
 
@@ -66,18 +64,19 @@ vlanmgrd needs the bridge MAC address for correct L2 forwarding:
 
 ## Fix
 
-### Current Solution (Feb 2026)
-
-**Profile-based MAC generation** (`pkg/newtlab/profile.go`):
-- `PatchProfiles()` calls `GenerateMAC(name, 0)` for each device at deploy time
-- Generates a deterministic MAC using QEMU OUI `52:54:00` + SHA256 of device name
-- MAC is written into the device profile JSON and flows into the composite automatically
-- `RestoreProfiles()` clears the MAC field on destroy
+### Current Solution (May 2026)
 
 **Merge-based ReplaceAll** (`pkg/newtron/device/sonic/pipeline.go`):
 - `ReplaceAll()` only deletes keys NOT present in the composite (stale keys)
 - Factory defaults survive because HSet merges composite fields on top of existing keys
-- Even without profile-based MAC, factory MAC would now survive provisioning
+- Factory MAC stays in CONFIG_DB across provisioning — vlanmgrd starts cleanly
+
+**Note on the deprecated PatchProfiles fix:** The Feb 2026 fix also included
+`pkg/newtlab/profile.go`'s `PatchProfiles()`, which wrote a deterministic
+`GenerateMAC(name, 0)` value into each device profile JSON at deploy time. That
+mechanism was removed in May 2026 — runtime profile mutation was a §27 violation
+(newtlab writing into spec files newtron read). Removing it did not regress this
+RCA's failure mode: the merge-based `ReplaceAll` is independently sufficient.
 
 **Config reload before provision** (`pkg/newtron/network/topology.go`):
 - Best-effort `config reload -y` before composite delivery restores CONFIG_DB to saved baseline

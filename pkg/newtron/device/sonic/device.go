@@ -9,12 +9,29 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// PortResolver supplies runtime port allocations for a deployed
+// topology. Device uses it at Connect time to resolve the SSH port
+// without knowing where the answer comes from — the interface expresses
+// intent, the implementation supplies the answer (DESIGN_PRINCIPLES
+// §33). The newtlab-backed implementation lives in pkg/newtlab/client;
+// tests may pass nil (Connect uses the default SSH port).
+type PortResolver interface {
+	SSHPort(ctx context.Context, topology, device string) (int, error)
+}
+
 // Device represents a SONiC switch.
 type Device struct {
 	Name     string
 	Profile  *spec.ResolvedProfile
 	ConfigDB *ConfigDB
 	StateDB  *StateDB
+
+	// Topology is the topology name passed to PortResolver. PortResolver
+	// resolves per-node SSH port allocations at Connect time. Both are
+	// nil/empty for tests and real-hardware deployments — Connect then
+	// uses the default SSH port.
+	Topology     string
+	PortResolver PortResolver
 
 	// SkipFrrcfgdCheck bypasses the frrcfgd precondition at connect time.
 	// Set to true for provisioning, which writes docker_routing_config_mode=unified
@@ -54,7 +71,11 @@ func (d *Device) Connect(ctx context.Context) error {
 
 	var addr string
 	if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
-		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
+		sshPort, err := d.resolveSSHPort(ctx)
+		if err != nil {
+			return fmt.Errorf("resolving SSH port for %s: %w", d.Name, err)
+		}
+		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, sshPort)
 		if err != nil {
 			return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
 		}
@@ -335,4 +356,21 @@ func (d *Device) requireFrrcfgd() error {
 		)
 	}
 	return nil
+}
+
+// resolveSSHPort returns the SSH port for the device's management
+// connection. When PortResolver is configured, the port comes from
+// the resolver (DESIGN_PRINCIPLES §33: orchestrators are API
+// consumers; §40: no fallback). When PortResolver is nil (real-
+// hardware deployments, tests), returns 0 so NewSSHTunnel uses the
+// default SSH port.
+func (d *Device) resolveSSHPort(ctx context.Context) (int, error) {
+	if d.PortResolver == nil || d.Topology == "" {
+		return 0, nil
+	}
+	port, err := d.PortResolver.SSHPort(ctx, d.Topology, d.Name)
+	if err != nil {
+		return 0, fmt.Errorf("resolve SSH port for %s: %w", d.Name, err)
+	}
+	return port, nil
 }
