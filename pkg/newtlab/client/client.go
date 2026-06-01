@@ -54,32 +54,56 @@ func New(baseURL string) *Client {
 // LabStatus returns the canonical LabState for a deployed topology.
 // Calls GET /newtlab/v1/topologies/{name}/status.
 func (c *Client) LabStatus(ctx context.Context, topology string) (*newtlab.LabState, error) {
+	var state newtlab.LabState
 	path := "/newtlab/v1/topologies/" + url.PathEscape(topology) + "/status"
+	if err := c.doGet(ctx, path, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// doGet issues a GET against the newtlab-server, unwraps the
+// `{"data": ...}` envelope, and decodes the data into result.
+//
+// Mirrors the helper pattern used by pkg/newtron/client/client.go so
+// both engine clients have the same shape for envelope handling.
+func (c *Client) doGet(ctx context.Context, path string, result any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("newtlabc: build request: %w", err)
+		return fmt.Errorf("GET %s: %w", path, err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("newtlabc: %w", err)
+		return fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
 
+// decodeResponse unwraps the {"data": ...} envelope returned by every
+// newtlab-server response and decodes the data into result. Errors
+// from the server (envelope.Error or non-2xx status) become *ServerError.
+func (c *Client) decodeResponse(resp *http.Response, result any) error {
+	var envelope httputil.APIResponse
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("newtlabc: read body: %w", err)
+		return fmt.Errorf("reading response: %w", err)
 	}
 
-	var envelope httputil.APIResponse
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &envelope); err != nil {
-			if resp.StatusCode >= 400 {
-				return nil, &ServerError{StatusCode: resp.StatusCode, Message: string(body)}
-			}
-			return nil, fmt.Errorf("newtlabc: decode envelope: %w", err)
+	if len(body) == 0 {
+		if resp.StatusCode >= 400 {
+			return &ServerError{StatusCode: resp.StatusCode, Message: resp.Status}
 		}
+		return nil
+	}
+
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		if resp.StatusCode >= 400 {
+			return &ServerError{StatusCode: resp.StatusCode, Message: string(body)}
+		}
+		return fmt.Errorf("decode response: %w", err)
 	}
 
 	if resp.StatusCode >= 400 {
@@ -87,23 +111,21 @@ func (c *Client) LabStatus(ctx context.Context, topology string) (*newtlab.LabSt
 		if msg == "" {
 			msg = resp.Status
 		}
-		return nil, &ServerError{StatusCode: resp.StatusCode, Message: msg}
+		return &ServerError{StatusCode: resp.StatusCode, Message: msg}
 	}
 	if envelope.Error != "" {
-		return nil, &ServerError{StatusCode: resp.StatusCode, Message: envelope.Error}
+		return &ServerError{StatusCode: resp.StatusCode, Message: envelope.Error}
 	}
 
-	if envelope.Data == nil {
-		return nil, fmt.Errorf("newtlabc: empty data for topology %q", topology)
+	if result != nil && envelope.Data != nil {
+		data, err := json.Marshal(envelope.Data)
+		if err != nil {
+			return fmt.Errorf("re-marshal data: %w", err)
+		}
+		if err := json.Unmarshal(data, result); err != nil {
+			return fmt.Errorf("decode data into %T: %w", result, err)
+		}
 	}
 
-	data, err := json.Marshal(envelope.Data)
-	if err != nil {
-		return nil, fmt.Errorf("newtlabc: re-marshal data: %w", err)
-	}
-	var state newtlab.LabState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("newtlabc: decode LabState: %w", err)
-	}
-	return &state, nil
+	return nil
 }

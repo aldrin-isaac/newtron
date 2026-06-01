@@ -11,8 +11,9 @@ import (
 
 // PortResolver supplies runtime port allocations for a deployed
 // topology. Device uses it at Connect time to resolve the SSH port
-// without knowing where the answer comes from (DESIGN_PRINCIPLES §33,
-// §34). The newtlab-backed implementation lives in pkg/newtlab/client;
+// without knowing where the answer comes from — the interface expresses
+// intent, the implementation supplies the answer (DESIGN_PRINCIPLES
+// §33). The newtlab-backed implementation lives in pkg/newtlab/client;
 // tests may pass nil (Connect uses the default SSH port).
 type PortResolver interface {
 	SSHPort(ctx context.Context, topology, device string) (int, error)

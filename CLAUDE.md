@@ -153,8 +153,8 @@ service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 
 **Cross-engine data objects:**
 
-- **Specs** (network.json, topology.json, platforms.json, profiles/*.json) — newtron is the owner; consumers call `/newtron/v1/network/...`. No engine opens spec files directly.
-- **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers call `/newtlab/v1/topologies/...`. No engine reads `~/.newtlab/labs/<name>/state.json` directly.
+- **Specs** (network.json, topology.json, platforms.json, profiles/*.json) — newtron is the owner; consumers reach the data through `/newtron/v1/network/...`. Opening the JSON files from another engine is the §27 violation.
+- **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers reach the data through `/newtlab/v1/topologies/...`. Reading `~/.newtlab/labs/<name>/state.json` from another engine is the §27 violation.
 - **Test run state** — newtrun is the owner; consumers call `/newtrun/v1/runs/...`.
 
 When adding new state of any kind — new CONFIG_DB writes, new spec fields, new runtime allocations — check who already owns it. Never add a second writer.

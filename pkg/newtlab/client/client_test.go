@@ -79,15 +79,24 @@ func TestLabStatus_BadJSON(t *testing.T) {
 	}
 }
 
-func TestLabStatus_EmptyBody(t *testing.T) {
+func TestLabStatus_5xx(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error": "internal error"}`))
 	}))
 	defer ts.Close()
 
 	c := New(ts.URL)
 	_, err := c.LabStatus(context.Background(), "anything")
 	if err == nil {
-		t.Fatal("LabStatus: expected error on empty body")
+		t.Fatal("LabStatus: expected error on 5xx")
+	}
+	se, ok := err.(*ServerError)
+	if !ok {
+		t.Fatalf("err = %T, want *ServerError", err)
+	}
+	if se.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", se.StatusCode)
 	}
 }
