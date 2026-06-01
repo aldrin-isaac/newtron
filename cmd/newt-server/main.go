@@ -34,6 +34,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	newtrunapi "github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 	"github.com/aldrin-isaac/newtron/pkg/version"
@@ -60,7 +61,14 @@ func main() {
 	// (network actors, run registry, deploy registry, brokers); we
 	// don't share state across engines — they communicate only via
 	// HTTP requests that travel through this process's mux.
-	newtronSrv := newtronapi.NewServer(logger, *idleTimeout)
+	//
+	// newtron consults newtlab at this same listen address (the engines
+	// share one process; the URL is the in-process loopback). The
+	// composition happens here in cmd — newtron's api package never
+	// sees newtlab; newtlab's client never sees newtron.
+	newtlabClient := newtlabclient.New("http://" + *listen)
+	newtronPortResolver := newtlabclient.NewPortResolver(newtlabClient)
+	newtronSrv := newtronapi.NewServer(logger, *idleTimeout, newtronPortResolver)
 	if *specDir != "" {
 		if err := newtronSrv.RegisterNetwork(*netID, *specDir); err != nil {
 			logger.Fatalf("failed to register network '%s' from %s: %v", *netID, *specDir, err)

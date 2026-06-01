@@ -18,8 +18,13 @@ type Network struct {
 }
 
 // LoadNetwork loads all spec files from specDir and returns a Network ready for use.
-func LoadNetwork(specDir string) (*Network, error) {
-	net, err := network.NewNetwork(specDir)
+//
+// topologyName identifies this network to the injected port resolver
+// (e.g., "1node-vs"). pr is consulted at Device.Connect time to
+// resolve per-node SSH ports. Pass nil for tests and real-hardware
+// deployments.
+func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver) (*Network, error) {
+	net, err := network.NewNetwork(specDir, topologyName, pr)
 	if err != nil {
 		return nil, err
 	}
@@ -217,17 +222,28 @@ func (net *Network) IsHostDevice(name string) bool {
 }
 
 // GetHostProfile returns connection parameters for a host device.
-func (net *Network) GetHostProfile(name string) (*HostProfile, error) {
+// SSH port is runtime state owned by newtlab (§27) — resolved at
+// request time through the configured PortResolver and included in
+// the response so callers (newtrun's host-exec path, CLI) never need
+// to know newtlab exists.
+func (net *Network) GetHostProfile(ctx context.Context, name string) (*HostProfile, error) {
 	p, err := net.internal.GetHostProfile(name)
 	if err != nil {
 		return nil, err
 	}
-	return &HostProfile{
+	profile := &HostProfile{
 		MgmtIP:  p.MgmtIP,
 		SSHUser: p.SSHUser,
 		SSHPass: p.SSHPass,
-		SSHPort: p.SSHPort,
-	}, nil
+	}
+	if resolver := net.internal.PortResolver(); resolver != nil {
+		port, err := resolver.SSHPort(ctx, net.internal.TopologyName(), name)
+		if err != nil {
+			return nil, fmt.Errorf("resolving SSH port for host %q: %w", name, err)
+		}
+		profile.SSHPort = port
+	}
+	return profile, nil
 }
 
 // InitFromDeviceIntent creates a node whose projection is built from the device's

@@ -534,7 +534,9 @@ func ReconstructExpected(ctx context.Context, sp SpecProvider,
 	intents map[string]map[string]string,
 	ports map[string]map[string]string) (*Node, error) {
 
-	n := NewAbstract(sp, name, profile, resolved)
+	// Reconstruction never connects to a device — pass empty topology and
+	// nil newtlab. The resulting Node is used for drift comparison only.
+	n := NewAbstract(sp, name, profile, resolved, "", nil)
 	for portName, fields := range ports {
 		n.RegisterPort(portName, fields)
 	}

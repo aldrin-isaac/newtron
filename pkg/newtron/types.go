@@ -561,7 +561,9 @@ type PlatformDetail struct {
 // Profile and Zone Detail Types
 // ============================================================================
 
-// DeviceProfileDetail is the API view of a device profile.
+// DeviceProfileDetail is the API view of a device profile. SSH port
+// is runtime state owned by newtlab (§27) — not part of the profile
+// spec; consumers fetch it from newtlab's API.
 type DeviceProfileDetail struct {
 	Name        string      `json:"name"`
 	MgmtIP      string      `json:"mgmt_ip"`
@@ -571,7 +573,6 @@ type DeviceProfileDetail struct {
 	MAC         string      `json:"mac,omitempty"`
 	UnderlayASN int         `json:"underlay_asn,omitempty"`
 	SSHUser     string      `json:"ssh_user,omitempty"`
-	SSHPort     int         `json:"ssh_port,omitempty"`
 	EVPN        *EVPNDetail `json:"evpn,omitempty"`
 }
 
@@ -621,7 +622,6 @@ type CreateDeviceProfileRequest struct {
 	UnderlayASN int                     `json:"underlay_asn,omitempty"`
 	SSHUser     string                  `json:"ssh_user,omitempty"`
 	SSHPass     string                  `json:"ssh_pass,omitempty"`
-	SSHPort     int                     `json:"ssh_port,omitempty"`
 	EVPN        *CreateEVPNConfigRequest `json:"evpn,omitempty"`
 }
 

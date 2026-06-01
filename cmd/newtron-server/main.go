@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
@@ -29,6 +30,7 @@ func main() {
 	specDir := flag.String("spec-dir", "", "spec directory to auto-register as 'default' network")
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout (default 5m, negative to disable caching)")
+	newtlabServer := flag.String("newtlab-server", "http://127.0.0.1:18080", "newtlab-server base URL; empty disables newtlab consultation (real-hardware deployments)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -37,7 +39,16 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
-	srv := api.NewServer(logger, *idleTimeout)
+	// cmd is the composition layer: it knows which engine provides
+	// the port-resolver implementation. newtron's api package sees
+	// only the contract (api.PortResolver); newtlab's client package
+	// supplies the concrete satisfier.
+	var portResolver api.PortResolver
+	if *newtlabServer != "" {
+		portResolver = newtlabclient.NewPortResolver(newtlabclient.New(*newtlabServer))
+	}
+
+	srv := api.NewServer(logger, *idleTimeout, portResolver)
 
 	if *specDir != "" {
 		if err := srv.RegisterNetwork(*netID, *specDir); err != nil {

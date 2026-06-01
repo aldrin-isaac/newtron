@@ -14,6 +14,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -32,6 +33,20 @@ type Network struct {
 	// Topology spec (nil if topology.json doesn't exist)
 	topology *spec.TopologySpecFile
 
+	// Topology name (e.g., "1node-vs"). Used as the topology argument
+	// when consulting portResolver. Empty for tests or real-hardware
+	// deployments where ports are static.
+	topologyName string
+
+	// portResolver supplies runtime SSH port allocations. Non-nil when
+	// the runtime is configured to consult an external authority (the
+	// newtlab-backed implementation, today). Nil for tests and real-
+	// hardware deployments where the profile's mgmt_ip is the device's
+	// real address. The implementation is injected from above
+	// (DESIGN_PRINCIPLES §33: orchestrators are API consumers; §34:
+	// transparent transport — the middle layer has no logic).
+	portResolver sonic.PortResolver
+
 	// Loader for loading device profiles (already initialized with Load())
 	loader *spec.Loader
 
@@ -44,7 +59,14 @@ type Network struct {
 
 // NewNetwork creates a new Network instance by loading all spec files.
 // This is the entry point for the application.
-func NewNetwork(specDir string) (*Network, error) {
+//
+// topologyName identifies this network when calling portResolver
+// (e.g., as a path segment in any consulted external API). Empty
+// string disables resolver consultation regardless of pr.
+//
+// pr is the port resolver used at Device.Connect time. Pass nil for
+// tests and real-hardware deployments.
+func NewNetwork(specDir, topologyName string, pr sonic.PortResolver) (*Network, error) {
 	loader := spec.NewLoader(specDir)
 
 	// Load all spec files
@@ -53,12 +75,24 @@ func NewNetwork(specDir string) (*Network, error) {
 	}
 
 	return &Network{
-		spec:      loader.GetNetwork(),
-		platforms: loader.GetPlatforms(),
-		topology:  loader.GetTopology(),
-		loader:    loader,
-		devices:   make(map[string]*node.Node),
+		spec:         loader.GetNetwork(),
+		platforms:    loader.GetPlatforms(),
+		topology:     loader.GetTopology(),
+		topologyName: topologyName,
+		portResolver: pr,
+		loader:       loader,
+		devices:      make(map[string]*node.Node),
 	}, nil
+}
+
+// TopologyName returns the topology name this Network is associated with.
+func (n *Network) TopologyName() string {
+	return n.topologyName
+}
+
+// PortResolver returns the port resolver (may be nil).
+func (n *Network) PortResolver() sonic.PortResolver {
+	return n.portResolver
 }
 
 // ============================================================================
@@ -651,7 +685,7 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 	resolvedSpecs := n.buildResolvedSpecs(profile)
 
 	// Create Node with ResolvedSpecs as SpecProvider for hierarchical spec access
-	dev := node.New(resolvedSpecs, name, profile, resolved)
+	dev := node.New(resolvedSpecs, name, profile, resolved, n.topologyName, n.portResolver)
 
 	n.devices[name] = dev
 	return dev, nil
@@ -677,7 +711,7 @@ func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 	}
 
 	resolvedSpecs := n.buildResolvedSpecs(profile)
-	return node.NewAbstract(resolvedSpecs, name, profile, resolved), nil
+	return node.NewAbstract(resolvedSpecs, name, profile, resolved, n.topologyName, n.portResolver), nil
 }
 
 // ConnectNodeForSetup connects without requiring frrcfgd. Used by
@@ -1106,10 +1140,10 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	// BGP neighbors from EVPN peers
 	resolved.BGPNeighbors, resolved.BGPNeighborASNs = n.deriveBGPNeighbors(profile, name)
 
-	// SSH credentials (for Redis tunnel)
+	// SSH credentials (for Redis tunnel). SSH port is resolved from
+	// newtlab at Device.Connect time, not from the profile spec.
 	resolved.SSHUser = profile.SSHUser
 	resolved.SSHPass = profile.SSHPass
-	resolved.SSHPort = profile.SSHPort
 
 	// eBGP underlay ASN
 	resolved.UnderlayASN = profile.UnderlayASN

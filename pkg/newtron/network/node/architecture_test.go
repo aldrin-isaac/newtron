@@ -47,7 +47,7 @@ func newRawAbstractNode() *Node {
 		LoopbackIP:  "10.0.0.1",
 		DeviceName:  "test-leaf",
 	}
-	n := NewAbstract(sp, "test-leaf", profile, resolved)
+	n := NewAbstract(sp, "test-leaf", profile, resolved, "", nil)
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "speed": "100G"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "speed": "100G"})
 	return n

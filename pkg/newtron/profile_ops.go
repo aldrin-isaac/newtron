@@ -47,13 +47,12 @@ func (net *Network) CreateProfile(req CreateDeviceProfileRequest, opts ExecOpts)
 	profile := &spec.DeviceProfile{
 		MgmtIP:      req.MgmtIP,
 		LoopbackIP:  req.LoopbackIP,
-		Zone:         req.Zone,
-		Platform:     req.Platform,
-		MAC:          req.MAC,
-		UnderlayASN:  req.UnderlayASN,
-		SSHUser:      req.SSHUser,
-		SSHPass:      req.SSHPass,
-		SSHPort:      req.SSHPort,
+		Zone:        req.Zone,
+		Platform:    req.Platform,
+		MAC:         req.MAC,
+		UnderlayASN: req.UnderlayASN,
+		SSHUser:     req.SSHUser,
+		SSHPass:     req.SSHPass,
 	}
 	if req.EVPN != nil {
 		profile.EVPN = &spec.EVPNConfig{
@@ -147,12 +146,11 @@ func convertProfileDetail(name string, p *spec.DeviceProfile) *DeviceProfileDeta
 		Name:        name,
 		MgmtIP:      p.MgmtIP,
 		LoopbackIP:  p.LoopbackIP,
-		Zone:         p.Zone,
-		Platform:     p.Platform,
-		MAC:          p.MAC,
-		UnderlayASN:  p.UnderlayASN,
-		SSHUser:      p.SSHUser,
-		SSHPort:      p.SSHPort,
+		Zone:        p.Zone,
+		Platform:    p.Platform,
+		MAC:         p.MAC,
+		UnderlayASN: p.UnderlayASN,
+		SSHUser:     p.SSHUser,
 	}
 	if p.EVPN != nil {
 		detail.EVPN = &EVPNDetail{

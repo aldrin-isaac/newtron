@@ -10,7 +10,7 @@ import (
 
 func TestNodeIntentAccessors(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Initially empty
 	if got := n.GetIntent("interface|Ethernet0"); got != nil {
@@ -75,7 +75,7 @@ func TestNodeIntentAccessors(t *testing.T) {
 
 func TestNodeLoadIntentsFromConfigDB(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Simulate CONFIG_DB with NEWTRON_INTENT entries
 	n.configDB.NewtronIntent = map[string]map[string]string{
@@ -130,7 +130,7 @@ func TestNodeLoadIntentsFromConfigDB(t *testing.T) {
 
 func TestSnapshot(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Simulate loaded intents via configDB (the single source)
 	n.configDB.NewtronIntent = map[string]map[string]string{
@@ -204,7 +204,7 @@ func TestSnapshot(t *testing.T) {
 
 func TestSnapshotRoundTrip(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	type expected struct {
 		service string
@@ -252,7 +252,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 func TestWriteIntentRecordsToProjection(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	cs := NewChangeSet("test", "test")
 	n.writeIntent(cs, sonic.OpCreateVRF, "vrf|Vrf_TRANSIT", map[string]string{
@@ -288,7 +288,7 @@ func TestWriteIntentRecordsToProjection(t *testing.T) {
 
 func TestWriteIntentPrepends(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Add a config entry first, then writeIntent — intent should be first.
 	cs := NewChangeSet("test", "test")
@@ -311,7 +311,7 @@ func TestWriteIntentPrepends(t *testing.T) {
 
 func TestDeleteIntentRemovesFromProjection(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Pre-populate an intent in projection
 	n.configDB.NewtronIntent["vrf|Vrf_TRANSIT"] = map[string]string{
@@ -711,7 +711,7 @@ func TestIntentsToSteps_FiltersNonActuated(t *testing.T) {
 
 func TestNodeServiceIntentsFiltersState(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Write non-actuated intents directly to configDB
 	n.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
@@ -833,7 +833,7 @@ func TestValidateIntentDAG_Orphan(t *testing.T) {
 // T8.2.1: writeIntent returns an error when a specified parent does not exist.
 func TestWriteIntent_ParentExistence(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	cs := NewChangeSet("test", "test")
 	err := n.writeIntent(cs, "create-vlan", "vlan|100", map[string]string{"vlan_id": "100"}, []string{"device"})
@@ -849,7 +849,7 @@ func TestWriteIntent_ParentExistence(t *testing.T) {
 // params but preserves children.
 func TestWriteIntent_IdempotentUpdate(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Seed device root
 	n.configDB.NewtronIntent["device"] = map[string]string{
@@ -895,7 +895,7 @@ func TestWriteIntent_IdempotentUpdate(t *testing.T) {
 // T8.2.3: writing an intent that already exists with different parents returns an error.
 func TestWriteIntent_DifferentParentsError(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Seed device and vrf|CUST roots
 	n.configDB.NewtronIntent["device"] = map[string]string{
@@ -923,7 +923,7 @@ func TestWriteIntent_DifferentParentsError(t *testing.T) {
 // T8.2.4: after writing a child intent, the parent's Children contains the child.
 func TestWriteIntent_ChildRegistered(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Seed device root
 	n.configDB.NewtronIntent["device"] = map[string]string{
@@ -954,7 +954,7 @@ func TestWriteIntent_ChildRegistered(t *testing.T) {
 // T8.2.5: deleteIntent refuses if the intent has children (I5).
 func TestDeleteIntent_RefusesWithChildren(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Seed device root
 	n.configDB.NewtronIntent["device"] = map[string]string{
@@ -981,7 +981,7 @@ func TestDeleteIntent_RefusesWithChildren(t *testing.T) {
 // T8.2.6: deleting a child removes it from the parent's Children.
 func TestDeleteIntent_DeregistersFromParent(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Seed device root
 	n.configDB.NewtronIntent["device"] = map[string]string{
@@ -1024,7 +1024,7 @@ func TestDeleteIntent_DeregistersFromParent(t *testing.T) {
 // T8.2.7: writeIntent with two parents registers the child in both parents' Children.
 func TestWriteIntent_MultiParent(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	// Seed device root
 	n.configDB.NewtronIntent["device"] = map[string]string{
@@ -1183,7 +1183,7 @@ func TestValidateIntentDAG_OrphanDetection(t *testing.T) {
 
 func TestIntentsByPrefix(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	n.configDB.NewtronIntent = map[string]map[string]string{
 		"device":            {"operation": "setup-device", "state": "actuated"},
@@ -1218,7 +1218,7 @@ func TestIntentsByPrefix(t *testing.T) {
 	}
 
 	// Nil configDB should return empty
-	n2 := New(sp, "test2", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n2 := New(sp, "test2", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 	if got := n2.IntentsByPrefix("vlan|"); len(got) != 0 {
 		t.Fatalf("IntentsByPrefix on nil configDB = %d, want 0", len(got))
 	}
@@ -1226,7 +1226,7 @@ func TestIntentsByPrefix(t *testing.T) {
 
 func TestIntentsByParam(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	n.configDB.NewtronIntent = map[string]map[string]string{
 		"interface|Ethernet0":    {"operation": "configure-interface", "state": "actuated", "vrf": "CUSTOMER"},
@@ -1256,7 +1256,7 @@ func TestIntentsByParam(t *testing.T) {
 
 func TestIntentsByOp(t *testing.T) {
 	sp := &testSpecProvider{}
-	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{}, "", nil)
 
 	n.configDB.NewtronIntent = map[string]map[string]string{
 		"device":            {"operation": "setup-device", "state": "actuated"},

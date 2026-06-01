@@ -19,7 +19,6 @@ var (
 	profileCreateUnderlayASN int
 	profileCreateSSHUser     string
 	profileCreateSSHPass     string
-	profileCreateSSHPort     int
 )
 
 var profileCmd = &cobra.Command{
@@ -104,9 +103,6 @@ var profileShowCmd = &cobra.Command{
 		if p.SSHUser != "" {
 			fmt.Printf("SSH User: %s\n", p.SSHUser)
 		}
-		if p.SSHPort > 0 {
-			fmt.Printf("SSH Port: %d\n", p.SSHPort)
-		}
 		if p.EVPN != nil {
 			fmt.Println("\nEVPN Peering:")
 			if len(p.EVPN.Peers) > 0 {
@@ -163,7 +159,6 @@ Examples:
 			UnderlayASN: profileCreateUnderlayASN,
 			SSHUser:     profileCreateSSHUser,
 			SSHPass:     profileCreateSSHPass,
-			SSHPort:     profileCreateSSHPort,
 		}, execOpts()); err != nil {
 			return err
 		}
@@ -207,7 +202,6 @@ func init() {
 	profileCreateCmd.Flags().IntVar(&profileCreateUnderlayASN, "underlay-asn", 0, "BGP underlay AS number")
 	profileCreateCmd.Flags().StringVar(&profileCreateSSHUser, "ssh-user", "", "SSH username")
 	profileCreateCmd.Flags().StringVar(&profileCreateSSHPass, "ssh-pass", "", "SSH password")
-	profileCreateCmd.Flags().IntVar(&profileCreateSSHPort, "ssh-port", 0, "SSH port")
 
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileShowCmd)

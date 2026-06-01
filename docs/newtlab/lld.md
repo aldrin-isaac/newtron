@@ -24,7 +24,6 @@ is implemented by looking at the file name.
 | `qemu.go` | QEMU command builder, node start/stop/running checks | `QEMUCommand`, `StartNode`, `StopNode`, `IsRunning` |
 | `boot.go` | Serial console bootstrap, SSH key generation, SSH readiness | `BootstrapNetwork`, `BootstrapHostNetwork`, `WaitForSSH`, `GenerateLabSSHKey` |
 | `patch.go` | Boot patch framework — resolve, render, apply | `BootPatch`, `FilePatch`, `RedisPatch`, `PatchVars`, `ResolveBootPatches`, `ApplyBootPatches` |
-| `profile.go` | Profile patching (post-deploy) and restoration (destroy) | `PatchProfiles`, `RestoreProfiles` |
 | `placement.go` | Server pool node placement | `PlaceNodes` |
 | `probe.go` | Port conflict detection (local and remote) | `PortAllocation`, `CollectAllPorts`, `ProbeAllPorts` |
 | `disk.go` | Overlay disk creation, remote state dir management | `CreateOverlay`, `CreateOverlayRemote` |
@@ -100,9 +99,12 @@ password fallback when the device profile doesn't specify `ssh_pass`.
 ### 2.3 DeviceProfile — newtlab Fields
 
 Per-device overrides that take priority over platform defaults. The newtlab
-fields on DeviceProfile serve two purposes: some are **read** by newtlab during
-resolution, others are **written** by `PatchProfiles` (§8.1) after deploy so
-that newtron can discover SSH connectivity.
+fields on DeviceProfile are **read** by newtlab during resolution. Runtime
+connectivity values (SSH port, console port, MAC) are not written into profile
+files — spec files are newtron's data object (DESIGN_PRINCIPLES §27) and
+newtlab must not write into them. Instead, these values are exposed in `LabState`
+via `GET /newtlab/v1/topologies/{name}/status` (see [newtlab API](api.md)) and
+consumed by newtron via `pkg/newtlab/client/PortResolver`.
 
 ```go
 type DeviceProfile struct {
@@ -116,7 +118,8 @@ type DeviceProfile struct {
     VMImage  string `json:"vm_image,omitempty"`
     VMHost   string `json:"vm_host,omitempty"` // server pool target
 
-    // Written by PatchProfiles (§8.1) / read by newtron Device Layer LLD §1
+    // Exposed in LabState via GET /newtlab/v1/topologies/{name}/status;
+    // consumed by newtron via pkg/newtlab/client/PortResolver.
     SSHPort     int    `json:"ssh_port,omitempty"`
     ConsolePort int    `json:"console_port,omitempty"`
     MAC         string `json:"mac,omitempty"` // deterministic system MAC
@@ -130,10 +133,6 @@ type DeviceProfile struct {
     HostGateway string `json:"host_gateway,omitempty"`
 }
 ```
-
-`SSHPort` defaults to 0 in profiles without newtlab patching. newtron's
-`NewSSHTunnel` treats port 0 as port 22, maintaining backward compatibility
-with profiles that predate newtlab.
 
 ### 2.4 TopologySpecFile.NewtLab
 
@@ -417,7 +416,6 @@ The context is checked at each major phase for cancellation.
 
 **Phase 7 — Boot patches** (`applyNodePatches`):
 - For each switch node (parallel): resolve and apply platform boot patches (`ApplyBootPatches`, §7.4).
-- Patch device profiles (`PatchProfiles`, §8.1).
 
 **Phase 8 — Host namespaces** (`provisionHostNamespaces`, if HostVMs exist):
 - SSH into each coalesced VM.
@@ -441,8 +439,7 @@ auto-rollback — explicit destroy is required.
 2. Kill QEMU processes (skip virtual host entries — killed with parent VM).
 3. Stop bridge processes per host (`stopAllBridges`).
 4. Clean up remote state directories.
-5. Restore profiles (`RestoreProfiles`, §8.2).
-6. Remove local state directory.
+5. Remove local state directory.
 
 Uses continue-on-error: collects all failures rather than stopping at first.
 A failed process kill should not prevent profile restoration or state cleanup.
@@ -857,38 +854,6 @@ post_commands.
 
 ---
 
-## 8. Profile Patching
-
-Profile patching bridges newtlab and newtron: newtlab writes runtime values
-(`ssh_port`, `mgmt_ip`, `mac`) into `DeviceProfile` (§2.3) JSON files so that
-newtron's SSH tunnel (see [Device LLD §1](../newtron/device-lld.md)) can
-discover how to connect to each device.
-
-### 8.1 PatchProfiles
-
-`PatchProfiles(lab)` updates device profile JSON files with newtlab runtime
-values after successful VM deployment. Called during Deploy phase 7.
-
-For each device (skipping `host-vm` synthetic nodes):
-1. Read `profiles/<name>.json` into `spec.DeviceProfile`.
-2. Save original `mgmt_ip` in state for restore.
-3. Set `mgmt_ip` to `127.0.0.1` (local) or the host's IP (remote).
-4. Set `ssh_port`, `console_port`, `mac` (deterministic from `GenerateMAC(name, 0)`).
-5. Set `ssh_user`/`ssh_pass` only if the profile didn't already have them.
-6. Write back as indented JSON.
-
-For virtual hosts: patches with the parent VM's SSH port and console port so
-newtron can reach them.
-
-### 8.2 RestoreProfiles
-
-`RestoreProfiles(lab)` reverses patching during `Destroy()`:
-1. Restore original `mgmt_ip` from saved state.
-2. Zero out `ssh_port`, `console_port`, `mac`.
-3. `ssh_user`/`ssh_pass` are **not** removed — they may have been user-set before deploy.
-
----
-
 ## 9. Server Pool and Port Probing
 
 Multi-host deployment support. `PlaceNodes()` runs during `NewLab()` (§4.1
@@ -1177,7 +1142,7 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 5. **Boot VMs:** `StartNode(switch1, stateDir, "")` → `QEMUCommand.Build()` → `qemu-system-x86_64 -m 8192 -smp 6 -cpu host -enable-kvm -drive file=.../switch1.qcow2,... -serial tcp::12006,server,nowait -netdev user,id=mgmt,hostfwd=tcp::13006-:22 -device e1000,... -netdev socket,id=eth1,connect=127.0.0.1:10000 ...`. Same for switch2 and hostvm-0.
 6. **Bootstrap:** Switches: `BootstrapNetwork(ctx, "127.0.0.1", 12006, "aldrin", "...", "admin", "...", 600s)` — serial login, eth0 DHCP, create admin user. Host VM: `BootstrapHostNetwork(ctx, "127.0.0.1", 12000, ...)` — wait for login prompt only (Alpine auto-starts DHCP+SSH). Then `WaitForSSH()` for all 3 VMs. Inject lab SSH key.
 7. **Patches:** `ResolveBootPatches("ciscovs", "")` → `patches/ciscovs/always/*.json` for switches. `buildPatchVars()` → `{NumPorts: 6, PCIAddrs: [...], PortStride: 1, ...}`. `ApplyBootPatches()` via SSH. Host VMs have no patches (no dataplane set).
-8. **PatchProfiles:** switch1.json gets `mgmt_ip: "127.0.0.1"`, `ssh_port: 13006`, `console_port: 12006`, `mac: "52:54:00:..."`. Virtual host profiles patched with parent VM's ports.
+8. **State saved.** `NodeState` for switch1 records `SSHPort: 13006`, `ConsolePort: 12006`. Runtime port values are not written into profile JSON files — newtron retrieves them at connect time via `pkg/newtlab/client/PortResolver` calling `GET /newtlab/v1/topologies/2node-ngdp/status`.
 9. **Host namespaces:** `provisionHostNamespaces()` SSHs into hostvm-0, creates 6 network namespaces (host1..host6), moves data NICs, assigns IPs via auto-derivation (§4.6).
 
 ### Phase 3 — Provision
@@ -1247,10 +1212,8 @@ identifies the package origin.
 | This LLD section | Related document | Relationship |
 |-----------------|-----------------|--------------|
 | §2.1 `PlatformSpec` VM fields | [newtron LLD](../newtron/lld.md) §3.1 | newtlab extends PlatformSpec |
-| §2.3 `DeviceProfile` newtlab fields | [newtron LLD](../newtron/lld.md) §3.1 | newtlab reads/writes profile fields |
+| §2.3 `DeviceProfile` newtlab fields | [newtron LLD](../newtron/lld.md) §3.1 | newtlab reads profile fields |
 | §2.4 `TopologySpecFile` | [newtron LLD](../newtron/lld.md) §3.1 | newtlab reads topology |
-| §8.1 `PatchProfiles` | [Device LLD](../newtron/device-lld.md) §1 | Patched `SSHPort`/`MgmtIP` read by SSH tunnel |
-| §8.1 `PatchProfiles` | [Device LLD](../newtron/device-lld.md) §5.1 | `SSHUser`/`SSHPass`/`SSHPort` used by `Device.Connect()` |
+| §10.1 `NodeState.SSHPort` | [Device LLD](../newtron/device-lld.md) §1 | newtron reads SSH port from `LabState` via `pkg/newtlab/client/PortResolver` |
 | §4.2 Deploy, §4.3 Destroy | [newtrun LLD](../newtrun/lld.md) §6.1–§6.2 | newtrun wraps `NewLab()` + `Deploy()` / `Destroy()` |
 | §2.1 `PlatformSpec.Dataplane` | [newtrun LLD](../newtrun/lld.md) §6.3 | Platform capability check reads dataplane field |
-| §8.1 Profile patching | [newtrun LLD](../newtrun/lld.md) §4.5 | Device connection relies on patched profiles |
