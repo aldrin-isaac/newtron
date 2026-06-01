@@ -121,14 +121,17 @@ community intended it to work. The test: does the fix use the same CONFIG_DB sig
 and perform the same intended actions? If it introduces a new table or replaces the
 community mechanism, it's reinvention.
 
-## Single-Owner Principle for CONFIG_DB Tables (DRY)
+## Single Owner Per Data Object
 
 *See `DESIGN_PRINCIPLES_NEWTRON.md` §27 for the full principle.*
 
-Each CONFIG_DB table MUST have exactly one owner. Composites call the owning
-primitives and merge their ChangeSets rather than constructing entries inline.
+Every data object that admits no multi-writer story has exactly one owner.
+A CONFIG_DB table is one kind of data object; spec files, lab runtime state,
+and test-run state are others. Two writers operating against an implicit
+shared schema diverge silently the moment either evolves; the inconsistency
+surfaces later, somewhere unrelated.
 
-Target ownership map:
+**CONFIG_DB tables — ownership map:**
 
 ```
 vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
@@ -148,7 +151,13 @@ intent_ops.go      → NEWTRON_INTENT
 service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
-When adding new CONFIG_DB writes, always check the ownership map — never add a second writer.
+**Cross-engine data objects:**
+
+- **Specs** (network.json, topology.json, platforms.json, profiles/*.json) — newtron is the owner; consumers call `/newtron/v1/network/...`. No engine opens spec files directly.
+- **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers call `/newtlab/v1/topologies/...`. No engine reads `~/.newtlab/labs/<name>/state.json` directly.
+- **Test run state** — newtrun is the owner; consumers call `/newtrun/v1/runs/...`.
+
+When adding new state of any kind — new CONFIG_DB writes, new spec fields, new runtime allocations — check who already owns it. Never add a second writer.
 
 ## The Interface Is the Point of Service
 

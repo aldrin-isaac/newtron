@@ -2056,7 +2056,7 @@ structure — file boundaries, method placement, type hierarchies — so
 that the architecture is a property of the code, not an intention
 documented above it.
 
-## 27. Single-Owner CONFIG_DB Tables
+## 27. Single Owner Per Data Object
 
 The ChangeSet (§11) is the single representation of what an operation
 does. That guarantee breaks if two files construct entries for the same
@@ -2064,40 +2064,57 @@ table with different field sets — the ChangeSet faithfully records
 whichever construction site ran, and the inconsistency surfaces as a
 daemon failure on a different platform, hours later.
 
-Each CONFIG_DB table has exactly one owner — a single module responsible
-for constructing, writing, and deleting entries in that table.
-Composites call the owning primitives and merge their ChangeSets.
+A CONFIG_DB table is one kind of data object — a structured chunk of
+state with an implicit schema and dependent consumers. The same failure
+mode applies to every kind: a configuration file, a runtime allocation,
+a counter in shared memory, an in-memory map. Two writers operating
+against an implicit shared schema diverge silently the moment either
+evolves; the inconsistency surfaces later, somewhere unrelated, as a
+stale field, a missed event, a configuration that worked yesterday.
 
-```
-vlan owner        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
-vrf owner         → VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
-bgp owner         → BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
-                     BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA,
-                     BGP_PEER_GROUP, BGP_PEER_GROUP_AF
-evpn owner        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
-                     SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
-acl owner         → ACL_TABLE, ACL_RULE
-qos owner         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
-                     SCHEDULER, WRED_PROFILE
-interface owner   → INTERFACE
-baseline owner    → LOOPBACK_INTERFACE
-portchannel owner → PORTCHANNEL, PORTCHANNEL_MEMBER
-intent owner      → intent records
-service owner     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
-```
+Every data object that admits no multi-writer story has exactly one
+owner — a single module, file, or program responsible for its
+construction, writes, and deletion. Consumers call the owner's
+interface. The interface changes with scope; the rule does not:
 
-**One module owns each table; everyone else calls the owner.** When the
-table format changes, the change propagates through callers, not beside
-them.
+| Scope                       | Owner's interface                                          |
+|-----------------------------|------------------------------------------------------------|
+| File within a module        | direct function call into the owning file                  |
+| Module within a program     | direct function call into the owning module                |
+| Program within a system     | the program's HTTP API                                     |
+| Daemon within a platform    | the daemon's own protocols (Redis pub/sub, file watches)   |
+
+The granularity of enforcement is chosen by the cost asymmetry of the
+data object. Where a mis-write surfaces late and unpredictably and
+where one-owner-per-table is cheap to maintain, ownership tightens to
+the file level — finer than most software systems use. Where the data
+object spans process boundaries, ownership coarsens to the engine
+level, enforced by HTTP APIs. The principle is the same; the mechanism
+scales to fit.
+
+The CONFIG_DB application is the most mechanically visible: each table
+has exactly one owning file — file-level enforcement justified by the
+cost asymmetry above (wrong field set → daemon failure on a different
+platform, hours later). Composites call the owning primitives and
+merge their ChangeSets. The project-specific ownership map lives in
+DESIGN_PRINCIPLES_NEWTRON.md §27.
+
+Locality does not grant ownership. A file any program can open and a
+Redis any client can connect to are no more co-owned than a Go struct
+any package could import. Ownership is designated, not earned.
+
+**One owner per data object; everyone else calls the owner.** When the
+object's shape changes, the change propagates through callers, not
+beside them.
 
 ---
 
 ## 28. File-Level Feature Cohesion
 
-§27 governs writes. This principle governs the entire feature — reads,
-writes, types, existence checks. All code for a feature belongs in one
-module. `GetVLAN` and `VLANInfo` belong with the VLAN owner just as much
-as `CreateVLAN` does.
+§27 names the owner of a data object. This principle widens the rule to
+the feature surrounding it — reads, helpers, types, existence checks.
+All code for a feature belongs in one module. `GetVLAN` and `VLANInfo`
+belong with the VLAN owner just as much as `CreateVLAN` does.
 
 Four module roles enforce the boundary:
 
@@ -2333,10 +2350,14 @@ state — not stale cache from a prior operation. In actuated mode, the
 drift guard also fires at this point, comparing the projection against
 actual device CONFIG_DB.
 
-**DRY across programs.** Single ownership (§27) extends across program
-boundaries: one spec directory, one connection mechanism (SSH-tunneled
-Redis), one verification mechanism (the ChangeSet), one profile per
-device. Every capability duplicated across programs drifts.
+**One mechanism per capability.** Within and across programs, every
+mechanism — the connection layer, the verification representation,
+the schema-validation table — is implemented once and consumed
+wherever it's needed. A mechanism reimplemented in two places
+diverges; tests pass against a different implementation than
+production runs. Data ownership across programs is §27; mechanism
+deduplication is the same instinct applied to *how* rather than
+*what*.
 
 ---
 

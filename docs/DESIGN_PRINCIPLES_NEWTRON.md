@@ -1962,7 +1962,7 @@ encode those guarantees into code structure — file boundaries, method
 placement, type hierarchies — so that the architecture is a property
 of the code, not an intention documented above it.
 
-## 27. Single-Owner CONFIG_DB Tables
+## 27. Single Owner Per Data Object
 
 The ChangeSet (§11) is the single representation of what an operation
 does. That guarantee breaks if two files construct entries for the same
@@ -1970,9 +1970,23 @@ table with different field sets — the ChangeSet faithfully records
 whichever construction site ran, and the inconsistency surfaces as a
 daemon failure on a different platform, hours later.
 
-Each CONFIG_DB table has exactly one owner — a single file responsible
-for constructing, writing, and deleting entries in that table.
-Composites call the owning primitives and merge their ChangeSets.
+A CONFIG_DB table is one kind of data object — a structured chunk of
+state with an implicit schema and dependent consumers. The same failure
+mode applies to every kind: a spec file, a runtime allocation, a
+counter in shared memory. Two writers operating against an implicit
+shared schema diverge silently the moment either evolves; the
+inconsistency surfaces later, somewhere unrelated.
+
+Every data object that admits no multi-writer story has exactly one
+owner. In this project:
+
+**CONFIG_DB tables.** Each table is owned by exactly one file — a
+*file-level* enforcement, finer than most software-engineering
+ownership conventions. The granularity is earned by the cost
+asymmetry: a wrong field set produces a daemon failure on a different
+platform hours later, while one Go file per CONFIG_DB table costs
+almost nothing to maintain. Composites call the owning primitives and
+merge their ChangeSets.
 
 ```
 vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
@@ -1992,18 +2006,43 @@ intent_ops.go      → NEWTRON_INTENT
 service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
-**One file owns each table; everyone else calls the owner.** When the
-table format changes, the change propagates through callers, not beside
-them.
+**Specs (network.json, topology.json, platforms.json, profiles/\*.json).**
+newtron is the owner — it writes the files and exposes their contents
+through `/newtron/v1/network/...`. Sibling engines (newtlab, newtrun)
+and external consumers (newtcon, scripts) call the API. None of them
+open the JSON files directly.
+
+**Lab runtime state (LabState, NodeState, LinkState).** newtlab is the
+owner. SSH ports, console ports, VM PIDs, link bytes/packets — all
+exposed through `/newtlab/v1/topologies/...`. newtron consumes
+per-device SSH port through the API at Device.Connect time; no other
+engine reaches into `~/.newtlab/labs/<name>/state.json`.
+
+**Test run state (RunState, scenario results).** newtrun is the owner.
+Other engines and operators call `/newtrun/v1/runs/...`.
+
+**Device CONFIG_DB and NEWTRON_INTENT.** The device is the owner of its
+own runtime state (§5). newtron reads through its SSH-tunneled Redis
+connection; no other tool reaches into the device's Redis.
+
+Locality does not grant ownership. The fact that `pkg/newtlab/` can
+`fopen("topology.json")` and parse it does not make newtlab a co-owner
+— it makes newtlab a second master of an implicit schema, which is
+exactly the violation §27 forbids. The fix is the same in every scope:
+route consumers through the owner's interface.
+
+**One owner per data object; everyone else calls the owner.** When the
+object's shape changes, the change propagates through callers, not
+beside them.
 
 ---
 
 ## 28. File-Level Feature Cohesion
 
-§27 governs writes. This principle governs the entire feature — reads,
-writes, types, existence checks. All code for a feature belongs in one
-file. `GetVLAN` and `VLANInfo` belong in `vlan_ops.go` just as much as
-`CreateVLAN` does.
+§27 names the owner of a data object. This principle widens the rule to
+the feature surrounding it — reads, helpers, types, existence checks.
+All code for a feature belongs in one file. `GetVLAN` and `VLANInfo`
+belong in `vlan_ops.go` just as much as `CreateVLAN` does.
 
 Four file roles enforce the boundary:
 
@@ -2329,16 +2368,30 @@ Before implementing a SONiC feature:
 
 ---
 
-## 39. DRY Across Programs
+## 39. One Mechanism Per Capability
 
-Single ownership (§27) applies within a program. This convention
-extends it across program boundaries: one spec directory (newtlab,
-newtron, newtrun all read from it), one connection mechanism
-(SSH-tunneled Redis), one verification mechanism (the ChangeSet), one
-platform definition (`platforms.json`), one profile per device
-(newtlab writes runtime fields *into the same profile* newtron reads).
-Every time a capability is duplicated across programs, the copies
-drift.
+§27 says every data object has one owner. This principle says every
+mechanism has one implementation. A mechanism is a *how* — the
+SSH-tunneled Redis connection, the ChangeSet representation, the
+unified-config-mode detection, the schema validation. Each is
+implemented once and consumed wherever it's needed.
+
+A mechanism reimplemented in two places diverges. The second
+implementation begins as a faithful port and then evolves
+independently, picking up local bug fixes the first never receives.
+Tests that pass against the second pass against a different mechanism
+than the production system runs. The drift is structural — neither
+side is wrong, they are simply two different things that share a name.
+
+In this project: the SSH tunnel is built in `pkg/newtron/device/sonic`
+once; consumers reuse it. The ChangeSet vocabulary
+(`ChangeSet.Changes`, `DriftEntry`) lives in `pkg/newtron/device/sonic`
+once; consumers serialize and deserialize it but never re-define it.
+Schema validation lives in `pkg/newtron/device/sonic/schema.go` once;
+every write path consults the same table.
+
+For data ownership across programs, see §27 ("Single Owner Per Data
+Object"). Mechanisms are reused; data has one master.
 
 ---
 
