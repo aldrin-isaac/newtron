@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
@@ -848,7 +849,11 @@ func TestBridgeStats(t *testing.T) {
 	zConn.Write(zData)
 	aConn.Read(buf)
 
-	stats = bridge.Stats()
+	// The bridge worker increments byte counters AFTER forwarding
+	// (countingWriter writes then Add). When Read returns, the data
+	// has been delivered but the counter goroutine may not have run
+	// yet. Poll for the expected counts with a tight timeout.
+	stats = waitForBridgeStats(t, bridge, 4, 8, time.Second)
 	if stats.Links[0].AToZBytes != 4 {
 		t.Errorf("AToZBytes = %d, want 4", stats.Links[0].AToZBytes)
 	}
@@ -861,6 +866,27 @@ func TestBridgeStats(t *testing.T) {
 	if !stats.Links[0].Connected {
 		t.Error("connected = false, want true")
 	}
+}
+
+// waitForBridgeStats polls bridge.Stats() until the first link reports
+// the expected AToZBytes and ZToABytes (or the timeout fires). The
+// counter increment in countingWriter happens AFTER the byte forward,
+// so a Read returning does not guarantee the counter is up-to-date.
+// This polling absorbs the small scheduling window.
+func waitForBridgeStats(t *testing.T, bridge *Bridge, wantAtoZ, wantZtoA int64, timeout time.Duration) BridgeStats {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var stats BridgeStats
+	for time.Now().Before(deadline) {
+		stats = bridge.Stats()
+		if len(stats.Links) >= 1 &&
+			stats.Links[0].AToZBytes >= wantAtoZ &&
+			stats.Links[0].ZToABytes >= wantZtoA {
+			return stats
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return stats
 }
 
 // ============================================================================
