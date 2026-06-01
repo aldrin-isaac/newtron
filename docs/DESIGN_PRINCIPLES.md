@@ -2079,14 +2079,25 @@ interface. The interface changes with scope; the rule does not:
 
 | Scope                       | Owner's interface                                          |
 |-----------------------------|------------------------------------------------------------|
+| File within a module        | direct function call into the owning file                  |
 | Module within a program     | direct function call into the owning module                |
 | Program within a system     | the program's HTTP API                                     |
 | Daemon within a platform    | the daemon's own protocols (Redis pub/sub, file watches)   |
 
+The granularity of enforcement is chosen by the cost asymmetry of the
+data object. Where a mis-write surfaces late and unpredictably and
+where one-owner-per-table is cheap to maintain, ownership tightens to
+the file level — finer than most software systems use. Where the data
+object spans process boundaries, ownership coarsens to the engine
+level, enforced by HTTP APIs. The principle is the same; the mechanism
+scales to fit.
+
 The CONFIG_DB application is the most mechanically visible: each table
-has exactly one owning module; composites call the owning primitives
-and merge their ChangeSets. The project-specific ownership map lives
-in DESIGN_PRINCIPLES_NEWTRON.md §27.
+has exactly one owning file — file-level enforcement justified by the
+cost asymmetry above (wrong field set → daemon failure on a different
+platform, hours later). Composites call the owning primitives and
+merge their ChangeSets. The project-specific ownership map lives in
+DESIGN_PRINCIPLES_NEWTRON.md §27.
 
 Locality does not grant ownership. A file any program can open and a
 Redis any client can connect to are no more co-owned than a Go struct

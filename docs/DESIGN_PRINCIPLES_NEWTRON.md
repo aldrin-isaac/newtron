@@ -1980,8 +1980,13 @@ inconsistency surfaces later, somewhere unrelated.
 Every data object that admits no multi-writer story has exactly one
 owner. In this project:
 
-**CONFIG_DB tables.** Each table is owned by exactly one file.
-Composites call the owning primitives and merge their ChangeSets.
+**CONFIG_DB tables.** Each table is owned by exactly one file — a
+*file-level* enforcement, finer than most software-engineering
+ownership conventions. The granularity is earned by the cost
+asymmetry: a wrong field set produces a daemon failure on a different
+platform hours later, while one Go file per CONFIG_DB table costs
+almost nothing to maintain. Composites call the owning primitives and
+merge their ChangeSets.
 
 ```
 vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
