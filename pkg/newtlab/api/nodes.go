@@ -16,7 +16,7 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
 		return
 	}
-	lab, err := s.openLab(name)
+	lab, err := s.openLab(r.Context(), name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return
@@ -41,7 +41,7 @@ func (s *Server) handleStopNode(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
 		return
 	}
-	lab, err := s.openLab(name)
+	lab, err := s.openLab(r.Context(), name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return

@@ -16,13 +16,11 @@ func (net *Network) ListProfiles() []string {
 	return net.internal.ListProfiles()
 }
 
-// ShowProfile returns the profile for a given device name, converted to DeviceProfileDetail.
-func (net *Network) ShowProfile(name string) (*DeviceProfileDetail, error) {
-	p, err := net.internal.GetProfile(name)
-	if err != nil {
-		return nil, err
-	}
-	return convertProfileDetail(name, p), nil
+// ShowProfile returns the canonical DeviceProfile (§46) for a single
+// device. Consumers (CLI, newtrun, newtlab) read whatever subset of
+// fields they need.
+func (net *Network) ShowProfile(name string) (*spec.DeviceProfile, error) {
+	return net.internal.GetProfile(name)
 }
 
 // CreateProfile creates a new device profile.
@@ -137,27 +135,3 @@ func (net *Network) DeleteZone(name string, opts ExecOpts) error {
 	return net.internal.DeleteZone(name)
 }
 
-// ============================================================================
-// Conversion helpers
-// ============================================================================
-
-func convertProfileDetail(name string, p *spec.DeviceProfile) *DeviceProfileDetail {
-	detail := &DeviceProfileDetail{
-		Name:        name,
-		MgmtIP:      p.MgmtIP,
-		LoopbackIP:  p.LoopbackIP,
-		Zone:        p.Zone,
-		Platform:    p.Platform,
-		MAC:         p.MAC,
-		UnderlayASN: p.UnderlayASN,
-		SSHUser:     p.SSHUser,
-	}
-	if p.EVPN != nil {
-		detail.EVPN = &EVPNDetail{
-			Peers:          p.EVPN.Peers,
-			RouteReflector: p.EVPN.RouteReflector,
-			ClusterID:      p.EVPN.ClusterID,
-		}
-	}
-	return detail
-}

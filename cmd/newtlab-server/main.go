@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
+	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
 // defaultListen — loopback-only; newt-server fronts external traffic on :18080.
@@ -33,6 +34,8 @@ const defaultListen = "127.0.0.1:19082"
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories")
+	newtronServer := flag.String("newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
+	netID := flag.String("net-id", "default", "newtron network ID")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtlab-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -41,9 +44,13 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
+	// newtlab consumes spec data via newtron's HTTP API (§27).
+	newtronAPIClient := newtronclient.New(*newtronServer, *netID)
+
 	srv := api.NewServer(api.Config{
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
+		NewtronClient:  newtronAPIClient,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

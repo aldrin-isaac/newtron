@@ -19,6 +19,19 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// SpecClient is the minimal interface newtlab needs from newtron's HTTP
+// client. Defined here (rather than imported) so test code can mock
+// without depending on the full pkg/newtron/client package, and so the
+// boundary between engines is explicit (DESIGN_PRINCIPLES_NEWTRON.md
+// §27 — newtron owns the spec data object; newtlab reads through
+// newtron's HTTP API). *pkg/newtron/client.Client satisfies this
+// interface structurally.
+type SpecClient interface {
+	GetTopology() (*spec.TopologySpecFile, error)
+	ListPlatforms() (*spec.PlatformSpecFile, error)
+	ShowProfile(name string) (*spec.DeviceProfile, error)
+}
+
 // HostVMGroup represents virtual hosts coalesced into one VM.
 type HostVMGroup struct {
 	VMName  string         // synthetic VM name (e.g., "hostvm-0")
@@ -26,11 +39,11 @@ type HostVMGroup struct {
 	NICBase map[string]int // host name → base NIC index on VM
 }
 
-// Lab is the top-level newtlab orchestrator. It reads newtron spec files,
-// resolves VM configuration, and manages QEMU processes.
+// Lab is the top-level newtlab orchestrator. It consumes newtron specs
+// via the HTTP API (§27 — newtron owns spec files), resolves VM
+// configuration, and manages QEMU processes.
 type Lab struct {
 	Name         string
-	SpecDir      string
 	StateDir     string
 	Topology     *spec.TopologySpecFile
 	Platform     *spec.PlatformSpecFile
@@ -43,6 +56,12 @@ type Lab struct {
 	Force        bool
 	DeviceFilter []string // if non-empty, only provision these devices
 
+	// specClient is the newtron HTTP client used to reload spec data
+	// when internal operations need a fresh view (e.g., Start() re-
+	// resolving a stopped node's config). Set by NewLab; not mutable
+	// after construction.
+	specClient SpecClient
+
 	// OnProgress is an optional callback for reporting deploy/destroy progress.
 	OnProgress func(phase, detail string)
 }
@@ -53,61 +72,61 @@ func (l *Lab) progress(phase, detail string) {
 	}
 }
 
-// NewLab loads specs from specDir and returns a configured Lab.
-func NewLab(specDir string) (*Lab, error) {
-	absDir, err := filepath.Abs(specDir)
-	if err != nil {
-		return nil, fmt.Errorf("newtlab: resolve spec dir: %w", err)
+// NewLab loads specs from newtron-server via HTTP and returns a
+// configured Lab. The client must be configured for the network that
+// owns the named topology.
+//
+// topologyName is the lab's identity — it appears as the state-directory
+// name under ~/.newtlab/labs/<name>/ and as the topology reference for
+// downstream commands. The client is expected to have been constructed
+// for the network that owns this topology (per-network HTTP client per
+// pkg/newtron/client conventions).
+//
+// newtlab no longer reads spec JSON files directly (DESIGN_PRINCIPLES
+// §27 — newtron owns the spec files and exposes their contents through
+// `/newtron/v1/network/...`).
+func NewLab(ctx context.Context, client SpecClient, topologyName string) (*Lab, error) {
+	if client == nil {
+		return nil, fmt.Errorf("newtlab: nil newtron client")
 	}
-
-	name := filepath.Base(absDir)
-	if name == "specs" {
-		name = filepath.Base(filepath.Dir(absDir))
+	if topologyName == "" {
+		return nil, fmt.Errorf("newtlab: topology name required")
 	}
 
 	l := &Lab{
-		Name:     name,
-		SpecDir:  absDir,
-		StateDir: LabDir(name),
-		Profiles: make(map[string]*spec.DeviceProfile),
-		Nodes:    make(map[string]*NodeConfig),
+		Name:       topologyName,
+		StateDir:   LabDir(topologyName),
+		Profiles:   make(map[string]*spec.DeviceProfile),
+		Nodes:      make(map[string]*NodeConfig),
+		specClient: client,
 	}
 
-	// Load topology.json
-	topoData, err := os.ReadFile(filepath.Join(absDir, "topology.json"))
+	// Topology from newtron
+	topo, err := client.GetTopology()
 	if err != nil {
-		return nil, fmt.Errorf("newtlab: read topology.json: %w", err)
+		return nil, fmt.Errorf("newtlab: get topology from newtron: %w", err)
 	}
-	if err := json.Unmarshal(topoData, &l.Topology); err != nil {
-		return nil, fmt.Errorf("newtlab: parse topology.json: %w", err)
-	}
+	l.Topology = topo
 
-	// Links must be explicit in topology.json
+	// Links must be explicit in topology
 	if len(l.Topology.Links) == 0 {
-		util.Logger.Infof("newtlab: no links defined in topology.json")
+		util.Logger.Infof("newtlab: no links defined in topology %q", topologyName)
 	}
 
-	// Load platforms.json
-	platData, err := os.ReadFile(filepath.Join(absDir, "platforms.json"))
+	// Platforms from newtron
+	platforms, err := client.ListPlatforms()
 	if err != nil {
-		return nil, fmt.Errorf("newtlab: read platforms.json: %w", err)
+		return nil, fmt.Errorf("newtlab: get platforms from newtron: %w", err)
 	}
-	if err := json.Unmarshal(platData, &l.Platform); err != nil {
-		return nil, fmt.Errorf("newtlab: parse platforms.json: %w", err)
-	}
+	l.Platform = platforms
 
-	// Load device profiles
+	// Per-device profiles from newtron
 	for deviceName := range l.Topology.Devices {
-		profilePath := filepath.Join(absDir, "profiles", deviceName+".json")
-		data, err := os.ReadFile(profilePath)
+		profile, err := client.ShowProfile(deviceName)
 		if err != nil {
-			return nil, fmt.Errorf("newtlab: read profile %s: %w", deviceName, err)
+			return nil, fmt.Errorf("newtlab: get profile %s from newtron: %w", deviceName, err)
 		}
-		var profile spec.DeviceProfile
-		if err := json.Unmarshal(data, &profile); err != nil {
-			return nil, fmt.Errorf("newtlab: parse profile %s: %w", deviceName, err)
-		}
-		l.Profiles[deviceName] = &profile
+		l.Profiles[deviceName] = profile
 	}
 
 	// Resolve newtlab config with defaults
@@ -309,7 +328,7 @@ func (l *Lab) buildHostMap() map[string]HostMapping {
 // and patches profiles. The context is checked at each major phase and
 // threaded into long-running sub-operations.
 func (l *Lab) Deploy(ctx context.Context) error {
-	util.Logger.Infof("newtlab: deploying lab %s from %s", l.Name, l.SpecDir)
+	util.Logger.Infof("newtlab: deploying lab %s", l.Name)
 
 	// Check for stale state
 	if existing, err := LoadState(l.Name); err == nil && existing != nil {
@@ -346,7 +365,6 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	l.State = &LabState{
 		Name:       l.Name,
 		Created:    time.Now(),
-		SpecDir:    l.SpecDir,
 		SSHKeyPath: sshKeyPath,
 		Nodes:      make(map[string]*NodeState),
 	}
@@ -925,6 +943,15 @@ func StartByName(ctx context.Context, labName, nodeName string) error {
 	return lab.Start(ctx, nodeName)
 }
 
+// DestroyByName destroys a lab identified only by name. Used by callers
+// (e.g., newtrun's stop command) that tear down a deployment without
+// needing to re-fetch spec data from newtron — Destroy() operates on
+// newtlab's own persisted state (state.json), not on specs.
+func DestroyByName(ctx context.Context, labName string) error {
+	lab := &Lab{Name: labName}
+	return lab.Destroy(ctx)
+}
+
 // Destroy kills QEMU processes, removes overlays, cleans state,
 // and restores profiles. The context allows cancellation of the
 // teardown sequence.
@@ -936,9 +963,6 @@ func (l *Lab) Destroy(ctx context.Context) error {
 		return err
 	}
 	l.State = state
-	if l.SpecDir == "" {
-		l.SpecDir = state.SpecDir
-	}
 
 	var errs []error
 
@@ -1049,8 +1073,14 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 		return fmt.Errorf("newtlab: node %q not found", nodeName)
 	}
 
-	// Re-load lab config to rebuild the node
-	lab, err := NewLab(state.SpecDir)
+	// Re-load lab config to rebuild the node. The original Lab's
+	// specClient is reused — newtlab is not the owner of spec data,
+	// so re-fetching from newtron picks up any operator edits since
+	// the original Deploy() was called.
+	if l.specClient == nil {
+		return fmt.Errorf("newtlab: cannot reload — no newtron client (lab was constructed without one)")
+	}
+	lab, err := NewLab(ctx, l.specClient, l.Name)
 	if err != nil {
 		return fmt.Errorf("newtlab: reload specs: %w", err)
 	}
@@ -1098,9 +1128,6 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
-	}
-	if l.SpecDir == "" {
-		l.SpecDir = state.SpecDir
 	}
 
 	// Apply device filter if set

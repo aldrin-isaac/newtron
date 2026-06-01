@@ -2,23 +2,17 @@ package newtron
 
 import "github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 
-// ListPlatforms returns all platform definitions, converted to PlatformDetail.
-func (net *Network) ListPlatforms() map[string]*PlatformDetail {
+// ListPlatforms returns the canonical PlatformSpecFile (§46). Consumers
+// (CLI, newtrun, newtlab) read whatever subset of fields they need.
+func (net *Network) ListPlatforms() *spec.PlatformSpecFile {
 	platforms := net.internal.Platforms()
-	result := make(map[string]*PlatformDetail, len(platforms))
-	for name, p := range platforms {
-		result[name] = convertPlatformDetail(name, p)
-	}
-	return result
+	return &spec.PlatformSpecFile{Platforms: platforms}
 }
 
-// ShowPlatform returns the platform spec for a given name, converted to PlatformDetail.
-func (net *Network) ShowPlatform(name string) (*PlatformDetail, error) {
-	p, err := net.internal.GetPlatform(name)
-	if err != nil {
-		return nil, err
-	}
-	return convertPlatformDetail(name, p), nil
+// ShowPlatform returns the canonical PlatformSpec (§46) for a single
+// platform.
+func (net *Network) ShowPlatform(name string) (*spec.PlatformSpec, error) {
+	return net.internal.GetPlatform(name)
 }
 
 // GetAllFeatures returns all known feature names from the dependency map.
@@ -47,16 +41,3 @@ func (net *Network) PlatformSupportsFeature(platform, feature string) bool {
 	return p.SupportsFeature(feature)
 }
 
-func convertPlatformDetail(name string, p *spec.PlatformSpec) *PlatformDetail {
-	return &PlatformDetail{
-		Name:                name,
-		HWSKU:               p.HWSKU,
-		Description:         p.Description,
-		DeviceType:          p.DeviceType,
-		Dataplane:           p.Dataplane,
-		DefaultSpeed:        p.DefaultSpeed,
-		PortCount:           p.PortCount,
-		Breakouts:           p.Breakouts,
-		UnsupportedFeatures: p.UnsupportedFeatures,
-	}
-}

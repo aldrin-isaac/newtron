@@ -14,8 +14,9 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,14 +25,17 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
 var (
-	specDir string
-	verbose bool
+	specDir       string
+	verbose       bool
+	newtronServer string
+	netID         string
 )
 
 func main() {
@@ -71,6 +75,8 @@ Topologies are resolved by name from newtrun/topologies/.
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory (overrides topology name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
+	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "default", "newtron network ID")
 
 	rootCmd.AddCommand(
 		newListCmd(),
@@ -111,17 +117,57 @@ func resolveTopologyDir(name string) string {
 	return filepath.Join(topologiesBaseDir(), name, "specs")
 }
 
+// topologyNameFromPath derives the topology name from a spec directory
+// path. Mirrors the convention used by newtron-server's topologyName():
+// /path/to/<topology>/specs → <topology>; /path/to/<topology> → <topology>.
+func topologyNameFromPath(absDir string) string {
+	base := filepath.Base(absDir)
+	if base == "specs" {
+		return filepath.Base(filepath.Dir(absDir))
+	}
+	return base
+}
+
+// prepareLab returns a configured *newtlab.Lab for the given topology
+// reference. It constructs a newtron HTTP client, registers the spec
+// directory with newtron (idempotent: 409 conflict is treated as
+// success), and calls newtlab.NewLab which consumes specs via the
+// newtron API (DESIGN_PRINCIPLES §27 — newtron owns spec files).
+func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
+	name, dir, err := resolveTarget(args)
+	if err != nil {
+		return nil, err
+	}
+	client := newtronclient.New(newtronServer, netID)
+	// Ensure the network is registered on newtron-server so it can
+	// serve specs for this topology. If newtron is already serving a
+	// different spec dir under the same netID, surface that error.
+	if dir != "" {
+		if regErr := client.RegisterNetwork(dir); regErr != nil {
+			// 409 conflict means already registered — treat as success
+			// (RegisterNetwork already swallows 409 per pkg/newtron/client/client.go).
+			// Other errors are real.
+			if se, ok := regErr.(*newtronclient.ServerError); !ok || se.StatusCode != http.StatusConflict {
+				return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
+			}
+		}
+	}
+	return newtlab.NewLab(ctx, client, name)
+}
+
 // resolveTarget resolves both lab name and spec directory from:
 // -S flag > positional topology name > auto-detect from deployed labs.
 // This is the shared resolution logic used by resolveSpecDir and resolveLabName.
+// The spec directory is no longer used for file reads (§27 — newtron owns
+// spec files); it is the path newtron is asked to register and serve.
 func resolveTarget(args []string) (labName string, dir string, err error) {
 	// Explicit -S flag takes priority
 	if specDir != "" {
-		lab, labErr := newtlab.NewLab(specDir)
-		if labErr != nil {
-			return "", "", labErr
+		absDir, absErr := filepath.Abs(specDir)
+		if absErr != nil {
+			return "", "", fmt.Errorf("resolve spec dir: %w", absErr)
 		}
-		return lab.Name, specDir, nil
+		return topologyNameFromPath(absDir), absDir, nil
 	}
 
 	// Positional topology name
@@ -142,11 +188,7 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 		if _, statErr := os.Stat(d); statErr != nil {
 			return "", "", fmt.Errorf("topology %q not found: %s does not exist", args[0], d)
 		}
-		lab, labErr := newtlab.NewLab(d)
-		if labErr != nil {
-			return "", "", labErr
-		}
-		return lab.Name, d, nil
+		return args[0], d, nil
 	}
 
 	// Auto-detect from deployed labs
@@ -204,67 +246,49 @@ func newListCmd() *cobra.Command {
 				}
 			}
 
-			t := cli.NewTable("TOPOLOGY", "DEVICES", "LINKS", "STATUS", "NODES").WithPrefix("  ")
+			// Display per-topology rows. Device/link counts come from
+			// the spec, which is newtron's data object (§27) — newtlab
+			// does not read spec files. Operators who want per-node
+			// detail run `newtlab status <topology>`.
+			t := cli.NewTable("TOPOLOGY", "STATUS", "NODES").WithPrefix("  ")
 			for _, e := range entries {
 				if !e.IsDir() {
 					continue
 				}
-				topoDir := filepath.Join(base, e.Name(), "specs")
-				devices, links := topoCounts(topoDir)
-				if devices == 0 {
+				// Skip directories without a specs subdirectory (not a topology).
+				if _, err := os.Stat(filepath.Join(base, e.Name(), "specs", "topology.json")); err != nil {
 					continue
 				}
 
-				// Check deployment status
+				// Check deployment status against newtlab's own state.
 				status := "—"
 				nodes := ""
-				// Derive lab name the same way NewLab does
-				lab, err := newtlab.NewLab(topoDir)
-				if err == nil {
-					if state, ok := deployedLabs[lab.Name]; ok {
-						running, total := 0, 0
-						for _, n := range state.Nodes {
-							total++
-							if n.Status == "running" {
-								running++
-							}
+				if state, ok := deployedLabs[e.Name()]; ok {
+					running, total := 0, 0
+					for _, n := range state.Nodes {
+						total++
+						if n.Status == "running" {
+							running++
 						}
-						if running == total && total > 0 {
-							status = green("deployed")
-							nodes = fmt.Sprintf("%d/%d running", running, total)
-						} else if running > 0 {
-							status = yellow("degraded")
-							nodes = fmt.Sprintf("%d/%d running", running, total)
-						} else if total > 0 {
-							status = yellow("stopped")
-							nodes = fmt.Sprintf("0/%d", total)
-						}
+					}
+					if running == total && total > 0 {
+						status = green("deployed")
+						nodes = fmt.Sprintf("%d/%d running", running, total)
+					} else if running > 0 {
+						status = yellow("degraded")
+						nodes = fmt.Sprintf("%d/%d running", running, total)
+					} else if total > 0 {
+						status = yellow("stopped")
+						nodes = fmt.Sprintf("0/%d", total)
 					}
 				}
 
-				t.Row(e.Name(), fmt.Sprintf("%d", devices), fmt.Sprintf("%d", links), status, nodes)
+				t.Row(e.Name(), status, nodes)
 			}
 			t.Flush()
 			return nil
 		},
 	}
-}
-
-// topoCounts returns device and link counts from a topology.json.
-func topoCounts(specDir string) (int, int) {
-	path := filepath.Join(specDir, "topology.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, 0
-	}
-	var topo struct {
-		Devices map[string]json.RawMessage `json:"devices"`
-		Links   []json.RawMessage          `json:"links"`
-	}
-	if err := json.Unmarshal(data, &topo); err != nil {
-		return 0, 0
-	}
-	return len(topo.Devices), len(topo.Links)
 }
 
 // ============================================================================

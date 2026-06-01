@@ -44,11 +44,15 @@ spec directory recorded in state, so it requires the state to be readable.`,
 				}
 			}
 
-			// Destroy the topology if the spec dir is on disk.
-			if state.SpecDir != "" {
-				if lab, err := newtlab.NewLab(state.SpecDir); err == nil {
-					fmt.Printf("destroying topology %s...\n", resolveTopologyFromState(state))
-					if err := lab.Destroy(ctx); err != nil {
+			// Destroy the topology if one was deployed for this suite.
+			// Uses DestroyByName (name-only) so we don't need a newtron
+			// client just to tear down — Destroy operates on newtlab's
+			// own state file, not on spec data.
+			topologyName := resolveTopologyFromState(state)
+			if topologyName != "" {
+				if _, err := newtlab.LoadState(topologyName); err == nil {
+					fmt.Printf("destroying topology %s...\n", topologyName)
+					if err := newtlab.DestroyByName(ctx, topologyName); err != nil {
 						fmt.Printf("warning: destroy topology: %v\n", err)
 					}
 				}

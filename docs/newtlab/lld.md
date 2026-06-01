@@ -188,7 +188,6 @@ The top-level orchestrator. Created by `NewLab()` (§4.1), consumed by
 ```go
 type Lab struct {
     Name         string
-    SpecDir      string
     StateDir     string
     Topology     *spec.TopologySpecFile
     Platform     *spec.PlatformSpecFile
@@ -366,20 +365,40 @@ processes, then `Deploy` executes that plan phase by phase. `Destroy`, `Stop`,
 
 ### 4.1 NewLab
 
-`NewLab(specDir)` loads all spec files and produces a fully resolved `Lab`
-ready for deployment. It does not start any processes.
+`NewLab(ctx, client, topologyName)` fetches spec data from newtron-server
+via the provided HTTP client and produces a fully resolved `Lab` ready for
+deployment. It does not start any processes.
+
+Spec data flows from newtron — newtron owns the spec files
+(`network.json`, `topology.json`, `platforms.json`, `profiles/*.json`) per
+DESIGN_PRINCIPLES §27 (Single Owner Per Data Object). newtlab is a
+consumer, not a reader of those files. The client argument is typically
+`*pkg/newtron/client.Client`, which satisfies `SpecClient` structurally.
 
 Steps:
 
-1. Resolve `specDir` to absolute path. Derive lab name from parent directory (e.g., `newtrun/topologies/2node-ngdp/specs` → `"2node-ngdp"`).
-2. Load and parse `topology.json`, `platforms.json`.
-3. If `topology.Links` is empty, derive links from `interface.link` fields via `DeriveLinksFromInterfaces()`.
-4. Load `profiles/<device>.json` for each device in the topology.
+1. Call `client.GetTopology()` → `*spec.TopologySpecFile`. The topology
+   name (the lab's identity) is supplied by the caller; in CLI flows it is
+   derived from the directory base name and passed to `prepareLab()` in
+   `cmd/newtlab/main.go`.
+2. If `topology.Links` is empty, derive links from `interface.link` fields
+   via `DeriveLinksFromInterfaces()`.
+3. Call `client.ListPlatforms()` → `*spec.PlatformSpecFile`.
+4. Call `client.ShowProfile(deviceName)` → `*spec.DeviceProfile` for each
+   device in the topology.
 5. Resolve `VMLabConfig` from `topology.NewtLab` with defaults.
 6. For each device (sorted by name): resolve platform, call `ResolveNodeConfig()`, allocate SSH/console ports.
 7. Coalesce host devices into shared VMs (`coalesceHostVMs()`, §3.6).
 8. Auto-place nodes across server pool if configured (`PlaceNodes()`, §9.1).
 9. Allocate links (`AllocateLinks()`, §5.2) — assigns NIC indices, TCP ports, worker hosts, and appends NIC entries to NodeConfigs.
+
+**Bootstrap dependency:** standalone `bin/newtlab` and `bin/newtlab-server`
+need a running newtron-server (default `--newtron-server
+http://127.0.0.1:18080`) before any topology operation. In the composed
+`bin/newt-server` binary both engines share a process; no ordering issue
+arises. The CLI's `prepareLab()` calls `client.RegisterNetwork(specDir)`
+idempotently so the operator does not have to register topologies
+manually.
 
 ### 4.2 Deploy
 
@@ -911,7 +930,7 @@ display. Defined in `state.go`.
 type LabState struct {
     Name       string
     Created    time.Time
-    SpecDir    string
+    SpecDir    string                  // legacy: populated by pre-#66 state.json files; new Lab() leaves this empty (spec data flows from newtron via HTTP per §27)
     SSHKeyPath string                  // lab Ed25519 private key path
     Nodes      map[string]*NodeState
     Links      []*LinkState
