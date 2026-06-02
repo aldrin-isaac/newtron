@@ -9,7 +9,6 @@ description: |
     1. The drift guard blocks writes when the device has drifted
     2. Drift detection correctly identifies the injected entry
     3. switch2 (undrifted) is not affected
-topology: 2node-vs-service
 requires: [inject-drift]
 
 steps:

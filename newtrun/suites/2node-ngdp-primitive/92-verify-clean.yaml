@@ -2,7 +2,6 @@ name: verify-clean
 description: |
   Comprehensive CONFIG_DB audit: verify that ALL entries created during the test
   suite have been cleaned up by deprovision primitives. Read-only verification.
-topology: 2node-ngdp
 requires: [teardown-infra]
 
 steps:

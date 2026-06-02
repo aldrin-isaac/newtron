@@ -13,7 +13,6 @@ description: |
       does not own (DEVICE_METADATA is factory-owned by SONiC).
     - --owned-only=false includes DEVICE_METADATA (with hostname=switch1).
     - --owned-only=false returns strictly more tables than the default.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

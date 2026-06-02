@@ -3,7 +3,6 @@ description: |
   Explicit ?reconcile=full in actuated mode: overrides the delta default.
   Verifies that the full reconcile path (config reload + ReplaceAll) still
   works when explicitly requested.
-topology: 1node-vs
 requires: [delta-reconcile-dry-run]
 
 steps:

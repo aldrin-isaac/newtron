@@ -7,7 +7,6 @@ description: |
   Injects a rogue VLAN (Vlan999) that has no corresponding NEWTRON_INTENT
   record. The actuated projection (built from device intents) won't include
   it, so drift detection will flag it as "extra".
-topology: 2node-vs-service
 requires: [verify-actuated-clean]
 
 steps:

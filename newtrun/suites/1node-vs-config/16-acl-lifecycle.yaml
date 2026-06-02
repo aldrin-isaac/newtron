@@ -3,7 +3,6 @@ description: |
   ACL create, add-rule, bind to interface, unbind, delete-rule, delete.
   Intent DAG: device → acl|TEST_ACL → acl|TEST_ACL|RULE_10.
   Binding: interface|Ethernet12 → interface|Ethernet12|acl|ingress.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

@@ -4,7 +4,6 @@ description: |
   ensure all SONiC daemons process the new config from a clean startup state.
   config reload handles both the BGP ASN change (RCA-019) and the vrfmgrd
   VRF_TABLE STATE_DB propagation that intfmgrd needs for VRF-bound interfaces.
-topology: 2node-ngdp-service
 requires: [boot-ssh]
 
 steps:

@@ -6,7 +6,6 @@ description: |
   topology.json — the device's entry has no intents." After clear,
   saving persists the empty intent set. Reloading after save should
   produce an empty tree (confirming topology.json was updated).
-topology: 1node-vs
 requires: [clear-reconcile]
 
 steps:

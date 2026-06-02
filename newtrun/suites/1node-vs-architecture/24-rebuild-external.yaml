@@ -20,7 +20,6 @@ description: |
   - "state" — intent state (actuated/pending)
   - Params as individual hash fields (not a JSON blob)
   - Parent's _children must also be updated (DAG is bidirectional)
-topology: 1node-vs
 requires: [clear-ports]
 
 steps:

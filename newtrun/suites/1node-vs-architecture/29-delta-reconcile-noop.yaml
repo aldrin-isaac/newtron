@@ -2,7 +2,6 @@ name: delta-reconcile-noop
 description: |
   Delta reconcile on a clean device: zero drift → zero changes.
   Verifies that delta reconcile is safe and idempotent when no drift exists.
-topology: 1node-vs
 requires: [delta-reconcile-topology]
 
 steps:

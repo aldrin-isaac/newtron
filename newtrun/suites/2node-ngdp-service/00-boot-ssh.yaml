@@ -3,7 +3,6 @@ description: |
   Verify SSH reachability and SwSS readiness on both switches, then
   verify all hosts. SwSS must be running for 120+ seconds before
   config reload will succeed.
-topology: 2node-ngdp-service
 
 steps:
   - name: ssh-echo-switch1

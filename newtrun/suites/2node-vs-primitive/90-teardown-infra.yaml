@@ -4,7 +4,6 @@ description: |
   config (BGP neighbors, interface IPs). Baseline infrastructure (setup-device)
   has no individual reverse — its collective reverse is reprovision
   (CompositeOverwrite), not config reload.
-topology: 2node-vs
 requires: [service-lifecycle]
 
 steps:

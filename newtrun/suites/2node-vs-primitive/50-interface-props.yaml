@@ -4,7 +4,6 @@ description: |
   Tests mtu, admin_status, and description set/verify primitives.
   ConfigureInterface creates the interface intent anchor that property
   sub-resources attach to (I4 enforcement).
-topology: 2node-vs
 requires: [setup-device]
 
 steps:

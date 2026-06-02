@@ -5,7 +5,6 @@ description: |
   ROUTE_REDISTRIBUTE, VXLAN_TUNNEL, VXLAN_EVPN_NVO, and NEWTRON_INTENT/device.
   Replaces the former configure-loopback primitive — setup-device covers all
   baseline infrastructure in a single intent-producing call.
-topology: 2node-ngdp
 requires: [boot-ssh]
 
 steps:

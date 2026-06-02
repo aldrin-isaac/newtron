@@ -333,6 +333,20 @@ type StartRunRequest struct {
 	// the CLI uses to coordinate report generation client-side. Present
 	// here for CLI compatibility with the original --junit flag.
 	JUnitPath string `json:"junit_path,omitempty"`
+
+	// Targets overrides per-dimension entries of the suite's targets
+	// block at run time. Keys must match dimensions declared in
+	// suite.yaml; omitted keys inherit the suite default. Values
+	// must satisfy the target-value identifier whitelist
+	// (^[A-Za-z0-9_-]+$). Used by parameterized scenarios.
+	Targets map[string][]string `json:"targets,omitempty"`
+
+	// Parameters overrides the suite's parameter defaults at run time.
+	// Keys must match parameters declared in suite.yaml; values are
+	// validated against each parameter's spec (type, constraints) and
+	// rejected with 400 on mismatch. Omit a key to inherit the
+	// default. Used by parameterized scenarios.
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 // StartRunResponse is the body returned by POST /api/runs.

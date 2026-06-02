@@ -40,7 +40,11 @@ func ParseScenarioBytes(data []byte) (*Scenario, error) {
 	return &s, nil
 }
 
-// ParseAllScenarios reads all .yaml files in dir and returns parsed scenarios.
+// ParseAllScenarios reads all .yaml files in dir (excluding suite.yaml
+// which is the suite manifest, parsed separately by LoadSuite) and
+// returns the parsed scenarios. Suite-level validation (template
+// references against suite-level declarations) does not run here —
+// use LoadSuite when that validation is required.
 func ParseAllScenarios(dir string) ([]*Scenario, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -49,7 +53,7 @@ func ParseAllScenarios(dir string) ([]*Scenario, error) {
 
 	var scenarios []*Scenario
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") || e.Name() == "suite.yaml" {
 			continue
 		}
 		s, err := ParseScenario(filepath.Join(dir, e.Name()))

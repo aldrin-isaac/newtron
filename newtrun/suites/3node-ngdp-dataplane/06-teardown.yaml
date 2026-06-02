@@ -4,7 +4,6 @@ description: |
   Transit services are removed with individual reverse actions (RemoveService per interface).
   Baseline infrastructure (setup-device) has no individual reverse — config reload
   restores CONFIG_DB to saved defaults, wiping loopback, BGP, and VTEP config.
-topology: 3node-ngdp
 requires: [evpn-irb]
 
 steps:

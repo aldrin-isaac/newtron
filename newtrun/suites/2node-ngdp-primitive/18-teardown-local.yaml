@@ -4,7 +4,6 @@ description: |
   Removes SVI, VLAN members, VLAN, interface IPs, VRF interface binding, and VRF
   in reverse order of setup. Frees Ethernet1/Ethernet3 on sw1 and Ethernet1 on sw2
   for reuse in cross-switch routing phase.
-topology: 2node-ngdp
 requires: [irb, static-route]
 
 steps:

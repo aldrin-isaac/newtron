@@ -99,8 +99,6 @@ func TestE2E_ScenarioLifecycle(t *testing.T) {
 	const scenario = "smoke"
 	body := []byte(`name: smoke
 description: e2e smoke test
-topology: synthetic
-platform: sonic-vs
 steps:
   - name: wait-one
     action: wait
@@ -108,7 +106,7 @@ steps:
 `)
 
 	// suite create
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", "synthetic"); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	if _, err := os.Stat(filepath.Join(suitesBase, suite)); err != nil {
@@ -170,13 +168,11 @@ func TestE2E_ScenarioPutFromFile(t *testing.T) {
 	binPath := buildCLI(t)
 	ts, suitesBase := newE2EServer(t)
 	const suite = "filedemo"
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", "synthetic"); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	body := []byte(`name: from-file
 description: e2e test for --file path
-topology: synthetic
-platform: sonic-vs
 steps:
   - name: wait
     action: wait
@@ -207,7 +203,7 @@ steps:
 func TestE2E_ScenarioPutRejectsBadYAML(t *testing.T) {
 	binPath := buildCLI(t)
 	ts, _ := newE2EServer(t)
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", "badyaml"); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", "badyaml", "--topology", "synthetic"); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	stdout, stderr, rc := runCLI(t, binPath, ts.URL,

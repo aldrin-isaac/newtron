@@ -1,6 +1,5 @@
 name: boot-ssh
 description: Verify SSH reachability on switch1
-topology: 1node-vs
 
 steps:
   - name: ssh-echo-switch1

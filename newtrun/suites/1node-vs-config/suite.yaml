@@ -1,0 +1,3 @@
+name: 1node-vs-config
+description: CLI configuration flows (VLAN, VRF, PortChannel, ACL, QoS, EVPN spec authoring, interface props) on 1node-vs.
+topology: 1node-vs

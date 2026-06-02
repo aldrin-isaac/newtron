@@ -75,15 +75,17 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	// the SuiteOptions.Suite hooks the file-based pause check that the
 	// existing CLI uses.
 	opts := newtrun.RunOptions{
-		Scenario:  req.Scenario,
-		Target:    req.Target,
-		All:       req.All,
-		Platform:  req.Platform,
-		NoDeploy:  req.NoDeploy,
-		Verbose:   req.Verbose,
-		JUnitPath: req.JUnitPath,
-		Suite:     suiteKey,
-		Keep:      true,
+		Scenario:   req.Scenario,
+		Target:     req.Target,
+		All:        req.All,
+		Platform:   req.Platform,
+		NoDeploy:   req.NoDeploy,
+		Verbose:    req.Verbose,
+		JUnitPath:  req.JUnitPath,
+		Suite:      suiteKey,
+		Keep:       true,
+		Targets:    req.Targets,
+		Parameters: req.Parameters,
 	}
 
 	// Resume from paused state: if a previous run was paused, populate

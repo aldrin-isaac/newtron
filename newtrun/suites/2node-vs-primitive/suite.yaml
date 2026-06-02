@@ -1,0 +1,3 @@
+name: 2node-vs-primitive
+description: Primitive operations on the 2node-vs topology (sonic-vs Force10-S6000 stride-4 ports).
+topology: 2node-vs

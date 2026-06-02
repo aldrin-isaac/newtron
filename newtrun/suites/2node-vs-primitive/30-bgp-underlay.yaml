@@ -16,7 +16,6 @@ description: |
   CONFIG_DB before the BGP restart. CiscoVS bgpcfgd (split mode) handles
   runtime notifications, so the CiscoVS suite can write BGP_NEIGHBOR after
   restart. See RCA-044 for details.
-topology: 2node-vs
 requires: [setup-device]
 
 steps:

@@ -3,7 +3,6 @@ description: |
   VRF BGP neighbor add/remove lifecycle.
   Requires VRF + interface to exist first.
   Intent DAG: device → vrf|Vrf_PEER → interface|Ethernet24 → bgp-peer|Ethernet24.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

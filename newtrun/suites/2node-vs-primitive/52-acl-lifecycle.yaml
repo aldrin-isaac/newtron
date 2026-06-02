@@ -3,7 +3,6 @@ description: |
   Self-contained ACL lifecycle on sw1:Ethernet40 (config-only, no host wired).
   Tests create-acl, add-acl-rule, bind-acl, unbind-acl, delete-acl-rule,
   and delete-acl primitives with full CONFIG_DB verification.
-topology: 2node-vs
 requires: [setup-device]
 
 steps:

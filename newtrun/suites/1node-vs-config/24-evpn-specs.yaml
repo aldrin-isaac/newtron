@@ -2,7 +2,6 @@ name: evpn-specs
 description: |
   EVPN IP-VPN and MAC-VPN spec authoring + VLAN MAC-VPN binding.
   Spec ops are network-scoped; binding is device-scoped.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

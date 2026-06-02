@@ -2,7 +2,6 @@ name: teardown
 description: |
   Reset devices to factory state. Config reload restores CONFIG_DB to the
   saved config_db.json defaults, wiping all newtron-applied config.
-topology: 2node-vs-service
 requires: [verify-unblocked]
 
 steps:

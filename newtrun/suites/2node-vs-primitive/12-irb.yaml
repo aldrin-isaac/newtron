@@ -3,7 +3,6 @@ description: |
   Integrated Routing and Bridging on switch1: configure SVI for VLAN 100
   (created by bridged) in global routing table, verify host1 can ping
   the gateway IP. Demonstrates L3 termination on a bridged VLAN.
-topology: 2node-vs
 requires: [bridged]
 
 steps:

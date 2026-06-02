@@ -1,7 +1,6 @@
 name: boot-ssh
 description: |
   Verify SSH reachability and SwSS readiness on both switches.
-topology: 2node-vs-service
 requires: []
 
 steps:

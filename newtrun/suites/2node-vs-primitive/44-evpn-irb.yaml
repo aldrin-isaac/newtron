@@ -3,7 +3,6 @@ description: |
   EVPN IRB: create Vrf_IRB with L3VNI, configure SVI for VLAN 300 as
   distributed anycast gateway. Verify IRB gateway reachability and L2
   bridging still works. Includes configure/unconfigure-interface sub-lifecycle.
-topology: 2node-vs
 requires: [evpn-bridged]
 
 steps:

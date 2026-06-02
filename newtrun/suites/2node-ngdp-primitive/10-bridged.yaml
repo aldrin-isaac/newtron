@@ -4,7 +4,6 @@ description: |
   untagged members, Ethernet2 as a tagged member (config-only verification).
   Verifies VLAN creation, member configuration (tagging modes), and that the NGDP
   dataplane bridges traffic between the two untagged host-facing ports (pure L2).
-topology: 2node-ngdp
 requires: [boot-ssh]
 
 steps:

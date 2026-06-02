@@ -5,7 +5,6 @@ description: |
   no individual reverse — reprovisioning (CompositeOverwrite) is the
   collective reverse. config reload restores saved state (not factory) since
   every API write calls config save.
-topology: 2node-ngdp
 requires: [service-lifecycle]
 
 steps:

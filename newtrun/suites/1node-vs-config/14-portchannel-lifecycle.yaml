@@ -2,7 +2,6 @@ name: portchannel-lifecycle
 description: |
   PortChannel create, add-interface, remove-interface, delete.
   Intent DAG: device → portchannel|PortChannel1 → portchannel|PortChannel1|Ethernet8.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

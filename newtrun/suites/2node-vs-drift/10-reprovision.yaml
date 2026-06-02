@@ -9,7 +9,6 @@ description: |
     - Extra entry (VLAN|Vlan999) must be removed
     - Modified entry (BGP_GLOBALS local_asn) must be corrected
     - Topology drift detection must report zero entries
-topology: 2node-vs-service
 requires: [detect-drift]
 
 steps:

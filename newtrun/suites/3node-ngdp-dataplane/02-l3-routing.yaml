@@ -6,7 +6,6 @@ description: |
   available as an L2 bridge port for subsequent EVPN scenarios.
   Note: "redistribute connected" is already active from provisioning —
   no vtysh manipulation needed.
-topology: 3node-ngdp
 requires: [provision]
 
 steps:

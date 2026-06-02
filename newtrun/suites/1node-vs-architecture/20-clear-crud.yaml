@@ -5,7 +5,6 @@ description: |
   Architecture §6 (Clear): "Clear + CRUD → build intents from scratch on
   an empty canvas." After clearing, the node has ports but no intents.
   CRUD operations should work normally — creating intents on the empty node.
-topology: 1node-vs
 requires: [mode-switch-state]
 
 steps:

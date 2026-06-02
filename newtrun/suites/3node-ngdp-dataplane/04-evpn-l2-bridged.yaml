@@ -4,7 +4,6 @@ description: |
   Ethernet1 on both switches (→host1 and →host2) are access members.
   Hosts communicate via L2 bridged over VXLAN — verifies the complete EVPN L2
   control and data plane path. Self-cleaning: removes all config at end.
-topology: 3node-ngdp
 requires: [evpn-verify]
 
 steps:

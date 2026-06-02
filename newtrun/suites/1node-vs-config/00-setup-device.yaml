@@ -4,7 +4,6 @@ description: |
   LOOPBACK_INTERFACE, BGP_GLOBALS, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE,
   VXLAN infrastructure, and the root "device" intent.
   No device connection — projection is the output.
-topology: 1node-vs
 
 steps:
   - name: setup-device

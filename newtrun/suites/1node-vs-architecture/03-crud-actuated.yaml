@@ -6,7 +6,6 @@ description: |
   - Intent tree reflects the new intent
   - Drift remains zero (projection matches device after each write)
   - Removing the VLAN cleans up both intent and CONFIG_DB
-topology: 1node-vs
 requires: [topology-reconcile]
 
 steps:

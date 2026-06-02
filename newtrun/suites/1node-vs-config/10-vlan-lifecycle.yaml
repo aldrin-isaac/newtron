@@ -2,7 +2,6 @@ name: vlan-lifecycle
 description: |
   VLAN create/configure-irb/unconfigure-irb/delete lifecycle.
   Intent DAG: device → vlan|100 → interface|Vlan100 (IRB).
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

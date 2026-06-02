@@ -4,7 +4,6 @@ description: |
   Verifies CONFIG_DB matches topology-derived expected state including
   VLANs, VLAN members, SVIs, EVPN VNIs, ARP suppression, service
   bindings, BGP sessions, and interface oper-up status.
-topology: 2node-vs-service
 requires: [provision]
 
 steps:

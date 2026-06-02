@@ -4,7 +4,6 @@ description: |
   the topology.json projection as the expected state.
 
   Uses ?mode=topology&reconcile=delta to override the topology default (full).
-topology: 1node-vs
 requires: [delta-reconcile-actuated]
 
 steps:

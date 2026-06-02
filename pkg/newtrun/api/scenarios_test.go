@@ -20,8 +20,6 @@ import (
 func buildValidScenarioYAML(name string) []byte {
 	return []byte(fmt.Sprintf(`name: %s
 description: synthetic scenario for tests
-topology: synthetic
-platform: sonic-vs
 steps:
   - name: wait-one
     action: wait
@@ -290,17 +288,17 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 	defer ts.Close()
 
 	resp, _ := doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
-		[]byte(`{"name":"fresh"}`))
+		[]byte(`{"name":"fresh","topology":"synthetic"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST status: got %d, want 201", resp.StatusCode)
 	}
-	if _, err := os.Stat(filepath.Join(srv.cfg.SuitesBase, "fresh")); err != nil {
-		t.Errorf("suite dir not created: %v", err)
+	if _, err := os.Stat(filepath.Join(srv.cfg.SuitesBase, "fresh", "suite.yaml")); err != nil {
+		t.Errorf("suite.yaml not created: %v", err)
 	}
 
 	// Duplicate POST → 409.
 	resp, _ = doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
-		[]byte(`{"name":"fresh"}`))
+		[]byte(`{"name":"fresh","topology":"synthetic"}`))
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("duplicate POST status: got %d, want 409", resp.StatusCode)
 	}

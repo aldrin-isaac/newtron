@@ -5,7 +5,6 @@ description: |
   This tests that ReplaceAll (DEL+HSET for all owned tables) is safe to repeat.
   After the first reconcile, the device matches the projection. A second
   reconcile should change nothing — zero drift before AND after.
-topology: 1node-vs
 requires: [mode-switching]
 
 steps:

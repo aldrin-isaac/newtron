@@ -5,7 +5,6 @@ description: |
   and that EVPN BGP sessions reach Established.
   Setup-device with source_ip creates all EVPN overlay infrastructure — this
   file only verifies it and waits for BGP convergence.
-topology: 3node-ngdp
 requires: [l3-routing]
 
 steps:

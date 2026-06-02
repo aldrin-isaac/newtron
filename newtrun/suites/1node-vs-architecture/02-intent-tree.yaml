@@ -5,7 +5,6 @@ description: |
   Verifies that /intent/tree returns the device's intent DAG in both modes:
   topology (from topology.json steps) and actuated (from device NEWTRON_INTENT).
   Both must return the same setup-device step that was provisioned.
-topology: 1node-vs
 requires: [topology-reconcile]
 
 steps:

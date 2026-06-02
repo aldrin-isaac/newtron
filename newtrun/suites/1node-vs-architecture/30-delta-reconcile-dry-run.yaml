@@ -3,7 +3,6 @@ description: |
   Delta reconcile dry-run: returns drift preview without modifying device.
   Dry-run behavior is the same regardless of reconcile mode — it returns
   the drift entries that would be patched.
-topology: 1node-vs
 requires: [delta-reconcile-noop]
 
 steps:

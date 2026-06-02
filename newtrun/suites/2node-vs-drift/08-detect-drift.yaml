@@ -9,7 +9,6 @@ description: |
 
   Uses ?mode=topology so the projection is built from topology.json.
   The injected CONFIG_DB changes diverge from what the topology declares.
-topology: 2node-vs-service
 requires: [inject-drift]
 
 steps:

@@ -10,7 +10,6 @@ description: |
   This is the "drift repair" path — the user runs reconcile after the
   drift guard blocks writes. It differs from topology-reconcile which
   delivers the topology.json projection.
-topology: 1node-vs
 requires: [drift-guard-reads]
 
 steps:

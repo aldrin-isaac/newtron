@@ -24,9 +24,12 @@ import (
 // who want lexical ordering use a "NN-" prefix that fits this charset.
 var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 
-// CreateSuiteRequest is the body for POST /api/suites.
+// CreateSuiteRequest is the body for POST /api/suites. Topology is
+// required — every suite declares its target topology on creation so
+// the runner can guard against topology/scenario mismatches.
 type CreateSuiteRequest struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	Topology string `json:"topology"`
 }
 
 // handleListSuites returns the suite names discoverable under SuitesBase.
@@ -53,6 +56,10 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q: must match %s", req.Name, nameRE))
 		return
 	}
+	if req.Topology == "" {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology is required"))
+		return
+	}
 	dir := filepath.Join(s.cfg.SuitesBase, req.Name)
 	if _, err := os.Stat(dir); err == nil {
 		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
@@ -60,6 +67,16 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
+		return
+	}
+	// Write the minimal suite.yaml — name + topology, no targets/
+	// parameters block. Operators add targets/parameters later by
+	// editing the file directly (no API to edit suite.yaml in v1;
+	// scenarios go through PUT, but suite metadata is rarely-
+	// changed config).
+	suiteYAML := fmt.Sprintf("name: %s\ntopology: %s\n", req.Name, req.Topology)
+	if err := os.WriteFile(filepath.Join(dir, "suite.yaml"), []byte(suiteYAML), 0644); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("write suite.yaml: %w", err))
 		return
 	}
 	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
@@ -86,11 +103,17 @@ func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(entries) > 0 {
-		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q is not empty (%d entries); delete scenarios first", suite, len(entries)))
+	// Empty-suite check ignores suite.yaml — the suite manifest is part
+	// of the suite-create handshake, not user content. A "still has
+	// scenarios" check looks for any other .yaml file.
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "suite.yaml" {
+			continue
+		}
+		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q still has scenarios; delete them first", suite))
 		return
 	}
-	if err := os.Remove(dir); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("remove suite dir: %w", err))
 		return
 	}
@@ -111,7 +134,7 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 		return
 	}
 	dir := filepath.Join(s.cfg.SuitesBase, suite)
-	scenarios, err := newtrun.ParseAllScenarios(dir)
+	loaded, err := newtrun.LoadSuite(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
@@ -120,22 +143,17 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if newtrun.HasRequires(scenarios) {
-		if sorted, sortErr := newtrun.ValidateDependencyGraph(scenarios); sortErr == nil {
-			scenarios = sorted
-		}
+	resp := SuiteScenariosResponse{
+		Suite:    suite,
+		Topology: loaded.Topology,
 	}
-	resp := SuiteScenariosResponse{Suite: suite}
-	if len(scenarios) > 0 {
-		resp.Topology = scenarios[0].Topology
-	}
-	resp.Scenarios = make([]ScenarioSummary, len(scenarios))
-	for i, sc := range scenarios {
+	resp.Scenarios = make([]ScenarioSummary, len(loaded.Scenarios))
+	for i, sc := range loaded.Scenarios {
 		resp.Scenarios[i] = ScenarioSummary{
 			Name:        sc.Name,
 			Description: sc.Description,
-			Topology:    sc.Topology,
-			Platform:    sc.Platform,
+			Topology:    loaded.Topology, // inherited from suite
+			Platform:    loaded.Platform,
 			StepCount:   len(sc.Steps),
 			Requires:    sc.Requires,
 		}

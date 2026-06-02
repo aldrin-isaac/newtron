@@ -1,0 +1,22 @@
+name: 2node-vs-service
+description: |
+  2-node sonic-vs service topology: switch1 + switch2 carrying transit,
+  local-irb, local-bridge, l2-extend, and overlay-irb services. Most
+  scenarios are embedded-target (step-level devices: selectors); the
+  rollout-admin-status scenario opts into the suite-level parameterized
+  catalog declared below.
+topology: 2node-vs-service
+
+# Catalog of targets and parameters that parameterized scenarios in
+# this suite may reference. Embedded-target scenarios coexist
+# alongside without participating in iteration — they keep using
+# step-level devices: selectors and {{device}} substitution.
+targets:
+  devices: [switch1, switch2]
+  interfaces: [Ethernet0, Ethernet4]
+
+parameters:
+  admin_status:
+    type: enum
+    values: [up, down]
+    default: up

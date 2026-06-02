@@ -4,7 +4,6 @@ description: |
   Ethernet8 on both switches (→host2 and →host5) are access members.
   Hosts communicate via L2 bridged over VXLAN — verifies the complete
   EVPN L2 control and data plane path.
-topology: 2node-vs
 requires: [evpn-verify]
 
 steps:

@@ -120,6 +120,10 @@ newtron/
 │
 ├── pkg/newtrun/                  # Engine (the orchestration core)
 │   ├── scenario.go               # Scenario, Step, StepAction, ExpectBlock, BatchCall
+│   ├── suite.go                  # Suite, ParameterSpec, LoadSuite, EffectiveTargets/Parameters,
+│   │                             #   target-value whitelist, ScenarioIsParameterized
+│   ├── template.go               # ExpandStep, CollectTemplateReferences, context-aware
+│   │                             #   substitution (URL/Shell/JQ/Raw), typed full-token preservation
 │   ├── parser.go                 # ParseScenario, ParseScenarioBytes, ValidateDependencyGraph
 │   ├── runner.go                 # Runner, RunOptions, Run(ctx, opts)
 │   ├── steps.go                  # stepExecutor interface, multi-device helpers
@@ -156,21 +160,58 @@ newtron/
 
 The split between `pkg/newtrun/`, `pkg/newtrun/newtrun/v1/`, and `pkg/newtrun/client/` enforces a one-way import direction: `client` → `api` → `newtrun`. The engine package is HTTP-agnostic; the server package adapts the engine to HTTP; the client package consumes the HTTP surface.
 
-## 5. Scenarios and Steps
+## 5. Suites, Scenarios, and Steps
 
-A scenario is a YAML file that defines what to run against a deployed topology. Scenarios are the unit of authorship — users write scenarios to exercise specific network behaviors or to encode operator workflows.
+newtrun organizes test artifacts in three layers:
 
-### 5.1 Scenario structure
+- **Suite** — a directory of scenarios that share a topology. The suite is the unit of orchestration: it owns the topology declaration, an optional catalog of targets/parameters that scenarios may opt into, and the dependency-ordered scenario list. Each suite directory holds one `suite.yaml` manifest and zero or more scenario YAMLs.
+- **Scenario** — one YAML file inside a suite. It is the step list plus dependency metadata (`requires`, `after`, `requires_features`, `repeat`).
+- **Step** — one action within a scenario. Step actions are listed in §5.3.
+
+### 5.1 Suite manifest (`suite.yaml`)
+
+Every suite directory has a `suite.yaml` declaring suite-wide metadata and, when the suite is parameterized, the targets/parameters catalog scenarios may reference.
+
+```yaml
+name: 2node-vs-service          # suite name (matches directory name)
+description: |
+  2-node sonic-vs service topology: switch1 + switch2 carrying transit,
+  local-irb, local-bridge, l2-extend, and overlay-irb services.
+topology: 2node-vs-service       # required — owned by suite, not by scenarios
+platform: sonic-vs               # optional — default for all scenarios
+
+# Catalog used by parameterized scenarios in this suite. Embedded-
+# target scenarios coexist alongside without participating in
+# iteration.
+targets:
+  devices: [switch1, switch2]
+  interfaces: [Ethernet0, Ethernet4]
+
+parameters:
+  admin_status:
+    type: enum
+    values: [up, down]
+    default: up
+```
+
+Scenarios within the suite must not redeclare `topology:` or `platform:` — those live on the suite. Suite-level `targets:` / `parameters:` are the **catalog**; scenarios opt in by using `{{target.X}}` / `{{param.X}}` tokens (§5.4).
+
+### 5.2 Scenario structure
+
+Two scenario shapes coexist in the same suite. The distinction is **where targets are declared**:
+
+- **Embedded-target scenarios** — each step carries its own `devices:` selector; step URLs name the target directly. Typical use: testing — the suite covers a known matrix.
+- **Parameterized scenarios** — declare no `devices:` selectors; steps reference suite-level targets/parameters via `{{target.X}}` / `{{param.X}}` templates. The runner expands them per iteration across the cross-product of declared target dimensions. Typical use: production rollout — same scenario template applied to different fleet slices.
+
+Embedded-target example:
 
 ```yaml
 name: provision
 description: Provision switches and verify BGP convergence
-topology: 2node-ngdp           # topology directory name
-platform: 8101-32fh-vs         # optional platform override
-requires: [boot-ssh]            # other scenarios that must pass first
-after: [other-name]             # ordering only, no pass/fail gate
-requires_features: [acl]        # platform features needed (skip if unsupported)
-repeat: 5                       # stress mode (default 1)
+requires: [boot-ssh]
+after: [other-name]
+requires_features: [acl]
+repeat: 5
 steps:
   - name: provision-all
     action: topology-reconcile
@@ -184,9 +225,33 @@ steps:
     expect: { jq: '.data | all(.status == "established")' }
 ```
 
-A scenario is one YAML file under a suite directory. A **suite** is a directory of scenarios that share a topology. Files within a suite are processed in directory order unless `requires` / `after` declare dependencies; with dependencies, a topological sort produces the execution order.
+Parameterized example (drawn from `newtrun/suites/2node-vs-service/`):
 
-### 5.2 Step actions
+```yaml
+name: rollout-admin-status
+description: Set admin_status on every IP-bearing interface and verify.
+requires: [verify-health]
+steps:
+  - name: set-admin-status
+    action: newtron
+    method: POST
+    url: /node/{{target.device}}/interface/{{target.interface}}/set-property
+    params:
+      property: admin_status
+      value: "{{param.admin_status}}"
+  - name: verify-admin-status
+    action: newtron
+    method: GET
+    url: /node/{{target.device}}/interface/{{target.interface}}
+    expect:
+      # No quotes around {{param.admin_status}} — the template engine
+      # emits "up" (JSON-quoted) when admin_status is a string.
+      jq: .admin_status == {{param.admin_status}}
+```
+
+Files within a suite are processed in directory order unless `requires` / `after` declare dependencies; with dependencies, a topological sort produces the execution order. Whether a scenario is parameterized is detected per-scenario by `ScenarioIsParameterized` — the runner takes the suite's target cross-product for parameterized scenarios and a single nil binding for embedded-target ones.
+
+### 5.3 Step actions
 
 Six built-in actions:
 
@@ -199,9 +264,66 @@ Six built-in actions:
 | `newtron` | Make an arbitrary newtron-server HTTP call with optional polling, batch, and jq expectations |
 | `newtron-cli` | Run the newtron CLI as a subprocess (used for testing CLI behavior specifically) |
 
-The `newtron` action is the most flexible. URLs use a single template placeholder `{{device}}` that the per-device executor expands; URLs without it are treated as network-scoped and dispatched once. The network ID itself is set on the run, not in the URL — the `/network/<id>/` prefix is prepended by the client. Polling, batched call sequences, and `jq` expectations on the response let one action cover most operational and verification patterns.
+The `newtron` action is the most flexible. Polling, batched call sequences, and `jq` expectations on the response let one action cover most operational and verification patterns. URL/Command/Params expansion is described in §5.4.
 
-### 5.3 Inline scenarios
+### 5.4 Template substitution
+
+newtrun expands three families of template tokens in step fields:
+
+| Token | Substituted from | Scenario shape |
+|---|---|---|
+| `{{device}}` | per-device dispatch over the step's `devices:` selector | embedded-target |
+| `{{target.X}}` | suite-level `targets.<X-plural>` (`devices` → `device`, `interfaces` → `interface`) | parameterized |
+| `{{param.X}}` | suite-level `parameters.X` value (request-time override or YAML default) | parameterized |
+
+The two families are mutually exclusive **within a scenario**: a parameterized scenario that uses `{{target.X}}` or `{{param.X}}` must not also use `{{device}}` or set a step-level `devices:` selector. `LoadSuite` rejects the mix at parse time.
+
+Substitution is **context-aware** to defend against injection. The same token expands differently per consumption surface:
+
+| Where the token appears | Encoding |
+|---|---|
+| URL path component | `url.PathEscape` on the substituted value (defensive even when target values pass the identifier whitelist) |
+| Shell command (`host-exec` `command:`) | single-quote wrap with POSIX `'\''` escape for internal single quotes |
+| JQ expression (`expect.jq`) | int / bool emitted as a literal; string emitted as JSON-quoted form. **Do not put your own quotes around a `{{param.X}}` in JQ** — the engine adds them. |
+| JSON params value | A string that consists ENTIRELY of one `{{token}}` keeps the parameter's typed Go value (e.g., int `9100` stays a JSON number); strings with partial tokens stringify and inline (Go's JSON encoder handles JSON escaping later) |
+| Free-form text (`expect.contains`, descriptions) | no escaping |
+
+Target values pass an identifier whitelist (`^[A-Za-z0-9_-]+$`) at YAML parse time and again at request-override time. Parameter values pass their declared type's `Coerce` validation (§5.5).
+
+### 5.5 Parameter declarations
+
+Suite-level `parameters:` blocks accept two YAML forms:
+
+- **Shorthand scalar** — type inferred from the scalar's YAML kind, value becomes the default:
+
+  ```yaml
+  parameters:
+    admin_status: up          # type=string,  default="up"
+    mtu: 9100                 # type=int,     default=9100
+    active: true              # type=bool,    default=true
+  ```
+
+- **Verbose map** — explicit `type:` plus type-specific constraints:
+
+  ```yaml
+  parameters:
+    vlan_id:
+      type: int
+      min: 1
+      max: 4094
+      default: 100
+    link_state:
+      type: enum
+      values: [up, down]
+      default: up
+    peer_ip:
+      type: ipv4
+      required: true          # implies no default; request must supply
+  ```
+
+Recognized types: `string`, `int`, `bool`, `enum`, `ipv4`, `cidr`. Request-time overrides go through `ParameterSpec.Coerce`, which validates the JSON-typed value against the declared spec and rejects with HTTP 400 on type mismatch or constraint violation.
+
+### 5.6 Inline scenarios
 
 Browser frontends submit scenarios inline through `POST /newtrun/v1/runs/inline` rather than authoring suite directories. The YAML body is parsed by the same `ParseScenarioBytes` the file-backed parser uses, then validated against the **inline safety policy** before the Runner starts:
 
@@ -211,7 +333,7 @@ Browser frontends submit scenarios inline through `POST /newtrun/v1/runs/inline`
 - **Topology-reconcile gate**: rejected unless the request opts in (`allow_reconcile: true`).
 - **Wall-time budget**: default 60 seconds, configurable per request.
 
-The browser composer / workbench / inbox surfaces submit inline scenarios in response to operator clicks. Each click is one one-shot scenario; safety guardrails enforce that operator-generated scenarios cannot, for instance, shell out to arbitrary commands.
+Inline scenarios are embedded-target only — parameterization requires a suite catalog and goes through the file-backed `POST /newtrun/v1/runs` path. The browser composer / workbench / inbox surfaces submit inline scenarios in response to operator clicks. Each click is one one-shot scenario; safety guardrails enforce that operator-generated scenarios cannot, for instance, shell out to arbitrary commands.
 
 ## 6. Test Topologies
 

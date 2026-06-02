@@ -14,7 +14,6 @@ description: |
     2. Delete the topology device (now unblocked).
     3. Delete the profile.
   Each step in order maps 1:1 with what an operator would do by hand.
-topology: 1node-vs
 
 steps:
   - name: create-switch2-profile

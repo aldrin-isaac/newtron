@@ -5,7 +5,6 @@ description: |
   (loopback, BGP globals, VTEP, EVPN peer group, overlay peers) persists —
   its collective reverse is reprovision (CompositeOverwrite), not individual
   teardown. Only per-operation entries are verified clean.
-topology: 2node-vs
 requires: [teardown-infra]
 
 steps:

@@ -8,7 +8,6 @@ description: |
   version present, devices map containing switch1.
 
   Reads topology.json loaded by the server; no device interaction.
-topology: 1node-vs
 
 steps:
   - name: read-topology

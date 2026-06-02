@@ -5,7 +5,6 @@ description: |
   Creates a VLAN in topology mode (unsaved mutation), verifies it's in the tree,
   then reloads. After reload, the tree must NOT contain the VLAN — the unsaved
   mutation was discarded. Also tests that reload is rejected in actuated mode.
-topology: 1node-vs
 requires: [intent-save]
 
 steps:

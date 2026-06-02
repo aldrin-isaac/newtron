@@ -6,7 +6,6 @@ description: |
     - Extra: add an unexpected VLAN not in any intent
     - Modified: change the BGP ASN to a wrong value
   These simulate out-of-band CONFIG_DB changes that diverge from the projection.
-topology: 1node-vs
 requires: [crud-actuated]
 
 steps:

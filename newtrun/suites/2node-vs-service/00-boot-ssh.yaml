@@ -3,7 +3,6 @@ description: |
   Verify SSH reachability and SwSS readiness on both switches, then
   verify all hosts. SwSS must be running before any SONiC operation
   (config reload, provision) can succeed.
-topology: 2node-vs-service
 
 steps:
   - name: ssh-echo-switch1

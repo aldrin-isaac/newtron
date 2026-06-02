@@ -6,7 +6,6 @@ description: |
   first (pushes the projection to the device, eliminating drift), then
   retry the write." The error message from the drift guard should guide
   the operator toward reconcile as the fix.
-topology: 1node-vs
 requires: [drift-detail]
 
 steps:

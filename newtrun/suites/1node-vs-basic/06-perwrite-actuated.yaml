@@ -11,7 +11,6 @@ description: |
   Cleans up by deleting VLAN 800 and asserts the delete operation produces
   a redis_delete device_ops entry — closing the operational-symmetry loop
   (§15) at the substrate-observability level.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

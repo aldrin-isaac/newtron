@@ -29,6 +29,14 @@ type Runner struct {
 	Topology string // topology name (from server)
 	SpecDir  string // spec directory (from server)
 
+	// Populated by Run from the loaded suite.yaml. Embedded-target
+	// suites set suite to a minimal value (no Targets/Parameters);
+	// parameterized suites populate iterations and parameters with
+	// the resolved cross-product and effective parameter bindings.
+	suite        *Suite
+	iterations   []map[string]string
+	parameters   map[string]any
+
 	discoveredPlatform string // platform discovered from connected devices
 
 	opts     RunOptions
@@ -46,10 +54,20 @@ type RunOptions struct {
 	Verbose   bool
 	JUnitPath string
 
+	// Targets overrides per-dimension entries of the suite's targets
+	// block at run time. Keys must match dimensions declared in
+	// suite.yaml; omitted keys inherit the suite default.
+	Targets map[string][]string
+
+	// Parameters overrides the suite's parameter defaults at run time.
+	// Keys must match parameters declared in suite.yaml; values are
+	// validated against each parameter's spec (type, constraints).
+	Parameters map[string]any
+
 	// Lifecycle fields (set by `start` command, not by `run`)
-	Suite     string                 // suite name for state tracking; empty disables lifecycle
-	Resume    bool                   // true when resuming a paused run
-	Completed map[string]StepStatus  // scenario → status from previous run (resume)
+	Suite     string                // suite name for state tracking; empty disables lifecycle
+	Resume    bool                  // true when resuming a paused run
+	Completed map[string]StepStatus // scenario → status from previous run (resume)
 }
 
 // NewRunner creates a new test runner.
@@ -60,8 +78,8 @@ func NewRunner(scenariosDir string) *Runner {
 }
 
 // Run executes one or all scenarios and returns results.
-// The server determines the topology — scenarios declare compatible topologies
-// as guards; mismatches fail immediately.
+// The server determines the topology — the suite declares its target
+// topology in suite.yaml; mismatches fail immediately.
 //
 // The supplied context cancels the run between scenario boundaries. SIGINT
 // handling is layered on top so an interactive CLI run still responds to
@@ -73,45 +91,58 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 		return nil, fmt.Errorf("specify --scenario <name>, --target <name>, or --all")
 	}
 
+	// Load the suite: suite.yaml + every scenario file in the dir.
+	// LoadSuite validates all template references against suite-level
+	// declarations and rejects scenarios that set topology/platform.
+	suite, err := LoadSuite(r.ScenariosDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(suite.Scenarios) == 0 {
+		return nil, fmt.Errorf("no scenarios found in %s", r.ScenariosDir)
+	}
+	r.suite = suite
+
+	// Resolve effective targets and parameters from suite defaults +
+	// per-run overrides. Failures here are 400-class — bad request.
+	effTargets, err := suite.EffectiveTargets(opts.Targets)
+	if err != nil {
+		return nil, err
+	}
+	effParams, err := suite.EffectiveParameters(opts.Parameters)
+	if err != nil {
+		return nil, err
+	}
+	// EffectiveTargets returns the suite defaults too; we need a temp
+	// Suite snapshot to drive TargetIterations against the resolved
+	// targets without mutating the loaded suite.
+	resolved := *suite
+	resolved.Targets = effTargets
+	r.iterations = resolved.TargetIterations()
+	r.parameters = effParams
+
+	// Filter scenarios by --scenario / --target / --all.
 	var scenarios []*Scenario
-
-	if opts.All || opts.Target != "" {
-		var err error
-		scenarios, err = ParseAllScenarios(r.ScenariosDir)
-		if err != nil {
-			return nil, err
-		}
-		if len(scenarios) == 0 {
-			return nil, fmt.Errorf("no scenarios found in %s", r.ScenariosDir)
-		}
-	} else {
-		path, err := resolveScenarioPath(r.ScenariosDir, opts.Scenario)
-		if err != nil {
-			return nil, err
-		}
-		s, err := ParseScenario(path)
-		if err != nil {
-			return nil, err
-		}
-		scenarios = []*Scenario{s}
-	}
-
-	// Validate and topologically sort if any scenario declares requires
-	if (opts.All || opts.Target != "") && HasRequires(scenarios) {
-		sorted, err := ValidateDependencyGraph(scenarios)
-		if err != nil {
-			return nil, err
-		}
-		scenarios = sorted
-	}
-
-	// --target: filter to minimal dependency chain
-	if opts.Target != "" {
-		chain, err := ComputeTargetChain(scenarios, opts.Target)
+	switch {
+	case opts.All:
+		scenarios = suite.Scenarios
+	case opts.Target != "":
+		chain, err := ComputeTargetChain(suite.Scenarios, opts.Target)
 		if err != nil {
 			return nil, err
 		}
 		scenarios = chain
+	default:
+		scenarios = nil
+		for _, sc := range suite.Scenarios {
+			if sc.Name == opts.Scenario {
+				scenarios = []*Scenario{sc}
+				break
+			}
+		}
+		if len(scenarios) == 0 {
+			return nil, fmt.Errorf("scenario %q not found in %s", opts.Scenario, r.ScenariosDir)
+		}
 	}
 
 	// Connect to server to learn topology
@@ -121,12 +152,10 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 	}
 	fmt.Fprintf(os.Stderr, "newtrun: server has topology %q (%d nodes)\n", r.Topology, len(r.allDeviceNames()))
 
-	// Guard: all scenarios must be compatible with the server's topology
-	for _, sc := range scenarios {
-		if sc.Topology != "" && sc.Topology != r.Topology {
-			return nil, fmt.Errorf("scenario %q requires topology %q but server has %q loaded",
-				sc.Name, sc.Topology, r.Topology)
-		}
+	// Guard: the suite's topology must match the server's.
+	if suite.Topology != "" && suite.Topology != r.Topology {
+		return nil, fmt.Errorf("suite %q requires topology %q but server has %q loaded",
+			suite.Name, suite.Topology, r.Topology)
 	}
 
 	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })
@@ -182,8 +211,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 
 	// Resolve platform for capability checks
 	deployedPlatform := opts.Platform
-	if deployedPlatform == "" && len(scenarios) > 0 {
-		deployedPlatform = scenarios[0].Platform
+	if deployedPlatform == "" {
+		deployedPlatform = suite.Platform
 	}
 	if deployedPlatform == "" {
 		deployedPlatform = r.discoveredPlatform
@@ -417,9 +446,25 @@ func (r *Runner) connectDevices() error {
 	return nil
 }
 
-// runScenarioSteps executes the steps of a scenario, appending results to result.
-// When scenario.Repeat > 1, all steps are executed in a loop for the specified
-// number of iterations. Execution stops on the first failed iteration.
+// runScenarioSteps executes the steps of a scenario, appending results
+// to result.
+//
+// Three nested loops, outer to inner:
+//
+//   - Repeat: when scenario.Repeat > 1, every step runs that many
+//     times. Repeat is fail-fast — the first failed repeat-iteration
+//     records FailedIteration and stops further repeats.
+//   - Target iteration: for parameterized scenarios, the runner
+//     enumerates the cross-product of suite-level Targets and binds
+//     {{target.X}} / {{param.X}} per iteration. Target iterations are
+//     continue-on-failure — one failing binding does not skip the
+//     remaining bindings, so a production rollout sees every failing
+//     target. Embedded-target scenarios collapse this loop to one
+//     nil-binding pass so the step list runs once.
+//   - Steps: the original step list. Steps are fail-fast within one
+//     target iteration: a failure stops the rest of that iteration's
+//     steps, then the outer loop moves to the next binding
+//     (parameterized) or stops (embedded-target).
 func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult) {
 	repeat := scenario.Repeat
 	if repeat <= 1 {
@@ -427,33 +472,80 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 	}
 	result.Repeat = scenario.Repeat
 
-	for iter := 1; iter <= repeat; iter++ {
-		iterFailed := false
-		for i, step := range scenario.Steps {
-			stepCopy := step
-			r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Steps)) })
+	isParameterized := ScenarioIsParameterized(scenario)
+	var iterations []map[string]string
+	var effectiveParams map[string]any
+	if isParameterized && r.suite != nil {
+		iterations = r.iterations
+		effectiveParams = r.parameters
+	}
+	if iterations == nil {
+		iterations = []map[string]string{nil}
+	}
 
-			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
+	for repeatIter := 1; repeatIter <= repeat; repeatIter++ {
+		repeatFailed := false
 
-			sr := *output.Result
-			if repeat > 1 {
-				sr.Iteration = iter
+		for _, binding := range iterations {
+			iterFailed := false
+
+			for i, step := range scenario.Steps {
+				stepToRun := step
+				var expandErr error
+				if isParameterized {
+					stepToRun, expandErr = ExpandStep(step, binding, effectiveParams)
+				}
+				if expandErr != nil {
+					sr := StepResult{
+						Name:          step.Name,
+						Action:        step.Action,
+						Status:        StepStatusError,
+						Message:       fmt.Sprintf("template expansion: %v", expandErr),
+						TargetBinding: binding,
+					}
+					if repeat > 1 {
+						sr.Iteration = repeatIter
+					}
+					result.Steps = append(result.Steps, sr)
+					iterFailed = true
+					break
+				}
+
+				stepCopy := stepToRun
+				r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Steps)) })
+
+				output := r.executeStep(ctx, &stepToRun, i, len(scenario.Steps), opts)
+
+				sr := *output.Result
+				if repeat > 1 {
+					sr.Iteration = repeatIter
+				}
+				sr.TargetBinding = binding
+				result.Steps = append(result.Steps, sr)
+
+				srCopy := sr
+				r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, i, len(scenario.Steps)) })
+
+				if output.Result.Status == StepStatusFailed || output.Result.Status == StepStatusError {
+					iterFailed = true
+					break
+				}
 			}
-			result.Steps = append(result.Steps, sr)
 
-			srCopy := sr
-			r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, i, len(scenario.Steps)) })
-
-			// Fail-fast within iteration
-			if output.Result.Status == StepStatusFailed || output.Result.Status == StepStatusError {
-				iterFailed = true
+			// Embedded-target scenarios fail-fast (the iteration loop
+			// has only one nil binding, so this propagates immediately
+			// to the repeat loop). Parameterized scenarios continue to
+			// the next binding so the operator sees every failing
+			// target in one run.
+			if iterFailed && !isParameterized {
+				repeatFailed = true
 				break
 			}
 		}
 
-		if iterFailed {
+		if repeatFailed {
 			if repeat > 1 {
-				result.FailedIteration = iter
+				result.FailedIteration = repeatIter
 			}
 			break
 		}
@@ -603,14 +695,14 @@ func (r *Runner) hasDataplane() bool {
 	return p.Dataplane != ""
 }
 
-// resolvePlatform returns the platform name from CLI override, scenario YAML,
-// or device discovery (in that priority order).
+// resolvePlatform returns the platform name from CLI override, suite
+// declaration, or device discovery (in that priority order).
 func (r *Runner) resolvePlatform() string {
 	if r.opts.Platform != "" {
 		return r.opts.Platform
 	}
-	if r.scenario != nil && r.scenario.Platform != "" {
-		return r.scenario.Platform
+	if r.suite != nil && r.suite.Platform != "" {
+		return r.suite.Platform
 	}
 	return r.discoveredPlatform
 }
