@@ -124,6 +124,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/stop", s.handleStopRun)
 	mux.HandleFunc("GET /newtrun/v1/runs/{suite}/events", s.handleRunEvents)
 	mux.HandleFunc("GET /newtrun/v1/topologies", s.handleListTopologies)
+	mux.HandleFunc("POST /newtrun/v1/topologies", s.handleCreateTopology)
 	mux.HandleFunc("GET /newtrun/v1/suites", s.handleListSuites)
 	mux.HandleFunc("POST /newtrun/v1/suites", s.handleCreateSuite)
 	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}", s.handleDeleteSuite)

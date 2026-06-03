@@ -437,13 +437,43 @@ Removes the file. Same lookup rule as GET.
 
 ### `GET /newtrun/v1/topologies`
 
-Returns the topology names discoverable under `topologies_base`. Missing base directory returns an empty array. Read-only; topology authoring is out of scope (issue #33 explicitly excluded it).
+Returns the topology names discoverable under `topologies_base`. Missing base directory returns an empty array.
 
 **Response:** 200 with `data` being a `TopologiesResponse`:
 
 ```json
 { "data": { "topologies": ["1node-vs", "2node-vs", "2node-vs-service"] } }
 ```
+
+### `POST /newtrun/v1/topologies`
+
+Bootstraps a new topology directory under `topologies_base`. The new directory ships with zero-valued `topology.json`, `platforms.json`, and `network.json` plus an empty `profiles/` subdirectory — the minimum set newtron's spec loader requires. The returned `spec_dir` is the value the caller passes to `POST /newtron/v1/network` to register the topology as a newtron Network.
+
+**Request body** — `CreateTopologyRequest`:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Directory name. Must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — same gate suite names go through. |
+| `description` | string | no | Free-text description seeded into `topology.json` so a listing already carries context. |
+
+**Response:** 201 with `data` being a `CreateTopologyResponse`:
+
+```json
+{ "data": { "name": "demo-1", "spec_dir": "newtrun/topologies/demo-1/specs" } }
+```
+
+400 on invalid name or malformed body. 409 if the topology already exists.
+
+**Chained operator flow:**
+
+```
+POST /newtrun/v1/topologies {name:"demo-1"}                              → 201 {name, spec_dir}
+POST /newtron/v1/network    {id:"demo-1", spec_dir:"…/demo-1/specs"}     → 201 {id}
+POST /newtron/v1/network/demo-1/topology/create-node {name, device:{…}}  → 201
+…
+```
+
+The operator never touches the filesystem. Closes issue #76.
 
 ---
 

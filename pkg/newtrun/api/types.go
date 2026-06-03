@@ -257,6 +257,27 @@ type TopologiesResponse struct {
 	Topologies []string `json:"topologies"`
 }
 
+// CreateTopologyRequest is the body for POST /newtrun/v1/topologies.
+// Bootstraps a new topology directory with zero-valued spec files so
+// the operator can register it as a newtron Network without shelling
+// out (closes issue #76). The Description field flows into
+// topology.json so a fresh listing already carries context.
+type CreateTopologyRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// CreateTopologyResponse is the body returned by POST
+// /newtrun/v1/topologies. SpecDir is the path the operator passes to
+// POST /newtron/v1/network's `spec_dir` field — same wire field
+// newtron's GET /newtron/v1/network already exposes per registered
+// network, so this is the existing inter-engine handle, not new
+// storage-internals leakage.
+type CreateTopologyResponse struct {
+	Name    string `json:"name"`
+	SpecDir string `json:"spec_dir"`
+}
+
 // SuitesResponse is the response shape for GET /api/suites. Returns the suite
 // names discoverable under the configured suites base directory.
 type SuitesResponse struct {
