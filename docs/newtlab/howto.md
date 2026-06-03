@@ -989,21 +989,6 @@ Define servers in `topology.json`:
 | `address` | Yes | IP address for cross-host TCP connections |
 | `max_nodes` | No | Maximum VMs on this server (0 = unlimited) |
 
-**Legacy `hosts` map:** The older `hosts` field (server name → IP map) is
-still supported for backward compatibility, but requires manual `vm_host` in
-every device profile. Prefer `servers` for new topologies:
-
-```json
-{
-  "newtlab": {
-    "hosts": {
-      "server-a": "192.168.1.10",
-      "server-b": "192.168.1.11"
-    }
-  }
-}
-```
-
 ### Auto-Placement
 
 When servers are defined, newtlab auto-places nodes across them to minimize

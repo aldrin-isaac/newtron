@@ -1319,6 +1319,11 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 }
 
 // resolveNewtLabConfig returns a VMLabConfig with defaults applied.
+// The runtime Hosts map (name → address) is derived from cfg.Servers;
+// there is no longer a parallel legacy Hosts input field (deleted per
+// §40 Greenfield). Single-host labs leave cfg.Servers nil and the
+// runtime Hosts map stays nil — resolveHostIP falls back to the host
+// name itself in that case.
 func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
 	resolved := &VMLabConfig{
 		LinkPortBase:    20000,
@@ -1341,8 +1346,6 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
 			for _, s := range cfg.Servers {
 				resolved.Hosts[s.Name] = s.Address
 			}
-		} else {
-			resolved.Hosts = cfg.Hosts
 		}
 	}
 	return resolved

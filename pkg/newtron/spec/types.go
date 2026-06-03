@@ -479,12 +479,15 @@ type ServerConfig struct {
 }
 
 // NewtLabConfig holds newtlab orchestration settings from topology.json.
+// Servers is the canonical server-pool declaration; runtime code
+// derives a name→address lookup map from it. There is no separate
+// legacy field — §40 (Greenfield) forbids carrying parallel input
+// shapes once the canonical one exists.
 type NewtLabConfig struct {
-	LinkPortBase    int               `json:"link_port_base,omitempty"`
-	ConsolePortBase int               `json:"console_port_base,omitempty"`
-	SSHPortBase     int               `json:"ssh_port_base,omitempty"`
-	Hosts           map[string]string `json:"hosts,omitempty"`   // legacy: kept for backward compat
-	Servers         []*ServerConfig   `json:"servers,omitempty"` // server pool for auto-placement
+	LinkPortBase    int             `json:"link_port_base,omitempty"`
+	ConsolePortBase int             `json:"console_port_base,omitempty"`
+	SSHPortBase     int             `json:"ssh_port_base,omitempty"`
+	Servers         []*ServerConfig `json:"servers,omitempty"` // server pool for auto-placement
 }
 
 // TopologyDevice defines a device's configuration within a topology.

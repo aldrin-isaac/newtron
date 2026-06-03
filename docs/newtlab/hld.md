@@ -465,9 +465,6 @@ Unpinned:  leaf2 → server-b (a=1, b=0 → pick b)
 Result:    server-a: 3, server-b: 3
 ```
 
-If no `servers` field is present, newtlab falls back to the legacy `hosts`
-map, and `vm_host` must be set manually in each profile.
-
 ### The --host Model
 
 In multi-host mode, each server runs `newtlab deploy --host <name>`
