@@ -679,22 +679,21 @@ The scenario uses `{{target.X}}` and `{{param.X}}` templates instead of step-lev
 **Step 3 — invoke with overrides:**
 
 ```bash
-# CLI: run the rollout plus its declared prereqs.
-# (The sample scenario declares requires: [verify-health], so it
-# needs --target to also run the verify-health prerequisite —
-# --scenario alone would SKIP because the prereq has not run.)
-bin/newtrun start 2node-vs-service --target rollout-admin-status
+# CLI: run with defaults from suite.yaml.
+bin/newtrun start 2node-vs-service --scenario rollout-admin-status
 
 # HTTP: override admin_status to "down" and limit to one interface.
 curl -X POST http://localhost:18080/newtrun/v1/runs \
   -H 'Content-Type: application/json' \
   -d '{
     "suite":      "2node-vs-service",
-    "target":     "rollout-admin-status",
+    "scenario":   "rollout-admin-status",
     "targets":    { "interfaces": ["Ethernet0"] },
     "parameters": { "admin_status": "down" }
   }'
 ```
+
+A production rollout typically declares `requires: [verify-health]` (or similar) on its parameterized scenario so the rollout only runs after device health is confirmed. To invoke a scenario plus its declared prereqs, use the CLI's `--target` flag (which walks the dependency chain): `bin/newtrun start 2node-vs-service --target rollout-admin-status`. The sample omits `requires:` so the standalone `--scenario` invocation above also works.
 
 Per-run overrides replace (not merge with) the suite default for each key — omit a key to inherit the default.
 

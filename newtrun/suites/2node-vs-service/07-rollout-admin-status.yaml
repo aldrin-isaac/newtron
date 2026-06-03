@@ -12,7 +12,11 @@ description: |
   are listed at the suite level rather than discovered. Discovery
   would belong in a setup step that synthesizes the targets block —
   out of scope for this suite, in scope for newtrun's roadmap.
-requires: [verify-health]
+
+  Production rollouts would typically add requires: [verify-health]
+  so the rollout only runs after device health is confirmed; this
+  sample omits the prereq so it stands alone as a demonstration of
+  the parameterized shape.
 
 steps:
   - name: set-admin-status
