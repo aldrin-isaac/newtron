@@ -165,6 +165,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	runner := newtrun.NewRunner(suiteDir)
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
+	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 
 	// Cancellable context for the run. Stop endpoints call entry.Cancel.
@@ -404,6 +405,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	runner := newtrun.NewRunner(scenariosDir)
 	runner.ServerURL = newtronURL
 	runner.NetworkID = s.cfg.NetworkID
+	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 
 	opts := newtrun.RunOptions{

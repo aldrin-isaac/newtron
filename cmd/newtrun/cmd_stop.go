@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/client"
 )
 
@@ -45,14 +45,15 @@ spec directory recorded in state, so it requires the state to be readable.`,
 			}
 
 			// Destroy the topology if one was deployed for this suite.
-			// Uses DestroyByName (name-only) so we don't need a newtron
-			// client just to tear down — Destroy operates on newtlab's
-			// own state file, not on spec data.
+			// Routes through newtlab-server's HTTP surface — newtlab
+			// owns LabState (§27), so cmd/newtrun consults it via the
+			// client rather than reading state.json from disk.
 			topologyName := resolveTopologyFromState(state)
 			if topologyName != "" {
-				if _, err := newtlab.LoadState(topologyName); err == nil {
+				lc := newtlabclient.New(newtlabURL())
+				if _, err := lc.LabStatus(ctx, topologyName); err == nil {
 					fmt.Printf("destroying topology %s...\n", topologyName)
-					if err := newtlab.DestroyByName(ctx, topologyName); err != nil {
+					if err := lc.Destroy(ctx, topologyName); err != nil {
 						fmt.Printf("warning: destroy topology: %v\n", err)
 					}
 				}

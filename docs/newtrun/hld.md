@@ -63,16 +63,16 @@ A Runner is a per-run orchestrator. Server-side, one Runner exists per in-flight
 | Field | Type | Talks to |
 |-------|------|----------|
 | `r.Client` | `*newtron-client.Client` | newtron-server over HTTP |
-| `r.Lab` | `*newtlab.Lab` | newtlab Go API (deploy / destroy / ensure topologies) |
+| `r.NewtlabClient` | `newtrun.LabClient` (production: `*newtlab-client.Client`) | newtlab-server over HTTP — deploy / destroy / status |
 | `r.HostConns` | `map[string]*ssh.Client` | host VMs over SSH (for data-plane testing) |
 
 **All SONiC operations go through HTTP.** The Runner creates a newtron HTTP client, registers the network spec directory with newtron-server, and every subsequent operation — provisioning, service lifecycle, health checks, route verification — is an HTTP request. newtron-server manages SSH connections to SONiC devices; newtrun never connects to them directly.
 
-**Topology lifecycle goes through newtlab.** `EnsureTopology` reuses running VMs if all nodes are healthy, avoiding a full redeploy between iterations.
+**Topology lifecycle also goes through HTTP.** Per §27 (Single Owner): newtlab owns `LabState`. The Runner reaches it via `newtlab-server`'s HTTP surface — `Deploy` / `Destroy` / `LabStatus` — never via in-process `newtlab.NewLab`. `EnsureTopology` reuses running VMs if all nodes are healthy, avoiding a full redeploy between iterations.
 
 **Host devices use direct SSH.** The `host-exec` action runs commands inside network namespaces on host VMs. These are plain Linux VMs, not SONiC devices.
 
-**No internal newtron imports.** newtrun imports `pkg/newtron/client/` (HTTP client), `pkg/newtlab/` (lab API), `pkg/newtron/` (public types), and shared utilities. It never imports `pkg/newtron/network/`, `pkg/newtron/network/node/`, or `pkg/newtron/device/sonic/`.
+**No internal newtron imports.** newtrun imports `pkg/newtron/client/` (HTTP client), `pkg/newtlab/client/` (HTTP client), `pkg/newtron/` (public types), and shared utilities. It never imports `pkg/newtron/network/`, `pkg/newtron/network/node/`, or `pkg/newtron/device/sonic/`.
 
 ### 3.3 The run registry and concurrency
 

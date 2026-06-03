@@ -10,7 +10,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -20,7 +19,8 @@ type Runner struct {
 	ServerURL    string         // newtron-server HTTP address
 	NetworkID    string         // network identifier for server operations
 	Client       *client.Client // HTTP client for all SONiC operations
-	Lab          *newtlab.Lab
+	NewtlabURL   string         // newtlab-server HTTP address (deploy/destroy/status via HTTP, not in-process)
+	NewtlabClient LabClient    // newtlab HTTP client (satisfied by *pkg/newtlab/client.Client); injected for tests
 	HostConns    map[string]*ssh.Client // host device name → SSH client
 	Progress     ProgressReporter
 
@@ -358,35 +358,39 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 	return results, nil
 }
 
-// deployTopology deploys the lab topology using lifecycle mode (EnsureTopology)
-// or standalone mode (DeployTopology). It returns a cleanup function that should
-// be deferred by the caller; the cleanup is nil when no teardown is needed.
+// deployTopology deploys the lab topology by calling newtlab-server.
+// Lifecycle mode (opts.Suite set, e.g. `newtrun start ...`) uses
+// EnsureTopology — reuse an already-running lab, redeploy otherwise.
+// Standalone mode (legacy direct Run.Run path) uses DeployTopology
+// and registers a cleanup func that calls DestroyTopology unless
+// opts.Keep is set. Per §27 (Single Owner) every touch of LabState
+// goes through newtlab-server's HTTP client; no in-process
+// newtlab.NewLab.
 //
-// specDir is no longer used to load specs (§27 — newtron owns spec files);
-// it is the path passed to newtron-server during network registration so
-// the engine can serve it. The Lab itself consumes spec data via the
-// already-constructed r.Client.
+// specDir registers the network with newtron-server so newtlab can
+// query specs from there during deploy.
 func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
 	if specDir != "" {
 		if regErr := r.Client.RegisterNetwork(specDir); regErr != nil {
 			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", specDir, regErr)
 		}
 	}
+	if r.NewtlabClient == nil {
+		return nil, fmt.Errorf("newtrun: no newtlab client configured (set Runner.NewtlabClient or use --newtlab-server)")
+	}
 	if opts.Suite != "" {
-		lab, err := EnsureTopology(ctx, r.Client, r.Topology)
-		if err != nil {
+		if err := EnsureTopology(ctx, r.NewtlabClient, r.Topology); err != nil {
 			return nil, err
 		}
-		r.Lab = lab
 		return nil, nil // lifecycle mode: stop command handles teardown
 	}
-	lab, err := DeployTopology(ctx, r.Client, r.Topology)
-	if err != nil {
+	if err := DeployTopology(ctx, r.NewtlabClient, r.Topology); err != nil {
 		return nil, err
 	}
-	r.Lab = lab
 	if !opts.Keep {
-		return func() { _ = DestroyTopology(context.Background(), r.Lab) }, nil
+		topo := r.Topology
+		client := r.NewtlabClient
+		return func() { _ = DestroyTopology(context.Background(), client, topo) }, nil
 	}
 	return nil, nil
 }

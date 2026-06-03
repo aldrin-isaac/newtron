@@ -559,15 +559,16 @@ Reads `state.json` and returns true when `state.Status == SuiteStatusPausing`. T
 
 ```go
 type Runner struct {
-    ScenariosDir string
-    ServerURL    string         // newtron-server HTTP address
-    NetworkID    string         // network identifier for server operations
-    Client       *client.Client // HTTP client for all SONiC operations
-    Lab          *newtlab.Lab
-    HostConns    map[string]*ssh.Client
-    Progress     ProgressReporter
-    Topology     string         // topology name (from server)
-    SpecDir      string         // spec directory (from server)
+    ScenariosDir  string
+    ServerURL     string         // newtron-server HTTP address
+    NetworkID     string         // network identifier for server operations
+    Client        *client.Client // HTTP client for all SONiC operations
+    NewtlabURL    string         // newtlab-server HTTP address
+    NewtlabClient LabClient      // deploy / destroy / status via HTTP (§27)
+    HostConns     map[string]*ssh.Client
+    Progress      ProgressReporter
+    Topology      string         // topology name (from server)
+    SpecDir       string         // spec directory (from server)
 
     discoveredPlatform string
     opts               RunOptions
@@ -581,7 +582,7 @@ type Runner struct {
 | `ServerURL` | `handleStartRun` from `req.NewtronServer` or server default | `client.Client` constructor + steps_cli passes to subprocess via `--server`. |
 | `NetworkID` | `handleStartRun` from `req.NetworkID` or server default | Network identifier in HTTP calls. |
 | `Client` | `connectToServer` | Every `newtron` action HTTP call. |
-| `Lab` | `deployTopology` (when `!opts.NoDeploy`) | Deploy + destroy. |
+| `NewtlabClient` | `handleStartRun` from `Config.NewtlabClient` (composed at the entry point from `--newtlab-server`) | `deployTopology` → `Deploy` / `Destroy` / `LabStatus`. Per §27, newtlab owns LabState; newtrun reaches it via HTTP, never in-process via `newtlab.NewLab`. |
 | `HostConns` | `connectDevices` | `host-exec` SSH calls. |
 | `Progress` | `handleStartRun` (HTTPReporter → StateReporter chain) | Every lifecycle event. |
 | `Topology` | `connectToServer` from `GET /network` | Verified against `Suite.Topology` (declared once in `suite.yaml`). |
@@ -958,16 +959,29 @@ func (r *Runner) executeForDevices(step *Step, fn func(name string) (string, err
 ## 11. newtlab Integration (`deploy.go`)
 
 ```go
-func DeployTopology(ctx context.Context, specDir string, force bool) (*newtlab.Lab, error)
-func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, error)
-func DestroyTopology(ctx context.Context, lab *newtlab.Lab) error
+// LabClient is the subset of pkg/newtlab/client.Client newtrun uses.
+// Production code passes *newtlabclient.Client directly — the
+// interface exists for unit-testing without a live newtlab-server.
+type LabClient interface {
+    LabStatus(ctx context.Context, topology string) (*newtlab.LabState, error)
+    Deploy(ctx context.Context, topology string, opts api.DeployRequest) error
+    Destroy(ctx context.Context, topology string) error
+}
+
+func DeployTopology(ctx context.Context, client LabClient, topology string) error
+func EnsureTopology(ctx context.Context, client LabClient, topology string) error
+func DestroyTopology(ctx context.Context, client LabClient, topology string) error
 ```
 
-`EnsureTopology` reuses an existing lab if all nodes report `running`, otherwise deploys fresh. Used between iterations of the same suite (`newtrun start` → fail → fix → `newtrun start`) to avoid a full redeploy when the lab is healthy.
+Per §27 (Single Owner): newtlab owns LabState; newtrun reaches it through newtlab-server's HTTP surface, never in-process via `newtlab.NewLab`. The composed `newt-server` binary instantiates the client against its own loopback listener; standalone `newtrun-server` instantiates it from the `--newtlab-server` flag. Either way only newtlab-server writes `~/.newtlab/labs/<name>/state.json`.
 
-`DeployTopology` forces a fresh deployment. The Runner uses `EnsureTopology` unless `opts.Keep` is false.
+`EnsureTopology` reuses an existing lab if all nodes report `running`, otherwise calls `Deploy` (forced). Used between iterations of the same suite (`newtrun start` → fail → fix → `newtrun start`) to avoid a full redeploy when the lab is healthy.
 
-`DestroyTopology` is called from `cmd_stop` (CLI side) and from defer cleanups when the Runner's deploy step succeeded.
+`DeployTopology` forces a fresh deployment. The Runner uses `EnsureTopology` in lifecycle mode (`opts.Suite != ""`) and `DeployTopology` in standalone mode; in the latter case a defer destroys the lab when `opts.Keep` is false.
+
+`DestroyTopology` is also called from `cmd_stop` (CLI side) — the CLI constructs its own `*newtlabclient.Client` against the URL resolved from `--newtlab-server` / `NEWTLAB_SERVER` / the default `http://127.0.0.1:18080`.
+
+`Deploy` is synchronous from the caller's perspective: it POSTs `/deploy` (which returns 202 Accepted immediately), then subscribes to the per-topology SSE stream and blocks until a terminal `complete` or `error` event arrives — matching the in-process `Lab.Deploy` semantics the HTTP path replaced.
 
 ---
 

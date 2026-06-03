@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
-	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -338,10 +339,11 @@ func findRunningSuite(suites []string) string {
 
 func checkTopologyStatus(topology string) string {
 	// Topology name is the lab name (per the same convention newtron
-	// uses). Load newtlab's persisted state directly — this function
-	// reports deployment state, which is newtlab's own data object;
-	// it does not need to consult newtron for spec data.
-	state, err := newtlab.LoadState(topology)
+	// uses). Routes through newtlab-server's HTTP client — newtlab
+	// owns LabState (§27), so cmd/newtrun consults it via the API
+	// rather than reading state.json from disk.
+	lc := newtlabclient.New(newtlabURL())
+	state, err := lc.LabStatus(context.Background(), topology)
 	if err != nil {
 		return "not deployed"
 	}

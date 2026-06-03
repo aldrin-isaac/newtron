@@ -11,6 +11,8 @@
 package client
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 )
 
 // Client talks to newtlab-server. Construct with New.
@@ -60,6 +63,141 @@ func (c *Client) LabStatus(ctx context.Context, topology string) (*newtlab.LabSt
 		return nil, err
 	}
 	return &state, nil
+}
+
+// ListTopologies returns the names of every lab newtlab knows about.
+// Calls GET /newtlab/v1/topologies. Running and stopped labs are both
+// included; per-node state requires LabStatus per topology.
+func (c *Client) ListTopologies(ctx context.Context) ([]string, error) {
+	var items []api.TopologyListItem
+	if err := c.doGet(ctx, "/newtlab/v1/topologies", &items); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(items))
+	for i, it := range items {
+		names[i] = it.Name
+	}
+	return names, nil
+}
+
+// Deploy submits an async deploy of the named topology to newtlab-
+// server and blocks until the deploy reaches a terminal event
+// (complete / error). The HTTP request itself returns 202 Accepted
+// immediately; this method consumes the per-topology SSE stream and
+// waits for completion so callers see a synchronous "deploy succeeded
+// or failed" outcome — matching the in-process Lab.Deploy semantics
+// that this method replaces.
+//
+// Returns ConflictError when another deploy is already in flight for
+// this topology. ctx cancellation aborts the SSE consumer (the
+// server-side deploy may still complete).
+func (c *Client) Deploy(ctx context.Context, topology string, opts api.DeployRequest) error {
+	if topology == "" {
+		return fmt.Errorf("newtlab: topology is required")
+	}
+	deployPath := "/newtlab/v1/topologies/" + url.PathEscape(topology) + "/deploy"
+	var resp api.DeployResponse
+	if err := c.doPost(ctx, deployPath, opts, &resp); err != nil {
+		return err
+	}
+	return c.waitForTerminalEvent(ctx, topology)
+}
+
+// Destroy tears down the named topology synchronously. Calls
+// POST /newtlab/v1/topologies/{name}/destroy.
+func (c *Client) Destroy(ctx context.Context, topology string) error {
+	if topology == "" {
+		return fmt.Errorf("newtlab: topology is required")
+	}
+	path := "/newtlab/v1/topologies/" + url.PathEscape(topology) + "/destroy"
+	return c.doPost(ctx, path, nil, nil)
+}
+
+// doPost issues a POST with a JSON body against newtlab-server. body
+// may be nil for empty-body POSTs (destroy). result may be nil when
+// the caller doesn't need the response payload.
+func (c *Client) doPost(ctx context.Context, path string, body any, result any) error {
+	var reqBody io.Reader
+	if body != nil {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode %T: %w", body, err)
+		}
+		reqBody = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, reqBody)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", path, err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
+
+// waitForTerminalEvent subscribes to the per-topology SSE stream and
+// blocks until a terminal event (complete or error) arrives. Used by
+// Deploy to provide synchronous semantics over an async server.
+//
+// The events endpoint emits SSE-framed lines:
+//
+//	event: phase|complete|error
+//	data: {"...json..."}
+//
+// We only care about terminal types; phase events are ignored at the
+// client. Callers needing live phase updates should subscribe to the
+// events endpoint directly.
+func (c *Client) waitForTerminalEvent(ctx context.Context, topology string) error {
+	eventsPath := "/newtlab/v1/topologies/" + url.PathEscape(topology) + "/events"
+	// SSE consumer needs an http.Client with no overall timeout — the
+	// stream is long-lived. Re-use the same Transport so connection
+	// pooling and TLS config carry through.
+	sseClient := &http.Client{Transport: c.httpClient.Transport}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+eventsPath, nil)
+	if err != nil {
+		return fmt.Errorf("subscribe events: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("subscribe events: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return &ServerError{StatusCode: resp.StatusCode, Message: resp.Status}
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 4096), 1<<20) // 1 MiB max event size
+	var eventType string
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			eventType = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			data := strings.TrimPrefix(line, "data: ")
+			switch api.EventType(eventType) {
+			case api.EventComplete:
+				return nil
+			case api.EventError:
+				var p api.ErrorPayload
+				if err := json.Unmarshal([]byte(data), &p); err == nil && p.Message != "" {
+					return fmt.Errorf("newtlab deploy: %s", p.Message)
+				}
+				return fmt.Errorf("newtlab deploy: server reported error")
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("events stream: %w", err)
+	}
+	return fmt.Errorf("events stream closed before terminal event")
 }
 
 // doGet issues a GET against the newtlab-server, unwraps the

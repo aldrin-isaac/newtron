@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
 // Config is the construction-time configuration for the newtrun server.
@@ -38,6 +39,13 @@ type Config struct {
 	// newtron-server. Empty string disables URL restriction (used in
 	// tests). The inline-runs safety spec mandates this guardrail.
 	InlineURLPrefix string
+
+	// NewtlabClient is the HTTP client newtrun uses to call newtlab-
+	// server for deploy / destroy / status. nil disables newtlab calls;
+	// Runner.Run rejects deploy attempts in that case with a clear
+	// error. Per §27 (Single Owner): newtlab owns LabState; newtrun
+	// reaches it via newtlab-server's HTTP surface, never in-process.
+	NewtlabClient newtrun.LabClient
 
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
