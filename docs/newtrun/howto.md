@@ -181,7 +181,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | Flag | Meaning |
 |------|---------|
 | `--no-deploy` | Skip topology deployment and host SSH connections. Use for loopback suites (e.g., `1node-vs-config`) or when the lab is already up. |
-| `--platform <name>` | Override the platform declared in scenario YAML. |
+| `--platform <name>` | Override the platform declared in `suite.yaml`. |
 | `--junit <path>` | Write a JUnit XML report at `<path>` after the run finishes. |
 | `--monitor` / `-m` | Replace the per-event terminal output with an auto-refreshing dashboard backed by `state.json`. |
 | `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
@@ -695,15 +695,15 @@ curl -X POST http://localhost:18080/newtrun/v1/runs \
 
 Per-run overrides replace (not merge with) the suite default for each key — omit a key to inherit the default.
 
-**Template substitution is context-aware.** The same `{{param.X}}` token expands differently depending on where it lands. Knowing the rule lets you author templates without quoting mistakes:
+**Template substitution is context-aware** — the engine emits encoded forms per consumption surface so you don't need to pre-escape. The author rules below cover the common author mistakes; the full encoding table lives in [LLD §3.3](../newtrun/lld.md#33-context-aware-substitution).
 
-| Where you write the token | What the engine emits | Author rule |
-|---|---|---|
-| `url:` path component | URL-escaped form | Use bare; do not pre-escape |
-| `command:` (host-exec) | single-quote wrapped, internal `'` escaped | Use bare; do not add your own quotes |
-| `expect.jq:` | `int`/`bool` as literal; string as JSON-quoted | Use bare; do not put surrounding `"..."` around a string param |
-| `params:` value | Typed substitution preserves int/bool; partial-token concatenates | Same string handling either way |
-| `expect.contains:` | unmodified | Use bare |
+| Where you write the token | Author rule |
+|---|---|
+| `url:` path component or query | Use bare — do not pre-escape |
+| `command:` (host-exec) | Use bare — do not add your own quotes around a `{{param.X}}` |
+| `expect.jq:` | Use bare — do not put surrounding `"..."` around a string `{{param.X}}`; the engine emits JSON-quoted form |
+| `params:` value | Use bare — same string handling whether the value is one token or interpolated |
+| `expect.contains:` | Use bare — no escaping is applied |
 
 **Target values pass an identifier whitelist** (`^[A-Za-z0-9_-]+$`) at both parse time and at request-override time. Targets address infrastructure (device, interface names) — they are always identifiers. Attempted shell-injection / path-traversal values fail validation before substitution.
 
@@ -713,6 +713,41 @@ Per-run overrides replace (not merge with) the suite default for each key — om
 |---|---|
 | Embedded-target (`devices:` selector + `{{device}}`) | Testing — the suite covers a known matrix and each step might address a different subset. |
 | Parameterized (`{{target.X}}` + suite-level `targets:`) | Production rollout — one scenario template applied to multiple fleet slices with per-run overrides. Reports per-binding pass/fail. |
+
+**Example output (4-iteration rollout, verbose CLI):**
+
+```
+newtrun: 1 scenarios, topology: 2node-vs-service, platform: sonic-vs
+
+  #     SCENARIO                  STEPS
+  1     rollout-admin-status      2
+
+  [1/1]  rollout-admin-status
+          [device=switch1 interface=Ethernet0] set-admin-status      PASS  (<1s)
+          [device=switch1 interface=Ethernet0] verify-admin-status   PASS  (<1s)
+          [device=switch1 interface=Ethernet4] set-admin-status      PASS  (<1s)
+          [device=switch1 interface=Ethernet4] verify-admin-status   PASS  (<1s)
+          [device=switch2 interface=Ethernet0] set-admin-status      PASS  (<1s)
+          [device=switch2 interface=Ethernet0] verify-admin-status   PASS  (<1s)
+          [device=switch2 interface=Ethernet4] set-admin-status      PASS  (<1s)
+          [device=switch2 interface=Ethernet4] verify-admin-status   PASS  (<1s)
+          PASS  (3s)
+```
+
+Per-iteration step results carry their `TargetBinding` on the SSE wire (`target_binding` field on `step_end` events) and in JUnit / markdown reports — operators see exactly which (device, interface) combination produced each pass or fail.
+
+**What can go wrong (server returns 400 on the run request):**
+
+| Cause | Example message |
+|---|---|
+| Override names a dimension that isn't in `suite.yaml` | `unknown target dimension "racks" (not declared in suite.yaml)` |
+| Override value fails the target-identifier whitelist (`^[A-Za-z0-9_-]+$`) | `target "devices" value "switch1; rm -rf /": must match [A-Za-z0-9_-]+ (identifiers only)` |
+| Override value's type doesn't match the parameter's declared type | `parameter "mtu": expected int, got string` |
+| Override value is outside the parameter's declared range | `parameter "vlan_id": value 5000 above max 4094` |
+| Override value isn't one of the enum's declared values | `parameter "admin_status": value "shutdown" not in [up down]` |
+| Override names a parameter that isn't in `suite.yaml` | `unknown parameter "made_up" (not declared in suite.yaml)` |
+
+A scenario that uses `{{target.X}}` but no matching dimension is declared in `suite.yaml` fails at suite-load time with `references {{target.X}} but suite.yaml has no Xs: dimension declared` — that's a YAML-author error, not a request-time one.
 
 ---
 
@@ -1491,7 +1526,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | `--scenario <name>` | Run a single scenario. |
 | `--target <name>` | Run the minimum dependency chain reaching this scenario. |
 | `--dir <path>` | Suite directory path (alternative to positional name). |
-| `--platform <name>` | Override platform from scenario YAML. |
+| `--platform <name>` | Override platform from `suite.yaml`. |
 | `--no-deploy` | Skip topology deployment + host SSH (loopback or pre-deployed lab). |
 | `--monitor`, `-m` | Auto-refreshing dashboard instead of per-event log. |
 | `--junit <path>` | JUnit XML report path. |

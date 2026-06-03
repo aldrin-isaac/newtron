@@ -370,9 +370,12 @@ Undefined references (`{{target.foo}}` where `foo` isn't in `target`) abort with
 | Context | Constant | Encoding |
 |---|---|---|
 | URL path component | `ctxURL` | `url.PathEscape` on every value |
+| URL query-string value | `ctxURLQuery` | `url.QueryEscape` on every value — escapes `&`, `=`, `+` that PathEscape leaves alone, so a string parameter dropped into a query position can't smuggle extra parameters |
 | Shell argument | `ctxShell` | single-quote wrap; embedded `'` becomes `'\''` (POSIX idiom) |
 | JQ expression | `ctxJQ` | `int` / `int64` / `float64` / `bool` emitted as JQ literal; strings emitted via `jsonQuote` (the user writes `{{param.X}}` WITHOUT surrounding quotes — the engine adds them) |
 | Free-form text | `ctxRaw` | no encoding |
+
+URL substitution is dispatched via `applyTemplateURL`, which splits the input at the first `?` and applies `ctxURL` to the path portion and `ctxURLQuery` to the query portion. Both step.URL and BatchCall.URL route through this helper.
 
 Target values pass the `^[A-Za-z0-9_-]+$` whitelist before reaching substitution, so they need no further escape beyond what each context demands defensively. Parameter values may be free-form strings — context-aware encoding is the only defense against injection at substitution time.
 
@@ -582,7 +585,7 @@ type Runner struct {
 | `Lab` | `deployTopology` (when `!opts.NoDeploy`) | Deploy + destroy. |
 | `HostConns` | `connectDevices` | `host-exec` SSH calls. |
 | `Progress` | `handleStartRun` (HTTPReporter → StateReporter chain) | Every lifecycle event. |
-| `Topology` | `connectToServer` from `GET /network` | Verified against each scenario's declared topology. |
+| `Topology` | `connectToServer` from `GET /network` | Verified against `Suite.Topology` (declared once in `suite.yaml`). |
 | `SpecDir` | `connectToServer` | Used by `Reconcile` action and by `cmd_stop` when destroying. |
 
 ### 6.2 RunOptions

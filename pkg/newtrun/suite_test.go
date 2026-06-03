@@ -619,7 +619,7 @@ steps:
 `,
 	})
 	_, err := LoadSuite(dir)
-	if err == nil || !strings.Contains(err.Error(), "interface dimension") {
+	if err == nil || !strings.Contains(err.Error(), "interfaces: dimension") {
 		t.Errorf("err = %v, want undeclared-target error", err)
 	}
 }

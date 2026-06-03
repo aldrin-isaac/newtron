@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // Parameterized scenario template expansion. Tokens {{target.X}} and
@@ -50,10 +51,11 @@ var fullTokenRe = regexp.MustCompile(`^\{\{(target|param)\.([a-zA-Z0-9_]+)\}\}$`
 type subContext int
 
 const (
-	ctxURL   subContext = iota // URL path component — url.PathEscape
-	ctxShell                   // shell argument — single-quote wrap
-	ctxJQ                      // JQ expression — JSON-encode strings, literal numerics
-	ctxRaw                     // free-form text — no escaping
+	ctxURL      subContext = iota // URL path component — url.PathEscape
+	ctxURLQuery                   // URL query-string value — url.QueryEscape (escapes & = + that PathEscape leaves alone)
+	ctxShell                      // shell argument — single-quote wrap
+	ctxJQ                         // JQ expression — JSON-encode strings, literal numerics
+	ctxRaw                        // free-form text — no escaping
 )
 
 // ExpandStep returns a copy of step with {{target.X}} and {{param.X}}
@@ -68,7 +70,7 @@ const (
 func ExpandStep(step Step, target map[string]string, params map[string]any) (Step, error) {
 	expanded := step
 	var err error
-	expanded.URL, err = applyTemplate(step.URL, target, params, ctxURL)
+	expanded.URL, err = applyTemplateURL(step.URL, target, params)
 	if err != nil {
 		return expanded, fmt.Errorf("url: %w", err)
 	}
@@ -84,7 +86,7 @@ func ExpandStep(step Step, target map[string]string, params map[string]any) (Ste
 		expanded.Batch = make([]BatchCall, len(step.Batch))
 		for i, bc := range step.Batch {
 			expanded.Batch[i] = bc
-			expanded.Batch[i].URL, err = applyTemplate(bc.URL, target, params, ctxURL)
+			expanded.Batch[i].URL, err = applyTemplateURL(bc.URL, target, params)
 			if err != nil {
 				return expanded, fmt.Errorf("batch[%d].url: %w", i, err)
 			}
@@ -107,6 +109,30 @@ func ExpandStep(step Step, target map[string]string, params map[string]any) (Ste
 		}
 	}
 	return expanded, nil
+}
+
+// applyTemplateURL substitutes templates in a URL string. Values
+// that land in the path portion are url.PathEscape'd; values that
+// land in the query string (anything after the first '?') are
+// url.QueryEscape'd. The split matters because PathEscape leaves
+// '&', '=' and '+' unescaped — a string parameter containing
+// "&evil=1" would silently inject extra query parameters when used
+// in a query position, and a literal '+' would be read by the
+// server as a space.
+func applyTemplateURL(s string, target map[string]string, params map[string]any) (string, error) {
+	qIdx := strings.IndexByte(s, '?')
+	if qIdx < 0 {
+		return applyTemplate(s, target, params, ctxURL)
+	}
+	pathPart, err := applyTemplate(s[:qIdx], target, params, ctxURL)
+	if err != nil {
+		return "", err
+	}
+	queryPart, err := applyTemplate(s[qIdx:], target, params, ctxURLQuery)
+	if err != nil {
+		return "", err
+	}
+	return pathPart + queryPart, nil
 }
 
 // applyTemplate substitutes {{target.X}} / {{param.X}} tokens in s.
@@ -155,6 +181,8 @@ func encodeForContext(v any, ctx subContext) string {
 	switch ctx {
 	case ctxURL:
 		return url.PathEscape(s)
+	case ctxURLQuery:
+		return url.QueryEscape(s)
 	case ctxShell:
 		return shellQuote(s)
 	case ctxJQ:

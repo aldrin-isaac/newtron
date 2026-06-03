@@ -33,7 +33,7 @@ func TestReporterCallbacksProduceCorrectEventTypes(t *testing.T) {
 		Duration: time.Second,
 	}
 
-	r.SuiteStart(scenarios)
+	r.SuiteStart("test-topo", "sonic-vs", scenarios)
 	r.ScenarioStart("s1", 0, 1)
 	r.StepStart("s1", step, 0, 1)
 	r.StepEnd("s1", stepResult, 0, 1)
@@ -161,7 +161,7 @@ type capturingReporter struct {
 	suiteEnds      int
 }
 
-func (c *capturingReporter) SuiteStart(scenarios []*newtrun.Scenario) {
+func (c *capturingReporter) SuiteStart(topology, platform string, scenarios []*newtrun.Scenario) {
 	c.suiteStarts++
 }
 func (c *capturingReporter) ScenarioStart(name string, index, total int) {

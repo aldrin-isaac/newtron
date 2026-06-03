@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
@@ -368,14 +370,12 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	runCtx, cancelTimeout := context.WithTimeout(context.Background(), policy.WallTimeBudget)
 	entry.Cancel = cancelTimeout
 
-	// Build a synthetic scenarios directory holding only this scenario,
-	// then point the Runner at it. The Runner's existing
-	// ParseAllScenarios path then finds exactly one scenario to run with
-	// the rest of its lifecycle (deploy / connect / iterate / report)
-	// intact. Per §3 of ai-instructions: this reuses the existing Runner
-	// machinery rather than introducing a parallel single-scenario
-	// execution path.
-	scenariosDir, err := writeInlineScenarioDir(runID, scenario, req.ScenarioYAML)
+	// Stage the scenario as a one-scenario suite (suite.yaml + the
+	// scenario YAML with topology stripped) so the Runner's existing
+	// LoadSuite path loads it without a special-case code path. The
+	// rest of the run lifecycle (deploy / connect / iterate / report)
+	// is identical between inline and file-backed runs.
+	scenariosDir, err := writeInlineScenarioDir(runID, scenario)
 	if err != nil {
 		cancelTimeout()
 		s.registry.Release(runID, &RunResult{Err: err})
@@ -410,20 +410,38 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeInlineScenarioDir stages the inline scenario YAML on disk in a
-// dedicated directory so the existing Runner.ScenariosDir machinery loads
-// exactly this scenario. The directory is removed when the run finishes.
-func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario, yaml string) (string, error) {
+// writeInlineScenarioDir stages an inline scenario on disk as a one-
+// scenario suite so the existing Runner.ScenariosDir → LoadSuite
+// machinery can load it without a special-case code path. The
+// directory is removed when the run finishes.
+//
+// Inline runs are embedded-target only: the submitted YAML carries
+// the topology directly (suite-level fields live on the scenario for
+// the inline wire shape). At stage time we lift topology onto a
+// suite.yaml manifest and re-marshal the scenario with topology +
+// platform cleared so LoadSuite's "scenarios may not set topology"
+// rule is satisfied.
+func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario) (string, error) {
 	inlineDir, err := newtrun.InlineStateDir(runID)
 	if err != nil {
 		return "", err
 	}
 	scenariosDir := filepath.Join(inlineDir, "scenarios")
-	if err := os.MkdirAll(scenariosDir, 0755); err != nil {
+	if err := os.MkdirAll(scenariosDir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(scenariosDir, "inline.yaml")
-	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+	if err := writeSuiteManifest(scenariosDir, runID, scenario.Topology); err != nil {
+		return "", err
+	}
+	staged := *scenario
+	staged.Topology = ""
+	staged.Platform = ""
+	scenarioYAML, err := yaml.Marshal(&staged)
+	if err != nil {
+		return "", fmt.Errorf("marshal inline scenario: %w", err)
+	}
+	scenarioPath := filepath.Join(scenariosDir, "inline.yaml")
+	if err := os.WriteFile(scenarioPath, scenarioYAML, 0o644); err != nil {
 		return "", err
 	}
 	return scenariosDir, nil

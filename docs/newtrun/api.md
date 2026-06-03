@@ -380,15 +380,15 @@ Creates the suite directory and writes a minimal `suite.yaml` manifest containin
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
 | `name` | string | yes | Suite identifier; matches `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`. |
-| `topology` | string | yes | Topology this suite targets; written into `suite.yaml`. |
+| `topology` | string | yes | Topology this suite targets; written into `suite.yaml`. Validated against the same identifier regex as `name` — a topology string containing YAML metacharacters (newlines, colons, leading dashes) is rejected so it can't smuggle additional top-level fields into the generated manifest. |
 
-**Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name or missing topology, 409 if the directory already exists.
+**Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name or invalid topology, 409 if the directory already exists.
 
 ### `DELETE /newtrun/v1/suites/{suite}`
 
-Removes the suite directory and its `suite.yaml`. **Refuses (409) if any scenario files remain** — `suite.yaml` is the suite-create handshake and doesn't count against the "still has scenarios" check, but any other `*.yaml` file blocks deletion. newtcon's UX is expected to delete scenarios individually first so the destructive action is explicit at the scenario level.
+Removes the suite directory and its `suite.yaml`. **Refuses (409) if anything other than `suite.yaml` remains** — scenario files block deletion (operators delete them through `DELETE /scenarios/{name}` first so the destructive action is explicit at the scenario level), and any subdirectory blocks deletion (operator backups, in-progress work — never silently destroyed). The reverse of "create suite + `suite.yaml`" is "remove dir + `suite.yaml`"; everything beyond that is operator content the API refuses to touch.
 
-**Response:** 204 on success, 404 if the suite doesn't exist, 409 if it has scenarios.
+**Response:** 204 on success, 404 if the suite doesn't exist, 409 if it has scenarios or subdirectories.
 
 ### `GET /newtrun/v1/suites/{suite}/scenarios`
 
@@ -482,10 +482,12 @@ suite_start  →  (scenario_start  →  (step_start  →  step_end)*  →  scena
 
 ### `suite_start`
 
-Sent once at the start of the run with the scenario roster.
+Sent once at the start of the run with the suite metadata and scenario roster. Topology and platform are suite-level (declared in `suite.yaml`); each `ScenarioSummary` also carries them for backwards compatibility with consumers that pivot on scenario rows.
 
 ```json
 {
+  "topology": "1node-vs",
+  "platform": "sonic-vs",
   "scenarios": [
     {
       "name": "setup-device",
@@ -555,6 +557,20 @@ Sent at the end of each step with the result.
     "action": "newtron-cli",
     "status": "PASS",
     "duration": "<1s"
+  }
+}
+```
+
+For parameterized scenarios, `result.target_binding` carries the per-iteration binding map (singular keys; suite-level `targets.devices: [switch1]` → `{"device": "switch1"}`) so consumers can attribute each step result to the (device, interface, …) combination that produced it. The field is omitted on embedded-target results.
+
+```json
+{
+  "scenario": "rollout-admin-status",
+  "result": {
+    "name": "set-admin-status",
+    "status": "PASS",
+    "duration": "<1s",
+    "target_binding": { "device": "switch1", "interface": "Ethernet0" }
   }
 }
 ```

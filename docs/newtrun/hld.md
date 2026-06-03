@@ -278,17 +278,7 @@ newtrun expands three families of template tokens in step fields:
 
 The two families are mutually exclusive **within a scenario**: a parameterized scenario that uses `{{target.X}}` or `{{param.X}}` must not also use `{{device}}` or set a step-level `devices:` selector. `LoadSuite` rejects the mix at parse time.
 
-Substitution is **context-aware** to defend against injection. The same token expands differently per consumption surface:
-
-| Where the token appears | Encoding |
-|---|---|
-| URL path component | `url.PathEscape` on the substituted value (defensive even when target values pass the identifier whitelist) |
-| Shell command (`host-exec` `command:`) | single-quote wrap with POSIX `'\''` escape for internal single quotes |
-| JQ expression (`expect.jq`) | int / bool emitted as a literal; string emitted as JSON-quoted form. **Do not put your own quotes around a `{{param.X}}` in JQ** — the engine adds them. |
-| JSON params value | A string that consists ENTIRELY of one `{{token}}` keeps the parameter's typed Go value (e.g., int `9100` stays a JSON number); strings with partial tokens stringify and inline (Go's JSON encoder handles JSON escaping later) |
-| Free-form text (`expect.contains`, descriptions) | no escaping |
-
-Target values pass an identifier whitelist (`^[A-Za-z0-9_-]+$`) at YAML parse time and again at request-override time. Parameter values pass their declared type's `Coerce` validation (§5.5).
+Substitution is **context-aware** to defend against injection — URL path components are URL-escaped, shell commands are single-quote-wrapped, JQ expressions emit numerics as literals and strings as JSON-quoted form, JSON params preserve typed values for full-token substitutions. Target values pass an identifier whitelist (`^[A-Za-z0-9_-]+$`) at YAML parse time and at request-override time; parameter values pass their declared type's `Coerce` validation (§5.5). The full encoding table is in [LLD §3.3](lld.md#33-context-aware-substitution).
 
 ### 5.5 Parameter declarations
 
@@ -711,7 +701,7 @@ $ NEWTRUN_SERVER=http://127.0.0.1:18080 bin/newtrun start 2node-ngdp-primitive
 `pkg/newtrun/runner.go` `Run`:
 1. Parses every scenario YAML under `newtrun/suites/2node-ngdp-primitive/`.
 2. Topologically sorts scenarios by `requires` / `after`.
-3. Connects to newtron-server to learn the topology name and spec dir.
+3. Connects to newtron-server, verifies the server's loaded topology matches `Suite.Topology`, and records the spec directory.
 4. Calls `SuiteStart` — every reporter forwards the event.
 5. Deploys the topology via newtlab (`DeployTopology`).
 6. For each scenario in order: `ScenarioStart`, iterate steps, `ScenarioEnd`. Steps dispatch through `stepExecutor` interface implementations.
@@ -764,7 +754,7 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `--dir <path>` | Run the suite at the given directory (replaces the positional name) |
 | `--scenario <name>` | Run a single scenario by name |
 | `--target <name>` | Run the minimum dependency chain that reaches the named scenario |
-| `--platform <name>` | Override the platform from the scenario YAML |
+| `--platform <name>` | Override the platform declared in `suite.yaml` |
 | `--no-deploy` | Skip topology deployment (loopback / offline mode) |
 | `--monitor`, `-m` | Render an auto-refreshing dashboard instead of the per-event log |
 | `--junit <path>` | Write a JUnit XML report to the named path |

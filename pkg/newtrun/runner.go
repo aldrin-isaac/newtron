@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,13 +28,18 @@ type Runner struct {
 	Topology string // topology name (from server)
 	SpecDir  string // spec directory (from server)
 
-	// Populated by Run from the loaded suite.yaml. Embedded-target
-	// suites set suite to a minimal value (no Targets/Parameters);
-	// parameterized suites populate iterations and parameters with
-	// the resolved cross-product and effective parameter bindings.
-	suite        *Suite
-	iterations   []map[string]string
-	parameters   map[string]any
+	// Populated by Run from the loaded suite.yaml. resolvedIterations
+	// is the cross-product of suite-level targets after per-run
+	// override merging — one entry for embedded-target suites (the
+	// single nil binding), one entry per dimension combination for
+	// parameterized suites. resolvedParameters carries the merged
+	// parameter values (suite defaults + run-time overrides, typed
+	// per ParameterSpec.Coerce). Both views are derived from the
+	// loaded suite once at Run startup; runScenarioSteps reads them
+	// directly without re-querying the suite per scenario.
+	suite               *Suite
+	resolvedIterations  []map[string]string
+	resolvedParameters  map[string]any
 
 	discoveredPlatform string // platform discovered from connected devices
 
@@ -118,8 +122,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 	// targets without mutating the loaded suite.
 	resolved := *suite
 	resolved.Targets = effTargets
-	r.iterations = resolved.TargetIterations()
-	r.parameters = effParams
+	r.resolvedIterations = resolved.TargetIterations()
+	r.resolvedParameters = effParams
 
 	// Filter scenarios by --scenario / --target / --all.
 	var scenarios []*Scenario
@@ -158,7 +162,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 			suite.Name, suite.Topology, r.Topology)
 	}
 
-	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })
+	r.progress(func(p ProgressReporter) { p.SuiteStart(suite.Topology, suite.Platform, scenarios) })
 	suiteStart := time.Now()
 
 	// Deploy topology (unless --no-deploy)
@@ -472,19 +476,26 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 	}
 	result.Repeat = scenario.Repeat
 
+	// A scenario is parameterized when any of its steps references
+	// {{target.X}} or {{param.X}}. Parameterized scenarios iterate
+	// the suite's resolved target cross-product; embedded-target
+	// scenarios run once with a nil binding. Both shapes coexist in
+	// one suite (a parameterized rollout alongside embedded-target
+	// provision/verify scenarios) so the choice is per-scenario, not
+	// per-suite.
 	isParameterized := ScenarioIsParameterized(scenario)
 	var iterations []map[string]string
 	var effectiveParams map[string]any
-	if isParameterized && r.suite != nil {
-		iterations = r.iterations
-		effectiveParams = r.parameters
+	if isParameterized {
+		iterations = r.resolvedIterations
+		effectiveParams = r.resolvedParameters
 	}
 	if iterations == nil {
 		iterations = []map[string]string{nil}
 	}
 
 	for repeatIter := 1; repeatIter <= repeat; repeatIter++ {
-		repeatFailed := false
+		anyIterFailed := false
 
 		for _, binding := range iterations {
 			iterFailed := false
@@ -532,18 +543,24 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 				}
 			}
 
-			// Embedded-target scenarios fail-fast (the iteration loop
-			// has only one nil binding, so this propagates immediately
-			// to the repeat loop). Parameterized scenarios continue to
-			// the next binding so the operator sees every failing
-			// target in one run.
-			if iterFailed && !isParameterized {
-				repeatFailed = true
-				break
+			if iterFailed {
+				anyIterFailed = true
+				// Embedded-target scenarios have only one (nil) binding,
+				// so this break is moot. Parameterized scenarios
+				// continue to the next binding so the operator sees
+				// every failing target in one run before the repeat
+				// pass terminates.
+				if !isParameterized {
+					break
+				}
 			}
 		}
 
-		if repeatFailed {
+		// Repeat is fail-fast regardless of scenario shape: if any
+		// iteration in this repeat pass failed, record the index
+		// (when Repeat > 1 it's a useful provenance marker for soak
+		// runs) and stop further repeats.
+		if anyIterFailed {
 			if repeat > 1 {
 				result.FailedIteration = repeatIter
 			}
@@ -785,49 +802,3 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 	return ""
 }
 
-// resolveScenarioPath resolves a scenario name to a YAML file path.
-// Tries in order:
-//  1. Exact match: <dir>/<name>.yaml
-//  2. Numbered prefix: <dir>/*-<name>.yaml
-//  3. Scan files for matching name: field
-func resolveScenarioPath(dir, name string) (string, error) {
-	// 1. Exact match
-	exact := filepath.Join(dir, name+".yaml")
-	if _, err := os.Stat(exact); err == nil {
-		return exact, nil
-	}
-
-	// 2. Numbered prefix glob: *-<name>.yaml
-	matches, _ := filepath.Glob(filepath.Join(dir, "*-"+name+".yaml"))
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-
-	// 3. Scan all YAML files for matching name: field
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", fmt.Errorf("scenario %q not found: %w", name, err)
-	}
-	var found string
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		s, err := ParseScenario(path)
-		if err != nil {
-			continue
-		}
-		if s.Name == name {
-			if found != "" {
-				return "", fmt.Errorf("ambiguous scenario name %q: found in %s and %s", name, filepath.Base(found), e.Name())
-			}
-			found = path
-		}
-	}
-	if found != "" {
-		return found, nil
-	}
-
-	return "", fmt.Errorf("scenario %q not found in %s", name, dir)
-}

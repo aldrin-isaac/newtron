@@ -49,12 +49,17 @@ func (e Event) Kind() string { return string(e.Type) }
 // Body satisfies httputil.Eventable.
 func (e Event) Body() any { return e.Payload }
 
-// SuiteStartPayload mirrors ProgressReporter.SuiteStart([]*Scenario).
-// Scenarios are summarized to name + step count rather than serialized in
-// full — the full Scenario objects include action-specific fields that
-// browser consumers don't need at suite-start time. Per-step detail is
-// surfaced incrementally via step_start / step_end events.
+// SuiteStartPayload mirrors ProgressReporter.SuiteStart. Topology
+// and Platform are suite-level — declared once in suite.yaml — so
+// they ride on the payload alongside the scenario summaries rather
+// than being repeated on every ScenarioSummary. Scenarios are
+// summarized to name + step count rather than serialized in full —
+// the full Scenario objects include action-specific fields that
+// browser consumers don't need at suite-start time. Per-step detail
+// is surfaced incrementally via step_start / step_end events.
 type SuiteStartPayload struct {
+	Topology  string            `json:"topology,omitempty"`
+	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
@@ -142,13 +147,14 @@ type SuiteEndPayload struct {
 // duration (Go's time.Duration serializes as nanoseconds by default, which
 // is awkward for browser consumers).
 type StepResultPayload struct {
-	Name      string                 `json:"name"`
-	Action    newtrun.StepAction     `json:"action"`
-	Status    newtrun.StepStatus     `json:"status"`
-	Duration  string                 `json:"duration"`
-	Message   string                 `json:"message,omitempty"`
-	Details   []DeviceResultPayload  `json:"details,omitempty"`
-	Iteration int                    `json:"iteration,omitempty"`
+	Name          string                `json:"name"`
+	Action        newtrun.StepAction    `json:"action"`
+	Status        newtrun.StepStatus    `json:"status"`
+	Duration      string                `json:"duration"`
+	Message       string                `json:"message,omitempty"`
+	Details       []DeviceResultPayload `json:"details,omitempty"`
+	Iteration     int                   `json:"iteration,omitempty"`
+	TargetBinding map[string]string     `json:"target_binding,omitempty"`
 }
 
 // DeviceResultPayload mirrors newtrun.DeviceResult.
@@ -205,13 +211,14 @@ func stepResultFrom(r *newtrun.StepResult) StepResultPayload {
 		})
 	}
 	return StepResultPayload{
-		Name:      r.Name,
-		Action:    r.Action,
-		Status:    r.Status,
-		Duration:  durationString(r.Duration),
-		Message:   r.Message,
-		Details:   details,
-		Iteration: r.Iteration,
+		Name:          r.Name,
+		Action:        r.Action,
+		Status:        r.Status,
+		Duration:      durationString(r.Duration),
+		Message:       r.Message,
+		Details:       details,
+		Iteration:     r.Iteration,
+		TargetBinding: r.TargetBinding,
 	}
 }
 

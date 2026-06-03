@@ -21,7 +21,7 @@ func TestRunScenarioSteps_ParameterizedIteratesCrossProduct(t *testing.T) {
 				"interfaces": {"Eth0", "Eth4"},
 			},
 		},
-		iterations: (&Suite{Targets: map[string][]string{
+		resolvedIterations: (&Suite{Targets: map[string][]string{
 			"devices":    {"s1", "s2"},
 			"interfaces": {"Eth0", "Eth4"},
 		}}).TargetIterations(),
@@ -68,7 +68,7 @@ func TestRunScenarioSteps_EmbeddedTargetInParameterizedSuiteSingleIteration(t *t
 		suite: &Suite{Targets: map[string][]string{
 			"devices": {"s1", "s2", "s3"},
 		}},
-		iterations: []map[string]string{
+		resolvedIterations: []map[string]string{
 			{"device": "s1"}, {"device": "s2"}, {"device": "s3"},
 		},
 	}
@@ -96,7 +96,7 @@ func TestRunScenarioSteps_ParameterizedContinuesOnFailure(t *testing.T) {
 		suite: &Suite{Targets: map[string][]string{
 			"devices": {"s1", "s2", "s3"},
 		}},
-		iterations: []map[string]string{
+		resolvedIterations: []map[string]string{
 			{"device": "s1"}, {"device": "s2"}, {"device": "s3"},
 		},
 	}
@@ -135,15 +135,15 @@ func TestRunScenarioSteps_ParameterizedContinuesOnFailure(t *testing.T) {
 
 func TestRunScenarioSteps_TemplateExpansionFailureReportedAsStepError(t *testing.T) {
 	// A scenario with a {{param.X}} reference but no value supplied
-	// (suite has parameters declared but the runner's r.parameters is
+	// (suite has parameters declared but the runner's r.resolvedParameters is
 	// empty) — the expansion fails and the runner records a structured
 	// step error rather than panicking.
 	r := &Runner{
 		suite: &Suite{Parameters: map[string]ParameterSpec{
 			"missing_value": {Type: ParameterTypeString},
 		}},
-		iterations: []map[string]string{nil},
-		parameters: nil,
+		resolvedIterations: []map[string]string{nil},
+		resolvedParameters: nil,
 	}
 	scenario := &Scenario{
 		Name: "expand-fail",
@@ -162,6 +162,44 @@ func TestRunScenarioSteps_TemplateExpansionFailureReportedAsStepError(t *testing
 	}
 }
 
+// TestRunScenarioSteps_ParameterizedRepeatFailFast guards against
+// the regression where a failing parameterized scenario kept running
+// every repeat pass (result.FailedIteration stayed 0 and N×iter
+// step results accumulated). Within a single repeat pass,
+// parameterized iterations are continue-on-failure (collect all
+// failing bindings); across repeat passes, the suite is fail-fast
+// regardless of shape.
+func TestRunScenarioSteps_ParameterizedRepeatFailFast(t *testing.T) {
+	r := &Runner{
+		suite: &Suite{Targets: map[string][]string{
+			"devices": {"s1", "s2"},
+		}},
+		resolvedIterations: []map[string]string{
+			{"device": "s1"}, {"device": "s2"},
+		},
+	}
+	scenario := &Scenario{
+		Name:   "fail-fast",
+		Repeat: 3,
+		Steps: []Step{
+			{Name: "always-fail", Action: "nonexistent-action",
+				Params: map[string]any{"_": "{{target.device}}"}},
+		},
+	}
+	result := &ScenarioResult{Name: "fail-fast"}
+	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
+
+	// Repeat iteration 1 fails on both bindings (continue-on-failure
+	// within the iteration) → 2 step results. Repeat then aborts
+	// instead of running passes 2 and 3 (which would be wasted work).
+	if got := len(result.Steps); got != 2 {
+		t.Errorf("steps = %d, want 2 (one per binding in pass 1; no further repeats)", got)
+	}
+	if result.FailedIteration != 1 {
+		t.Errorf("FailedIteration = %d, want 1", result.FailedIteration)
+	}
+}
+
 func TestRunScenarioSteps_RepeatTimesIterationsCrossProduct(t *testing.T) {
 	// Repeat × parameterized iterations should produce
 	// Repeat-count × Iteration-count step results.
@@ -169,7 +207,7 @@ func TestRunScenarioSteps_RepeatTimesIterationsCrossProduct(t *testing.T) {
 		suite: &Suite{Targets: map[string][]string{
 			"devices": {"s1", "s2"},
 		}},
-		iterations: []map[string]string{
+		resolvedIterations: []map[string]string{
 			{"device": "s1"}, {"device": "s2"},
 		},
 	}

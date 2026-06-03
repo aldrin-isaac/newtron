@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,9 +25,9 @@ import (
 // template.
 type Suite struct {
 	Name        string                   `yaml:"name"`
-	Description string                   `yaml:"description"`
+	Description string                   `yaml:"description,omitempty"`
 	Topology    string                   `yaml:"topology"`
-	Platform    string                   `yaml:"platform"`
+	Platform    string                   `yaml:"platform,omitempty"`
 	Targets     map[string][]string      `yaml:"targets,omitempty"`
 	Parameters  map[string]ParameterSpec `yaml:"parameters,omitempty"`
 
@@ -179,6 +178,23 @@ func singularize(plural string) (string, bool) {
 	return s, ok
 }
 
+// pluralize is the inverse of singularize — given a template-side
+// singular (`device`), recover the YAML-side plural (`devices`) for
+// use in error messages. Operators see {{target.device}} in their
+// templates and add `device: [...]` (singular) to suite.yaml; the
+// diagnostic needs to name the form they should actually write.
+// Falls back to plural+"s" if no mapping exists, but every key in
+// singularizeMap has a reverse entry so the fallback is for
+// future-proofing only.
+func pluralize(singular string) string {
+	for plural, s := range singularizeMap {
+		if s == singular {
+			return plural
+		}
+	}
+	return singular + "s"
+}
+
 // LoadSuite reads a suite directory: suite.yaml declares the suite,
 // every other .yaml file is a scenario. Returns the suite with its
 // Scenarios slice populated in dependency order.
@@ -216,21 +232,12 @@ func LoadSuite(dir string) (*Suite, error) {
 		return nil, fmt.Errorf("%s: %w", suitePath, err)
 	}
 
-	entries, err := os.ReadDir(dir)
+	scenarios, paths, err := loadScenarioFiles(dir)
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", dir, err)
+		return nil, err
 	}
-
-	var scenarios []*Scenario
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") || e.Name() == "suite.yaml" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		sc, err := ParseScenario(path)
-		if err != nil {
-			return nil, err
-		}
+	for i, sc := range scenarios {
+		path := paths[i]
 		if sc.Topology != "" {
 			return nil, fmt.Errorf("%s: topology is set on suite.yaml, not on individual scenarios", path)
 		}
@@ -240,7 +247,6 @@ func LoadSuite(dir string) (*Suite, error) {
 		if err := validateScenarioAgainstSuite(sc, &suite, path); err != nil {
 			return nil, err
 		}
-		scenarios = append(scenarios, sc)
 	}
 
 	if HasRequires(scenarios) {
@@ -310,7 +316,7 @@ func validateScenarioAgainstSuite(sc *Scenario, suite *Suite, path string) error
 			}
 			for _, t := range targets {
 				if !declaredTargets[t] {
-					return fmt.Errorf("%s: references {{target.%s}} but no %s dimension declared in suite.yaml", prefix, t, t)
+					return fmt.Errorf("%s: references {{target.%s}} but suite.yaml has no %s: dimension declared", prefix, t, pluralize(t))
 				}
 			}
 			for _, p := range params {

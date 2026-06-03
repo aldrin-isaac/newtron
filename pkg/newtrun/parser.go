@@ -46,23 +46,39 @@ func ParseScenarioBytes(data []byte) (*Scenario, error) {
 // references against suite-level declarations) does not run here —
 // use LoadSuite when that validation is required.
 func ParseAllScenarios(dir string) ([]*Scenario, error) {
+	scenarios, _, err := loadScenarioFiles(dir)
+	return scenarios, err
+}
+
+// loadScenarioFiles is the underlying walk used by both
+// ParseAllScenarios (test/list paths) and LoadSuite (run path). It
+// returns each parsed scenario paired with its source file path so
+// suite-level error messages (e.g. "scenario X sets topology — that
+// belongs in suite.yaml") can name the offending file. Per §28
+// (file-level feature cohesion), scenario loading lives here in
+// parser.go; LoadSuite layers suite-level rejection on top.
+func loadScenarioFiles(dir string) ([]*Scenario, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("reading scenarios dir %s: %w", dir, err)
+		return nil, nil, fmt.Errorf("reading scenarios dir %s: %w", dir, err)
 	}
-
-	var scenarios []*Scenario
+	var (
+		scenarios []*Scenario
+		paths     []string
+	)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") || e.Name() == "suite.yaml" {
 			continue
 		}
-		s, err := ParseScenario(filepath.Join(dir, e.Name()))
+		path := filepath.Join(dir, e.Name())
+		s, err := ParseScenario(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		scenarios = append(scenarios, s)
+		paths = append(paths, path)
 	}
-	return scenarios, nil
+	return scenarios, paths, nil
 }
 
 // requireParam checks that a required key exists in step.Params.

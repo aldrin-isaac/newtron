@@ -25,6 +25,57 @@ func TestApplyTemplate_URLContext_PathEscape(t *testing.T) {
 	}
 }
 
+// applyTemplateURL splits at the first '?' and applies PathEscape to
+// the path portion, QueryEscape to the query string. PathEscape leaves
+// '&', '=', '+' unescaped, so a string param dropped into a query
+// position via the path-context path would inject extra parameters.
+func TestApplyTemplateURL_QueryPositionUsesQueryEscape(t *testing.T) {
+	got, err := applyTemplateURL(
+		"/search?q={{param.q}}",
+		nil,
+		map[string]any{"q": "a&evil=1"},
+	)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	want := "/search?q=a%26evil%3D1"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestApplyTemplateURL_PathPositionStillUsesPathEscape(t *testing.T) {
+	got, err := applyTemplateURL(
+		"/node/{{target.device}}",
+		map[string]string{"device": "switch1"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got != "/node/switch1" {
+		t.Errorf("got %q, want /node/switch1", got)
+	}
+}
+
+func TestApplyTemplateURL_BothPathAndQuery(t *testing.T) {
+	got, err := applyTemplateURL(
+		"/node/{{target.device}}/route?filter={{param.f}}",
+		map[string]string{"device": "switch1"},
+		map[string]any{"f": "vrf=red&owner=me"},
+	)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	// Path: "switch1" passes PathEscape unchanged. Query: '&' and '='
+	// in the filter value get QueryEscape'd so they don't smuggle
+	// extra query parameters.
+	want := "/node/switch1/route?filter=vrf%3Dred%26owner%3Dme"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestApplyTemplate_URLContext_EscapesParamWithSlash(t *testing.T) {
 	// A parameter value that contains URL-unsafe characters must be
 	// path-escaped, defending against path traversal injection.
@@ -340,7 +391,6 @@ func TestExpandStep_DoesNotMutateOriginal(t *testing.T) {
 		Params: map[string]any{"v": "{{param.x}}"},
 	}
 	origURL := step.URL
-	origParamsRef := step.Params
 	_, err := ExpandStep(step,
 		map[string]string{"device": "s1"},
 		map[string]any{"x": "value"})
@@ -350,10 +400,9 @@ func TestExpandStep_DoesNotMutateOriginal(t *testing.T) {
 	if step.URL != origURL {
 		t.Errorf("source URL mutated: %q", step.URL)
 	}
-	if &step.Params == nil || step.Params["v"] != "{{param.x}}" {
+	if step.Params["v"] != "{{param.x}}" {
 		t.Errorf("source Params mutated: %v", step.Params)
 	}
-	_ = origParamsRef
 }
 
 func TestExpandStep_ExpandsBatch(t *testing.T) {
