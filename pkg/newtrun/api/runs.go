@@ -61,6 +61,31 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pre-flight validation: load the suite and resolve overrides
+	// synchronously so failures here become HTTP 400 (bad request)
+	// rather than disappearing into the goroutine's state.json. The
+	// runner re-loads the suite during its lifecycle (file I/O is
+	// cheap and keeps Runner.Run self-contained); the only purpose
+	// of the pre-flight is to give bad-input requests an immediate
+	// error response.
+	suite, err := newtrun.LoadSuite(suiteDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suiteKey))
+		} else {
+			httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite load: %w", err))
+		}
+		return
+	}
+	if _, err := suite.EffectiveTargets(req.Targets); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("targets override: %w", err))
+		return
+	}
+	if _, err := suite.EffectiveParameters(req.Parameters); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("parameters override: %w", err))
+		return
+	}
+
 	// Reserve the suite key. Same-suite re-run rejected as 409.
 	entry, err := s.registry.Acquire(suiteKey)
 	if err != nil {

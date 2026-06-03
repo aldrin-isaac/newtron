@@ -89,6 +89,20 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 			fmt.Errorf("body name field %q does not match URL name %q", parsed.Name, name))
 		return
 	}
+	// File-backed scenarios live inside a suite; topology and platform
+	// are declared on suite.yaml, not on individual scenarios.
+	// Accepting them here would write a file LoadSuite later refuses,
+	// silently breaking the next run of that suite.
+	if parsed.Topology != "" {
+		httputil.WriteError(w, http.StatusBadRequest,
+			fmt.Errorf("scenario must not set topology: — that is declared on suite.yaml"))
+		return
+	}
+	if parsed.Platform != "" {
+		httputil.WriteError(w, http.StatusBadRequest,
+			fmt.Errorf("scenario must not set platform: — that is declared on suite.yaml or via --platform"))
+		return
+	}
 
 	// Pick the destination filename: existing file's basename if
 	// any (preserves operator-authored lexical prefix), else

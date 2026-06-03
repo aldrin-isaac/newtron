@@ -126,6 +126,39 @@ func TestApplyTemplate_ShellContext_EscapesInternalQuote(t *testing.T) {
 	}
 }
 
+// newtron-cli execs argv via strings.Fields with no shell in the
+// middle; substituted values must NOT be shell-quoted or literal
+// single quotes appear inside argv elements. ExpandStep picks the
+// substitution context by action — ctxShell for host-exec, ctxRaw
+// for newtron-cli.
+func TestExpandStep_NewtronCLICommandUsesRawContext(t *testing.T) {
+	step := Step{
+		Action:  ActionNewtronCLI,
+		Command: "service apply Ethernet0 {{param.opt}}",
+	}
+	expanded, err := ExpandStep(step, nil, map[string]any{"opt": "transit"})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if expanded.Command != "service apply Ethernet0 transit" {
+		t.Errorf("Command = %q, want raw (no shell quotes)", expanded.Command)
+	}
+}
+
+func TestExpandStep_HostExecCommandUsesShellContext(t *testing.T) {
+	step := Step{
+		Action:  ActionHostExec,
+		Command: "echo {{param.msg}}",
+	}
+	expanded, err := ExpandStep(step, nil, map[string]any{"msg": "hello world"})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if expanded.Command != "echo 'hello world'" {
+		t.Errorf("Command = %q, want shell-quoted", expanded.Command)
+	}
+}
+
 func TestApplyTemplate_ShellContext_DefendsAgainstCommandInjection(t *testing.T) {
 	// The attempted injection `; rm -rf /` must be wrapped as a single
 	// argv, not interpreted as a command separator.

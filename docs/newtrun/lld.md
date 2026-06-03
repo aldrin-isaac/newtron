@@ -206,7 +206,7 @@ func ScenarioIsParameterized(sc *Scenario) bool
 
 Reports whether any step in the scenario uses `{{target.X}}` or `{{param.X}}` tokens. Decided per-scenario by scanning `CollectTemplateReferences` over every step; embedded-target scenarios coexist with parameterized scenarios in the same suite, and the runner takes the suite's target cross-product only for the latter.
 
-### 2.4 singularize (`scenario.go`)
+### 2.4 singularize (`suite.go`)
 
 ```go
 var singularizeMap = map[string]string{

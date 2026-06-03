@@ -444,6 +444,15 @@ func (p *ParameterSpec) ValidateDeclaration() error {
 	if p.Type == ParameterTypeEnum && len(p.Values) == 0 {
 		return fmt.Errorf("enum: values is required")
 	}
+	if p.Required && p.Default != nil {
+		// Required + Default is internally contradictory: with a
+		// default, the override is always satisfied so required:
+		// becomes a no-op. Operators who wrote both almost certainly
+		// meant "this has no default; the request must supply a
+		// value" — surface the mistake rather than silently dropping
+		// one half.
+		return fmt.Errorf("required: true and default: are mutually exclusive — required parameters have no default")
+	}
 	if p.Default != nil {
 		if _, err := p.Coerce(p.Default); err != nil {
 			return fmt.Errorf("default: %w", err)

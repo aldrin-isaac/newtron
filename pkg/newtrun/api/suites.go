@@ -8,6 +8,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -156,11 +157,16 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 	dir := filepath.Join(s.cfg.SuitesBase, suite)
 	loaded, err := newtrun.LoadSuite(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		// LoadSuite wraps the underlying file-open error via fmt.Errorf,
+		// so os.IsNotExist (which doesn't unwrap) reports false. Use
+		// errors.Is against os.ErrNotExist instead — that follows the
+		// %w chain and correctly distinguishes "suite directory not
+		// found" (404) from "suite.yaml malformed" (400).
+		if errors.Is(err, os.ErrNotExist) {
 			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
 	resp := SuiteScenariosResponse{

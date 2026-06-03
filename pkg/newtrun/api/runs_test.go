@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,12 +18,18 @@ import (
 
 // writeMinimalSuite creates a single-scenario suite directory the server
 // can resolve. The scenario uses `wait` so it runs without needing a
-// newtron-server connection.
+// newtron-server connection. The fixture writes a suite.yaml manifest
+// alongside — handleStartRun's pre-flight LoadSuite refuses to resolve
+// a directory without one.
 func writeMinimalSuite(t *testing.T, base, name, body string) {
 	t.Helper()
 	dir := filepath.Join(base, name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	manifest := fmt.Sprintf("name: %s\ntopology: synthetic\n", name)
+	if err := os.WriteFile(filepath.Join(dir, "suite.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatalf("write suite.yaml: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "00-only.yaml"), []byte(body), 0644); err != nil {
 		t.Fatalf("write scenario: %v", err)
@@ -326,12 +333,11 @@ func TestReconcileStaleStatus_NilState(t *testing.T) {
 }
 
 // scenarioYAMLBody is a minimal scenario that requires no newtron-server
-// to load (its `topology` field matches the test topology, and `wait`
-// action is a pure sleep).
+// to load. topology is suite-level (writeMinimalSuite emits suite.yaml),
+// not on the scenario; `wait` is a pure sleep.
 const scenarioYAMLBody = `
 name: smoke
 description: minimal scenario for tests
-topology: test-topo
 steps:
   - name: brief-pause
     action: wait

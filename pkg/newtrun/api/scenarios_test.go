@@ -175,6 +175,43 @@ func TestScenario_PutRejectsNameMismatch(t *testing.T) {
 	}
 }
 
+// TestScenario_PutRejectsTopology and TestScenario_PutRejectsPlatform
+// guard against the regression where the PUT handler accepted
+// scenarios with suite-level fields set. Without this check the file
+// gets written and the next LoadSuite refuses to load the suite,
+// silently breaking subsequent runs.
+func TestScenario_PutRejectsTopology(t *testing.T) {
+	ts, _ := newScenarioTestServer(t)
+	body := []byte(`name: hello
+description: scenario with stray topology
+topology: synthetic
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	resp, respBody := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/hello", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400; body=%s", resp.StatusCode, respBody)
+	}
+}
+
+func TestScenario_PutRejectsPlatform(t *testing.T) {
+	ts, _ := newScenarioTestServer(t)
+	body := []byte(`name: hello
+description: scenario with stray platform
+platform: sonic-vs
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	resp, respBody := doRequest(t, ts, http.MethodPut, "/newtrun/v1/suites/demo/scenarios/hello", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400; body=%s", resp.StatusCode, respBody)
+	}
+}
+
 // TestScenario_GetReturnsRawYAML covers the read path: GET returns the
 // exact bytes that were written, with application/yaml Content-Type so
 // browser-side consumers don't need to guess.
@@ -230,8 +267,6 @@ func TestScenario_ConcurrentPutsAreAtomic(t *testing.T) {
 	for i := range bodies {
 		bodies[i] = []byte(fmt.Sprintf(`name: race
 description: writer-%d
-topology: synthetic
-platform: sonic-vs
 steps:
   - name: wait
     action: wait

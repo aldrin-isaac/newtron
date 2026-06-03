@@ -135,6 +135,13 @@ func TestParameterSpec_ValidateDeclaration_DefaultViolatesEnum(t *testing.T) {
 	}
 }
 
+func TestParameterSpec_ValidateDeclaration_RequiredAndDefaultMutuallyExclusive(t *testing.T) {
+	p := ParameterSpec{Type: ParameterTypeString, Required: true, Default: "x"}
+	if err := p.ValidateDeclaration(); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("err = %v, want required+default mutual-exclusion error", err)
+	}
+}
+
 func TestParameterSpec_ValidateDeclaration_DefaultViolatesIntMin(t *testing.T) {
 	one := 100
 	p := ParameterSpec{Type: ParameterTypeInt, Min: &one, Default: 50}

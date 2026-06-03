@@ -74,7 +74,18 @@ func ExpandStep(step Step, target map[string]string, params map[string]any) (Ste
 	if err != nil {
 		return expanded, fmt.Errorf("url: %w", err)
 	}
-	expanded.Command, err = applyTemplate(step.Command, target, params, ctxShell)
+	// host-exec sends Command through an SSH shell (`sh -c '<cmd>'`),
+	// so substituted values must be shell-quoted to survive
+	// re-tokenization. newtron-cli execs Command as argv via
+	// strings.Fields without a shell — shell-quoting there would
+	// place literal single quotes inside the argv elements, breaking
+	// the subprocess invocation. Pick the encoding context per
+	// action.
+	cmdCtx := ctxShell
+	if step.Action == ActionNewtronCLI {
+		cmdCtx = ctxRaw
+	}
+	expanded.Command, err = applyTemplate(step.Command, target, params, cmdCtx)
 	if err != nil {
 		return expanded, fmt.Errorf("command: %w", err)
 	}
