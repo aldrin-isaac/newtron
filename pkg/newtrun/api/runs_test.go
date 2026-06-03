@@ -130,6 +130,84 @@ func TestStartRunReturns202AndRegistersEntry(t *testing.T) {
 	t.Log("registry entry registered + released before assertion; not a failure")
 }
 
+// TestStartRunReturns400OnBadTargetsOverride and the param-override
+// variant guard the pre-flight validation in handleStartRun. Without
+// it, override-validation errors would land in the goroutine's
+// state.json as status=failed instead of as 400 on the request.
+func TestStartRunReturns400OnUnknownTargetsDimension(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(StartRunRequest{
+		Suite:   "demo-suite",
+		All:     true,
+		Targets: map[string][]string{"racks": {"r1"}},
+	})
+	resp, err := http.Post(ts.URL+"/newtrun/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400 (unknown dimension should fail pre-flight, not bury in state.json)", resp.StatusCode)
+	}
+}
+
+func TestStartRunReturns400OnTargetWhitelistViolation(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	// Suite needs a declared dimension for the override to even
+	// reach the value-whitelist check. Append it to the suite.yaml
+	// the fixture wrote.
+	suitePath := filepath.Join(srv.cfg.SuitesBase, "demo-suite", "suite.yaml")
+	manifest, _ := os.ReadFile(suitePath)
+	manifest = append(manifest, []byte("targets:\n  devices: [s1]\n")...)
+	_ = os.WriteFile(suitePath, manifest, 0644)
+
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(StartRunRequest{
+		Suite:   "demo-suite",
+		All:     true,
+		Targets: map[string][]string{"devices": {"s1; rm -rf /"}},
+	})
+	resp, err := http.Post(ts.URL+"/newtrun/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400 (identifier-whitelist violation should fail pre-flight)", resp.StatusCode)
+	}
+}
+
+func TestStartRunReturns400OnUnknownParameterOverride(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(StartRunRequest{
+		Suite:      "demo-suite",
+		All:        true,
+		Parameters: map[string]any{"made_up": "x"},
+	})
+	resp, err := http.Post(ts.URL+"/newtrun/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400 (undeclared parameter should fail pre-flight)", resp.StatusCode)
+	}
+}
+
 func TestStopRunReturns404ForUnknownSuite(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()

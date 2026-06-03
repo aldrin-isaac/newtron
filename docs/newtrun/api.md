@@ -482,7 +482,7 @@ suite_start  →  (scenario_start  →  (step_start  →  step_end)*  →  scena
 
 ### `suite_start`
 
-Sent once at the start of the run with the suite metadata and scenario roster. Topology and platform are suite-level (declared in `suite.yaml`); each `ScenarioSummary` also carries them for backwards compatibility with consumers that pivot on scenario rows.
+Sent once at the start of the run with the suite metadata and scenario roster. Topology and platform are suite-level (declared in `suite.yaml`) and ride on the envelope; per-scenario summaries don't repeat them.
 
 ```json
 {
@@ -491,8 +491,6 @@ Sent once at the start of the run with the suite metadata and scenario roster. T
   "scenarios": [
     {
       "name": "setup-device",
-      "topology": "1node-vs",
-      "platform": "sonic-vs",
       "step_count": 6
     }
   ]

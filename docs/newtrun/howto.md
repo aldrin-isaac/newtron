@@ -703,6 +703,7 @@ Per-run overrides replace (not merge with) the suite default for each key — om
 |---|---|
 | `url:` path component or query | Use bare — do not pre-escape |
 | `command:` (host-exec) | Use bare — do not add your own quotes around a `{{param.X}}` |
+| `command:` (newtron-cli) | Use bare; substituted values **must not contain whitespace** — newtron-cli execs argv via `strings.Fields(command)` with no shell, so a `{{param.X}}` whose value contains a space splits into multiple argv elements |
 | `expect.jq:` | Use bare — do not put surrounding `"..."` around a string `{{param.X}}`; the engine emits JSON-quoted form |
 | `params:` value | Use bare — same string handling whether the value is one token or interpolated |
 | `expect.contains:` | Use bare — no escaping is applied |

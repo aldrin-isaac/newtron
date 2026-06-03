@@ -173,13 +173,15 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 		Suite:    suite,
 		Topology: loaded.Topology,
 	}
+	// Topology and Platform are on the SuiteScenariosResponse envelope,
+	// not on per-scenario summaries — repeating them would diverge once
+	// suite.yaml changes.
+	resp.Platform = loaded.Platform
 	resp.Scenarios = make([]ScenarioSummary, len(loaded.Scenarios))
 	for i, sc := range loaded.Scenarios {
 		resp.Scenarios[i] = ScenarioSummary{
 			Name:        sc.Name,
 			Description: sc.Description,
-			Topology:    loaded.Topology, // inherited from suite
-			Platform:    loaded.Platform,
 			StepCount:   len(sc.Steps),
 			Requires:    sc.Requires,
 		}

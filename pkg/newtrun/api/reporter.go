@@ -39,14 +39,7 @@ func NewHTTPReporter(broker *httputil.Broker[Event], runKey string, inner newtru
 func (r *HTTPReporter) SuiteStart(suiteTopology, suitePlatform string, scenarios []*newtrun.Scenario) {
 	summaries := make([]ScenarioSummary, 0, len(scenarios))
 	for _, s := range scenarios {
-		summary := scenarioSummaryFrom(s)
-		// Suite-level topology/platform aren't on the Scenario any
-		// more; copy them onto each summary so wire consumers that
-		// read ScenarioSummary directly (suite picker, list view)
-		// still see populated fields.
-		summary.Topology = suiteTopology
-		summary.Platform = suitePlatform
-		summaries = append(summaries, summary)
+		summaries = append(summaries, scenarioSummaryFrom(s))
 	}
 	r.Broker.Publish(r.RunKey, Event{
 		Type: EventSuiteStart,

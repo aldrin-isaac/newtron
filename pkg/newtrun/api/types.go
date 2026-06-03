@@ -64,16 +64,16 @@ type SuiteStartPayload struct {
 }
 
 // ScenarioSummary is the per-scenario view returned by SuiteStart events
-// and by GET /api/suites/{suite}/scenarios. The browser suite picker and
-// `newtrun list <suite>` both render from this shape, so it carries the
-// fields a chooser needs (name, topology, step count) plus dependency
-// info (requires) so dependency-ordered lists can be rendered without a
-// second call. Full scenario CRUD over HTTP is tracked in issue #33.
+// and by GET /api/suites/{suite}/scenarios. The browser suite picker
+// and `newtrun list <suite>` both render from this shape; per-scenario
+// fields are name + step count + dependency info. Topology and
+// Platform are suite-level and ride on the parent envelope
+// (SuiteStartPayload or SuiteScenariosResponse), not on each
+// ScenarioSummary — repeating them per row would diverge once
+// suite.yaml is mutated.
 type ScenarioSummary struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
-	Topology    string   `json:"topology"`
-	Platform    string   `json:"platform,omitempty"`
 	StepCount   int      `json:"step_count"`
 	Requires    []string `json:"requires,omitempty"`
 }
@@ -165,12 +165,13 @@ type DeviceResultPayload struct {
 }
 
 // scenarioSummaryFrom converts a *newtrun.Scenario to its summary form.
+// Topology and Platform are intentionally not copied here — they live
+// on the parent envelope (SuiteStartPayload / SuiteScenariosResponse),
+// not per scenario.
 func scenarioSummaryFrom(s *newtrun.Scenario) ScenarioSummary {
 	return ScenarioSummary{
 		Name:        s.Name,
 		Description: s.Description,
-		Topology:    s.Topology,
-		Platform:    s.Platform,
 		StepCount:   len(s.Steps),
 	}
 }
@@ -277,10 +278,13 @@ type HealthResponse struct {
 }
 
 // SuiteScenariosResponse is the response shape for GET
-// /api/suites/{suite}/scenarios.
+// /api/suites/{suite}/scenarios. Topology and Platform are suite-level
+// (suite.yaml owns them) so they ride on the envelope; per-scenario
+// summaries don't repeat them.
 type SuiteScenariosResponse struct {
 	Suite     string            `json:"suite"`
 	Topology  string            `json:"topology,omitempty"`
+	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
