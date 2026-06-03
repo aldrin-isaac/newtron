@@ -445,12 +445,9 @@ func ComputeTargetChain(scenarios []*Scenario, target string) ([]*Scenario, erro
 ```go
 type RunState struct {
     Suite     string          `json:"suite"`
-    SuiteDir  string          `json:"suite_dir"`
     Topology  string          `json:"topology"`
-    SpecDir   string          `json:"spec_dir,omitempty"`
     Platform  string          `json:"platform"`
     Target    string          `json:"target,omitempty"`
-    PID       int             `json:"pid"`
     Status    SuiteStatus     `json:"status"`
     Started   time.Time       `json:"started"`
     Updated   time.Time       `json:"updated"`
@@ -460,6 +457,8 @@ type RunState struct {
 ```
 
 Persisted to `~/.newtron/newtrun/<key>/state.json` after every progress event. `<key>` is the suite name for file-backed runs or a UUID for inline runs (separate `_inline/<uuid>/` subdirectory keeps the namespaces clean).
+
+The fields exposed here are the abstract run identity — name (Suite), topology, platform, lifecycle status, and per-scenario progress. Storage internals (where `suite.yaml` lives on disk, which spec directory the runner used) are deliberately absent: clients address suites by *name*; resolving a name to bytes is server-internal and must not leak through the wire (§33 Public API Boundary). The legacy CLI-process PID lock retired when the runner became a goroutine under the registry — the AcquireLock / ReleaseLock helpers and the `pid` field were deleted together.
 
 ### 5.2 SuiteStatus
 

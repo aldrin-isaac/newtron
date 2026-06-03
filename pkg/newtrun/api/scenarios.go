@@ -117,10 +117,12 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("write scenario: %w", err))
 		return
 	}
+	// Response carries the abstract handle (suite + name) only. Whether
+	// the server stored it as <name>.yaml or NN-<name>.yaml is a
+	// storage detail that does not leak through the wire.
 	httputil.WriteJSON(w, status, map[string]string{
 		"suite": suite,
 		"name":  name,
-		"path":  filepath.Base(destPath),
 	})
 }
 

@@ -170,8 +170,7 @@ If another run holds the suite's registry slot, the response is 409 Conflict wit
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `suite` | string | one of suite/suite_dir | Suite name under server's `suites_base`. Mutually exclusive with `suite_dir`. The named directory must contain a `suite.yaml` declaring `name` + `topology`. |
-| `suite_dir` | string | one of suite/suite_dir | Absolute path to a suite directory. Mutually exclusive with `suite`. |
+| `suite` | string | yes | Suite name. The server resolves it under its own `suites_base`; filesystem layout is server-internal and intentionally never accepted from or returned to clients. The named directory must contain a `suite.yaml` declaring `name` + `topology`. |
 | `scenario` | string | no | Run only the named scenario. Mutually exclusive with `target` and `all`. |
 | `target` | string | no | Run the minimal dependency chain reaching this scenario. |
 | `all` | bool | no | Run all scenarios. Defaults to true when none of `scenario` / `target` / `all` are set. |
@@ -210,8 +209,8 @@ The server resolves overrides against the suite catalog (LoadSuite → Effective
 
 **Error responses:**
 
-- 400 — missing both `suite` and `suite_dir`; both set; malformed body.
-- 404 — `suite_dir` doesn't exist on the server.
+- 400 — missing `suite`; invalid suite name; malformed body; override values fail validation (unknown dimension, identifier-whitelist violation, type mismatch).
+- 404 — suite directory not found on the server.
 - 409 — registry already has an entry for this suite.
 
 ### `GET /newtrun/v1/runs` — list runs
@@ -444,9 +443,9 @@ Resolves the on-disk file by either exact `{name}.yaml` or `*-{name}.yaml` (the 
 
 Body is raw YAML. The server validates with `ParseScenarioBytes` (the same parser the rest of the framework uses) AND asserts the body's `name:` field matches the URL `{name}`. If either fails, the file is **never touched**. On success, the file is written atomically (same-directory tempfile + rename(2)) so concurrent readers never observe a partial write.
 
-**File naming:** a fresh scenario lands at `{suite_dir}/{name}.yaml`. An update to a scenario authored on disk with a lexical prefix (e.g. `06-perwrite-actuated.yaml`) is written in-place to that file, preserving the prefix.
+**Storage handling.** Where the server stores the bytes is server-internal. A fresh scenario lands at the canonical name; an update to a scenario that already has a lexical prefix (e.g. `06-perwrite-actuated.yaml`) is rewritten in-place to that file so the prefix survives. The client addresses the scenario by name; the on-disk filename is never returned.
 
-**Response:** 201 on create, 200 on update, with `{"data": {"suite": "...", "name": "...", "path": "..."}}`. 400 on invalid YAML or name mismatch, 404 if the suite directory doesn't exist.
+**Response:** 201 on create, 200 on update, with `{"data": {"suite": "...", "name": "..."}}`. 400 on invalid YAML or name mismatch, 404 if the suite doesn't exist.
 
 ### `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}`
 
@@ -615,7 +614,6 @@ The complete record for one run. Returned by `GET /newtrun/v1/runs/{suite}` ([§
 ```json
 {
   "suite": "1node-vs-config",
-  "suite_dir": "newtrun/suites/1node-vs-config",
   "topology": "1node-vs",
   "platform": "sonic-vs",
   "status": "complete",
@@ -626,7 +624,9 @@ The complete record for one run. Returned by `GET /newtrun/v1/runs/{suite}` ([§
 }
 ```
 
-`target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied. `pid` is no longer populated by the server (suite-backed runs are owned by goroutines, not OS processes) — older state files may still carry it but new ones omit it.
+The wire shape carries the abstract run identity only — no on-disk paths (where `suite.yaml` lives, which spec directory the runner used) and no PID. Storage location is the server's business; the legacy CLI-process PID lock was retired when the runner became a goroutine under the registry.
+
+`target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied.
 
 `status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /newtrun/v1/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
 

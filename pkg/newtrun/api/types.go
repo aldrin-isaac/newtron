@@ -86,17 +86,23 @@ type ScenarioStartPayload struct {
 }
 
 // ScenarioEndPayload mirrors ProgressReporter.ScenarioEnd(*ScenarioResult, ...).
+// Repeat and FailedIteration carry the soak-mode provenance from the
+// canonical ScenarioResult: how many repeat passes were requested
+// (Repeat) and which pass failed (FailedIteration, 0 when none did).
+// Wire consumers report "failed on iteration K/N" from this pair.
 type ScenarioEndPayload struct {
-	Name        string                    `json:"name"`
-	Topology    string                    `json:"topology,omitempty"`
-	Platform    string                    `json:"platform,omitempty"`
-	Status      newtrun.StepStatus        `json:"status"`
-	Duration    string                    `json:"duration"`
-	Steps       []StepResultPayload       `json:"steps,omitempty"`
-	DeployError string                    `json:"deploy_error,omitempty"`
-	SkipReason  string                    `json:"skip_reason,omitempty"`
-	Index       int                       `json:"index"`
-	Total       int                       `json:"total"`
+	Name            string              `json:"name"`
+	Topology        string              `json:"topology,omitempty"`
+	Platform        string              `json:"platform,omitempty"`
+	Status          newtrun.StepStatus  `json:"status"`
+	Duration        string              `json:"duration"`
+	Steps           []StepResultPayload `json:"steps,omitempty"`
+	DeployError     string              `json:"deploy_error,omitempty"`
+	SkipReason      string              `json:"skip_reason,omitempty"`
+	Repeat          int                 `json:"repeat,omitempty"`
+	FailedIteration int                 `json:"failed_iteration,omitempty"`
+	Index           int                 `json:"index"`
+	Total           int                 `json:"total"`
 }
 
 // StepStartPayload mirrors ProgressReporter.StepStart(scenario, *Step, index, total).
@@ -188,14 +194,16 @@ func scenarioEndFrom(r *newtrun.ScenarioResult, index, total int) ScenarioEndPay
 		deployErr = r.DeployError.Error()
 	}
 	return ScenarioEndPayload{
-		Name:        r.Name,
-		Topology:    r.Topology,
-		Platform:    r.Platform,
-		Status:      r.Status,
-		Duration:    durationString(r.Duration),
-		Steps:       steps,
-		DeployError: deployErr,
-		SkipReason:  r.SkipReason,
+		Name:            r.Name,
+		Topology:        r.Topology,
+		Platform:        r.Platform,
+		Status:          r.Status,
+		Duration:        durationString(r.Duration),
+		Steps:           steps,
+		DeployError:     deployErr,
+		SkipReason:      r.SkipReason,
+		Repeat:          r.Repeat,
+		FailedIteration: r.FailedIteration,
 		Index:       index,
 		Total:       total,
 	}
@@ -288,23 +296,18 @@ type SuiteScenariosResponse struct {
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
-// StartRunRequest is the body for POST /api/runs. Names the suite to run
-// and optional run-shaping options that mirror the existing CLI flags.
+// StartRunRequest is the body for POST /api/runs. Names the suite to
+// run and optional run-shaping options that mirror the existing CLI
+// flags.
 //
-// Suite (named) and SuiteDir (path) are alternatives — exactly one must
-// be set. Suite resolves under the server's SuitesBase; SuiteDir is an
-// absolute filesystem path the server reads directly. The path mode
-// matches the original CLI's --dir flag and honors the server's
-// filesystem permissions; security posture is bounded by deployment-
-// time trust controls (loopback default, reverse proxy for non-loopback).
+// The client addresses a suite by *name* — the server resolves the
+// name to bytes under its SuitesBase. Filesystem layout is server-
+// internal and intentionally absent from the wire (§33 Public API
+// Boundary): clients must not learn where suite.yaml lives, and the
+// server must not accept absolute paths from clients.
 type StartRunRequest struct {
 	// Suite is the file-backed suite name under the server's SuitesBase.
-	// Mutually exclusive with SuiteDir.
-	Suite string `json:"suite,omitempty"`
-
-	// SuiteDir is an absolute path to a suite directory the server reads
-	// directly. Mutually exclusive with Suite.
-	SuiteDir string `json:"suite_dir,omitempty"`
+	Suite string `json:"suite"`
 
 	// Scenario, if set, runs a single scenario from the suite. Mutually
 	// exclusive with Target and All.

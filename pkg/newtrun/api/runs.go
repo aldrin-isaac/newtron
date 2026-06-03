@@ -29,12 +29,12 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	if req.Suite == "" && req.SuiteDir == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite or suite_dir is required"))
+	if req.Suite == "" {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite is required"))
 		return
 	}
-	if req.Suite != "" && req.SuiteDir != "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite and suite_dir are mutually exclusive"))
+	if !nameRE.MatchString(req.Suite) {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", req.Suite))
 		return
 	}
 	// Default: All=true when neither Scenario nor Target is set, matching
@@ -43,21 +43,13 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		req.All = true
 	}
 
-	// Resolve the suite directory and the run key. When suite_dir is
-	// supplied, the run key is the basename of that path (mirrors the
-	// original CLI's newtrun.SuiteName behavior). When suite is supplied,
-	// the run key is the suite name and the directory is resolved under
-	// SuitesBase.
-	var suiteDir, suiteKey string
-	if req.SuiteDir != "" {
-		suiteDir = req.SuiteDir
-		suiteKey = filepath.Base(filepath.Clean(req.SuiteDir))
-	} else {
-		suiteDir = filepath.Join(s.cfg.SuitesBase, req.Suite)
-		suiteKey = req.Suite
-	}
+	// Resolve the suite name to an on-disk location. Suite directories
+	// live under SuitesBase by convention; the path itself is server-
+	// internal and is never returned to or accepted from the client.
+	suiteKey := req.Suite
+	suiteDir := filepath.Join(s.cfg.SuitesBase, req.Suite)
 	if !isDirectory(suiteDir) {
-		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite directory not found: %s", suiteDir))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suiteKey))
 		return
 	}
 
@@ -131,10 +123,11 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Construct the persistent state record.
+	// Construct the persistent state record. Topology is unknown at
+	// this point — the runner discovers it from the server and the
+	// state reporter fills it in via SuiteStart.
 	state := &newtrun.RunState{
 		Suite:    suiteKey,
-		SuiteDir: suiteDir,
 		Platform: req.Platform,
 		Target:   req.Target,
 		Status:   newtrun.SuiteStatusRunning,

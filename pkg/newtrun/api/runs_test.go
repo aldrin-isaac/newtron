@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -205,6 +206,60 @@ func TestStartRunReturns400OnUnknownParameterOverride(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status: got %d, want 400 (undeclared parameter should fail pre-flight)", resp.StatusCode)
+	}
+}
+
+// TestStepResultPayload_CarriesTargetBinding guards the wire shape
+// for parameterized runs. StepResult.TargetBinding (canonical Go
+// type) and StepResultPayload.TargetBinding (wire shape) are both
+// declared, but a future rename of stepResultFrom that drops the
+// field would silently break browser frontends / inline-state
+// consumers that pivot results on (device, interface) tuples. The
+// test serializes a StepResult containing a binding through
+// stepResultFrom and asserts the raw JSON carries target_binding.
+func TestStepResultPayload_CarriesTargetBinding(t *testing.T) {
+	canonical := &newtrun.StepResult{
+		Name:   "verify-admin-status",
+		Action: newtrun.ActionNewtron,
+		Status: newtrun.StepStatusPassed,
+		TargetBinding: map[string]string{
+			"device":    "switch1",
+			"interface": "Ethernet0",
+		},
+	}
+	payload := stepResultFrom(canonical)
+	if !reflect.DeepEqual(payload.TargetBinding, canonical.TargetBinding) {
+		t.Errorf("payload.TargetBinding = %v, want %v",
+			payload.TargetBinding, canonical.TargetBinding)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"target_binding"`)) {
+		t.Errorf("JSON missing target_binding field: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte(`"device":"switch1"`)) {
+		t.Errorf("JSON missing device=switch1: %s", raw)
+	}
+}
+
+// TestStepResultPayload_OmitsEmptyTargetBinding confirms the omitempty
+// tag works — embedded-target step results (binding=nil) must not
+// emit "target_binding": null on the wire.
+func TestStepResultPayload_OmitsEmptyTargetBinding(t *testing.T) {
+	canonical := &newtrun.StepResult{
+		Name:          "wait",
+		Action:        newtrun.ActionWait,
+		Status:        newtrun.StepStatusPassed,
+		TargetBinding: nil,
+	}
+	raw, err := json.Marshal(stepResultFrom(canonical))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(raw, []byte(`"target_binding"`)) {
+		t.Errorf("nil binding leaked target_binding field: %s", raw)
 	}
 }
 

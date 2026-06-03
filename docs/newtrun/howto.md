@@ -652,7 +652,6 @@ Recognized types: `string`, `int`, `bool`, `enum`, `ipv4`, `cidr`. Each type val
 ```yaml
 name: rollout-admin-status
 description: Set admin_status on every IP-bearing interface and verify.
-requires: [verify-health]
 steps:
   - name: set-admin-status
     action: newtron
@@ -823,15 +822,15 @@ Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (c
 
 #### URL templates
 
-URLs start from the path after the network segment. The `/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
+URLs start from the path after the network segment. The `newtron` action calls newtron-server, so the `/newtron/v1/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
 
 ```yaml
-url: /node/{{device}}/health             # → /newtrun/v1/network/<id>/node/switch1/health
-url: /node/{{device}}/bgp/check          # → /newtrun/v1/network/<id>/node/switch1/bgp/check
-url: /node/{{device}}/create-vlan        # → /newtrun/v1/network/<id>/node/switch1/create-vlan
+url: /node/{{device}}/health             # → /newtron/v1/network/<id>/node/switch1/health
+url: /node/{{device}}/bgp/check          # → /newtron/v1/network/<id>/node/switch1/bgp/check
+url: /node/{{device}}/create-vlan        # → /newtron/v1/network/<id>/node/switch1/create-vlan
 ```
 
-newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/newtrun/v1/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
+newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
 
 If the URL contains `{{device}}`, the call runs in parallel across target devices. If not, it runs once with no device scoping (network-level operations like creating specs).
 
