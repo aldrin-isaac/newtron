@@ -139,6 +139,13 @@ type portOwner struct {
 // some unrelated lab must not block probing the lab currently being deployed.
 // In the worst case attribution is best-effort; the bare error format is the
 // fallback.
+//
+// Attribution is also TOCTOU against concurrent deploys/destroys: the read
+// happens once at the top of ProbeAllPorts, but the actual net.Listen calls
+// follow. A peer lab destroyed between snapshot and probe will still be
+// named in the error (or vice versa). The operator should treat the lab
+// name as a hint, not a contract — re-running the deploy after the error
+// resolves the ambiguity.
 func attributePortOwners(excludeLab string) map[int]portOwner {
 	names, err := ListLabs()
 	if err != nil {

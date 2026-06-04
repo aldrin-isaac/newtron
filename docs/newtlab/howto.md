@@ -1217,6 +1217,11 @@ Common causes:
   manually-started service, another user's lab), the error falls back to the
   bare form — stop the conflicting process or shift the relevant port base.
 
+  Attribution is best-effort: lab state files are read once at the top of the
+  probe, so a peer lab destroyed or deployed mid-probe may be named (or
+  missed). Re-run the deploy after acting on the message to resolve the
+  ambiguity.
+
 ### Can't SSH
 
 ```bash

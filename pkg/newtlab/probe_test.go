@@ -305,6 +305,72 @@ func TestProbeAllPorts_ExcludesSelfLab(t *testing.T) {
 	}
 }
 
+// TestProbeAllPorts_AttributesLinkBridgePort verifies the link-bridge
+// attribution path: a port held by another lab's link A/Z is owned by the
+// bridge worker on that link's WorkerHost, and the error names that worker's
+// PID. This exercises probe.go:175-183 which was previously uncovered.
+func TestProbeAllPorts_AttributesLinkBridgePort(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	linkPort := ln.Addr().(*net.TCPAddr).Port
+
+	// SSH ports are unused here; the conflict is on linkA (the bridge
+	// worker's listen port). bridgePID 7777 is the worker's PID.
+	seedLabState(t, "peer-lab", 0, 7777, 40000, 30000, linkPort, 20001, 19999)
+
+	allocs := []PortAllocation{{Port: linkPort, Purpose: "link switch1:Ethernet0 A-side"}}
+	err = ProbeAllPorts(allocs, "self-lab")
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"peer-lab", "PID 7777", "link bridge"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q; got: %s", want, msg)
+		}
+	}
+}
+
+// TestProbeAllPorts_OmitsPIDWhenZero exercises the formatPortConflict branch
+// that suppresses ", PID %d" when the owner record has PID=0 (e.g., a node
+// whose process exited before state.json was last updated). The lab name +
+// purpose still appear; only the PID hint is dropped.
+func TestProbeAllPorts_OmitsPIDWhenZero(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	sshPort := ln.Addr().(*net.TCPAddr).Port
+
+	// PID=0 on the SSH-owning node simulates the post-crash state.json.
+	seedLabState(t, "peer-lab", 0, 0, sshPort, 30001, 20002, 20003, 19999)
+
+	allocs := []PortAllocation{{Port: sshPort, Purpose: "switch1 SSH"}}
+	err = ProbeAllPorts(allocs, "self-lab")
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "peer-lab") || !strings.Contains(msg, "SSH") {
+		t.Errorf("error should still name lab + purpose, got: %s", msg)
+	}
+	if strings.Contains(msg, "PID 0") {
+		t.Errorf("error should omit 'PID 0' when PID is unknown, got: %s", msg)
+	}
+}
+
 // TestAttributePortOwners_CorruptStateSkipped verifies a corrupt state.json
 // in one lab doesn't poison attribution of unrelated labs.
 func TestAttributePortOwners_CorruptStateSkipped(t *testing.T) {
