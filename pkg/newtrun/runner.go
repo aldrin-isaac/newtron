@@ -16,6 +16,7 @@ import (
 // Runner is the top-level newtrun orchestrator.
 type Runner struct {
 	ScenariosDir string
+	SuitesBase   string         // directory under which sibling suite dirs live; required for run-suite step composition (issue #27)
 	ServerURL    string         // newtron-server HTTP address
 	NetworkID    string         // network identifier for server operations
 	Client       *client.Client // HTTP client for all SONiC operations

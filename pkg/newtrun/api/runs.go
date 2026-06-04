@@ -163,6 +163,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 
 	// Construct the runner.
 	runner := newtrun.NewRunner(suiteDir)
+	runner.SuitesBase = s.cfg.SuitesBase
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
 	runner.NewtlabClient = s.cfg.NewtlabClient

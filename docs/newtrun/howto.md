@@ -761,7 +761,7 @@ A scenario that uses `{{target.X}}` but no matching dimension is declared in `su
 
 ## 11. Step Action Reference
 
-newtrun has six actions. `topology-reconcile` and `verify-topology` handle provisioning and its post-condition check. `host-exec` runs commands on host VMs via SSH. `newtron` is the generic action that covers every newtron-server operation via HTTP. `newtron-cli` runs the newtron CLI as a subprocess (for loopback testing). `wait` is a context-aware sleep.
+newtrun has seven actions. `topology-reconcile` and `verify-topology` handle provisioning and its post-condition check. `host-exec` runs commands on host VMs via SSH. `newtron` is the generic action that covers every newtron-server operation via HTTP. `newtron-cli` runs the newtron CLI as a subprocess (for loopback testing). `wait` is a context-aware sleep. `run-suite` invokes another suite as a single step — the composition primitive.
 
 ### 11.1 topology-reconcile
 
@@ -996,7 +996,36 @@ Use `--no-deploy` with `newtrun start` when running loopback suites — no topol
 bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:18080
 ```
 
-### 11.7 Common operations
+### 11.7 run-suite — invoke another suite as a step
+
+Composes scenarios across suites. The called suite runs in the parent's process — same goroutine pattern, same connections (Client, NewtlabClient, HostConns), same ProgressReporter — but with `NoDeploy=true` (the parent already deployed the topology) and the parent's discovered topology/platform reused. The step succeeds iff every child scenario completed cleanly (worst-status wins: `error > failed > skipped > passed`).
+
+```yaml
+- name: apply-then-verify
+  action: run-suite
+  suite: verify-service-health        # which suite to call (resolves under server's --suites-base)
+  parameters:                         # parameter overrides for the called suite
+    service: '{{param.service}}'
+  targets:                            # target-dimension overrides
+    devices: ['{{target.device}}']
+    interfaces: ['{{target.interface}}']
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `suite` | yes | Sibling suite directory name (no path separators). Resolves under the server's `--suites-base`. |
+| `parameters` | no | Per-parameter overrides that fill the called suite's `{{param.X}}` templates. Same shape as `POST /runs`' `parameters` body field. |
+| `targets` | no | Per-dimension target overrides that fill the called suite's `{{target.X}}` templates. Same shape as `POST /runs`' `targets` body field. |
+
+The parser rejects `parameters:` or `targets:` on any non-`run-suite` action — silently dropping them would surface as "step ran but nothing happened" at runtime.
+
+**Recursion limit.** Each call increments a context-carried depth counter; the executor refuses to go past `MaxRunSuiteDepth` (default 5). Deep enough for realistic composition (setup → service → verify → drift-check → reconcile) without permitting accidental towers. If you genuinely need deeper composition, flatten the suite graph.
+
+**Inline runs.** `run-suite` is **not** in the default-allowed action list for `POST /runs/inline` — recursive composition has too broad a blast radius for operator-click scenarios. Use file-backed suites.
+
+**Concurrent collision.** v0 does not register child suites with the run registry, so two parent runs each invoking the same child suite proceed independently. Top-level `POST /runs` collision detection still applies.
+
+### 11.8 Common operations
 
 The `newtron` action covers every operation exposed by newtron-server. The recipes below show real endpoint shapes — copy the URL form, not the YAML structure. Verify against `pkg/newtron/newtrun/v1/handler.go` before authoring against newer endpoints.
 
@@ -1449,7 +1478,7 @@ sudo journalctl -u swss --since "10 minutes ago"
 
 ### 14.11 Health checks fail (oper_checks not converging)
 
-Health checks verify interfaces, BGP, EVPN, LAG, and VXLAN. Use polling so the check retries during daemon convergence rather than failing on the first attempt (the `verify-health` recipe in [§11.7](#117-common-operations) shows the polling pattern). If polling still times out, SSH in and inspect:
+Health checks verify interfaces, BGP, EVPN, LAG, and VXLAN. Use polling so the check retries during daemon convergence rather than failing on the first attempt (the `verify-health` recipe in [§11.8](#118-common-operations) shows the polling pattern). If polling still times out, SSH in and inspect:
 
 ```bash
 bin/newtlab ssh switch1

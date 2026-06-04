@@ -63,6 +63,11 @@ type Step struct {
 	Poll   *PollBlock  `yaml:"poll,omitempty"`   // polling configuration
 	Batch  []BatchCall `yaml:"batch,omitempty"`  // sequential batch of calls
 
+	// run-suite (composition: invoke another suite as a step)
+	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved under SuitesBase)
+	Parameters map[string]any      `yaml:"parameters,omitempty"` // parameter overrides for the called suite
+	Targets    map[string][]string `yaml:"targets,omitempty"`    // target-dimension overrides for the called suite
+
 	// All actions
 	Expect        *ExpectBlock `yaml:"expect,omitempty"`
 	ExpectFailure bool         `yaml:"expect_failure,omitempty"`
@@ -78,6 +83,7 @@ const (
 	ActionHostExec           StepAction = "host-exec"
 	ActionNewtron            StepAction = "newtron"
 	ActionNewtronCLI         StepAction = "newtron-cli"
+	ActionRunSuite           StepAction = "run-suite"
 )
 
 // validActions is the set of all recognized step actions, derived from the
