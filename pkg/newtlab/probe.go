@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -120,11 +121,100 @@ func hostDisplayName(host string) string {
 	return host
 }
 
-// ProbeAllPorts checks that all allocated ports are free.
-// Local ports are tested with net.Listen. Remote ports are tested via SSH + ss.
-// Returns a multi-error listing all conflicts.
-func ProbeAllPorts(allocations []PortAllocation) error {
-	// Group by resolved host IP (empty string = local)
+// portOwner describes which lab (and which process within that lab) holds a
+// TCP port. Populated by attributePortOwners from each lab's state.json so
+// ProbeAllPorts can name the conflicting lab in its error rather than just
+// reporting a bare "port N in use" (issue #67).
+type portOwner struct {
+	Lab     string // lab name (matches the directory under ~/.newtlab/labs/)
+	PID     int    // owning process PID; 0 when the state record doesn't store one
+	Purpose string // "SSH", "console", "link bridge", "bridge stats"
+}
+
+// attributePortOwners walks every lab's state.json and indexes the ports each
+// lab holds. excludeLab is skipped so the lab being deployed doesn't flag
+// itself during a redeploy.
+//
+// Errors are absorbed silently — a corrupt or partially-written state.json on
+// some unrelated lab must not block probing the lab currently being deployed.
+// In the worst case attribution is best-effort; the bare error format is the
+// fallback.
+func attributePortOwners(excludeLab string) map[int]portOwner {
+	names, err := ListLabs()
+	if err != nil {
+		return nil
+	}
+	owners := map[int]portOwner{}
+	for _, name := range names {
+		if name == excludeLab {
+			continue
+		}
+		state, err := LoadState(name)
+		if err != nil {
+			continue
+		}
+		for _, node := range state.Nodes {
+			if node.SSHPort > 0 {
+				owners[node.SSHPort] = portOwner{Lab: state.Name, PID: node.PID, Purpose: "SSH"}
+			}
+			if node.ConsolePort > 0 {
+				owners[node.ConsolePort] = portOwner{Lab: state.Name, PID: node.PID, Purpose: "console"}
+			}
+		}
+		bridgePIDByHost := map[string]int{}
+		for host, br := range state.Bridges {
+			bridgePIDByHost[host] = br.PID
+			if _, portStr, splitErr := net.SplitHostPort(br.StatsAddr); splitErr == nil {
+				if port, atoiErr := strconv.Atoi(portStr); atoiErr == nil && port > 0 {
+					owners[port] = portOwner{Lab: state.Name, PID: br.PID, Purpose: "bridge stats"}
+				}
+			}
+		}
+		for _, link := range state.Links {
+			pid := bridgePIDByHost[link.WorkerHost]
+			if link.APort > 0 {
+				owners[link.APort] = portOwner{Lab: state.Name, PID: pid, Purpose: "link bridge"}
+			}
+			if link.ZPort > 0 {
+				owners[link.ZPort] = portOwner{Lab: state.Name, PID: pid, Purpose: "link bridge"}
+			}
+		}
+	}
+	return owners
+}
+
+// formatPortConflict produces the user-facing error line for one conflicting
+// port. When the port is held by another newtlab-managed lab, the message
+// names that lab and suggests the remediation command. Otherwise it falls
+// back to the bare "port N in use" form so the operator still sees the
+// conflict (just without the lab attribution).
+func formatPortConflict(purpose string, port int, hostIP string, owners map[int]portOwner) string {
+	suffix := ""
+	if hostIP != "" {
+		suffix = " on " + hostIP
+	}
+	if owner, ok := owners[port]; ok {
+		ownership := fmt.Sprintf("lab %q (%s", owner.Lab, owner.Purpose)
+		if owner.PID > 0 {
+			ownership += fmt.Sprintf(", PID %d", owner.PID)
+		}
+		ownership += ")"
+		return fmt.Sprintf("  %s: port %d%s held by %s; run 'newtlab destroy %s' first",
+			purpose, port, suffix, ownership, owner.Lab)
+	}
+	return fmt.Sprintf("  %s: port %d%s in use", purpose, port, suffix)
+}
+
+// ProbeAllPorts checks that all allocated ports are free. Local ports are
+// tested with net.Listen; remote ports via SSH + ss. excludeLab is the name
+// of the lab being deployed — its own ports are not attributed to itself
+// when a redeploy collides with a stale entry. Pass "" if no exclusion.
+//
+// Returns a multi-error listing every conflict, with each line naming the
+// owning lab (and PID, when known) so the operator can stop or destroy it.
+func ProbeAllPorts(allocations []PortAllocation, excludeLab string) error {
+	owners := attributePortOwners(excludeLab)
+
 	byHost := map[string][]PortAllocation{}
 	for _, a := range allocations {
 		key := a.HostIP
@@ -136,16 +226,14 @@ func ProbeAllPorts(allocations []PortAllocation) error {
 
 	var errs []string
 
-	// Probe local ports
 	if locals, ok := byHost[""]; ok {
 		for _, a := range locals {
 			if err := probePortLocal(a.Port); err != nil {
-				errs = append(errs, fmt.Sprintf("  %s: port %d in use", a.Purpose, a.Port))
+				errs = append(errs, formatPortConflict(a.Purpose, a.Port, "", owners))
 			}
 		}
 	}
 
-	// Probe remote ports (one SSH per host)
 	for hostIP, allocs := range byHost {
 		if hostIP == "" {
 			continue
@@ -155,11 +243,10 @@ func ProbeAllPorts(allocations []PortAllocation) error {
 			ports[i] = a.Port
 		}
 		conflicts := probePortsRemote(hostIP, ports)
-		for port, err := range conflicts {
-			// Find the allocation for this port to get its purpose
+		for port := range conflicts {
 			for _, a := range allocs {
 				if a.Port == port {
-					errs = append(errs, fmt.Sprintf("  %s: port %d in use on %s (%v)", a.Purpose, port, hostIP, err))
+					errs = append(errs, formatPortConflict(a.Purpose, port, hostIP, owners))
 					break
 				}
 			}

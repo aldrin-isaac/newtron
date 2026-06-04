@@ -1,7 +1,10 @@
 package newtlab
 
 import (
+	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,7 +71,7 @@ func TestProbeAllPorts_AllFree(t *testing.T) {
 		{Port: p2, Purpose: "test console"},
 	}
 
-	if err := ProbeAllPorts(allocs); err != nil {
+	if err := ProbeAllPorts(allocs, ""); err != nil {
 		t.Fatalf("expected no conflicts, got: %v", err)
 	}
 }
@@ -87,7 +90,7 @@ func TestProbeAllPorts_Conflict(t *testing.T) {
 		{Port: port, Purpose: "test port"},
 	}
 
-	err = ProbeAllPorts(allocs)
+	err = ProbeAllPorts(allocs, "")
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -118,7 +121,7 @@ func TestProbeAllPorts_MultipleConflicts(t *testing.T) {
 		{Port: port2, Purpose: "port B"},
 	}
 
-	err = ProbeAllPorts(allocs)
+	err = ProbeAllPorts(allocs, "")
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -147,6 +150,191 @@ func TestProbePortLocal(t *testing.T) {
 	if err := probePortLocal(port); err == nil {
 		t.Error("expected error for occupied port, got nil")
 	}
+}
+
+// seedLabState writes a state.json under the test HOME so attribution can
+// find it. Callers must `t.Setenv("HOME", tmpDir)` and `resetHomeCache(t)`
+// before seeding. Returns the SSH/console/link/stats ports it allocated so
+// tests can probe them.
+func seedLabState(t *testing.T, name string, sshPID, bridgePID int, sshPort, consolePort, linkA, linkZ, statsPort int) {
+	t.Helper()
+	state := &LabState{
+		Name: name,
+		Nodes: map[string]*NodeState{
+			"node1": {
+				PID:         sshPID,
+				SSHPort:     sshPort,
+				ConsolePort: consolePort,
+			},
+		},
+		Links: []*LinkState{
+			{A: "node1:Eth0", Z: "node2:Eth0", APort: linkA, ZPort: linkZ, WorkerHost: ""},
+		},
+		Bridges: map[string]*BridgeState{
+			"": {PID: bridgePID, StatsAddr: fmt.Sprintf("127.0.0.1:%d", statsPort)},
+		},
+	}
+	if err := SaveState(state); err != nil {
+		t.Fatalf("seed lab %q: %v", name, err)
+	}
+}
+
+// resetHomeCache clears the once-cached HOME so a t.Setenv earlier in the
+// same test takes effect for LabDir / ListLabs. Thin wrapper over the
+// package's existing resetHomeDir helper.
+func resetHomeCache(t *testing.T) {
+	t.Helper()
+	resetHomeDir()
+}
+
+// TestProbeAllPorts_AttributesSSHPort verifies the conflict error names the
+// holding lab and PID when the conflict is on a peer lab's SSH port.
+func TestProbeAllPorts_AttributesSSHPort(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+
+	// Bind a port to simulate the peer lab's qemu holding it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	sshPort := ln.Addr().(*net.TCPAddr).Port
+
+	// Seed the peer lab's state.json claiming the same port as its SSH.
+	seedLabState(t, "peer-lab", 42424, 0, sshPort, 30001, 20002, 20003, 19999)
+
+	allocs := []PortAllocation{{Port: sshPort, Purpose: "switch1 SSH"}}
+	err = ProbeAllPorts(allocs, "self-lab")
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"peer-lab", "PID 42424", "SSH", "newtlab destroy peer-lab"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q; got: %s", want, msg)
+		}
+	}
+}
+
+// TestProbeAllPorts_AttributesBridgeStatsPort verifies the bridge-stats port
+// is attributed via the BridgeState.StatsAddr parsing path.
+func TestProbeAllPorts_AttributesBridgeStatsPort(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	statsPort := ln.Addr().(*net.TCPAddr).Port
+
+	seedLabState(t, "peer-lab", 100, 200, 40000, 30000, 20000, 20001, statsPort)
+
+	allocs := []PortAllocation{{Port: statsPort, Purpose: "bridge stats (local)"}}
+	err = ProbeAllPorts(allocs, "self-lab")
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"peer-lab", "PID 200", "bridge stats", "newtlab destroy peer-lab"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q; got: %s", want, msg)
+		}
+	}
+}
+
+// TestProbeAllPorts_FallsBackForExternalProcess verifies that ports held by
+// processes outside newtlab's purview keep the bare error format (no fake
+// lab attribution).
+func TestProbeAllPorts_FallsBackForExternalProcess(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+	// No seeded lab state. The conflict has no newtlab owner.
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	allocs := []PortAllocation{{Port: port, Purpose: "switch1 SSH"}}
+	err = ProbeAllPorts(allocs, "self-lab")
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "in use") {
+		t.Errorf("expected bare 'in use' fallback, got: %s", msg)
+	}
+	if strings.Contains(msg, "held by lab") {
+		t.Errorf("should not falsely attribute external port, got: %s", msg)
+	}
+}
+
+// TestProbeAllPorts_ExcludesSelfLab verifies the lab being deployed doesn't
+// attribute its own ports to itself when its prior state.json still lists
+// them — covers the redeploy/--force flow.
+func TestProbeAllPorts_ExcludesSelfLab(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	seedLabState(t, "self-lab", 999, 0, port, 30001, 20002, 20003, 19999)
+
+	allocs := []PortAllocation{{Port: port, Purpose: "switch1 SSH"}}
+	err = ProbeAllPorts(allocs, "self-lab")
+	if err == nil {
+		t.Fatal("expected conflict error (port is held externally), got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "held by lab \"self-lab\"") {
+		t.Errorf("self-lab should not be attributed as its own owner; got: %s", msg)
+	}
+}
+
+// TestAttributePortOwners_CorruptStateSkipped verifies a corrupt state.json
+// in one lab doesn't poison attribution of unrelated labs.
+func TestAttributePortOwners_CorruptStateSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	resetHomeCache(t)
+
+	// Healthy peer lab.
+	seedLabState(t, "good-lab", 111, 0, 40000, 30000, 20000, 20001, 19999)
+
+	// Corrupt peer lab — invalid JSON in state.json.
+	badDir := filepath.Join(tmp, ".newtlab", "labs", "bad-lab")
+	if err := writeRaw(badDir, "state.json", "not valid json"); err != nil {
+		t.Fatalf("seed corrupt lab: %v", err)
+	}
+
+	owners := attributePortOwners("")
+	if owner, ok := owners[40000]; !ok {
+		t.Errorf("good-lab attribution missing")
+	} else if owner.Lab != "good-lab" {
+		t.Errorf("port 40000 owner: got %q, want good-lab", owner.Lab)
+	}
+}
+
+// writeRaw is the test helper for seeding malformed state files.
+func writeRaw(dir, name, body string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644)
 }
 
 func TestResolveNewtLabConfig_WithServers(t *testing.T) {

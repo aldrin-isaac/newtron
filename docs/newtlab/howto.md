@@ -1203,9 +1203,19 @@ Common causes:
   expanded.
 - **KVM not available** — check `ls /dev/kvm`. Without KVM, QEMU uses TCG
   (much slower). The VM may time out during boot.
-- **Port already in use** — newtlab probes all ports before deploy. If ports
-  are in use, deploy fails with a clear error. Stop the conflicting process
-  or change port bases.
+- **Port already in use** — newtlab probes every allocated port before deploy
+  (SSH, console, link A/Z, bridge stats). When the holder is another
+  newtlab-managed lab, the error names it directly so the operator can stop
+  it:
+
+  ```
+  newtlab: port conflicts:
+    bridge stats (local): port 19999 held by lab "2node-vs-service" (bridge stats, PID 3948672); run 'newtlab destroy 2node-vs-service' first
+  ```
+
+  When the holder is a process outside newtlab's purview (a stray QEMU, a
+  manually-started service, another user's lab), the error falls back to the
+  bare form — stop the conflicting process or shift the relevant port base.
 
 ### Can't SSH
 
