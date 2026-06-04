@@ -352,7 +352,11 @@ func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, 
 		// the end of its own closure) doesn't double-write.
 		if persistFromCtx(ctx) == PersistTopology && na.node != nil && na.node.HasUnsavedIntents() {
 			if err := na.saveTopologyNow(); err != nil {
-				return nil, fmt.Errorf("device updated, topology.json unchanged: %w", err)
+				// The in-memory write (and the device write in intent mode)
+				// already succeeded; only the topology.json persist failed.
+				// Phrase it mode-agnostically — in topology mode the device
+				// is never touched, so "device updated" would mislead.
+				return nil, fmt.Errorf("write succeeded but topology.json persist failed: %w", err)
 			}
 		}
 		return result, nil
