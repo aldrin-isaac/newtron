@@ -52,6 +52,15 @@ type CreateSuiteRequest struct {
 	Topology string `json:"topology"`
 }
 
+// CreateSuiteResponse is the body returned by POST /api/suites.
+// Typed (rather than an ad-hoc map) so adding fields to either side of
+// the create-suite / create-topology pair is a compile-time change for
+// clients — mirrors the typed CreateTopologyResponse shape (§13 same
+// concept = same name; §23 new code matches the codebase idiom).
+type CreateSuiteResponse struct {
+	Name string `json:"name"`
+}
+
 // handleListSuites returns the suite names discoverable under SuitesBase.
 func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
 	names, err := listSubdirs(s.cfg.SuitesBase)
@@ -65,7 +74,10 @@ func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
 // handleCreateSuite creates an empty suite directory. Used by newtcon
 // to bootstrap a new test suite before populating it with scenarios.
 // Returns 201 on create, 409 if the suite already exists, 400 on
-// invalid name.
+// invalid name. If the suite manifest write fails after the directory
+// was created, the directory is rolled back so the operator doesn't
+// inherit an orphaned dir — same transactional shape as
+// handleCreateTopology (§23 codebase idiom).
 func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 	var req CreateSuiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -85,15 +97,16 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
 		return
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
 		return
 	}
 	if err := writeSuiteManifest(dir, req.Name, req.Topology); err != nil {
+		_ = os.RemoveAll(dir)
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+	httputil.WriteJSON(w, http.StatusCreated, CreateSuiteResponse{Name: req.Name})
 }
 
 // handleDeleteSuite removes an empty suite directory. Refuses to

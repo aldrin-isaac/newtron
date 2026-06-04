@@ -189,6 +189,41 @@ func TestParameterSpec_Coerce_IntBounds(t *testing.T) {
 	if v, err := p.Coerce(15); err != nil || v != 15 {
 		t.Errorf("Coerce(in range): v=%v err=%v", v, err)
 	}
+	// Boundary-exact values: min and max themselves are accepted (the
+	// constraint is inclusive). Off-by-one above and below are rejected.
+	// Audit gap: TestParameterSpec_Coerce_IntBounds previously only
+	// exercised the wide-margin cases (5, 15, 25 against 10..20), missing
+	// the boundary semantics that an operator authoring suite.yaml relies
+	// on most.
+	if v, err := p.Coerce(10); err != nil || v != 10 {
+		t.Errorf("Coerce(min boundary): v=%v err=%v, want 10 nil", v, err)
+	}
+	if v, err := p.Coerce(20); err != nil || v != 20 {
+		t.Errorf("Coerce(max boundary): v=%v err=%v, want 20 nil", v, err)
+	}
+	if _, err := p.Coerce(9); err == nil {
+		t.Errorf("Coerce(one below min): expected error")
+	}
+	if _, err := p.Coerce(21); err == nil {
+		t.Errorf("Coerce(one above max): expected error")
+	}
+}
+
+// TestParameterSpec_Coerce_IntBounds_Degenerate covers min == max: a
+// single accepted value. Useful for pinning a parameter to a constant
+// across iterations without removing it from the suite manifest.
+func TestParameterSpec_Coerce_IntBounds_Degenerate(t *testing.T) {
+	v := 7
+	p := ParameterSpec{Type: ParameterTypeInt, Min: &v, Max: &v}
+	if got, err := p.Coerce(7); err != nil || got != 7 {
+		t.Errorf("Coerce(7) with min=max=7: got %v err=%v, want 7 nil", got, err)
+	}
+	if _, err := p.Coerce(6); err == nil {
+		t.Errorf("Coerce(6) with min=max=7: expected error")
+	}
+	if _, err := p.Coerce(8); err == nil {
+		t.Errorf("Coerce(8) with min=max=7: expected error")
+	}
 }
 
 func TestParameterSpec_Coerce_Bool(t *testing.T) {

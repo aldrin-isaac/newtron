@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -351,6 +352,31 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 	resp, _ = doRequest(t, ts, http.MethodDelete, "/newtrun/v1/suites/fresh", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("empty-suite DELETE: got %d, want 204", resp.StatusCode)
+	}
+}
+
+// TestSuite_CreateReturnsTypedResponse pins the wire shape: POST
+// /newtrun/v1/suites returns a CreateSuiteResponse, not an ad-hoc map.
+// Catches the case where a future refactor silently reverts to the
+// untyped map and clients that started depending on field discovery
+// stop seeing new fields (e.g. spec_dir, if it ever lands here).
+func TestSuite_CreateReturnsTypedResponse(t *testing.T) {
+	srv, _ := newTestServer(t)
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+	resp, body := doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
+		[]byte(`{"name":"typed","topology":"synthetic"}`))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: got %d, want 201; body=%s", resp.StatusCode, body)
+	}
+	var env struct {
+		Data CreateSuiteResponse `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode CreateSuiteResponse: %v; body=%s", err, body)
+	}
+	if env.Data.Name != "typed" {
+		t.Errorf("response name: got %q, want %q", env.Data.Name, "typed")
 	}
 }
 

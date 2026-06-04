@@ -934,7 +934,7 @@ func (n *Node) ConnectTransport(ctx context.Context) error {
 
 // InitFromDeviceIntent initializes the node's projection by reading NEWTRON_INTENT
 // records from the device and replaying them. This is the actuated-mode boot sequence:
-// transport → legacy migration → register ports → replay intents → mark actuated.
+// transport → register ports → replay intents → mark actuated.
 //
 // Architecture §3: Device intents → ConnectTransport() → read PORT + NEWTRON_INTENT
 // → RegisterPort() → IntentsToSteps() → ReplayStep() for each step.
