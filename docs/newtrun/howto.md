@@ -394,6 +394,12 @@ bin/newtrun suites
 
 # List server-known topologies
 bin/newtrun topologies
+
+# Bootstrap a new empty topology directory (writes topology.json, platforms.json,
+# network.json, and an empty profiles/ subdirectory under newtrun/topologies/<name>/specs/).
+# The next step is to register it as a newtron network via POST /newtron/v1/network
+# with the printed spec_dir.
+bin/newtrun topology create demo-1 --description "demo lab"
 ```
 
 Example `newtrun list 2node-vs-primitive`:
@@ -1518,6 +1524,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | Command | Purpose |
 |---------|---------|
 | `newtrun topologies` | List topology directories visible to the server. |
+| `newtrun topology create <name> [--description <text>]` | Bootstrap a new topology directory (seeds topology.json, platforms.json, network.json, and an empty profiles/). Prints the spec_dir to pass to `POST /newtron/v1/network`. |
 | `newtrun actions` | List the six supported step actions (derived from `pkg/newtrun.StepAction`). `newtrun actions <name>` shows required fields, device semantics, and a YAML example. Mirrors [§11 Step Action Reference](#11-step-action-reference). |
 | `newtrun version` | Print build version. |
 

@@ -182,6 +182,18 @@ func (c *Client) ListTopologies(ctx context.Context) ([]string, error) {
 	return resp.Topologies, nil
 }
 
+// CreateTopology bootstraps a new topology directory on the server.
+// The returned spec_dir is the value the caller passes to newtron's
+// POST /newtron/v1/network when registering the topology as a
+// network. 409 if the topology already exists.
+func (c *Client) CreateTopology(ctx context.Context, req api.CreateTopologyRequest) (*api.CreateTopologyResponse, error) {
+	var resp api.CreateTopologyResponse
+	if err := c.do(ctx, http.MethodPost, "/newtrun/v1/topologies", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // StreamEvents subscribes to the SSE event stream for the named suite.
 // The handler is called for each event in delivery order. Returns when
 // the connection closes (caller cancels the context) or on a network

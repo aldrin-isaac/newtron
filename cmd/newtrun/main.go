@@ -65,6 +65,7 @@ Discovery:
 		newSuiteCmd(),
 		newScenarioCmd(),
 		newTopologiesCmd(),
+		newTopologyCmd(),
 		newActionsCmd(),
 		&cobra.Command{
 			Use:   "version",
