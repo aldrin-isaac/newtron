@@ -505,6 +505,14 @@ func init() {
 	intentReconcileCmd.Flags().BoolVar(&reconcileFull, "full", false, "Full reconcile (config reload + ReplaceAll)")
 	intentReconcileCmd.Flags().BoolVar(&reconcileDelta, "delta", false, "Delta reconcile (patch only drifted entries)")
 
+	// Register -x/--execute on intentReconcileCmd — the only intent
+	// subcommand that branches on app.executeMode. Issue #62 surfaced
+	// the gap: newtlab's provisioning step invokes
+	// `newtron <dev> --topology intent reconcile -x` and got
+	// "unknown shorthand flag" — the variable was declared globally on
+	// `app` but never bound to this subcommand.
+	addWriteFlags(intentReconcileCmd)
+
 	// Register all under intentCmd
 	intentCmd.AddCommand(intentTreeCmd)
 	intentCmd.AddCommand(intentProjectionCmd)
