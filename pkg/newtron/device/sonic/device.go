@@ -19,6 +19,21 @@ type PortResolver interface {
 	SSHPort(ctx context.Context, topology, device string) (int, error)
 }
 
+// NotReadyError is a behavior interface PortResolver implementations MAY
+// return for "the runtime is not present, or it doesn't contain the
+// requested device." Consumers (e.g. Network.ProbeOnline) dispatch on this
+// interface via errors.As so newtron stays decoupled from the resolver
+// implementation package at compile time — preserving the §33 boundary
+// that keeps cmd-time-injected impls from leaking into pkg/newtron.
+//
+// newtlab's resolver implements this on its NotInTopologyError type. Other
+// resolvers (real-hardware, tests) leave it unimplemented and the
+// classification falls through to "unreachable."
+type NotReadyError interface {
+	error
+	IsPortResolverNotReady() bool
+}
+
 // Device represents a SONiC switch.
 type Device struct {
 	Name     string

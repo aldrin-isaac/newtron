@@ -26,6 +26,13 @@ func (e *NotInTopologyError) Error() string {
 	return fmt.Sprintf("device %q not in newtlab topology %q", e.Device, e.Topology)
 }
 
+// IsPortResolverNotReady satisfies the sonic.NotReadyError behavior
+// interface, so newtron consumers can classify the error via errors.As
+// against the interface — keeping pkg/newtron free of any compile-time
+// dependency on this package. Always returns true (the type only
+// represents that condition).
+func (e *NotInTopologyError) IsPortResolverNotReady() bool { return true }
+
 // PortResolver answers per-device runtime port questions by consulting
 // newtlab-server's LabState. Structurally satisfies the contract any
 // consumer would declare (e.g. newtron's sonic.PortResolver), so cmd
