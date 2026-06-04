@@ -67,6 +67,8 @@ Discovery:
 		newTopologiesCmd(),
 		newTopologyCmd(),
 		newActionsCmd(),
+		newReportCmd(),
+		newMonitorCmd(),
 		&cobra.Command{
 			Use:   "version",
 			Short: "Print version information",
