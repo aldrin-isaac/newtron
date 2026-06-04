@@ -65,6 +65,59 @@ type ReportGenerator struct {
 	Results []*ScenarioResult
 }
 
+// ResultsFromRunState converts an HTTP-fetched RunState into the
+// []*ScenarioResult that ReportGenerator consumes (issue #29 R2).
+// State.json stores per-scenario state with stringified durations —
+// the reverse of the in-memory marshaling — so the conversion parses
+// each duration back to time.Duration and propagates suite-level
+// Topology/Platform onto each scenario (matching what the in-process
+// Runner emits). Used by `newtrun report` to render JUnit / markdown
+// from a finished run fetched over HTTP, without re-running it.
+func ResultsFromRunState(state *RunState) []*ScenarioResult {
+	if state == nil {
+		return nil
+	}
+	results := make([]*ScenarioResult, 0, len(state.Scenarios))
+	for _, sc := range state.Scenarios {
+		r := &ScenarioResult{
+			Name:       sc.Name,
+			Topology:   state.Topology,
+			Platform:   state.Platform,
+			Status:     StepStatus(sc.Status),
+			Duration:   parseReportDuration(sc.Duration),
+			SkipReason: sc.SkipReason,
+		}
+		for _, st := range sc.Steps {
+			r.Steps = append(r.Steps, StepResult{
+				Name:     st.Name,
+				Action:   StepAction(st.Action),
+				Status:   StepStatus(st.Status),
+				Duration: parseReportDuration(st.Duration),
+				Message:  st.Message,
+			})
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
+// parseReportDuration converts the human-readable duration strings
+// state.json stores ("2s", "<1s", "1m30s") back to time.Duration. The
+// "<1s" sentinel — produced by durationString in pkg/newtrun/api — has
+// no Duration round-trip, so we read it as zero. Errors yield zero
+// rather than failing the report: a malformed duration shouldn't lose
+// the operator their report.
+func parseReportDuration(s string) time.Duration {
+	if s == "" || s == "<1s" {
+		return 0
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
 // WriteMarkdown writes a markdown report to the given path.
 func (g *ReportGenerator) WriteMarkdown(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
