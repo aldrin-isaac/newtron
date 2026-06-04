@@ -341,9 +341,11 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		}
 	}
 
-	// Port conflict detection (SSH, console, link, bridge stats — local and remote)
+	// Port conflict detection (SSH, console, link, bridge stats — local and remote).
+	// Excluding the lab's own name lets attribution skip stale self-records when
+	// a redeploy collides with an in-flight teardown.
 	allocs := CollectAllPorts(l)
-	if err := ProbeAllPorts(allocs); err != nil {
+	if err := ProbeAllPorts(allocs, l.Name); err != nil {
 		return fmt.Errorf("newtlab: port conflicts:\n%w", err)
 	}
 
