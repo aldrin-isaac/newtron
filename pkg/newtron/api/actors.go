@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // DefaultIdleTimeout is how long a device SSH connection stays cached after
@@ -341,8 +342,44 @@ func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, 
 			na.closeNode()
 			return nil, err
 		}
-		return fn()
+		result, err := fn()
+		if err != nil {
+			return nil, err
+		}
+		// ?persist=topology hook (#75C). Data-driven: the persist work
+		// only runs when fn actually dirtied the intent tree, so read-only
+		// handlers are no-ops and /intent/save (which clears the flag at
+		// the end of its own closure) doesn't double-write.
+		if persistFromCtx(ctx) == PersistTopology && na.node != nil && na.node.HasUnsavedIntents() {
+			if err := na.saveTopologyNow(); err != nil {
+				// The in-memory write (and the device write in intent mode)
+				// already succeeded; only the topology.json persist failed.
+				// Phrase it mode-agnostically — in topology mode the device
+				// is never touched, so "device updated" would mislead.
+				return nil, fmt.Errorf("write succeeded but topology.json persist failed: %w", err)
+			}
+		}
+		return result, nil
 	})
+}
+
+// saveTopologyNow rewrites this device's entry in topology.json from the
+// current intent tree, then clears the unsaved flag. Mirrors the verb in
+// Network.SaveDeviceIntents (§13 — same concept, same name). Used by
+// (1) the ?persist=topology hook above and (2) handleSave, so the two
+// share one body. Must be called on the actor goroutine so na.node
+// access is race-free.
+func (na *NodeActor) saveTopologyNow() error {
+	tree := na.node.Tree()
+	steps := make([]spec.TopologyStep, len(tree.Steps))
+	for i, s := range tree.Steps {
+		steps[i] = spec.TopologyStep{URL: s.URL, Params: s.Params}
+	}
+	if err := na.net.SaveDeviceIntents(na.device, steps); err != nil {
+		return err
+	}
+	na.node.ClearUnsavedIntents()
+	return nil
 }
 
 // ============================================================================

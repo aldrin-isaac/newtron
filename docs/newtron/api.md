@@ -227,8 +227,30 @@ Lock -> fn -> Commit -> Save cycle):
 |-----------|------|---------|-------------|
 | `dry_run` | string | `"false"` | When `"true"`, builds the ChangeSet but does not commit to Redis. The response `preview` field shows what would change. |
 | `no_save` | string | `"false"` | When `"true"`, commits to Redis but skips `config save` (changes persist in running config only, lost on reboot). |
+| `persist` | string | `""` | When `"topology"`, the successful write is also persisted to `topology.json` via `SaveDeviceIntents` before the response returns. Atomic write+persist (issue #75C). No-op when the handler didn't mutate the intent tree (read-only paths, `/intent/save` after it clears the unsaved flag). See "Atomic write+persist" below. |
 
 These parameters apply to endpoints documented with "**Query parameters:** `dry_run`, `no_save`" below. Read-only endpoints and lifecycle operations (reload-config, save-config, restart-daemon, ssh-command) ignore them.
+
+#### Atomic write+persist (`?persist=topology`)
+
+The operator's mental model for "Apply" is **(1) persist the change in the
+topology AND (2) apply it to the device when online**. Without
+`?persist=topology` that's two round trips: the per-action POST followed
+by `POST /intent/save`. With `?persist=topology`, the server runs the same
+`SaveDeviceIntents` code path inline at the end of any successful
+mutation, while still holding the per-device actor lock — no window of
+"device updated but topology.json doesn't know yet."
+
+Applies to handlers that mutate the intent tree through the unified
+`execute()` entry point (every `/node/{device}/...` and
+`/node/{device}/interface/{name}/...` mutating write). The hook is
+data-driven: it fires when the request both opts in via
+`?persist=topology` AND the handler dirtied the intent tree
+(`Node.HasUnsavedIntents()`). That gate makes three categories no-ops:
+
+- **Read-only handlers** (`/intent/drift`, `/intent/projection`, `/info`, …) never set the dirty flag.
+- **`/intent/save`** already persists and clears the flag inside its own closure, so the hook sees a clean tree.
+- **Mutating handlers without the query** — the flag may be dirty but the request didn't opt in.
 
 Network spec write endpoints (S5) also accept `dry_run` -- when `"true"`, the spec
 is validated but not persisted to disk.
