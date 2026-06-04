@@ -357,13 +357,13 @@ func (net *Network) ProbeOnline(ctx context.Context, device string) (bool, Onlin
 	}
 	port, err := resolver.SSHPort(ctx, net.internal.TopologyName(), device)
 	if err != nil {
-		// Dispatch on the sonic.NotReadyError behavior interface so this
+		// Dispatch on the sonic.NotReadyError marker interface so this
 		// package stays decoupled from the resolver impl package (§33,
 		// §34). newtlab/client's *NotInTopologyError implements it; other
 		// resolver impls leave it unimplemented and fall through to
 		// "unreachable."
 		var notReady sonic.NotReadyError
-		if errors.As(err, &notReady) && notReady.IsPortResolverNotReady() {
+		if errors.As(err, &notReady) {
 			return false, OnlineReasonNewtlabNotRealised
 		}
 		return false, OnlineReasonUnreachable

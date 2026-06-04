@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -151,5 +152,29 @@ func TestSSHPort_DeviceNotInTopology(t *testing.T) {
 	}
 	if nit.Topology != "1node-vs" || nit.Device != "switch99" {
 		t.Errorf("error fields: got {%q, %q}, want {1node-vs, switch99}", nit.Topology, nit.Device)
+	}
+}
+
+// TestNotInTopologyError_SatisfiesNotReadyMarker locks in the contract
+// that *NotInTopologyError satisfies sonic.NotReadyError. newtron's
+// Network.ProbeOnline dispatches on this marker via errors.As — if
+// someone later renames or removes PortResolverNotReady, the dispatch
+// silently falls through to "unreachable" and this test catches it.
+//
+// Defined inline rather than importing sonic to keep the
+// newtlab/client → pkg/newtron/device/sonic dependency direction
+// matching production code (newtlab/client does NOT import sonic).
+func TestNotInTopologyError_SatisfiesNotReadyMarker(t *testing.T) {
+	// Local clone of the sonic.NotReadyError marker contract. Matching
+	// this interface is the production-code dispatch in newtron, so
+	// satisfying it here proves the production dispatch will work.
+	type notReadyMarker interface {
+		error
+		PortResolverNotReady()
+	}
+	var err error = &NotInTopologyError{Topology: "lab", Device: "dev"}
+	var marker notReadyMarker
+	if !errors.As(err, &marker) {
+		t.Fatalf("*NotInTopologyError does not satisfy the NotReadyError marker — dispatch in newtron.Network.ProbeOnline will silently fall through")
 	}
 }
