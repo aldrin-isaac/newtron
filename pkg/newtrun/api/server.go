@@ -93,6 +93,19 @@ func NewServer(cfg Config) *Server {
 			s.registry.CancelAll(5 * time.Second)
 		}),
 	)
+
+	// Server-restart recovery (issue #29 R1). Any state.json with status
+	// "running" or "pausing" at startup is by definition stale — the
+	// new server's registry is fresh, so no in-memory entry tracks the
+	// run. Mark them "abandoned" so subsequent stop/pause/list calls
+	// reflect reality. Errors are logged; the sweep is best-effort and
+	// must not block startup.
+	if n, err := newtrun.SweepAbandonedRuns(); err != nil {
+		cfg.Logger.Printf("newtrun-server: recovery sweep: %v (marked %d records before the error)", err, n)
+	} else if n > 0 {
+		cfg.Logger.Printf("newtrun-server: marked %d stale run(s) as abandoned at startup", n)
+	}
+
 	return s
 }
 

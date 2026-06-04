@@ -19,12 +19,13 @@ const DateTimeFormat = "2006-01-02 15:04:05"
 type SuiteStatus string
 
 const (
-	SuiteStatusRunning  SuiteStatus = "running"
-	SuiteStatusPausing  SuiteStatus = "pausing"
-	SuiteStatusPaused   SuiteStatus = "paused"
-	SuiteStatusComplete SuiteStatus = "complete"
-	SuiteStatusAborted  SuiteStatus = "aborted"
-	SuiteStatusFailed   SuiteStatus = "failed"
+	SuiteStatusRunning   SuiteStatus = "running"
+	SuiteStatusPausing   SuiteStatus = "pausing"
+	SuiteStatusPaused    SuiteStatus = "paused"
+	SuiteStatusComplete  SuiteStatus = "complete"
+	SuiteStatusAborted   SuiteStatus = "aborted"
+	SuiteStatusFailed    SuiteStatus = "failed"
+	SuiteStatusAbandoned SuiteStatus = "abandoned" // server died mid-run; no live process owns it
 )
 
 // SuiteStatusFromOutcome derives the terminal suite status from a
