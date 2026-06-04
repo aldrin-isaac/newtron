@@ -371,3 +371,48 @@ The check:
 3. If most sections are derivative, the document should not exist — the content is
    already housed; only the pointers are missing
 4. Create new documents only for genuinely original content that has no canonical home
+
+---
+
+## 23. New Code Matches the Codebase Idiom — IMPL+REVIEW
+
+Architecture (directive 1) and concept naming (directive 13) govern *what* the code
+does and *what concepts share names*. This directive governs *how* the code reads —
+the local idioms a maintainer carries in their head when scanning a file.
+
+Before adding code in a package, read several nearby files in that package first to
+absorb its conventions. New code follows those conventions, not the patterns familiar
+from other projects, other languages, or the assistant's training data.
+
+The conventions to match include, at minimum:
+
+- **Error-handling shape** — wrapped errors with `fmt.Errorf("doing X: %w", err)` vs.
+  typed errors vs. sentinels. Whichever the package uses, follow it.
+- **Receiver names** — if existing methods use `n *Node`, don't introduce `node *Node`.
+- **Helper placement** — per-file private helpers vs. a shared `*_helpers_test.go`
+  vs. a `util.go`. Match the file that already does it.
+- **Comment voice** — terse vs. narrative, present-tense vs. imperative. Match the
+  surrounding doc comments.
+- **Struct field ordering** — grouped by lifecycle, by visibility, or alphabetic.
+  Whichever the existing types use.
+- **Import grouping and aliasing** — group order, alias conventions (`netpkg` vs.
+  shadowing). Match the package, not your habit.
+- **Test naming** — `TestX_Behavior` vs. `TestXBehavior` vs. `TestX/behavior`
+  subtests. Match the file the new tests live in.
+- **Error message phrasing** — operator-facing vs. developer-facing, sentence
+  capitalization, period termination. Match the rest of the binary's output.
+
+A drift from idiom is treated the same as a drift from architecture: stop and
+reconcile, don't push the non-conformant style and let it normalize over time.
+Mixed-idiom code is harder to scan than either idiom alone — every line forces the
+reader to ask "is this the existing convention, or did this file invent something?"
+
+**The audit dimension:** after writing, diff against three nearby files in the same
+package. If the new file reads as foreign, rewrite to match. The test is not "does
+my code compile cleanly?" — it's "would a reader who knows this package guess this
+file was written by the same person who wrote the rest?"
+
+**When the existing idiom is genuinely wrong** (e.g., a §4 hack you're undoing,
+or pre-greenfield compatibility code per §40), say so explicitly in the commit
+message and either fix the idiom in scope or leave a tracked follow-up. Do not
+silently introduce a "better" idiom while claiming consistency with the package.
