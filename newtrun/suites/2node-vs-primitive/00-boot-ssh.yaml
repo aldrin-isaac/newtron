@@ -2,7 +2,6 @@ name: boot-ssh
 description: |
   Verify SSH reachability and SwSS readiness on both switches.
   SwSS must be running for 120+ seconds before config reload will succeed.
-topology: 2node-vs
 requires: []
 
 steps:

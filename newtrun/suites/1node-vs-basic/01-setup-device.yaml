@@ -2,7 +2,6 @@ name: setup-device
 description: |
   Baseline device setup. Creates the 'device' root intent required by all
   subsequent operations.
-topology: 1node-vs
 requires: [boot-ssh]
 
 steps:

@@ -2,7 +2,6 @@ name: static-route
 description: |
   Self-contained static route lifecycle: add a static route to Vrf_local,
   verify CONFIG_DB entry, then remove it and verify removal.
-topology: 2node-ngdp
 requires: [routed]
 
 steps:

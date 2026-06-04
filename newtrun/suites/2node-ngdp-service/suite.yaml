@@ -1,0 +1,3 @@
+name: 2node-ngdp-service
+description: Service lifecycle plus dataplane verification on the service-annotated 2node-ngdp-service topology.
+topology: 2node-ngdp-service

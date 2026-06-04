@@ -2,7 +2,6 @@ name: vrf-ipvpn-binding
 description: |
   VRF IP-VPN bind/unbind lifecycle.
   Requires IP-VPN spec + VRF to exist.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

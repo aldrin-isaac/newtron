@@ -3,7 +3,6 @@ description: |
   VLAN and VRF lifecycle: create VLAN 100 with a tagged member, create VRF,
   then tear down and verify all entries removed. Tests disaggregated primitives
   on a single switch.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

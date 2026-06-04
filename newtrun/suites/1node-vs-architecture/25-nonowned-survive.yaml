@@ -13,7 +13,6 @@ description: |
 
   Tests that after reconcile, factory DEVICE_METADATA fields (mac, platform,
   hwsku) still exist on the device.
-topology: 1node-vs
 requires: [rebuild-external]
 
 steps:

@@ -15,7 +15,6 @@ description: |
   Note: the 1node-vs topology doesn't define ports in topology.json,
   so this test verifies the device-side behavior rather than the
   abstract node's projection.
-topology: 1node-vs
 requires: [clear-save]
 
 steps:

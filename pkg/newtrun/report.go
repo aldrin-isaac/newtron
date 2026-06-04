@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -42,6 +44,13 @@ type StepResult struct {
 	Message   string
 	Details   []DeviceResult
 	Iteration int // 1-based iteration number (0 = no repeat)
+
+	// TargetBinding records the suite-level target values that produced
+	// this step result for parameterized scenarios — keys are singular
+	// (`device`, `interface`), values are the resolved names. Nil for
+	// embedded-target scenarios. Reporting uses this to distinguish
+	// step results that share a Name but ran against different targets.
+	TargetBinding map[string]string
 }
 
 // DeviceResult holds the result for a single device within a multi-device step.
@@ -74,18 +83,9 @@ func (g *ReportGenerator) WriteMarkdown(path string) error {
 	fmt.Fprintln(f, "| Scenario | Topology | Platform | Result | Duration | Note |")
 	fmt.Fprintln(f, "|----------|----------|----------|--------|----------|------|")
 	for _, r := range g.Results {
-		note := ""
-		if r.SkipReason != "" {
-			note = r.SkipReason
-		}
-		if r.Repeat > 1 && r.FailedIteration > 0 {
-			note = fmt.Sprintf("failed on iteration %d/%d", r.FailedIteration, r.Repeat)
-		} else if r.Repeat > 1 {
-			note = fmt.Sprintf("%d iterations", r.Repeat)
-		}
 		fmt.Fprintf(f, "| %s | %s | %s | %s | %s | %s |\n",
 			r.Name, r.Topology, r.Platform, r.Status,
-			r.Duration.Round(time.Second), note)
+			r.Duration.Round(time.Second), scenarioNote(r))
 	}
 
 	// Failures section
@@ -98,7 +98,7 @@ func (g *ReportGenerator) WriteMarkdown(path string) error {
 					hasFailures = true
 				}
 				fmt.Fprintf(f, "### %s\n", r.Name)
-				fmt.Fprintf(f, "Step %s (%s): %s\n\n", s.Name, s.Action, s.Message)
+				fmt.Fprintf(f, "Step %s (%s): %s\n\n", stepDisplayName(s), s.Action, s.Message)
 				for _, d := range s.Details {
 					if d.Status == StepStatusFailed {
 						fmt.Fprintf(f, "  %s: %s\n", d.Device, d.Message)
@@ -141,12 +141,8 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 
 		for _, s := range r.Steps {
 			suite.Tests++
-			stepName := s.Name
-			if s.Iteration > 0 {
-				stepName = fmt.Sprintf("[iter %d] %s", s.Iteration, s.Name)
-			}
 			tc := junitTestCase{
-				Name:      stepName,
+				Name:      stepDisplayName(s),
 				ClassName: r.Name,
 				Time:      s.Duration.Seconds(),
 			}
@@ -183,6 +179,71 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 	}
 
 	return os.WriteFile(path, append([]byte(xml.Header), data...), 0o644)
+}
+
+// scenarioNote composes the markdown summary row's Note column from
+// the result's skip reason, repeat-iteration outcome, and parameterized
+// target count. Returns the skip reason verbatim when the scenario was
+// skipped; otherwise combines a repeat tag and a target-count tag with
+// a comma separator when both apply.
+func scenarioNote(r *ScenarioResult) string {
+	if r.SkipReason != "" {
+		return r.SkipReason
+	}
+	var parts []string
+	if r.Repeat > 1 && r.FailedIteration > 0 {
+		parts = append(parts, fmt.Sprintf("failed on iteration %d/%d", r.FailedIteration, r.Repeat))
+	} else if r.Repeat > 1 {
+		parts = append(parts, fmt.Sprintf("%d iterations", r.Repeat))
+	}
+	bindings := map[string]bool{}
+	for _, s := range r.Steps {
+		if len(s.TargetBinding) > 0 {
+			bindings[formatTargetBinding(s.TargetBinding)] = true
+		}
+	}
+	if len(bindings) > 0 {
+		parts = append(parts, fmt.Sprintf("%d targets", len(bindings)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatTargetBinding renders a parameterized scenario's per-iteration
+// target binding as a deterministic bracketed string (sorted by key)
+// suitable for embedding in step display names. Returns "" for nil or
+// empty bindings (embedded-target scenarios).
+//
+//	{device=switch1, interface=Ethernet0} → "[device=switch1 interface=Ethernet0]"
+func formatTargetBinding(binding map[string]string) string {
+	if len(binding) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(binding))
+	for k := range binding {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", k, binding[k]))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// stepDisplayName composes the human-facing identifier for a step
+// result: the step's name, prefixed by the repeat iteration tag when
+// scenario.Repeat > 1 and by the target binding when the scenario is
+// parameterized. Both prefixes appear together when both apply.
+func stepDisplayName(s StepResult) string {
+	parts := make([]string, 0, 3)
+	if s.Iteration > 0 {
+		parts = append(parts, fmt.Sprintf("[iter %d]", s.Iteration))
+	}
+	if b := formatTargetBinding(s.TargetBinding); b != "" {
+		parts = append(parts, b)
+	}
+	parts = append(parts, s.Name)
+	return strings.Join(parts, " ")
 }
 
 // statusVerb returns a past-tense verb for a status, used in skip reasons.

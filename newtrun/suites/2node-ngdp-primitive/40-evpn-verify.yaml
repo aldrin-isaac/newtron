@@ -5,7 +5,6 @@ description: |
   EVPN BGP sessions reach Established.
   Setup-device already created all EVPN overlay infrastructure — this file
   only verifies it and waits for BGP convergence.
-topology: 2node-ngdp
 requires: [bgp-underlay]
 
 steps:

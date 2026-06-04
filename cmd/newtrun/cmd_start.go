@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +18,6 @@ import (
 
 func newStartCmd() *cobra.Command {
 	var (
-		dir       string
 		scenario  string
 		target    string
 		platform  string
@@ -31,7 +29,7 @@ func newStartCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start [suite]",
+		Use:   "start <suite>",
 		Short: "Start or resume a suite run",
 		Long: `Submit a run of the named file-backed suite to newtrun-server, then
 stream scenario and step events back to the terminal as they arrive.
@@ -39,7 +37,6 @@ stream scenario and step events back to the terminal as they arrive.
   newtrun start 2node-ngdp-primitive                        # run all scenarios
   newtrun start 2node-ngdp-primitive --scenario boot-ssh    # run one
   newtrun start 2node-ngdp-primitive --target cross-switch  # run dependency chain
-  newtrun start --dir /path/to/suite                        # run a suite by path
   newtrun start 2node-ngdp-primitive --monitor              # live dashboard
   newtrun start 2node-ngdp-primitive --junit out.xml        # JUnit XML report
 
@@ -50,21 +47,11 @@ The topology and per-Node atomicity model are determined by newtron-server.
 Pause with 'newtrun pause <suite>'; tear down with 'newtrun stop <suite>'.
 
 Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve suite identity: positional arg or --dir flag.
-			var suiteName, suiteDir string
-			switch {
-			case len(args) > 0 && args[0] != "":
-				suiteName = args[0]
-			case dir != "":
-				abs, err := filepath.Abs(dir)
-				if err != nil {
-					return fmt.Errorf("resolve --dir: %w", err)
-				}
-				suiteDir = abs
-			default:
-				return fmt.Errorf("provide a suite name or --dir <path>")
+			suiteName := args[0]
+			if suiteName == "" {
+				return fmt.Errorf("provide a suite name")
 			}
 
 			c := newClient()
@@ -86,8 +73,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 			}
 
 			req := api.StartRunRequest{
-				Suite:         "",
-				SuiteDir:      "",
+				Suite:         suiteName,
 				Scenario:      scenario,
 				Target:        target,
 				Platform:      platform,
@@ -96,11 +82,6 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				NewtronServer: serverURL,
 				NetworkID:     networkID,
 				JUnitPath:     junitPath,
-			}
-			if suiteDir != "" {
-				req.SuiteDir = suiteDir
-			} else {
-				req.Suite = suiteName
 			}
 
 			started, err := c.StartRun(ctx, req)
@@ -226,7 +207,6 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files (alternative to positional suite name)")
 	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario (default: all)")
 	cmd.Flags().StringVar(&target, "target", "", "run minimal dependency chain to reach scenario")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")

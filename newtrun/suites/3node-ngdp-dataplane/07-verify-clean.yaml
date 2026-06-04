@@ -4,7 +4,6 @@ description: |
   there must be a reverse action — this suite verifies that every CONFIG_DB
   entry written during provisioning or test scenarios has been removed.
   Organized by table to trace operational symmetry.
-topology: 3node-ngdp
 requires: [teardown]
 
 steps:

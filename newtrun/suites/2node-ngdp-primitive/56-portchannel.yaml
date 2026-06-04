@@ -3,7 +3,6 @@ description: |
   PortChannel lifecycle + dataplane: create PortChannel1 on both switches using
   Ethernet4+Ethernet5, assign IPs, add static routes to redirect host1↔host4
   traffic through the PortChannel, verify reachability, then clean up.
-topology: 2node-ngdp
 requires: [cross-switch]
 
 steps:

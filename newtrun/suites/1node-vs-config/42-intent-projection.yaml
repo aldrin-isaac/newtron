@@ -9,7 +9,6 @@ description: |
   setup-device on a 1node-vs lab.
 
   No device connection — loopback projection is the output.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

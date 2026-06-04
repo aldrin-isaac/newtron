@@ -8,7 +8,6 @@ description: |
 
   After clearing, reconcile would factory-reset the device (empty CONFIG_DB
   except ports) — we don't do that here, but verify the tree is empty.
-topology: 1node-vs
 requires: [intent-reload]
 
 steps:

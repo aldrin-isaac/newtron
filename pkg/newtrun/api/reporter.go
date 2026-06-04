@@ -36,17 +36,21 @@ func NewHTTPReporter(broker *httputil.Broker[Event], runKey string, inner newtru
 	}
 }
 
-func (r *HTTPReporter) SuiteStart(scenarios []*newtrun.Scenario) {
+func (r *HTTPReporter) SuiteStart(suiteTopology, suitePlatform string, scenarios []*newtrun.Scenario) {
 	summaries := make([]ScenarioSummary, 0, len(scenarios))
 	for _, s := range scenarios {
 		summaries = append(summaries, scenarioSummaryFrom(s))
 	}
 	r.Broker.Publish(r.RunKey, Event{
-		Type:    EventSuiteStart,
-		Payload: SuiteStartPayload{Scenarios: summaries},
+		Type: EventSuiteStart,
+		Payload: SuiteStartPayload{
+			Topology:  suiteTopology,
+			Platform:  suitePlatform,
+			Scenarios: summaries,
+		},
 	})
 	if r.Inner != nil {
-		r.Inner.SuiteStart(scenarios)
+		r.Inner.SuiteStart(suiteTopology, suitePlatform, scenarios)
 	}
 }
 

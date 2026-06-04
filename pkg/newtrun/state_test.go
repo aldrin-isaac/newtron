@@ -33,10 +33,8 @@ func TestSaveLoadRunState(t *testing.T) {
 
 	state := &RunState{
 		Suite:    "test-suite",
-		SuiteDir: "/tmp/test",
 		Topology: "2node-ngdp",
 		Platform: "sonic-vpp",
-		PID:      12345,
 		Status:   SuiteStatusRunning,
 		Started:  time.Now().Truncate(time.Second),
 		Scenarios: []ScenarioState{
@@ -151,66 +149,11 @@ func TestListSuiteStates(t *testing.T) {
 	}
 }
 
-func TestAcquireLock_Fresh(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	state := &RunState{
-		Suite:  "lock-test",
-		Status: SuiteStatusRunning,
-	}
-
-	if err := AcquireLock(state); err != nil {
-		t.Fatalf("AcquireLock: %v", err)
-	}
-
-	if state.PID != os.Getpid() {
-		t.Errorf("PID = %d, want %d", state.PID, os.Getpid())
-	}
-}
-
-func TestAcquireLock_StalePID(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	// Save state with a definitely-dead PID
-	old := &RunState{
-		Suite:  "stale-lock",
-		PID:    999999999, // won't exist
-		Status: SuiteStatusRunning,
-	}
-	if err := SaveRunState(old); err != nil {
-		t.Fatalf("SaveRunState: %v", err)
-	}
-
-	// Should succeed — stale PID
-	state := &RunState{Suite: "stale-lock", Status: SuiteStatusRunning}
-	if err := AcquireLock(state); err != nil {
-		t.Fatalf("AcquireLock with stale PID: %v", err)
-	}
-}
-
-func TestAcquireLock_ActivePID(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	// Save state with our own PID (definitely alive)
-	old := &RunState{
-		Suite:  "active-lock",
-		PID:    os.Getpid(),
-		Status: SuiteStatusRunning,
-	}
-	if err := SaveRunState(old); err != nil {
-		t.Fatalf("SaveRunState: %v", err)
-	}
-
-	// Should fail — PID is alive
-	state := &RunState{Suite: "active-lock", Status: SuiteStatusRunning}
-	err := AcquireLock(state)
-	if err == nil {
-		t.Fatal("expected error for active PID lock")
-	}
-}
+// AcquireLock/ReleaseLock/IsProcessAlive were CLI-process-mode lock
+// helpers — used by the old monolithic runner to hold the suite via
+// PID + process-alive probe. Server-mode runs are goroutines under
+// the registry, so the PID lock is obsolete and the helpers were
+// retired. Tests for them deleted with the functions.
 
 func TestCheckPausing(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -240,22 +183,3 @@ func TestCheckPausing(t *testing.T) {
 	}
 }
 
-func TestIsProcessAlive(t *testing.T) {
-	// Our own PID is alive
-	if !IsProcessAlive(os.Getpid()) {
-		t.Error("own PID should be alive")
-	}
-
-	// Zero or negative PIDs are not alive
-	if IsProcessAlive(0) {
-		t.Error("PID 0 should not be alive")
-	}
-	if IsProcessAlive(-1) {
-		t.Error("PID -1 should not be alive")
-	}
-
-	// Very large PID likely doesn't exist
-	if IsProcessAlive(999999999) {
-		t.Error("PID 999999999 should not be alive")
-	}
-}

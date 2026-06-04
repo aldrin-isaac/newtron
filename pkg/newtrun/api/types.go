@@ -49,26 +49,31 @@ func (e Event) Kind() string { return string(e.Type) }
 // Body satisfies httputil.Eventable.
 func (e Event) Body() any { return e.Payload }
 
-// SuiteStartPayload mirrors ProgressReporter.SuiteStart([]*Scenario).
-// Scenarios are summarized to name + step count rather than serialized in
-// full — the full Scenario objects include action-specific fields that
-// browser consumers don't need at suite-start time. Per-step detail is
-// surfaced incrementally via step_start / step_end events.
+// SuiteStartPayload mirrors ProgressReporter.SuiteStart. Topology
+// and Platform are suite-level — declared once in suite.yaml — so
+// they ride on the payload alongside the scenario summaries rather
+// than being repeated on every ScenarioSummary. Scenarios are
+// summarized to name + step count rather than serialized in full —
+// the full Scenario objects include action-specific fields that
+// browser consumers don't need at suite-start time. Per-step detail
+// is surfaced incrementally via step_start / step_end events.
 type SuiteStartPayload struct {
+	Topology  string            `json:"topology,omitempty"`
+	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
 // ScenarioSummary is the per-scenario view returned by SuiteStart events
-// and by GET /api/suites/{suite}/scenarios. The browser suite picker and
-// `newtrun list <suite>` both render from this shape, so it carries the
-// fields a chooser needs (name, topology, step count) plus dependency
-// info (requires) so dependency-ordered lists can be rendered without a
-// second call. Full scenario CRUD over HTTP is tracked in issue #33.
+// and by GET /api/suites/{suite}/scenarios. The browser suite picker
+// and `newtrun list <suite>` both render from this shape; per-scenario
+// fields are name + step count + dependency info. Topology and
+// Platform are suite-level and ride on the parent envelope
+// (SuiteStartPayload or SuiteScenariosResponse), not on each
+// ScenarioSummary — repeating them per row would diverge once
+// suite.yaml is mutated.
 type ScenarioSummary struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
-	Topology    string   `json:"topology"`
-	Platform    string   `json:"platform,omitempty"`
 	StepCount   int      `json:"step_count"`
 	Requires    []string `json:"requires,omitempty"`
 }
@@ -81,17 +86,23 @@ type ScenarioStartPayload struct {
 }
 
 // ScenarioEndPayload mirrors ProgressReporter.ScenarioEnd(*ScenarioResult, ...).
+// Repeat and FailedIteration carry the soak-mode provenance from the
+// canonical ScenarioResult: how many repeat passes were requested
+// (Repeat) and which pass failed (FailedIteration, 0 when none did).
+// Wire consumers report "failed on iteration K/N" from this pair.
 type ScenarioEndPayload struct {
-	Name        string                    `json:"name"`
-	Topology    string                    `json:"topology,omitempty"`
-	Platform    string                    `json:"platform,omitempty"`
-	Status      newtrun.StepStatus        `json:"status"`
-	Duration    string                    `json:"duration"`
-	Steps       []StepResultPayload       `json:"steps,omitempty"`
-	DeployError string                    `json:"deploy_error,omitempty"`
-	SkipReason  string                    `json:"skip_reason,omitempty"`
-	Index       int                       `json:"index"`
-	Total       int                       `json:"total"`
+	Name            string              `json:"name"`
+	Topology        string              `json:"topology,omitempty"`
+	Platform        string              `json:"platform,omitempty"`
+	Status          newtrun.StepStatus  `json:"status"`
+	Duration        string              `json:"duration"`
+	Steps           []StepResultPayload `json:"steps,omitempty"`
+	DeployError     string              `json:"deploy_error,omitempty"`
+	SkipReason      string              `json:"skip_reason,omitempty"`
+	Repeat          int                 `json:"repeat,omitempty"`
+	FailedIteration int                 `json:"failed_iteration,omitempty"`
+	Index           int                 `json:"index"`
+	Total           int                 `json:"total"`
 }
 
 // StepStartPayload mirrors ProgressReporter.StepStart(scenario, *Step, index, total).
@@ -142,13 +153,14 @@ type SuiteEndPayload struct {
 // duration (Go's time.Duration serializes as nanoseconds by default, which
 // is awkward for browser consumers).
 type StepResultPayload struct {
-	Name      string                 `json:"name"`
-	Action    newtrun.StepAction     `json:"action"`
-	Status    newtrun.StepStatus     `json:"status"`
-	Duration  string                 `json:"duration"`
-	Message   string                 `json:"message,omitempty"`
-	Details   []DeviceResultPayload  `json:"details,omitempty"`
-	Iteration int                    `json:"iteration,omitempty"`
+	Name          string                `json:"name"`
+	Action        newtrun.StepAction    `json:"action"`
+	Status        newtrun.StepStatus    `json:"status"`
+	Duration      string                `json:"duration"`
+	Message       string                `json:"message,omitempty"`
+	Details       []DeviceResultPayload `json:"details,omitempty"`
+	Iteration     int                   `json:"iteration,omitempty"`
+	TargetBinding map[string]string     `json:"target_binding,omitempty"`
 }
 
 // DeviceResultPayload mirrors newtrun.DeviceResult.
@@ -159,12 +171,13 @@ type DeviceResultPayload struct {
 }
 
 // scenarioSummaryFrom converts a *newtrun.Scenario to its summary form.
+// Topology and Platform are intentionally not copied here — they live
+// on the parent envelope (SuiteStartPayload / SuiteScenariosResponse),
+// not per scenario.
 func scenarioSummaryFrom(s *newtrun.Scenario) ScenarioSummary {
 	return ScenarioSummary{
 		Name:        s.Name,
 		Description: s.Description,
-		Topology:    s.Topology,
-		Platform:    s.Platform,
 		StepCount:   len(s.Steps),
 	}
 }
@@ -181,14 +194,16 @@ func scenarioEndFrom(r *newtrun.ScenarioResult, index, total int) ScenarioEndPay
 		deployErr = r.DeployError.Error()
 	}
 	return ScenarioEndPayload{
-		Name:        r.Name,
-		Topology:    r.Topology,
-		Platform:    r.Platform,
-		Status:      r.Status,
-		Duration:    durationString(r.Duration),
-		Steps:       steps,
-		DeployError: deployErr,
-		SkipReason:  r.SkipReason,
+		Name:            r.Name,
+		Topology:        r.Topology,
+		Platform:        r.Platform,
+		Status:          r.Status,
+		Duration:        durationString(r.Duration),
+		Steps:           steps,
+		DeployError:     deployErr,
+		SkipReason:      r.SkipReason,
+		Repeat:          r.Repeat,
+		FailedIteration: r.FailedIteration,
 		Index:       index,
 		Total:       total,
 	}
@@ -205,13 +220,14 @@ func stepResultFrom(r *newtrun.StepResult) StepResultPayload {
 		})
 	}
 	return StepResultPayload{
-		Name:      r.Name,
-		Action:    r.Action,
-		Status:    r.Status,
-		Duration:  durationString(r.Duration),
-		Message:   r.Message,
-		Details:   details,
-		Iteration: r.Iteration,
+		Name:          r.Name,
+		Action:        r.Action,
+		Status:        r.Status,
+		Duration:      durationString(r.Duration),
+		Message:       r.Message,
+		Details:       details,
+		Iteration:     r.Iteration,
+		TargetBinding: r.TargetBinding,
 	}
 }
 
@@ -270,30 +286,28 @@ type HealthResponse struct {
 }
 
 // SuiteScenariosResponse is the response shape for GET
-// /api/suites/{suite}/scenarios.
+// /api/suites/{suite}/scenarios. Topology and Platform are suite-level
+// (suite.yaml owns them) so they ride on the envelope; per-scenario
+// summaries don't repeat them.
 type SuiteScenariosResponse struct {
 	Suite     string            `json:"suite"`
 	Topology  string            `json:"topology,omitempty"`
+	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
-// StartRunRequest is the body for POST /api/runs. Names the suite to run
-// and optional run-shaping options that mirror the existing CLI flags.
+// StartRunRequest is the body for POST /api/runs. Names the suite to
+// run and optional run-shaping options that mirror the existing CLI
+// flags.
 //
-// Suite (named) and SuiteDir (path) are alternatives — exactly one must
-// be set. Suite resolves under the server's SuitesBase; SuiteDir is an
-// absolute filesystem path the server reads directly. The path mode
-// matches the original CLI's --dir flag and honors the server's
-// filesystem permissions; security posture is bounded by deployment-
-// time trust controls (loopback default, reverse proxy for non-loopback).
+// The client addresses a suite by *name* — the server resolves the
+// name to bytes under its SuitesBase. Filesystem layout is server-
+// internal and intentionally absent from the wire (§33 Public API
+// Boundary): clients must not learn where suite.yaml lives, and the
+// server must not accept absolute paths from clients.
 type StartRunRequest struct {
 	// Suite is the file-backed suite name under the server's SuitesBase.
-	// Mutually exclusive with SuiteDir.
-	Suite string `json:"suite,omitempty"`
-
-	// SuiteDir is an absolute path to a suite directory the server reads
-	// directly. Mutually exclusive with Suite.
-	SuiteDir string `json:"suite_dir,omitempty"`
+	Suite string `json:"suite"`
 
 	// Scenario, if set, runs a single scenario from the suite. Mutually
 	// exclusive with Target and All.
@@ -333,6 +347,20 @@ type StartRunRequest struct {
 	// the CLI uses to coordinate report generation client-side. Present
 	// here for CLI compatibility with the original --junit flag.
 	JUnitPath string `json:"junit_path,omitempty"`
+
+	// Targets overrides per-dimension entries of the suite's targets
+	// block at run time. Keys must match dimensions declared in
+	// suite.yaml; omitted keys inherit the suite default. Values
+	// must satisfy the target-value identifier whitelist
+	// (^[A-Za-z0-9_-]+$). Used by parameterized scenarios.
+	Targets map[string][]string `json:"targets,omitempty"`
+
+	// Parameters overrides the suite's parameter defaults at run time.
+	// Keys must match parameters declared in suite.yaml; values are
+	// validated against each parameter's spec (type, constraints) and
+	// rejected with 400 on mismatch. Omit a key to inherit the
+	// default. Used by parameterized scenarios.
+	Parameters map[string]any `json:"parameters,omitempty"`
 }
 
 // StartRunResponse is the body returned by POST /api/runs.

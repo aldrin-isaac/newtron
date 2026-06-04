@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	verboseFlag      bool
+	verboseFlag       bool
 	newtrunServerFlag string // root persistent flag — newtrun-server URL
+	newtlabServerFlag string // root persistent flag — newtlab-server URL (lab status / deploy / destroy)
 )
 
 // Sentinel errors for exit code mapping. RunE handlers return these instead
@@ -49,7 +50,8 @@ Discovery:
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
-	rootCmd.PersistentFlags().StringVar(&newtrunServerFlag, "newtrun-server", "", "URL of newtser (or newtrun-server directly). Default: http://127.0.0.1:18080 (newtser). Env: NEWTRUN_SERVER")
+	rootCmd.PersistentFlags().StringVar(&newtrunServerFlag, "newtrun-server", "", "URL of newt-server (or newtrun-server directly). Default: http://127.0.0.1:18080. Env: NEWTRUN_SERVER")
+	rootCmd.PersistentFlags().StringVar(&newtlabServerFlag, "newtlab-server", "", "URL of newt-server (or newtlab-server directly) for lab status / deploy / destroy. Default: http://127.0.0.1:18080. Env: NEWTLAB_SERVER")
 
 	startCmd := newStartCmd()
 

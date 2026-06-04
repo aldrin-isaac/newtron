@@ -9,7 +9,6 @@ description: |
 
   After verifying the wipe, we re-reconcile from topology.json to restore
   the device to its normal state for subsequent tests.
-topology: 1node-vs
 requires: [clear-crud]
 
 steps:

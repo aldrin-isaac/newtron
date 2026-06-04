@@ -6,7 +6,6 @@ description: |
   and bridges via VXLAN to the remote leaf — true asymmetric IRB using only L2 VNI
   DECAP (no L3VNI required, works on CiscoVS per RCA-039).
   Self-cleaning: removes all config at end.
-topology: 3node-ngdp
 requires: [evpn-verify]
 after: [evpn-l2-bridged]
 

@@ -1,0 +1,3 @@
+name: 1node-vs-architecture
+description: Architectural invariants on the 1node-vs topology — intent tree, drift, reconcile (full/delta/dry-run), mode switching, clear semantics.
+topology: 1node-vs

@@ -9,17 +9,37 @@ import (
 	"time"
 )
 
-// Scenario is a parsed test scenario from a YAML file.
+// Scenario is a parsed test scenario YAML file. Targets and
+// parameters live on the parent Suite, not here — a scenario is the
+// step list and its dependency metadata; the suite owns iteration and
+// run-time bindings (see suite.go).
+//
+// Scenarios come in two shapes, distinguished per-scenario by whether
+// any step uses {{target.X}} or {{param.X}} tokens. Both shapes
+// coexist within one suite:
+//
+//   - Embedded-target scenarios use step-level devices: selectors and
+//     {{device}} substitution; the runner dispatches per device.
+//     Typical use: testing — the scenario covers a known matrix.
+//
+//   - Parameterized scenarios reference the suite-level targets:/
+//     parameters: catalog via {{target.X}} / {{param.X}}; the runner
+//     iterates the cross-product of declared targets. Step-level
+//     devices: and {{device}} are forbidden in these scenarios.
+//     Typical use: production rollout.
+//
+// ScenarioIsParameterized (suite.go) makes the per-scenario decision.
 type Scenario struct {
 	Name             string   `yaml:"name"`
 	Description      string   `yaml:"description"`
-	Topology         string   `yaml:"topology"`
-	Platform         string   `yaml:"platform"`
+	Topology         string   `yaml:"topology,omitempty"`        // suite-level field; LoadSuite rejects scenarios that set it
+	Platform         string   `yaml:"platform,omitempty"`        // suite-level field; LoadSuite rejects scenarios that set it
 	Requires         []string `yaml:"requires,omitempty"`
 	After            []string `yaml:"after,omitempty"`              // Run after these scenarios (ordering only, no pass/fail gate)
 	RequiresFeatures []string `yaml:"requires_features,omitempty"` // Platform features required (e.g., ["acl", "macvpn"])
 	Repeat           int      `yaml:"repeat,omitempty"`
-	Steps            []Step   `yaml:"steps"`
+
+	Steps []Step `yaml:"steps"`
 }
 
 // Step is a single action within a scenario.

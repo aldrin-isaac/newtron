@@ -3,7 +3,6 @@ description: >
   Create the device root intent on switch2. All resource intents (VRFs,
   interfaces) declare [device] as parent — the device intent must exist
   before any resource operations (intents.md §4.1, I4).
-topology: 2node-ngdp
 requires: [boot-ssh]
 
 steps:

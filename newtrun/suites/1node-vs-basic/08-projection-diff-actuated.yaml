@@ -18,7 +18,6 @@ description: |
     - diff includes VLAN|Vlan100 with type="extra" (hypothetical add).
   Then issues a follow-up Drift call to confirm the Node's observable
   state is unchanged — no Vlan100 in the actual projection or device.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

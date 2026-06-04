@@ -3,7 +3,6 @@ description: |
   Service apply/remove lifecycle using the "transit" service from network.json.
   transit = routed service with BGP (peer_as: request).
   Intent DAG: device → interface|Ethernet28 → service-binding.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

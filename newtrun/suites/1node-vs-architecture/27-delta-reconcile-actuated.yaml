@@ -6,7 +6,6 @@ description: |
 
   Delta mode is the default for actuated reconcile. No config reload,
   no BGP restart needed — CONFIG_DB is patched in-place.
-topology: 1node-vs
 requires: [save-roundtrip]
 
 steps:

@@ -2,7 +2,6 @@ name: provision
 description: |
   Provision both switches via topology provisioner. Establishes a known
   CONFIG_DB baseline for drift detection to compare against.
-topology: 2node-vs-service
 requires: [boot-ssh]
 
 steps:

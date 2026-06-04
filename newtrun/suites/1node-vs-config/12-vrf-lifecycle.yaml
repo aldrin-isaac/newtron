@@ -3,7 +3,6 @@ description: |
   VRF create, add-interface, add-route, remove-route, remove-interface, delete.
   Intent DAG: device → vrf|Vrf_TEST → route|Vrf_TEST|10.0.0.0/8.
   Interface config: device → interface|Ethernet4 → configure-interface (with VRF).
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

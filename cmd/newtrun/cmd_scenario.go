@@ -142,14 +142,7 @@ func newSuiteCmd() *cobra.Command {
 		Short: "Create or delete suites via newtrun-server",
 	}
 	cmd.AddCommand(
-		&cobra.Command{
-			Use:   "create <name>",
-			Short: "Create an empty suite directory on the server",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return createSuite(cmd.Context(), args[0])
-			},
-		},
+		newSuiteCreateCmd(),
 		&cobra.Command{
 			Use:   "delete <name>",
 			Short: "Delete an empty suite directory (refuses if scenarios remain)",
@@ -162,15 +155,33 @@ func newSuiteCmd() *cobra.Command {
 	return cmd
 }
 
-func createSuite(ctx context.Context, name string) error {
+func newSuiteCreateCmd() *cobra.Command {
+	var topology string
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a suite directory + suite.yaml manifest on the server",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if topology == "" {
+				return fmt.Errorf("--topology is required")
+			}
+			return createSuite(cmd.Context(), args[0], topology)
+		},
+	}
+	cmd.Flags().StringVar(&topology, "topology", "", "topology name this suite targets (required)")
+	_ = cmd.MarkFlagRequired("topology")
+	return cmd
+}
+
+func createSuite(ctx context.Context, name, topology string) error {
 	c := newClient()
 	if err := requireServer(ctx, c); err != nil {
 		return err
 	}
-	if err := c.CreateSuite(ctx, name); err != nil {
+	if err := c.CreateSuite(ctx, name, topology); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "created suite %s\n", name)
+	fmt.Fprintf(os.Stderr, "created suite %s (topology=%s)\n", name, topology)
 	return nil
 }
 

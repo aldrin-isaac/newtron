@@ -2,7 +2,6 @@ name: verify-clean
 description: |
   Verify no leftover CONFIG_DB entries from the test suite. Confirms that
   service-lifecycle and vlan-vrf scenarios cleaned up after themselves.
-topology: 1node-vs
 requires: [service-lifecycle, vlan-vrf]
 
 steps:

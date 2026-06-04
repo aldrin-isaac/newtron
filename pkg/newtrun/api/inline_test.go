@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -188,6 +190,65 @@ func TestInlineStatePersistedToInlineNamespace(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("inline state for %s never appeared", runID)
+}
+
+// TestInlineStagesAsLoadableSuite is the regression guard for the
+// pre-fix break where Runner.Run started calling LoadSuite
+// unconditionally but the inline writer only emitted the scenario
+// YAML — every inline run died in the goroutine with "reading
+// .../suite.yaml: no such file or directory". The test stages an
+// inline run, locates the synthetic directory, and confirms (a)
+// suite.yaml exists, (b) the staged scenario has no leftover
+// suite-level fields, (c) LoadSuite accepts the result and returns
+// exactly one scenario.
+func TestInlineStagesAsLoadableSuite(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	resp, env := postInline(t, ts, InlineRunRequest{
+		ScenarioYAML:   inlineScenarioWait,
+		TimeoutSeconds: 5,
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status: got %d, want 202; error: %s", resp.StatusCode, env.Error)
+	}
+	runID := env.Data.(map[string]any)["run_id"].(string)
+
+	inlineDir, err := newtrun.InlineStateDir(runID)
+	if err != nil {
+		t.Fatalf("InlineStateDir: %v", err)
+	}
+	scenariosDir := filepath.Join(inlineDir, "scenarios")
+
+	suitePath := filepath.Join(scenariosDir, "suite.yaml")
+	if _, err := os.Stat(suitePath); err != nil {
+		t.Fatalf("suite.yaml missing in inline staging dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(scenariosDir, "inline.yaml")); err != nil {
+		t.Fatalf("inline.yaml missing in inline staging dir: %v", err)
+	}
+	scenarioBody, err := os.ReadFile(filepath.Join(scenariosDir, "inline.yaml"))
+	if err != nil {
+		t.Fatalf("read inline.yaml: %v", err)
+	}
+	if strings.Contains(string(scenarioBody), "topology:") {
+		t.Errorf("staged inline.yaml retained suite-level topology: field — LoadSuite will reject it\n%s", scenarioBody)
+	}
+	if strings.Contains(string(scenarioBody), "platform:") {
+		t.Errorf("staged inline.yaml retained suite-level platform: field\n%s", scenarioBody)
+	}
+	suite, err := newtrun.LoadSuite(scenariosDir)
+	if err != nil {
+		t.Fatalf("LoadSuite on inline staging dir failed: %v", err)
+	}
+	if len(suite.Scenarios) != 1 {
+		t.Fatalf("LoadSuite returned %d scenarios, want 1", len(suite.Scenarios))
+	}
+	if suite.Topology != "test-topo" {
+		t.Errorf("suite topology = %q, want test-topo", suite.Topology)
+	}
 }
 
 func TestInlineDeleteUnreachableUntilTerminal(t *testing.T) {

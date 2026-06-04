@@ -8,7 +8,6 @@ description: |
     - Remove extra entries (VLAN|Vlan999)
     - Correct modified entries (BGP_GLOBALS ASN)
     - Result in zero drift
-topology: 1node-vs
 requires: [detect-drift]
 
 steps:

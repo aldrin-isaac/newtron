@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -21,13 +19,27 @@ type Runner struct {
 	ServerURL    string         // newtron-server HTTP address
 	NetworkID    string         // network identifier for server operations
 	Client       *client.Client // HTTP client for all SONiC operations
-	Lab          *newtlab.Lab
+	NewtlabURL   string         // newtlab-server HTTP address (deploy/destroy/status via HTTP, not in-process)
+	NewtlabClient LabClient    // newtlab HTTP client (satisfied by *pkg/newtlab/client.Client); injected for tests
 	HostConns    map[string]*ssh.Client // host device name → SSH client
 	Progress     ProgressReporter
 
 	// Populated by connectToServer from the server's registered network.
 	Topology string // topology name (from server)
 	SpecDir  string // spec directory (from server)
+
+	// Populated by Run from the loaded suite.yaml. resolvedIterations
+	// is the cross-product of suite-level targets after per-run
+	// override merging — one entry for embedded-target suites (the
+	// single nil binding), one entry per dimension combination for
+	// parameterized suites. resolvedParameters carries the merged
+	// parameter values (suite defaults + run-time overrides, typed
+	// per ParameterSpec.Coerce). Both views are derived from the
+	// loaded suite once at Run startup; runScenarioSteps reads them
+	// directly without re-querying the suite per scenario.
+	suite               *Suite
+	resolvedIterations  []map[string]string
+	resolvedParameters  map[string]any
 
 	discoveredPlatform string // platform discovered from connected devices
 
@@ -46,10 +58,20 @@ type RunOptions struct {
 	Verbose   bool
 	JUnitPath string
 
+	// Targets overrides per-dimension entries of the suite's targets
+	// block at run time. Keys must match dimensions declared in
+	// suite.yaml; omitted keys inherit the suite default.
+	Targets map[string][]string
+
+	// Parameters overrides the suite's parameter defaults at run time.
+	// Keys must match parameters declared in suite.yaml; values are
+	// validated against each parameter's spec (type, constraints).
+	Parameters map[string]any
+
 	// Lifecycle fields (set by `start` command, not by `run`)
-	Suite     string                 // suite name for state tracking; empty disables lifecycle
-	Resume    bool                   // true when resuming a paused run
-	Completed map[string]StepStatus  // scenario → status from previous run (resume)
+	Suite     string                // suite name for state tracking; empty disables lifecycle
+	Resume    bool                  // true when resuming a paused run
+	Completed map[string]StepStatus // scenario → status from previous run (resume)
 }
 
 // NewRunner creates a new test runner.
@@ -60,8 +82,8 @@ func NewRunner(scenariosDir string) *Runner {
 }
 
 // Run executes one or all scenarios and returns results.
-// The server determines the topology — scenarios declare compatible topologies
-// as guards; mismatches fail immediately.
+// The server determines the topology — the suite declares its target
+// topology in suite.yaml; mismatches fail immediately.
 //
 // The supplied context cancels the run between scenario boundaries. SIGINT
 // handling is layered on top so an interactive CLI run still responds to
@@ -73,45 +95,58 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 		return nil, fmt.Errorf("specify --scenario <name>, --target <name>, or --all")
 	}
 
+	// Load the suite: suite.yaml + every scenario file in the dir.
+	// LoadSuite validates all template references against suite-level
+	// declarations and rejects scenarios that set topology/platform.
+	suite, err := LoadSuite(r.ScenariosDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(suite.Scenarios) == 0 {
+		return nil, fmt.Errorf("no scenarios found in %s", r.ScenariosDir)
+	}
+	r.suite = suite
+
+	// Resolve effective targets and parameters from suite defaults +
+	// per-run overrides. Failures here are 400-class — bad request.
+	effTargets, err := suite.EffectiveTargets(opts.Targets)
+	if err != nil {
+		return nil, err
+	}
+	effParams, err := suite.EffectiveParameters(opts.Parameters)
+	if err != nil {
+		return nil, err
+	}
+	// EffectiveTargets returns the suite defaults too; we need a temp
+	// Suite snapshot to drive TargetIterations against the resolved
+	// targets without mutating the loaded suite.
+	resolved := *suite
+	resolved.Targets = effTargets
+	r.resolvedIterations = resolved.TargetIterations()
+	r.resolvedParameters = effParams
+
+	// Filter scenarios by --scenario / --target / --all.
 	var scenarios []*Scenario
-
-	if opts.All || opts.Target != "" {
-		var err error
-		scenarios, err = ParseAllScenarios(r.ScenariosDir)
-		if err != nil {
-			return nil, err
-		}
-		if len(scenarios) == 0 {
-			return nil, fmt.Errorf("no scenarios found in %s", r.ScenariosDir)
-		}
-	} else {
-		path, err := resolveScenarioPath(r.ScenariosDir, opts.Scenario)
-		if err != nil {
-			return nil, err
-		}
-		s, err := ParseScenario(path)
-		if err != nil {
-			return nil, err
-		}
-		scenarios = []*Scenario{s}
-	}
-
-	// Validate and topologically sort if any scenario declares requires
-	if (opts.All || opts.Target != "") && HasRequires(scenarios) {
-		sorted, err := ValidateDependencyGraph(scenarios)
-		if err != nil {
-			return nil, err
-		}
-		scenarios = sorted
-	}
-
-	// --target: filter to minimal dependency chain
-	if opts.Target != "" {
-		chain, err := ComputeTargetChain(scenarios, opts.Target)
+	switch {
+	case opts.All:
+		scenarios = suite.Scenarios
+	case opts.Target != "":
+		chain, err := ComputeTargetChain(suite.Scenarios, opts.Target)
 		if err != nil {
 			return nil, err
 		}
 		scenarios = chain
+	default:
+		scenarios = nil
+		for _, sc := range suite.Scenarios {
+			if sc.Name == opts.Scenario {
+				scenarios = []*Scenario{sc}
+				break
+			}
+		}
+		if len(scenarios) == 0 {
+			return nil, fmt.Errorf("scenario %q not found in %s", opts.Scenario, r.ScenariosDir)
+		}
 	}
 
 	// Connect to server to learn topology
@@ -121,15 +156,13 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 	}
 	fmt.Fprintf(os.Stderr, "newtrun: server has topology %q (%d nodes)\n", r.Topology, len(r.allDeviceNames()))
 
-	// Guard: all scenarios must be compatible with the server's topology
-	for _, sc := range scenarios {
-		if sc.Topology != "" && sc.Topology != r.Topology {
-			return nil, fmt.Errorf("scenario %q requires topology %q but server has %q loaded",
-				sc.Name, sc.Topology, r.Topology)
-		}
+	// Guard: the suite's topology must match the server's.
+	if suite.Topology != "" && suite.Topology != r.Topology {
+		return nil, fmt.Errorf("suite %q requires topology %q but server has %q loaded",
+			suite.Name, suite.Topology, r.Topology)
 	}
 
-	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })
+	r.progress(func(p ProgressReporter) { p.SuiteStart(suite.Topology, suite.Platform, scenarios) })
 	suiteStart := time.Now()
 
 	// Deploy topology (unless --no-deploy)
@@ -182,8 +215,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 
 	// Resolve platform for capability checks
 	deployedPlatform := opts.Platform
-	if deployedPlatform == "" && len(scenarios) > 0 {
-		deployedPlatform = scenarios[0].Platform
+	if deployedPlatform == "" {
+		deployedPlatform = suite.Platform
 	}
 	if deployedPlatform == "" {
 		deployedPlatform = r.discoveredPlatform
@@ -325,35 +358,39 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 	return results, nil
 }
 
-// deployTopology deploys the lab topology using lifecycle mode (EnsureTopology)
-// or standalone mode (DeployTopology). It returns a cleanup function that should
-// be deferred by the caller; the cleanup is nil when no teardown is needed.
+// deployTopology deploys the lab topology by calling newtlab-server.
+// Lifecycle mode (opts.Suite set, e.g. `newtrun start ...`) uses
+// EnsureTopology — reuse an already-running lab, redeploy otherwise.
+// Standalone mode (legacy direct Run.Run path) uses DeployTopology
+// and registers a cleanup func that calls DestroyTopology unless
+// opts.Keep is set. Per §27 (Single Owner) every touch of LabState
+// goes through newtlab-server's HTTP client; no in-process
+// newtlab.NewLab.
 //
-// specDir is no longer used to load specs (§27 — newtron owns spec files);
-// it is the path passed to newtron-server during network registration so
-// the engine can serve it. The Lab itself consumes spec data via the
-// already-constructed r.Client.
+// specDir registers the network with newtron-server so newtlab can
+// query specs from there during deploy.
 func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
 	if specDir != "" {
 		if regErr := r.Client.RegisterNetwork(specDir); regErr != nil {
 			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", specDir, regErr)
 		}
 	}
+	if r.NewtlabClient == nil {
+		return nil, fmt.Errorf("newtrun: no newtlab client configured (set Runner.NewtlabClient or use --newtlab-server)")
+	}
 	if opts.Suite != "" {
-		lab, err := EnsureTopology(ctx, r.Client, r.Topology)
-		if err != nil {
+		if err := EnsureTopology(ctx, r.NewtlabClient, r.Topology); err != nil {
 			return nil, err
 		}
-		r.Lab = lab
 		return nil, nil // lifecycle mode: stop command handles teardown
 	}
-	lab, err := DeployTopology(ctx, r.Client, r.Topology)
-	if err != nil {
+	if err := DeployTopology(ctx, r.NewtlabClient, r.Topology); err != nil {
 		return nil, err
 	}
-	r.Lab = lab
 	if !opts.Keep {
-		return func() { _ = DestroyTopology(context.Background(), r.Lab) }, nil
+		topo := r.Topology
+		client := r.NewtlabClient
+		return func() { _ = DestroyTopology(context.Background(), client, topo) }, nil
 	}
 	return nil, nil
 }
@@ -417,9 +454,25 @@ func (r *Runner) connectDevices() error {
 	return nil
 }
 
-// runScenarioSteps executes the steps of a scenario, appending results to result.
-// When scenario.Repeat > 1, all steps are executed in a loop for the specified
-// number of iterations. Execution stops on the first failed iteration.
+// runScenarioSteps executes the steps of a scenario, appending results
+// to result.
+//
+// Three nested loops, outer to inner:
+//
+//   - Repeat: when scenario.Repeat > 1, every step runs that many
+//     times. Repeat is fail-fast — the first failed repeat-iteration
+//     records FailedIteration and stops further repeats.
+//   - Target iteration: for parameterized scenarios, the runner
+//     enumerates the cross-product of suite-level Targets and binds
+//     {{target.X}} / {{param.X}} per iteration. Target iterations are
+//     continue-on-failure — one failing binding does not skip the
+//     remaining bindings, so a production rollout sees every failing
+//     target. Embedded-target scenarios collapse this loop to one
+//     nil-binding pass so the step list runs once.
+//   - Steps: the original step list. Steps are fail-fast within one
+//     target iteration: a failure stops the rest of that iteration's
+//     steps, then the outer loop moves to the next binding
+//     (parameterized) or stops (embedded-target).
 func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult) {
 	repeat := scenario.Repeat
 	if repeat <= 1 {
@@ -427,33 +480,93 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 	}
 	result.Repeat = scenario.Repeat
 
-	for iter := 1; iter <= repeat; iter++ {
-		iterFailed := false
-		for i, step := range scenario.Steps {
-			stepCopy := step
-			r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Steps)) })
+	// A scenario is parameterized when any of its steps references
+	// {{target.X}} or {{param.X}}. Parameterized scenarios iterate
+	// the suite's resolved target cross-product; embedded-target
+	// scenarios run once with a nil binding. Both shapes coexist in
+	// one suite (a parameterized rollout alongside embedded-target
+	// provision/verify scenarios) so the choice is per-scenario, not
+	// per-suite.
+	isParameterized := ScenarioIsParameterized(scenario)
+	var iterations []map[string]string
+	var effectiveParams map[string]any
+	if isParameterized {
+		iterations = r.resolvedIterations
+		effectiveParams = r.resolvedParameters
+	}
+	if iterations == nil {
+		iterations = []map[string]string{nil}
+	}
 
-			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
+	for repeatIter := 1; repeatIter <= repeat; repeatIter++ {
+		anyIterFailed := false
 
-			sr := *output.Result
-			if repeat > 1 {
-				sr.Iteration = iter
+		for _, binding := range iterations {
+			iterFailed := false
+
+			for i, step := range scenario.Steps {
+				stepToRun := step
+				var expandErr error
+				if isParameterized {
+					stepToRun, expandErr = ExpandStep(step, binding, effectiveParams)
+				}
+				if expandErr != nil {
+					sr := StepResult{
+						Name:          step.Name,
+						Action:        step.Action,
+						Status:        StepStatusError,
+						Message:       fmt.Sprintf("template expansion: %v", expandErr),
+						TargetBinding: binding,
+					}
+					if repeat > 1 {
+						sr.Iteration = repeatIter
+					}
+					result.Steps = append(result.Steps, sr)
+					iterFailed = true
+					break
+				}
+
+				stepCopy := stepToRun
+				r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Steps)) })
+
+				output := r.executeStep(ctx, &stepToRun, i, len(scenario.Steps), opts)
+
+				sr := *output.Result
+				if repeat > 1 {
+					sr.Iteration = repeatIter
+				}
+				sr.TargetBinding = binding
+				result.Steps = append(result.Steps, sr)
+
+				srCopy := sr
+				r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, i, len(scenario.Steps)) })
+
+				if output.Result.Status == StepStatusFailed || output.Result.Status == StepStatusError {
+					iterFailed = true
+					break
+				}
 			}
-			result.Steps = append(result.Steps, sr)
 
-			srCopy := sr
-			r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, i, len(scenario.Steps)) })
-
-			// Fail-fast within iteration
-			if output.Result.Status == StepStatusFailed || output.Result.Status == StepStatusError {
-				iterFailed = true
-				break
+			if iterFailed {
+				anyIterFailed = true
+				// Embedded-target scenarios have only one (nil) binding,
+				// so this break is moot. Parameterized scenarios
+				// continue to the next binding so the operator sees
+				// every failing target in one run before the repeat
+				// pass terminates.
+				if !isParameterized {
+					break
+				}
 			}
 		}
 
-		if iterFailed {
+		// Repeat is fail-fast regardless of scenario shape: if any
+		// iteration in this repeat pass failed, record the index
+		// (when Repeat > 1 it's a useful provenance marker for soak
+		// runs) and stop further repeats.
+		if anyIterFailed {
 			if repeat > 1 {
-				result.FailedIteration = iter
+				result.FailedIteration = repeatIter
 			}
 			break
 		}
@@ -603,14 +716,14 @@ func (r *Runner) hasDataplane() bool {
 	return p.Dataplane != ""
 }
 
-// resolvePlatform returns the platform name from CLI override, scenario YAML,
-// or device discovery (in that priority order).
+// resolvePlatform returns the platform name from CLI override, suite
+// declaration, or device discovery (in that priority order).
 func (r *Runner) resolvePlatform() string {
 	if r.opts.Platform != "" {
 		return r.opts.Platform
 	}
-	if r.scenario != nil && r.scenario.Platform != "" {
-		return r.scenario.Platform
+	if r.suite != nil && r.suite.Platform != "" {
+		return r.suite.Platform
 	}
 	return r.discoveredPlatform
 }
@@ -693,49 +806,3 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 	return ""
 }
 
-// resolveScenarioPath resolves a scenario name to a YAML file path.
-// Tries in order:
-//  1. Exact match: <dir>/<name>.yaml
-//  2. Numbered prefix: <dir>/*-<name>.yaml
-//  3. Scan files for matching name: field
-func resolveScenarioPath(dir, name string) (string, error) {
-	// 1. Exact match
-	exact := filepath.Join(dir, name+".yaml")
-	if _, err := os.Stat(exact); err == nil {
-		return exact, nil
-	}
-
-	// 2. Numbered prefix glob: *-<name>.yaml
-	matches, _ := filepath.Glob(filepath.Join(dir, "*-"+name+".yaml"))
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-
-	// 3. Scan all YAML files for matching name: field
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", fmt.Errorf("scenario %q not found: %w", name, err)
-	}
-	var found string
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		s, err := ParseScenario(path)
-		if err != nil {
-			continue
-		}
-		if s.Name == name {
-			if found != "" {
-				return "", fmt.Errorf("ambiguous scenario name %q: found in %s and %s", name, filepath.Base(found), e.Name())
-			}
-			found = path
-		}
-	}
-	if found != "" {
-		return found, nil
-	}
-
-	return "", fmt.Errorf("scenario %q not found in %s", name, dir)
-}

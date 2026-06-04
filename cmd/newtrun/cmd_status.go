@@ -1,17 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
-	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -146,11 +146,6 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 	// Header
 	fmt.Printf("newtrun: %s\n", suite)
 
-	// Suite directory
-	if state.SuiteDir != "" {
-		fmt.Printf("  suite:     %s\n", state.SuiteDir)
-	}
-
 	// Topology info
 	topology := resolveTopologyFromState(state)
 	topoStatus := "unknown"
@@ -171,17 +166,10 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 		fmt.Printf("  target:    %s\n", state.Target)
 	}
 
-	// Runner status
-	statusStr := string(state.Status)
-	if state.PID != 0 && newtrun.IsProcessAlive(state.PID) {
-		statusStr = fmt.Sprintf("%s (pid %d)", statusStr, state.PID)
-	} else if state.PID != 0 {
-		// PID recorded but not alive
-		if state.Status == newtrun.SuiteStatusRunning {
-			statusStr = cli.Yellow("aborted") + fmt.Sprintf(" (pid %d exited)", state.PID)
-		}
-	}
-	fmt.Printf("  status:    %s\n", colorRunStatus(state.Status, statusStr))
+	// Runner status. The server-mode runner is a goroutine under the
+	// registry, not a separate OS process, so the legacy PID display
+	// was retired with the AcquireLock/ReleaseLock helpers.
+	fmt.Printf("  status:    %s\n", colorRunStatus(state.Status, string(state.Status)))
 
 	// Timing
 	if !state.Started.IsZero() {
@@ -283,11 +271,10 @@ func printDetailView(state *newtrun.RunState) {
 				fmt.Printf("    %s\n", cli.Dim(line))
 			}
 		}
-		if state.SuiteDir != "" {
-			if path := resolveScenarioFilePath(state.SuiteDir, sc.Name); path != "" {
-				fmt.Printf("    %s %s\n", cli.Dim("file:"), cli.Dim(path))
-			}
-		}
+		// The on-disk scenario path is server-internal and intentionally
+		// absent from RunState — operators inspect scenario contents via
+		// `newtrun scenario get <suite> <name>` rather than chasing the
+		// filename here.
 		fmt.Println()
 
 		t := cli.NewTable("#", "STEP", "ACTION", "STATUS", "DURATION", "MESSAGE").WithPrefix("    ")
@@ -349,31 +336,14 @@ func findRunningSuite(suites []string) string {
 	return ""
 }
 
-// resolveScenarioFilePath finds the YAML file for a scenario in the suite directory.
-// Matches either exact name or *-name.yaml pattern (e.g., "01-health-check.yaml").
-func resolveScenarioFilePath(suiteDir, name string) string {
-	entries, err := os.ReadDir(suiteDir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
-			continue
-		}
-		base := strings.TrimSuffix(e.Name(), ".yaml")
-		if base == name || strings.HasSuffix(base, "-"+name) {
-			return filepath.Join(suiteDir, e.Name())
-		}
-	}
-	return ""
-}
 
 func checkTopologyStatus(topology string) string {
 	// Topology name is the lab name (per the same convention newtron
-	// uses). Load newtlab's persisted state directly — this function
-	// reports deployment state, which is newtlab's own data object;
-	// it does not need to consult newtron for spec data.
-	state, err := newtlab.LoadState(topology)
+	// uses). Routes through newtlab-server's HTTP client — newtlab
+	// owns LabState (§27), so cmd/newtrun consults it via the API
+	// rather than reading state.json from disk.
+	lc := newtlabclient.New(newtlabURL())
+	state, err := lc.LabStatus(context.Background(), topology)
 	if err != nil {
 		return "not deployed"
 	}

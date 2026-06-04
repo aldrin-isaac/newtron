@@ -9,7 +9,6 @@ description: |
 
   Tests that modified drift entries carry expected/actual field values,
   not just the table and key.
-topology: 1node-vs
 requires: [actuated-reconcile]
 
 steps:

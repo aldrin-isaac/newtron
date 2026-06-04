@@ -17,7 +17,6 @@ description: |
   2. Save intents
   3. Reload from saved topology.json
   4. Verify tree has same intents with same params and ordering
-topology: 1node-vs
 requires: [nonowned-survive]
 
 steps:

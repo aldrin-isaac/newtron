@@ -170,17 +170,31 @@ If another run holds the suite's registry slot, the response is 409 Conflict wit
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `suite` | string | one of suite/suite_dir | Suite name under server's `suites_base`. Mutually exclusive with `suite_dir`. |
-| `suite_dir` | string | one of suite/suite_dir | Absolute path to a suite directory. Mutually exclusive with `suite`. |
+| `suite` | string | yes | Suite name. The server resolves it under its own `suites_base`; filesystem layout is server-internal and intentionally never accepted from or returned to clients. The named directory must contain a `suite.yaml` declaring `name` + `topology`. |
 | `scenario` | string | no | Run only the named scenario. Mutually exclusive with `target` and `all`. |
 | `target` | string | no | Run the minimal dependency chain reaching this scenario. |
 | `all` | bool | no | Run all scenarios. Defaults to true when none of `scenario` / `target` / `all` are set. |
-| `platform` | string | no | Override platform from the scenario YAML. |
+| `platform` | string | no | Override the suite's platform declaration. |
 | `no_deploy` | bool | no | Skip topology deployment + host SSH connection setup. Use only for loopback or fully external-lab runs. |
 | `verbose` | bool | no | Reserved for verbosity hints. |
 | `newtron_server` | string | no | newtron-server URL the Runner should target. Overrides the server's default. |
 | `network_id` | string | no | Network identifier passed to newtron operations. |
 | `junit_path` | string | no | If set, the CLI writes a JUnit XML report there after the run finishes. The server-side runner does not use this field directly — it's a CLI-only hint. |
+| `targets` | object | no | Per-dimension overrides of the suite's `targets:` block — `map[string][]string`. Keys must match dimensions declared in `suite.yaml`; values must satisfy the target-value whitelist (`^[A-Za-z0-9_-]+$`). Omitted keys inherit the suite default. Used by parameterized scenarios. |
+| `parameters` | object | no | Per-name overrides of the suite's `parameters:` block — `map[string]any`. Keys must match parameters declared in `suite.yaml`; values are validated against each parameter's `ParameterSpec` (type and constraints). Omitted keys inherit the declared default. Used by parameterized scenarios. |
+
+**Parameterized run example.** A suite that declares targets/parameters in `suite.yaml` can be reshaped per request via `targets` and `parameters`:
+
+```json
+{
+  "suite":      "2node-vs-service",
+  "scenario":   "rollout-admin-status",
+  "targets":    { "interfaces": ["Ethernet0"] },
+  "parameters": { "admin_status": "down" }
+}
+```
+
+The server resolves overrides against the suite catalog (LoadSuite → EffectiveTargets / EffectiveParameters); failures return 400 with a descriptive error (unknown dimension, identifier-whitelist violation, type mismatch, enum out-of-range, etc.).
 
 **Response:** 202 with a `StartRunResponse`:
 
@@ -195,8 +209,8 @@ If another run holds the suite's registry slot, the response is 409 Conflict wit
 
 **Error responses:**
 
-- 400 — missing both `suite` and `suite_dir`; both set; malformed body.
-- 404 — `suite_dir` doesn't exist on the server.
+- 400 — missing `suite`; invalid suite name; malformed body; override values fail validation (unknown dimension, identifier-whitelist violation, type mismatch).
+- 404 — suite directory not found on the server.
 - 409 — registry already has an entry for this suite.
 
 ### `GET /newtrun/v1/runs` — list runs
@@ -335,8 +349,8 @@ The `run_id` becomes the `{suite}` path parameter for subsequent calls to `/newt
 | Method | Path | Status | Purpose |
 |--------|------|--------|---------|
 | `GET` | `/newtrun/v1/suites` | 200 | List suite directories |
-| `POST` | `/newtrun/v1/suites` | 201 / 409 | Create an empty suite |
-| `DELETE` | `/newtrun/v1/suites/{suite}` | 204 / 404 / 409 | Delete an empty suite |
+| `POST` | `/newtrun/v1/suites` | 201 / 400 / 409 | Create a suite directory with its `suite.yaml` manifest |
+| `DELETE` | `/newtrun/v1/suites/{suite}` | 204 / 404 / 409 | Delete a suite (must have no scenarios) |
 | `GET` | `/newtrun/v1/suites/{suite}/scenarios` | 200 / 404 | List scenarios in a suite |
 
 ### `GET /newtrun/v1/suites`
@@ -351,21 +365,29 @@ Returns the names of immediate subdirectories under `suites_base`. Missing base 
 
 ### `POST /newtrun/v1/suites`
 
-Creates an empty directory under `suites_base`.
+Creates the suite directory and writes a minimal `suite.yaml` manifest containing the supplied `name` + `topology`. After creation the operator can `PUT` scenarios into the suite or edit `suite.yaml` directly to add `targets:` / `parameters:` for parameterized scenarios.
 
 **Request:** `application/json`, body is a `CreateSuiteRequest`:
 
 ```json
-{ "name": "my-new-suite" }
+{
+  "name":     "my-new-suite",
+  "topology": "2node-vs-service"
+}
 ```
 
-**Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name, 409 if the directory already exists.
+| Field | Type | Required | Meaning |
+|-------|------|----------|---------|
+| `name` | string | yes | Suite identifier; matches `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`. |
+| `topology` | string | yes | Topology this suite targets; written into `suite.yaml`. Validated against the same identifier regex as `name` — a topology string containing YAML metacharacters (newlines, colons, leading dashes) is rejected so it can't smuggle additional top-level fields into the generated manifest. |
+
+**Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name or invalid topology, 409 if the directory already exists.
 
 ### `DELETE /newtrun/v1/suites/{suite}`
 
-Removes the suite directory. **Refuses (409) if any files remain** — newtcon's UX is expected to delete scenarios individually first so the destructive action is explicit at the scenario level.
+Removes the suite directory and its `suite.yaml`. **Refuses (409) if anything other than `suite.yaml` remains** — scenario files block deletion (operators delete them through `DELETE /scenarios/{name}` first so the destructive action is explicit at the scenario level), and any subdirectory blocks deletion (operator backups, in-progress work — never silently destroyed). The reverse of "create suite + `suite.yaml`" is "remove dir + `suite.yaml`"; everything beyond that is operator content the API refuses to touch.
 
-**Response:** 204 on success, 404 if the suite doesn't exist, 409 if it has scenarios.
+**Response:** 204 on success, 404 if the suite doesn't exist, 409 if it has scenarios or subdirectories.
 
 ### `GET /newtrun/v1/suites/{suite}/scenarios`
 
@@ -421,9 +443,9 @@ Resolves the on-disk file by either exact `{name}.yaml` or `*-{name}.yaml` (the 
 
 Body is raw YAML. The server validates with `ParseScenarioBytes` (the same parser the rest of the framework uses) AND asserts the body's `name:` field matches the URL `{name}`. If either fails, the file is **never touched**. On success, the file is written atomically (same-directory tempfile + rename(2)) so concurrent readers never observe a partial write.
 
-**File naming:** a fresh scenario lands at `{suite_dir}/{name}.yaml`. An update to a scenario authored on disk with a lexical prefix (e.g. `06-perwrite-actuated.yaml`) is written in-place to that file, preserving the prefix.
+**Storage handling.** Where the server stores the bytes is server-internal. A fresh scenario lands at the canonical name; an update to a scenario that already has a lexical prefix (e.g. `06-perwrite-actuated.yaml`) is rewritten in-place to that file so the prefix survives. The client addresses the scenario by name; the on-disk filename is never returned.
 
-**Response:** 201 on create, 200 on update, with `{"data": {"suite": "...", "name": "...", "path": "..."}}`. 400 on invalid YAML or name mismatch, 404 if the suite directory doesn't exist.
+**Response:** 201 on create, 200 on update, with `{"data": {"suite": "...", "name": "..."}}`. 400 on invalid YAML or name mismatch, 404 if the suite doesn't exist.
 
 ### `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}`
 
@@ -459,15 +481,15 @@ suite_start  →  (scenario_start  →  (step_start  →  step_end)*  →  scena
 
 ### `suite_start`
 
-Sent once at the start of the run with the scenario roster.
+Sent once at the start of the run with the suite metadata and scenario roster. Topology and platform are suite-level (declared in `suite.yaml`) and ride on the envelope; per-scenario summaries don't repeat them.
 
 ```json
 {
+  "topology": "1node-vs",
+  "platform": "sonic-vs",
   "scenarios": [
     {
       "name": "setup-device",
-      "topology": "1node-vs",
-      "platform": "sonic-vs",
       "step_count": 6
     }
   ]
@@ -536,6 +558,20 @@ Sent at the end of each step with the result.
 }
 ```
 
+For parameterized scenarios, `result.target_binding` carries the per-iteration binding map (singular keys; suite-level `targets.devices: [switch1]` → `{"device": "switch1"}`) so consumers can attribute each step result to the (device, interface, …) combination that produced it. The field is omitted on embedded-target results.
+
+```json
+{
+  "scenario": "rollout-admin-status",
+  "result": {
+    "name": "set-admin-status",
+    "status": "PASS",
+    "duration": "<1s",
+    "target_binding": { "device": "switch1", "interface": "Ethernet0" }
+  }
+}
+```
+
 ### `scenario_end`
 
 Sent at the end of each scenario with the full per-step result list.
@@ -578,7 +614,6 @@ The complete record for one run. Returned by `GET /newtrun/v1/runs/{suite}` ([§
 ```json
 {
   "suite": "1node-vs-config",
-  "suite_dir": "newtrun/suites/1node-vs-config",
   "topology": "1node-vs",
   "platform": "sonic-vs",
   "status": "complete",
@@ -589,7 +624,9 @@ The complete record for one run. Returned by `GET /newtrun/v1/runs/{suite}` ([§
 }
 ```
 
-`target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied. `pid` is no longer populated by the server (suite-backed runs are owned by goroutines, not OS processes) — older state files may still carry it but new ones omit it.
+The wire shape carries the abstract run identity only — no on-disk paths (where `suite.yaml` lives, which spec directory the runner used) and no PID. Storage location is the server's business; the legacy CLI-process PID lock was retired when the runner became a goroutine under the registry.
+
+`target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied.
 
 `status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /newtrun/v1/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
 

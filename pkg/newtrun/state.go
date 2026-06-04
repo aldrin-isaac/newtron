@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
@@ -59,15 +58,19 @@ func SuiteStatusFromOutcome(runErr error, results []*ScenarioResult) SuiteStatus
 	return SuiteStatusComplete
 }
 
-// RunState is persisted to ~/.newtron/newtrun/<suite>/state.json.
+// RunState is persisted to ~/.newtron/newtrun/<suite>/state.json. The
+// fields exposed here are the abstract run identity — name (Suite),
+// topology, platform, lifecycle status, and per-scenario progress.
+// Storage internals (where suite.yaml lives on disk, which spec
+// directory the runner was pointed at) are deliberately absent: the
+// client addresses a suite by *name*; how the server resolves the
+// name to bytes is server-internal and must not leak through the
+// wire shape (§33 Public API Boundary).
 type RunState struct {
 	Suite     string          `json:"suite"`
-	SuiteDir  string          `json:"suite_dir"`
 	Topology  string          `json:"topology"`
-	SpecDir   string          `json:"spec_dir,omitempty"` // spec directory from server (for newtlab destroy)
 	Platform  string          `json:"platform"`
 	Target    string          `json:"target,omitempty"` // --target scenario (empty = all)
-	PID       int             `json:"pid"`
 	Status    SuiteStatus     `json:"status"`
 	Started   time.Time       `json:"started"`
 	Updated   time.Time       `json:"updated"`
@@ -225,28 +228,6 @@ func ListSuiteStates() ([]string, error) {
 	return names, nil
 }
 
-// AcquireLock checks for an existing active runner and claims the lock.
-// Returns an error if another process is actively running this suite.
-func AcquireLock(state *RunState) error {
-	existing, err := LoadRunState(state.Suite)
-	if err != nil {
-		return err
-	}
-
-	if existing != nil && existing.PID != 0 && IsProcessAlive(existing.PID) {
-		return fmt.Errorf("suite %s already running (pid %d)", state.Suite, existing.PID)
-	}
-
-	state.PID = os.Getpid()
-	return SaveRunState(state)
-}
-
-// ReleaseLock clears the PID and saves state.
-func ReleaseLock(state *RunState) error {
-	state.PID = 0
-	return SaveRunState(state)
-}
-
 // CheckPausing returns true if the suite's status is "pausing".
 func CheckPausing(suite string) bool {
 	state, err := LoadRunState(suite)
@@ -254,15 +235,6 @@ func CheckPausing(suite string) bool {
 		return false
 	}
 	return state.Status == SuiteStatusPausing
-}
-
-// IsProcessAlive checks if a process with the given PID exists.
-func IsProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil
 }
 
 // InlineStateDir returns the state directory path for an inline run.

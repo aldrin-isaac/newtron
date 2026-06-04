@@ -7,7 +7,6 @@ description: |
   config reload is attempted first (handles vrfmgrd VRF_TABLE propagation),
   but may be skipped if SwSS isn't ready. The explicit BGP restart ensures
   frrcfgd processes BGP_GLOBALS and BGP_NEIGHBOR entries regardless.
-topology: 2node-vs-service
 requires: [boot-ssh]
 
 steps:

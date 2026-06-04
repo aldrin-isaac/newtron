@@ -2,7 +2,6 @@ name: qos-lifecycle
 description: |
   QoS policy spec authoring + device apply/remove.
   Spec ops are network-scoped; apply/remove are device-scoped.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

@@ -10,7 +10,6 @@ description: |
   Tests that intent/tree (read) and intent/drift (read) both succeed on a
   drifted device in actuated mode, while a write (create-vlan) is correctly
   blocked by the drift guard.
-topology: 1node-vs
 requires: [reconcile-idempotent]
 
 steps:

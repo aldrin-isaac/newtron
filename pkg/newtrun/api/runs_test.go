@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +19,18 @@ import (
 
 // writeMinimalSuite creates a single-scenario suite directory the server
 // can resolve. The scenario uses `wait` so it runs without needing a
-// newtron-server connection.
+// newtron-server connection. The fixture writes a suite.yaml manifest
+// alongside — handleStartRun's pre-flight LoadSuite refuses to resolve
+// a directory without one.
 func writeMinimalSuite(t *testing.T, base, name, body string) {
 	t.Helper()
 	dir := filepath.Join(base, name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	manifest := fmt.Sprintf("name: %s\ntopology: synthetic\n", name)
+	if err := os.WriteFile(filepath.Join(dir, "suite.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatalf("write suite.yaml: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "00-only.yaml"), []byte(body), 0644); err != nil {
 		t.Fatalf("write scenario: %v", err)
@@ -121,6 +129,138 @@ func TestStartRunReturns202AndRegistersEntry(t *testing.T) {
 	// we only fail if neither ever happened. Since the registry was the
 	// substrate for the 409 rejection test above, the path is exercised.
 	t.Log("registry entry registered + released before assertion; not a failure")
+}
+
+// TestStartRunReturns400OnBadTargetsOverride and the param-override
+// variant guard the pre-flight validation in handleStartRun. Without
+// it, override-validation errors would land in the goroutine's
+// state.json as status=failed instead of as 400 on the request.
+func TestStartRunReturns400OnUnknownTargetsDimension(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(StartRunRequest{
+		Suite:   "demo-suite",
+		All:     true,
+		Targets: map[string][]string{"racks": {"r1"}},
+	})
+	resp, err := http.Post(ts.URL+"/newtrun/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400 (unknown dimension should fail pre-flight, not bury in state.json)", resp.StatusCode)
+	}
+}
+
+func TestStartRunReturns400OnTargetWhitelistViolation(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	// Suite needs a declared dimension for the override to even
+	// reach the value-whitelist check. Append it to the suite.yaml
+	// the fixture wrote.
+	suitePath := filepath.Join(srv.cfg.SuitesBase, "demo-suite", "suite.yaml")
+	manifest, _ := os.ReadFile(suitePath)
+	manifest = append(manifest, []byte("targets:\n  devices: [s1]\n")...)
+	_ = os.WriteFile(suitePath, manifest, 0644)
+
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(StartRunRequest{
+		Suite:   "demo-suite",
+		All:     true,
+		Targets: map[string][]string{"devices": {"s1; rm -rf /"}},
+	})
+	resp, err := http.Post(ts.URL+"/newtrun/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400 (identifier-whitelist violation should fail pre-flight)", resp.StatusCode)
+	}
+}
+
+func TestStartRunReturns400OnUnknownParameterOverride(t *testing.T) {
+	srv, cleanup := newTestServer(t)
+	defer cleanup()
+	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	ts := httptest.NewServer(srv.buildHandler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(StartRunRequest{
+		Suite:      "demo-suite",
+		All:        true,
+		Parameters: map[string]any{"made_up": "x"},
+	})
+	resp, err := http.Post(ts.URL+"/newtrun/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want 400 (undeclared parameter should fail pre-flight)", resp.StatusCode)
+	}
+}
+
+// TestStepResultPayload_CarriesTargetBinding guards the wire shape
+// for parameterized runs. StepResult.TargetBinding (canonical Go
+// type) and StepResultPayload.TargetBinding (wire shape) are both
+// declared, but a future rename of stepResultFrom that drops the
+// field would silently break browser frontends / inline-state
+// consumers that pivot results on (device, interface) tuples. The
+// test serializes a StepResult containing a binding through
+// stepResultFrom and asserts the raw JSON carries target_binding.
+func TestStepResultPayload_CarriesTargetBinding(t *testing.T) {
+	canonical := &newtrun.StepResult{
+		Name:   "verify-admin-status",
+		Action: newtrun.ActionNewtron,
+		Status: newtrun.StepStatusPassed,
+		TargetBinding: map[string]string{
+			"device":    "switch1",
+			"interface": "Ethernet0",
+		},
+	}
+	payload := stepResultFrom(canonical)
+	if !reflect.DeepEqual(payload.TargetBinding, canonical.TargetBinding) {
+		t.Errorf("payload.TargetBinding = %v, want %v",
+			payload.TargetBinding, canonical.TargetBinding)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"target_binding"`)) {
+		t.Errorf("JSON missing target_binding field: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte(`"device":"switch1"`)) {
+		t.Errorf("JSON missing device=switch1: %s", raw)
+	}
+}
+
+// TestStepResultPayload_OmitsEmptyTargetBinding confirms the omitempty
+// tag works — embedded-target step results (binding=nil) must not
+// emit "target_binding": null on the wire.
+func TestStepResultPayload_OmitsEmptyTargetBinding(t *testing.T) {
+	canonical := &newtrun.StepResult{
+		Name:          "wait",
+		Action:        newtrun.ActionWait,
+		Status:        newtrun.StepStatusPassed,
+		TargetBinding: nil,
+	}
+	raw, err := json.Marshal(stepResultFrom(canonical))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(raw, []byte(`"target_binding"`)) {
+		t.Errorf("nil binding leaked target_binding field: %s", raw)
+	}
 }
 
 func TestStopRunReturns404ForUnknownSuite(t *testing.T) {
@@ -326,12 +466,11 @@ func TestReconcileStaleStatus_NilState(t *testing.T) {
 }
 
 // scenarioYAMLBody is a minimal scenario that requires no newtron-server
-// to load (its `topology` field matches the test topology, and `wait`
-// action is a pure sleep).
+// to load. topology is suite-level (writeMinimalSuite emits suite.yaml),
+// not on the scenario; `wait` is a pure sleep.
 const scenarioYAMLBody = `
 name: smoke
 description: minimal scenario for tests
-topology: test-topo
 steps:
   - name: brief-pause
     action: wait

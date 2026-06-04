@@ -79,16 +79,23 @@ func listScenarios(ctx context.Context, suite string) error {
 		fmt.Printf("No scenarios found in suite %q\n", suite)
 		return nil
 	}
-	fmt.Printf("Suite: %s (%d scenarios)\n\n", resp.Suite, len(resp.Scenarios))
+	// Topology + Platform live on the response envelope (suite-
+	// level), not on each ScenarioSummary. The header carries the
+	// suite metadata; the per-scenario rows carry the rest.
+	header := fmt.Sprintf("Suite: %s  topology=%s", resp.Suite, resp.Topology)
+	if resp.Platform != "" {
+		header += "  platform=" + resp.Platform
+	}
+	fmt.Printf("%s  (%d scenarios)\n\n", header, len(resp.Scenarios))
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "  #\tSCENARIO\tSTEPS\tTOPOLOGY\tREQUIRES")
+	fmt.Fprintln(w, "  #\tSCENARIO\tSTEPS\tREQUIRES")
 	for i, s := range resp.Scenarios {
 		requires := "-"
 		if len(s.Requires) > 0 {
 			requires = strings.Join(s.Requires, ", ")
 		}
-		fmt.Fprintf(w, "  %d\t%s\t%d\t%s\t%s\n",
-			i+1, s.Name, s.StepCount, s.Topology, requires)
+		fmt.Fprintf(w, "  %d\t%s\t%d\t%s\n",
+			i+1, s.Name, s.StepCount, requires)
 	}
 	return w.Flush()
 }

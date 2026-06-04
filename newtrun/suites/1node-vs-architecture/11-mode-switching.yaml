@@ -12,7 +12,6 @@ description: |
   Each mode switch is a full node reconstruction. The projection is rebuilt
   from the new intent source. ConnectTransport (M3) is exercised implicitly
   during actuated mode operations.
-topology: 1node-vs
 requires: [intent-clear]
 
 steps:

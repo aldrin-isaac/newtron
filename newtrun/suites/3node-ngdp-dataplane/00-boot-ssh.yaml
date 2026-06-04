@@ -2,7 +2,6 @@ name: boot-ssh
 description: |
   SSH connectivity check for all devices (spine, leaf switches, virtual hosts).
   SwSS must be running for 120+ seconds before config reload will succeed.
-topology: 3node-ngdp
 
 steps:
   - name: ssh-echo-spine

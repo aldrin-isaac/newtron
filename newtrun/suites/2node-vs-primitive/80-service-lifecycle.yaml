@@ -3,7 +3,6 @@ description: |
   Composite service operations: apply-service, refresh-service, remove-service.
   Tests svc-evpn-irb on sw1:Eth3 + sw2:Eth3 with dataplane verification,
   then svc-bridged on sw1:Eth1. Exercises the full service lifecycle API.
-topology: 2node-vs
 requires: [teardown-overlay]
 
 steps:

@@ -9,7 +9,6 @@ description: |
   is needed so frrcfgd startup replay processes the overlay entries. The underlay
   restart in 30-bgp-underlay.yaml may have already replayed them, but we restart
   again as a safety measure to ensure overlay peers are processed. See RCA-044.
-topology: 2node-vs
 requires: [bgp-underlay]
 
 steps:

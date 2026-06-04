@@ -3,7 +3,6 @@ description: |
   L3 routing in Vrf_local on switch2: create VRF, bind Ethernet1 (→host4),
   assign IP, and verify host4 can reach the gateway. Demonstrates full
   primitive build-up: VRF → interface binding → IP → dataplane.
-topology: 2node-ngdp
 requires: [boot-ssh]
 
 steps:

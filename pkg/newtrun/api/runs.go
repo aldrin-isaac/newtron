@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
@@ -27,12 +29,12 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	if req.Suite == "" && req.SuiteDir == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite or suite_dir is required"))
+	if req.Suite == "" {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite is required"))
 		return
 	}
-	if req.Suite != "" && req.SuiteDir != "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite and suite_dir are mutually exclusive"))
+	if !nameRE.MatchString(req.Suite) {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", req.Suite))
 		return
 	}
 	// Default: All=true when neither Scenario nor Target is set, matching
@@ -41,21 +43,38 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		req.All = true
 	}
 
-	// Resolve the suite directory and the run key. When suite_dir is
-	// supplied, the run key is the basename of that path (mirrors the
-	// original CLI's newtrun.SuiteName behavior). When suite is supplied,
-	// the run key is the suite name and the directory is resolved under
-	// SuitesBase.
-	var suiteDir, suiteKey string
-	if req.SuiteDir != "" {
-		suiteDir = req.SuiteDir
-		suiteKey = filepath.Base(filepath.Clean(req.SuiteDir))
-	} else {
-		suiteDir = filepath.Join(s.cfg.SuitesBase, req.Suite)
-		suiteKey = req.Suite
-	}
+	// Resolve the suite name to an on-disk location. Suite directories
+	// live under SuitesBase by convention; the path itself is server-
+	// internal and is never returned to or accepted from the client.
+	suiteKey := req.Suite
+	suiteDir := filepath.Join(s.cfg.SuitesBase, req.Suite)
 	if !isDirectory(suiteDir) {
-		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite directory not found: %s", suiteDir))
+		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suiteKey))
+		return
+	}
+
+	// Pre-flight validation: load the suite and resolve overrides
+	// synchronously so failures here become HTTP 400 (bad request)
+	// rather than disappearing into the goroutine's state.json. The
+	// runner re-loads the suite during its lifecycle (file I/O is
+	// cheap and keeps Runner.Run self-contained); the only purpose
+	// of the pre-flight is to give bad-input requests an immediate
+	// error response.
+	suite, err := newtrun.LoadSuite(suiteDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suiteKey))
+		} else {
+			httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite load: %w", err))
+		}
+		return
+	}
+	if _, err := suite.EffectiveTargets(req.Targets); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("targets override: %w", err))
+		return
+	}
+	if _, err := suite.EffectiveParameters(req.Parameters); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("parameters override: %w", err))
 		return
 	}
 
@@ -75,15 +94,17 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	// the SuiteOptions.Suite hooks the file-based pause check that the
 	// existing CLI uses.
 	opts := newtrun.RunOptions{
-		Scenario:  req.Scenario,
-		Target:    req.Target,
-		All:       req.All,
-		Platform:  req.Platform,
-		NoDeploy:  req.NoDeploy,
-		Verbose:   req.Verbose,
-		JUnitPath: req.JUnitPath,
-		Suite:     suiteKey,
-		Keep:      true,
+		Scenario:   req.Scenario,
+		Target:     req.Target,
+		All:        req.All,
+		Platform:   req.Platform,
+		NoDeploy:   req.NoDeploy,
+		Verbose:    req.Verbose,
+		JUnitPath:  req.JUnitPath,
+		Suite:      suiteKey,
+		Keep:       true,
+		Targets:    req.Targets,
+		Parameters: req.Parameters,
 	}
 
 	// Resume from paused state: if a previous run was paused, populate
@@ -102,10 +123,11 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Construct the persistent state record.
+	// Construct the persistent state record. Topology is unknown at
+	// this point — the runner discovers it from the server and the
+	// state reporter fills it in via SuiteStart.
 	state := &newtrun.RunState{
 		Suite:    suiteKey,
-		SuiteDir: suiteDir,
 		Platform: req.Platform,
 		Target:   req.Target,
 		Status:   newtrun.SuiteStatusRunning,
@@ -143,6 +165,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	runner := newtrun.NewRunner(suiteDir)
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
+	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 
 	// Cancellable context for the run. Stop endpoints call entry.Cancel.
@@ -366,14 +389,12 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	runCtx, cancelTimeout := context.WithTimeout(context.Background(), policy.WallTimeBudget)
 	entry.Cancel = cancelTimeout
 
-	// Build a synthetic scenarios directory holding only this scenario,
-	// then point the Runner at it. The Runner's existing
-	// ParseAllScenarios path then finds exactly one scenario to run with
-	// the rest of its lifecycle (deploy / connect / iterate / report)
-	// intact. Per §3 of ai-instructions: this reuses the existing Runner
-	// machinery rather than introducing a parallel single-scenario
-	// execution path.
-	scenariosDir, err := writeInlineScenarioDir(runID, scenario, req.ScenarioYAML)
+	// Stage the scenario as a one-scenario suite (suite.yaml + the
+	// scenario YAML with topology stripped) so the Runner's existing
+	// LoadSuite path loads it without a special-case code path. The
+	// rest of the run lifecycle (deploy / connect / iterate / report)
+	// is identical between inline and file-backed runs.
+	scenariosDir, err := writeInlineScenarioDir(runID, scenario)
 	if err != nil {
 		cancelTimeout()
 		s.registry.Release(runID, &RunResult{Err: err})
@@ -384,6 +405,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	runner := newtrun.NewRunner(scenariosDir)
 	runner.ServerURL = newtronURL
 	runner.NetworkID = s.cfg.NetworkID
+	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 
 	opts := newtrun.RunOptions{
@@ -408,20 +430,38 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeInlineScenarioDir stages the inline scenario YAML on disk in a
-// dedicated directory so the existing Runner.ScenariosDir machinery loads
-// exactly this scenario. The directory is removed when the run finishes.
-func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario, yaml string) (string, error) {
+// writeInlineScenarioDir stages an inline scenario on disk as a one-
+// scenario suite so the existing Runner.ScenariosDir → LoadSuite
+// machinery can load it without a special-case code path. The
+// directory is removed when the run finishes.
+//
+// Inline runs are embedded-target only: the submitted YAML carries
+// the topology directly (suite-level fields live on the scenario for
+// the inline wire shape). At stage time we lift topology onto a
+// suite.yaml manifest and re-marshal the scenario with topology +
+// platform cleared so LoadSuite's "scenarios may not set topology"
+// rule is satisfied.
+func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario) (string, error) {
 	inlineDir, err := newtrun.InlineStateDir(runID)
 	if err != nil {
 		return "", err
 	}
 	scenariosDir := filepath.Join(inlineDir, "scenarios")
-	if err := os.MkdirAll(scenariosDir, 0755); err != nil {
+	if err := os.MkdirAll(scenariosDir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(scenariosDir, "inline.yaml")
-	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+	if err := writeSuiteManifest(scenariosDir, runID, scenario.Topology); err != nil {
+		return "", err
+	}
+	staged := *scenario
+	staged.Topology = ""
+	staged.Platform = ""
+	scenarioYAML, err := yaml.Marshal(&staged)
+	if err != nil {
+		return "", fmt.Errorf("marshal inline scenario: %w", err)
+	}
+	scenarioPath := filepath.Join(scenariosDir, "inline.yaml")
+	if err := os.WriteFile(scenarioPath, scenarioYAML, 0o644); err != nil {
 		return "", err
 	}
 	return scenariosDir, nil

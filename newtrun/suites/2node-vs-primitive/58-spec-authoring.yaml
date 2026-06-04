@@ -3,7 +3,6 @@ description: |
   Tests network-level spec authoring API: prefix list CRUD, route policy CRUD,
   service creation with routing referencing those objects, apply/remove on device,
   and full teardown in reverse dependency order.
-topology: 2node-vs
 requires: [setup-device]
 
 steps:

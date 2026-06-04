@@ -9,7 +9,6 @@ description: |
 
   Also tests M3 (ConnectTransport — reconcile connects to device without
   overwriting the projection) and M8 (Drift — post-reconcile drift must be zero).
-topology: 1node-vs
 requires: [boot-ssh]
 
 steps:

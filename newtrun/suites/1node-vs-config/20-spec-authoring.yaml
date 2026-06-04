@@ -3,7 +3,6 @@ description: |
   Network-scoped spec CRUD: prefix-list, route-policy, filter, service.
   These are spec operations (no device needed), so no devices field.
   --loopback is still needed for the server mode.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

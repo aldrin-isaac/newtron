@@ -10,7 +10,6 @@ description: |
     3. poll-bgp-instance — wait for 'router bgp NNNNN' in show running-config.
     4. bgp-add-neighbor — write BGP_NEIGHBOR AFTER bgpcfgd is initialized.
     5. verify-bgp — poll until Established.
-topology: 2node-ngdp
 requires: [setup-device]
 
 steps:

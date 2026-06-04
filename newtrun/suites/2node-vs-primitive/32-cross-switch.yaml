@@ -4,7 +4,6 @@ description: |
   the default VRF, verify BGP distributes connected routes, and test host-to-host
   reachability via routed path (host1 ↔ host4 across two switches).
   Requires teardown-local (frees Ethernet4 on both switches) and bgp-underlay.
-topology: 2node-vs
 requires: [teardown-local, bgp-underlay]
 
 steps:

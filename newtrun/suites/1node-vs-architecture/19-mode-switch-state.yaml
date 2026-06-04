@@ -15,7 +15,6 @@ description: |
   3. Switch to actuated mode — VLAN should NOT be in actuated tree
      (it was saved to topology.json but never reconciled to device)
   4. Reconcile from topology — now VLAN appears on device
-topology: 1node-vs
 requires: [reconcile-dry-run]
 
 steps:

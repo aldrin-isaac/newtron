@@ -21,7 +21,6 @@ description: |
     - the diff includes an INTERFACE entry for Ethernet0|10.1.0.0/31.
     - the diff includes a BGP_NEIGHBOR entry for the peer (10.1.0.1).
   Cleans up by removing the service.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

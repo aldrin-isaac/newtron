@@ -75,10 +75,16 @@ func main() {
 			logger.Fatalf("failed to register network '%s' from %s: %v", *netID, *specDir, err)
 		}
 	}
+	// newtrun reaches newtlab via HTTP (§27 — newtlab owns LabState).
+	// In the composed binary the call is an in-process loopback to
+	// the newtlab handler mounted on the same mux; in standalone
+	// newtrun-server it's cross-process. Either way newtrun's runner
+	// stays a client of newtlab, never a co-writer.
 	newtrunSrv := newtrunapi.NewServer(newtrunapi.Config{
 		SuitesBase:     *suitesBase,
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
+		NewtlabClient:  newtlabClient,
 	})
 	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
 	// owns spec files). In the composed binary this is an in-process

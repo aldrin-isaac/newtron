@@ -2,7 +2,6 @@ name: evpn-peers
 description: |
   EVPN BGP overlay peer add/remove.
   Intent DAG: device → evpn-peer|10.0.0.2.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

@@ -29,7 +29,13 @@ import (
 // that can (HTTPReporter for SSE; StateReporter for state.json) surface
 // the events at the appropriate granularity.
 type ProgressReporter interface {
-	SuiteStart(scenarios []*Scenario)
+	// SuiteStart fires once per run with the resolved suite metadata
+	// (topology + platform are suite-level, not per-scenario) and the
+	// dependency-ordered scenarios that will execute. Reporters use
+	// the metadata in roster headers, SSE payloads, and persisted
+	// state so consumers can show "running suite X on topology Y"
+	// without a separate fetch.
+	SuiteStart(suiteTopology, suitePlatform string, scenarios []*Scenario)
 	ScenarioStart(name string, index, total int)
 	ScenarioEnd(result *ScenarioResult, index, total int)
 	StepStart(scenario string, step *Step, index, total int)
@@ -57,14 +63,12 @@ func NewConsoleProgress(verbose bool) ProgressReporter {
 	}
 }
 
-func (p *consoleProgress) SuiteStart(scenarios []*Scenario) {
+func (p *consoleProgress) SuiteStart(suiteTopology, suitePlatform string, scenarios []*Scenario) {
 	if len(scenarios) == 0 {
 		return
 	}
-
-	// Derive suite name from common topology + detect shared properties
-	topology := scenarios[0].Topology
-	platform := scenarios[0].Platform
+	topology := suiteTopology
+	platform := suitePlatform
 	p.suiteName = topology
 
 	// Compute max scenario name length for dot padding
@@ -336,7 +340,16 @@ func (r *StateReporter) save() error {
 	return SaveRunState(r.State)
 }
 
-func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
+func (r *StateReporter) SuiteStart(suiteTopology, suitePlatform string, scenarios []*Scenario) {
+	// Capture suite-level metadata on the run state. Topology was
+	// previously read off scenarios[0].Topology, which is now always
+	// empty (LoadSuite rejects per-scenario topology).
+	if r.State.Topology == "" {
+		r.State.Topology = suiteTopology
+	}
+	if r.State.Platform == "" {
+		r.State.Platform = suitePlatform
+	}
 	// Initialize scenario states with metadata
 	r.State.Scenarios = make([]ScenarioState, len(scenarios))
 	for i, s := range scenarios {
@@ -351,7 +364,7 @@ func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
-		r.Inner.SuiteStart(scenarios)
+		r.Inner.SuiteStart(suiteTopology, suitePlatform, scenarios)
 	}
 }
 

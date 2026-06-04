@@ -140,10 +140,12 @@ func (c *Client) ListSuiteScenarios(ctx context.Context, suite string) (*api.Sui
 	return &resp, nil
 }
 
-// CreateSuite creates an empty suite directory on the server. 409 if
-// the suite already exists.
-func (c *Client) CreateSuite(ctx context.Context, name string) error {
-	return c.do(ctx, http.MethodPost, "/newtrun/v1/suites", api.CreateSuiteRequest{Name: name}, nil)
+// CreateSuite creates a suite directory + suite.yaml manifest on the
+// server. Returns 409 if the suite already exists. Topology is the
+// topology this suite targets; the runner uses it as a guard against
+// suite/server-topology mismatches at run time.
+func (c *Client) CreateSuite(ctx context.Context, name, topology string) error {
+	return c.do(ctx, http.MethodPost, "/newtrun/v1/suites", api.CreateSuiteRequest{Name: name, Topology: topology}, nil)
 }
 
 // DeleteSuite removes an empty suite directory. Returns 409 if the

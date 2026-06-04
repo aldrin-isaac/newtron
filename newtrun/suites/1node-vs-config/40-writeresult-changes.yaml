@@ -8,7 +8,6 @@ description: |
   as an add change.
 
   No device connection — loopback projection is the output.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

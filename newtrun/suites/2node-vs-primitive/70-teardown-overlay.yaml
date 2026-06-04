@@ -3,7 +3,6 @@ description: |
   Reverse teardown of EVPN IRB + bridged + cross-switch using deprovision primitives.
   Removes SVI, unbinds IP-VPN, deletes VRF, unbinds MAC-VPN, removes VLAN members,
   deletes VLANs, and removes cross-switch IPs.
-topology: 2node-vs
 requires: [evpn-irb, cross-switch]
 
 steps:

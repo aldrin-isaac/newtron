@@ -7,7 +7,6 @@ description: |
   device intents. This tests: "does the device match what topology declares?"
 
   Also spot-checks specific CONFIG_DB entries to prove they exist independently.
-topology: 2node-vs-service
 requires: [provision]
 
 steps:

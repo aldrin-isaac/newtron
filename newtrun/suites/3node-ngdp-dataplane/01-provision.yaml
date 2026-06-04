@@ -2,7 +2,6 @@ name: provision
 description: |
   Provision all switches (spine + leaves), config-reload to activate CONFIG_DB
   changes (BGP ASN, loopback, underlay peers), and verify BGP convergence.
-topology: 3node-ngdp
 requires: [boot-ssh]
 
 steps:

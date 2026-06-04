@@ -8,15 +8,35 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
+
+// writeSuiteManifest writes a minimal suite.yaml manifest to dir. All
+// suite-creating call sites — file-backed POST /suites and the inline
+// run staging — go through this helper so the encoding is uniformly
+// yaml.Marshal. Hand-rolled fmt.Sprintf into YAML is a metacharacter
+// hazard (newlines, colons, leading dashes inside the topology string
+// could smuggle additional top-level fields past LoadSuite).
+//
+// Callers must validate name + topology against nameRE before calling
+// — writeSuiteManifest does not re-validate.
+func writeSuiteManifest(dir, name, topology string) error {
+	body, err := yaml.Marshal(&newtrun.Suite{Name: name, Topology: topology})
+	if err != nil {
+		return fmt.Errorf("marshal suite.yaml: %w", err)
+	}
+	return os.WriteFile(filepath.Join(dir, "suite.yaml"), body, 0o644)
+}
 
 // nameRE constrains suite and scenario identifiers to a safe subset.
 // Allowed: alphanumeric, hyphen, underscore. No path separators, no
@@ -24,9 +44,12 @@ import (
 // who want lexical ordering use a "NN-" prefix that fits this charset.
 var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 
-// CreateSuiteRequest is the body for POST /api/suites.
+// CreateSuiteRequest is the body for POST /api/suites. Topology is
+// required — every suite declares its target topology on creation so
+// the runner can guard against topology/scenario mismatches.
 type CreateSuiteRequest struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	Topology string `json:"topology"`
 }
 
 // handleListSuites returns the suite names discoverable under SuitesBase.
@@ -53,6 +76,10 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q: must match %s", req.Name, nameRE))
 		return
 	}
+	if !nameRE.MatchString(req.Topology) {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid topology %q: must match %s", req.Topology, nameRE))
+		return
+	}
 	dir := filepath.Join(s.cfg.SuitesBase, req.Name)
 	if _, err := os.Stat(dir); err == nil {
 		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
@@ -60,6 +87,10 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
+		return
+	}
+	if err := writeSuiteManifest(dir, req.Name, req.Topology); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
@@ -86,8 +117,21 @@ func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if len(entries) > 0 {
-		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q is not empty (%d entries); delete scenarios first", suite, len(entries)))
+	// Empty-suite check ignores suite.yaml — the suite manifest is part
+	// of the suite-create handshake, not user content. Any other entry
+	// (scenario YAMLs, subdirectories with operator-authored content)
+	// blocks deletion so we never silently destroy user files. The
+	// reverse of "create suite + suite.yaml" is "remove dir + suite.yaml"
+	// — anything beyond that requires the operator to clear it first.
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() == "suite.yaml" {
+			continue
+		}
+		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q still has content (%s); delete it first", suite, e.Name()))
+		return
+	}
+	if err := os.Remove(filepath.Join(dir, "suite.yaml")); err != nil && !os.IsNotExist(err) {
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("remove suite.yaml: %w", err))
 		return
 	}
 	if err := os.Remove(dir); err != nil {
@@ -106,36 +150,38 @@ func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 // a single scenario name) lives in scenarios.go.
 func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request) {
 	suite := r.PathValue("suite")
-	if suite == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+	if !nameRE.MatchString(suite) {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return
 	}
 	dir := filepath.Join(s.cfg.SuitesBase, suite)
-	scenarios, err := newtrun.ParseAllScenarios(dir)
+	loaded, err := newtrun.LoadSuite(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		// LoadSuite wraps the underlying file-open error via fmt.Errorf,
+		// so os.IsNotExist (which doesn't unwrap) reports false. Use
+		// errors.Is against os.ErrNotExist instead — that follows the
+		// %w chain and correctly distinguishes "suite directory not
+		// found" (404) from "suite.yaml malformed" (400).
+		if errors.Is(err, os.ErrNotExist) {
 			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
 			return
 		}
-		httputil.WriteError(w, http.StatusInternalServerError, err)
+		httputil.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
-	if newtrun.HasRequires(scenarios) {
-		if sorted, sortErr := newtrun.ValidateDependencyGraph(scenarios); sortErr == nil {
-			scenarios = sorted
-		}
+	resp := SuiteScenariosResponse{
+		Suite:    suite,
+		Topology: loaded.Topology,
 	}
-	resp := SuiteScenariosResponse{Suite: suite}
-	if len(scenarios) > 0 {
-		resp.Topology = scenarios[0].Topology
-	}
-	resp.Scenarios = make([]ScenarioSummary, len(scenarios))
-	for i, sc := range scenarios {
+	// Topology and Platform are on the SuiteScenariosResponse envelope,
+	// not on per-scenario summaries — repeating them would diverge once
+	// suite.yaml changes.
+	resp.Platform = loaded.Platform
+	resp.Scenarios = make([]ScenarioSummary, len(loaded.Scenarios))
+	for i, sc := range loaded.Scenarios {
 		resp.Scenarios[i] = ScenarioSummary{
 			Name:        sc.Name,
 			Description: sc.Description,
-			Topology:    sc.Topology,
-			Platform:    sc.Platform,
 			StepCount:   len(sc.Steps),
 			Requires:    sc.Requires,
 		}

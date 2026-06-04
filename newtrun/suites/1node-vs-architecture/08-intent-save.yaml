@@ -6,7 +6,6 @@ description: |
   reloading the topology should produce a tree that includes the new VLAN —
   proving the intent was persisted to topology.json and survives node
   reconstruction.
-topology: 1node-vs
 requires: [reconcile-fixes-drift]
 
 steps:

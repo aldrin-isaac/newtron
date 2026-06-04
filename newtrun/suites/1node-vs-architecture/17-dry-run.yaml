@@ -12,7 +12,6 @@ description: |
   - The VLAN intent does NOT exist on the device after dry-run
   - The VLAN CONFIG_DB entry does NOT exist on the device after dry-run
   - A subsequent real operation still works correctly
-topology: 1node-vs
 requires: [drift-guard-resolution]
 
 steps:

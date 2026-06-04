@@ -10,7 +10,6 @@ description: |
 
   Also exercises a CRUD write in actuated mode (create + delete VLAN) to
   prove the actuated pipeline works end-to-end before we test the drift guard.
-topology: 2node-vs-service
 requires: [provision]
 
 steps:

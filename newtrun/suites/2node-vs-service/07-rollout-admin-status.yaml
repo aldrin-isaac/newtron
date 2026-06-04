@@ -1,0 +1,38 @@
+name: rollout-admin-status
+description: |
+  Parameterized rollout: set admin_status on every IP-bearing interface
+  across both leaves, then verify each one took. Exercises the
+  scenario-as-template shape — same step list, expanded across the
+  cross-product of (devices × interfaces) drawn from the suite's
+  targets block, with admin_status taken from the suite's parameters
+  block (default "up", overridable per run via the POST /api/runs
+  request body's parameters field).
+
+  The IP-bearing interfaces (Ethernet0 transit, Ethernet4 local-irb)
+  are listed at the suite level rather than discovered. Discovery
+  would belong in a setup step that synthesizes the targets block —
+  out of scope for this suite, in scope for newtrun's roadmap.
+
+  Production rollouts would typically add requires: [verify-health]
+  so the rollout only runs after device health is confirmed; this
+  sample omits the prereq so it stands alone as a demonstration of
+  the parameterized shape.
+
+steps:
+  - name: set-admin-status
+    action: newtron
+    method: POST
+    url: /node/{{target.device}}/interface/{{target.interface}}/set-property
+    params:
+      property: admin_status
+      value: "{{param.admin_status}}"
+
+  - name: verify-admin-status
+    action: newtron
+    method: GET
+    url: /node/{{target.device}}/interface/{{target.interface}}
+    expect:
+      # No quotes around {{param.admin_status}} — the template engine
+      # emits the value as a JQ-safe JSON-quoted form, so the
+      # expanded expression reads `.admin_status == "up"`.
+      jq: .admin_status == {{param.admin_status}}

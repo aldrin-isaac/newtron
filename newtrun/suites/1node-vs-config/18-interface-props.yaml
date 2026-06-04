@@ -2,7 +2,6 @@ name: interface-props
 description: |
   Interface property set/clear lifecycle.
   Intent DAG: device → interface|Ethernet16 → interface|Ethernet16|mtu.
-topology: 1node-vs
 requires: [setup-device]
 
 steps:

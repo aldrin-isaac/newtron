@@ -21,6 +21,24 @@ func newClient() *client.Client {
 	return client.New(url)
 }
 
+// newtlabURL resolves the URL for newtlab-server's HTTP surface from
+// the persistent --newtlab-server flag, the NEWTLAB_SERVER env var,
+// and the default `http://127.0.0.1:18080` (newt-server's composed
+// listen address). Used by stop / status to read lab state and
+// destroy topologies through newtlab's HTTP API — newtlab owns
+// LabState (§27) so the CLI consults it via the client rather than
+// reading state.json from disk.
+func newtlabURL() string {
+	url := newtlabServerFlag
+	if url == "" {
+		url = os.Getenv("NEWTLAB_SERVER")
+	}
+	if url == "" {
+		url = "http://127.0.0.1:18080"
+	}
+	return url
+}
+
 // requireServer probes the server's health endpoint and returns a clear
 // error message pointing the user to start newtrun-server if it isn't up.
 // Every CLI command — read or write — calls this before its real work.

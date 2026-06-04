@@ -6,7 +6,6 @@ description: |
   reachability (SVI 10.100.1.1/24 on VLAN 100).
   Note: EVPN IRB inter-subnet routing (L3VNI 50400) is blocked by CiscoVS
   Silicon One SAI limitation — VNI_TO_VIRTUAL_ROUTER_ID DECAP fails (RCA-039).
-topology: 2node-ngdp-service
 requires: [provision]
 after: [verify-health]
 

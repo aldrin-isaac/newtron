@@ -181,7 +181,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | Flag | Meaning |
 |------|---------|
 | `--no-deploy` | Skip topology deployment and host SSH connections. Use for loopback suites (e.g., `1node-vs-config`) or when the lab is already up. |
-| `--platform <name>` | Override the platform declared in scenario YAML. |
+| `--platform <name>` | Override the platform declared in `suite.yaml`. |
 | `--junit <path>` | Write a JUnit XML report at `<path>` after the run finishes. |
 | `--monitor` / `-m` | Replace the per-event terminal output with an auto-refreshing dashboard backed by `state.json`. |
 | `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
@@ -428,10 +428,12 @@ Scenario CRUD is exposed over HTTP — you can author, edit, and delete suites a
 ### 9.1 Create a suite directory
 
 ```bash
-bin/newtrun suite create my-experiment
+bin/newtrun suite create my-experiment --topology 1node-vs
 ```
 
-Creates `<suites-base>/my-experiment/`. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. Returns 409 if the suite already exists.
+Creates `<suites-base>/my-experiment/` with a minimal `suite.yaml` declaring `name: my-experiment` and `topology: 1node-vs`. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. `--topology` is required. Returns 409 if the suite already exists.
+
+For parameterized scenarios (production-rollout shape) edit `suite.yaml` directly to add `targets:` and `parameters:` blocks — see [§10.6 Parameterized scenarios](#106-parameterized-scenarios).
 
 ### 9.2 Add a scenario
 
@@ -442,8 +444,6 @@ Two ways:
 cat <<'EOF' | bin/newtrun scenario put my-experiment hello
 name: hello
 description: smoke test
-topology: 1node-vs
-platform: sonic-vs
 steps:
   - name: wait-one
     action: wait
@@ -454,7 +454,7 @@ EOF
 bin/newtrun scenario put my-experiment hello --file hello.yaml
 ```
 
-The server validates with `ParseScenarioBytes` AND asserts the body's `name:` field matches the URL `{name}`. If either fails, the file is **never touched** — the existing scenario (if any) is preserved.
+Scenarios must NOT declare `topology:` or `platform:` — those live on `suite.yaml`. The server validates with `ParseScenarioBytes`, then `LoadSuite` enforces cross-suite invariants at run time. The body's `name:` field must match the URL `{name}`. If validation fails, the file is **never touched** — the existing scenario (if any) is preserved.
 
 The on-disk file is written atomically via tempfile + rename. Concurrent readers (`newtrun list`, another `newtrun scenario get`) never see a partial write.
 
@@ -502,14 +502,12 @@ bin/newtrun start my-experiment --scenario hello --server http://localhost:18080
 
 ## 10. Writing Scenarios from Scratch
 
-A scenario is a YAML file with `name`, `description`, `topology`, and a list of `steps`:
+A scenario is a YAML file with `name`, `description`, and a list of `steps` placed inside a suite directory whose `suite.yaml` declares `topology` (and optionally `platform`):
 
 ```yaml
 name: my-first-scenario
 description: |
   Apply a transit service on Ethernet0 and verify it sticks.
-topology: 1node-vs
-platform: sonic-vs
 
 steps:
   - name: apply-transit
@@ -545,13 +543,13 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 |-------|----------|-------------|
 | `name` | yes | Unique scenario identifier; must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` and the URL `{name}` segment of CRUD endpoints. |
 | `description` | no | Human-readable description shown in `newtrun list` and on the SuiteStart event. |
-| `topology` | no | Topology name. The Runner aborts if the server has a different one loaded. |
-| `platform` | no | Platform name (e.g., `sonic-vs`); the Runner uses this for capability checks. |
 | `requires` | no | Names of scenarios that must pass first. Hard dependency — a missing prerequisite means this scenario is SKIPPED. |
 | `after` | no | Soft ordering — run after these, regardless of their status. Used for cleanup scenarios that always run last. |
 | `requires_features` | no | Platform feature flags. Scenario is SKIPPED if the platform doesn't declare them (e.g., `evpn-vxlan` on a platform without overlay support). |
 | `repeat` | no | Run the step list N times in sequence. Used for soak/stability tests. |
 | `steps` | yes | Ordered list of [Step](#step-fields) records. |
+
+`topology` and `platform` are **suite-level** — declared in `suite.yaml`, not in individual scenarios. `LoadSuite` rejects any scenario that sets them.
 
 ### 10.2 Step fields
 
@@ -615,6 +613,143 @@ steps:
 ```
 
 `StepResult.Iteration` distinguishes results from each iteration; the first FAIL stops the scenario and reports the iteration number.
+
+### 10.6 Parameterized scenarios
+
+Parameterized scenarios are the **production-rollout shape**: one scenario template, expanded across a target matrix declared at the suite level, with knobs the operator can tune per run. The two scenario shapes coexist in the same suite — most cleanup / provisioning / verification scenarios stay embedded-target; the rollout-flavored ones opt into parameterization by using template tokens.
+
+**Step 1 — declare the catalog in `suite.yaml`:**
+
+```yaml
+name: 2node-vs-service
+topology: 2node-vs-service
+
+targets:
+  devices: [switch1, switch2]
+  interfaces: [Ethernet0, Ethernet4]
+
+parameters:
+  admin_status:
+    type: enum
+    values: [up, down]
+    default: up
+  mtu:
+    type: int
+    min: 1500
+    max: 9216
+    default: 9100
+```
+
+Parameter declarations support two YAML forms:
+
+- **Shorthand** — `mtu: 9100` infers `{type: int, default: 9100}`. Use for plain defaults.
+- **Verbose** — explicit `type:` plus constraints. Use for enums, bounded integers, required-with-no-default.
+
+Recognized types: `string`, `int`, `bool`, `enum`, `ipv4`, `cidr`. Each type validates its override at request time and rejects with HTTP 400 on type mismatch or constraint violation.
+
+**Step 2 — write the scenario template:**
+
+```yaml
+name: rollout-admin-status
+description: Set admin_status on every IP-bearing interface and verify.
+steps:
+  - name: set-admin-status
+    action: newtron
+    method: POST
+    url: /node/{{target.device}}/interface/{{target.interface}}/set-property
+    params:
+      property: admin_status
+      value: "{{param.admin_status}}"
+
+  - name: verify-admin-status
+    action: newtron
+    method: GET
+    url: /node/{{target.device}}/interface/{{target.interface}}
+    expect:
+      # No quotes around {{param.admin_status}} — the template engine
+      # emits "up" (JSON-quoted) when admin_status is a string.
+      jq: .admin_status == {{param.admin_status}}
+```
+
+The scenario uses `{{target.X}}` and `{{param.X}}` templates instead of step-level `devices:` selectors. The runner iterates the cross-product of suite-level `targets:` (here, 2 devices × 2 interfaces = 4 iterations), running every step once per binding.
+
+**Iteration semantics differ from `repeat`.** Parameterized iterations are **continue-on-failure** — one failing binding does not skip the remaining bindings, so a rollout sees every failing target in one run. `repeat` remains fail-fast within each binding.
+
+**Step 3 — invoke with overrides:**
+
+```bash
+# CLI: run with defaults from suite.yaml.
+bin/newtrun start 2node-vs-service --scenario rollout-admin-status
+
+# HTTP: override admin_status to "down" and limit to one interface.
+curl -X POST http://localhost:18080/newtrun/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "suite":      "2node-vs-service",
+    "scenario":   "rollout-admin-status",
+    "targets":    { "interfaces": ["Ethernet0"] },
+    "parameters": { "admin_status": "down" }
+  }'
+```
+
+A production rollout typically declares `requires: [verify-health]` (or similar) on its parameterized scenario so the rollout only runs after device health is confirmed. To invoke a scenario plus its declared prereqs, use the CLI's `--target` flag (which walks the dependency chain): `bin/newtrun start 2node-vs-service --target rollout-admin-status`. The sample omits `requires:` so the standalone `--scenario` invocation above also works.
+
+Per-run overrides replace (not merge with) the suite default for each key — omit a key to inherit the default.
+
+**Template substitution is context-aware** — the engine emits encoded forms per consumption surface so you don't need to pre-escape. The author rules below cover the common author mistakes; the full encoding table lives in [LLD §3.3](../newtrun/lld.md#33-context-aware-substitution).
+
+| Where you write the token | Author rule |
+|---|---|
+| `url:` path component or query | Use bare — do not pre-escape |
+| `command:` (host-exec) | Use bare — do not add your own quotes around a `{{param.X}}` |
+| `command:` (newtron-cli) | Use bare; substituted values **must not contain whitespace** — newtron-cli execs argv via `strings.Fields(command)` with no shell, so a `{{param.X}}` whose value contains a space splits into multiple argv elements |
+| `expect.jq:` | Use bare — do not put surrounding `"..."` around a string `{{param.X}}`; the engine emits JSON-quoted form |
+| `params:` value | Use bare — same string handling whether the value is one token or interpolated |
+| `expect.contains:` | Use bare — no escaping is applied |
+
+**Target values pass an identifier whitelist** (`^[A-Za-z0-9_-]+$`) at both parse time and at request-override time. Targets address infrastructure (device, interface names) — they are always identifiers. Attempted shell-injection / path-traversal values fail validation before substitution.
+
+**When to use which shape:**
+
+| Shape | Use when |
+|---|---|
+| Embedded-target (`devices:` selector + `{{device}}`) | Testing — the suite covers a known matrix and each step might address a different subset. |
+| Parameterized (`{{target.X}}` + suite-level `targets:`) | Production rollout — one scenario template applied to multiple fleet slices with per-run overrides. Reports per-binding pass/fail. |
+
+**Example output (4-iteration rollout, verbose CLI):**
+
+```
+newtrun: 1 scenarios, topology: 2node-vs-service, platform: sonic-vs
+
+  #     SCENARIO                  STEPS
+  1     rollout-admin-status      2
+
+  [1/1]  rollout-admin-status
+          [device=switch1 interface=Ethernet0] set-admin-status      PASS  (<1s)
+          [device=switch1 interface=Ethernet0] verify-admin-status   PASS  (<1s)
+          [device=switch1 interface=Ethernet4] set-admin-status      PASS  (<1s)
+          [device=switch1 interface=Ethernet4] verify-admin-status   PASS  (<1s)
+          [device=switch2 interface=Ethernet0] set-admin-status      PASS  (<1s)
+          [device=switch2 interface=Ethernet0] verify-admin-status   PASS  (<1s)
+          [device=switch2 interface=Ethernet4] set-admin-status      PASS  (<1s)
+          [device=switch2 interface=Ethernet4] verify-admin-status   PASS  (<1s)
+          PASS  (3s)
+```
+
+Per-iteration step results carry their `TargetBinding` on the SSE wire (`target_binding` field on `step_end` events) and in JUnit / markdown reports — operators see exactly which (device, interface) combination produced each pass or fail.
+
+**What can go wrong (server returns 400 on the run request):**
+
+| Cause | Example message |
+|---|---|
+| Override names a dimension that isn't in `suite.yaml` | `unknown target dimension "racks" (not declared in suite.yaml)` |
+| Override value fails the target-identifier whitelist (`^[A-Za-z0-9_-]+$`) | `target "devices" value "switch1; rm -rf /": must match [A-Za-z0-9_-]+ (identifiers only)` |
+| Override value's type doesn't match the parameter's declared type | `parameter "mtu": expected int, got string` |
+| Override value is outside the parameter's declared range | `parameter "vlan_id": value 5000 above max 4094` |
+| Override value isn't one of the enum's declared values | `parameter "admin_status": value "shutdown" not in [up down]` |
+| Override names a parameter that isn't in `suite.yaml` | `unknown parameter "made_up" (not declared in suite.yaml)` |
+
+A scenario that uses `{{target.X}}` but no matching dimension is declared in `suite.yaml` fails at suite-load time with `references {{target.X}} but suite.yaml has no Xs: dimension declared` — that's a YAML-author error, not a request-time one.
 
 ---
 
@@ -687,15 +822,15 @@ Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (c
 
 #### URL templates
 
-URLs start from the path after the network segment. The `/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
+URLs start from the path after the network segment. The `newtron` action calls newtron-server, so the `/newtron/v1/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
 
 ```yaml
-url: /node/{{device}}/health             # → /newtrun/v1/network/<id>/node/switch1/health
-url: /node/{{device}}/bgp/check          # → /newtrun/v1/network/<id>/node/switch1/bgp/check
-url: /node/{{device}}/create-vlan        # → /newtrun/v1/network/<id>/node/switch1/create-vlan
+url: /node/{{device}}/health             # → /newtron/v1/network/<id>/node/switch1/health
+url: /node/{{device}}/bgp/check          # → /newtron/v1/network/<id>/node/switch1/bgp/check
+url: /node/{{device}}/create-vlan        # → /newtron/v1/network/<id>/node/switch1/create-vlan
 ```
 
-newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/newtrun/v1/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
+newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
 
 If the URL contains `{{device}}`, the call runs in parallel across target devices. If not, it runs once with no device scoping (network-level operations like creating specs).
 
@@ -1393,7 +1528,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | `--scenario <name>` | Run a single scenario. |
 | `--target <name>` | Run the minimum dependency chain reaching this scenario. |
 | `--dir <path>` | Suite directory path (alternative to positional name). |
-| `--platform <name>` | Override platform from scenario YAML. |
+| `--platform <name>` | Override platform from `suite.yaml`. |
 | `--no-deploy` | Skip topology deployment + host SSH (loopback or pre-deployed lab). |
 | `--monitor`, `-m` | Auto-refreshing dashboard instead of per-event log. |
 | `--junit <path>` | JUnit XML report path. |

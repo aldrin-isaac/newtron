@@ -8,7 +8,6 @@ description: |
 
   Only inject on switch1. switch2 remains clean — this tests that drift
   detection is per-device and doesn't cross-contaminate.
-topology: 2node-vs-service
 requires: [verify-clean]
 
 steps:

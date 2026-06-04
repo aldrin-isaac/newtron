@@ -9,7 +9,6 @@ description: |
 
   Tests that CRUD operations fail with a drift-related error message.
   Topology mode is NOT guarded (topology is authoritative, drift is expected).
-topology: 1node-vs
 requires: [inject-drift]
 
 steps:
