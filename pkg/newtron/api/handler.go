@@ -187,9 +187,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/apply-qos", s.handleApplyInterfaceQoS)
 	mux.HandleFunc("POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 
-	// Apply middleware chain: recovery → logger → requestID → timeout → mode → mux
+	// Apply middleware chain: recovery → logger → requestID → timeout → persist → mode → mux
 	var handler http.Handler = mux
 	handler = withMode(handler)
+	handler = withPersist(handler)
 	handler = httputil.Timeout(5 * time.Minute)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)
