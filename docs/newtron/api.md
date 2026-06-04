@@ -241,14 +241,16 @@ by `POST /intent/save`. With `?persist=topology`, the server runs the same
 mutation, while still holding the per-device actor lock — no window of
 "device updated but topology.json doesn't know yet."
 
-Applies uniformly to every per-action POST that uses the unified
+Applies to handlers that mutate the intent tree through the unified
 `execute()` entry point (every `/node/{device}/...` and
-`/node/{device}/interface/{name}/...` write). The hook is data-driven:
-it fires when the request both opts in via `?persist=topology` AND the
-handler dirtied the intent tree (`Node.HasUnsavedIntents()`). Read-only
-endpoints leave the flag untouched, so they're no-ops. `/intent/save`
-clears the flag at the end of its own work, so the hook never
-double-writes there.
+`/node/{device}/interface/{name}/...` mutating write). The hook is
+data-driven: it fires when the request both opts in via
+`?persist=topology` AND the handler dirtied the intent tree
+(`Node.HasUnsavedIntents()`). That gate makes three categories no-ops:
+
+- **Read-only handlers** (`/intent/drift`, `/intent/projection`, `/info`, …) never set the dirty flag.
+- **`/intent/save`** already persists and clears the flag inside its own closure, so the hook sees a clean tree.
+- **Mutating handlers without the query** — the flag may be dirty but the request didn't opt in.
 
 Network spec write endpoints (S5) also accept `dry_run` -- when `"true"`, the spec
 is validated but not persisted to disk.

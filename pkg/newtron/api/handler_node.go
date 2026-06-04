@@ -6,7 +6,6 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
-	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================
@@ -1269,21 +1268,15 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
-	na, nodeActor := s.requireNodeActor(w, r)
+	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
-	device := r.PathValue("device")
 	val, err := nodeActor.execute(r.Context(), func() (any, error) {
 		tree := nodeActor.node.Tree()
-		steps := make([]spec.TopologyStep, len(tree.Steps))
-		for i, s := range tree.Steps {
-			steps[i] = spec.TopologyStep{URL: s.URL, Params: s.Params}
-		}
-		if err := na.net.SaveDeviceIntents(device, steps); err != nil {
+		if err := nodeActor.saveTopologyNow(); err != nil {
 			return nil, err
 		}
-		nodeActor.node.ClearUnsavedIntents()
 		return tree, nil
 	})
 	if err != nil {

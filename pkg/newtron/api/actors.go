@@ -351,20 +351,21 @@ func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, 
 		// handlers are no-ops and /intent/save (which clears the flag at
 		// the end of its own closure) doesn't double-write.
 		if persistFromCtx(ctx) == PersistTopology && na.node != nil && na.node.HasUnsavedIntents() {
-			if err := na.persistTopologyNow(); err != nil {
-				return nil, fmt.Errorf("write succeeded but persist=topology failed: %w", err)
+			if err := na.saveTopologyNow(); err != nil {
+				return nil, fmt.Errorf("device updated, topology.json unchanged: %w", err)
 			}
 		}
 		return result, nil
 	})
 }
 
-// persistTopologyNow rewrites this device's entry in topology.json from the
-// current intent tree, then clears the unsaved flag. Same code path as
-// handleSave's closure — extracted so the ?persist=topology hook can invoke
-// it after any mutating handler, not just /intent/save. Must be called on
-// the actor goroutine so na.node access is race-free.
-func (na *NodeActor) persistTopologyNow() error {
+// saveTopologyNow rewrites this device's entry in topology.json from the
+// current intent tree, then clears the unsaved flag. Mirrors the verb in
+// Network.SaveDeviceIntents (§13 — same concept, same name). Used by
+// (1) the ?persist=topology hook above and (2) handleSave, so the two
+// share one body. Must be called on the actor goroutine so na.node
+// access is race-free.
+func (na *NodeActor) saveTopologyNow() error {
 	tree := na.node.Tree()
 	steps := make([]spec.TopologyStep, len(tree.Steps))
 	for i, s := range tree.Steps {
