@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdnet "net"
+	"strings"
+	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
-	"github.com/aldrin-isaac/newtron/pkg/newtron/network"
+	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // Network is the top-level API entry point.
 type Network struct {
-	internal *network.Network
+	internal *netpkg.Network
 	auth     *auth.Checker
 }
 
@@ -24,7 +27,7 @@ type Network struct {
 // resolve per-node SSH ports. Pass nil for tests and real-hardware
 // deployments.
 func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver) (*Network, error) {
-	net, err := network.NewNetwork(specDir, topologyName, pr)
+	net, err := netpkg.NewNetwork(specDir, topologyName, pr)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +271,7 @@ func (net *Network) BuildTopologyNode(device string) (*Node, error) {
 	if !net.HasTopology() {
 		return nil, &ValidationError{Message: "no topology loaded — topology mode requires a topology"}
 	}
-	tp, err := network.NewTopologyProvisioner(net.internal)
+	tp, err := netpkg.NewTopologyProvisioner(net.internal)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +301,7 @@ func (net *Network) BuildEmptyTopologyNode(device string) (*Node, error) {
 	if !net.HasTopology() {
 		return nil, &ValidationError{Message: "no topology loaded — topology mode requires a topology"}
 	}
-	tp, err := network.NewTopologyProvisioner(net.internal)
+	tp, err := netpkg.NewTopologyProvisioner(net.internal)
 	if err != nil {
 		return nil, err
 	}
@@ -317,11 +320,92 @@ func (net *Network) SaveDeviceIntents(device string, steps []spec.TopologyStep) 
 	if !net.HasTopology() {
 		return &ValidationError{Message: "no topology loaded — save requires a topology"}
 	}
-	tp, err := network.NewTopologyProvisioner(net.internal)
+	tp, err := netpkg.NewTopologyProvisioner(net.internal)
 	if err != nil {
 		return err
 	}
 	return tp.SaveDeviceIntents(device, steps)
+}
+
+// OnlineReason enumerates why a device is or isn't reachable. Tied to the
+// /node/{device}/status response field of the same name (issue #75A) so the
+// browser UI can render distinct indicators without parsing free-form
+// strings. The "unknown_" prefixed reasons mean "we have no topology runtime
+// to ask," which is distinct from "the device says no."
+type OnlineReason string
+
+const (
+	OnlineReasonSSHPortResolved   OnlineReason = "ssh_port_resolved"
+	OnlineReasonNewtlabNotRealised OnlineReason = "newtlab_not_realised"
+	OnlineReasonPortClosed        OnlineReason = "port_closed"
+	OnlineReasonUnreachable       OnlineReason = "unreachable"
+	OnlineReasonNoResolver        OnlineReason = "no_resolver"
+)
+
+// ProbeOnline is the cheap reachability probe behind the /status endpoint:
+// resolve the SSH port via the configured PortResolver (no SSH session),
+// then TCP-dial it with a 500ms timeout. Returns (online, reason, err).
+// err is only set for resolver/probe failures that don't have a clean
+// reason mapping; reason carries the operator-facing classification.
+//
+// Designed to be cheap enough for newtcon to poll one-per-device on a
+// short timer without warming an SSH connection each time.
+func (net *Network) ProbeOnline(ctx context.Context, device string) (bool, OnlineReason, error) {
+	resolver := net.internal.PortResolver()
+	if resolver == nil {
+		// Real-hardware/test mode has no runtime to ask. Caller renders
+		// "no_resolver" as "unknown" in the UI.
+		return false, OnlineReasonNoResolver, nil
+	}
+	port, err := resolver.SSHPort(ctx, net.internal.TopologyName(), device)
+	if err != nil {
+		if isNewtlabNotRealised(err) {
+			return false, OnlineReasonNewtlabNotRealised, nil
+		}
+		return false, OnlineReasonUnreachable, nil
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, dialErr := stdnet.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if dialErr != nil {
+		return false, OnlineReasonPortClosed, nil
+	}
+	_ = conn.Close()
+	return true, OnlineReasonSSHPortResolved, nil
+}
+
+// isNewtlabNotRealised classifies a PortResolver error as "the topology is
+// not deployed (or the device isn't in it)" vs. "the resolver itself is
+// unreachable." The newtlab client (pkg/newtlab/client/port_resolver.go)
+// surfaces "device %q not in newtlab topology %q" for the former — substring
+// match here mirrors the error format authored there. Avoids importing the
+// client package (one-way dependency newtron → newtlab is not desired).
+func isNewtlabNotRealised(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not in newtlab topology") || strings.Contains(msg, "404")
+}
+
+// TopologyDrift answers "does the device CONFIG_DB diverge from
+// topology.json right now?" — independent of the operator's in-flight edits.
+// Builds a transient TopologyNode from topology.json, connects transport,
+// runs Drift, and closes. Does NOT touch any cached NodeActor state.
+//
+// Strictly more expensive than /intent/drift (it opens a fresh SSH session
+// per call). Callers invoke it on-demand from a "show topology drift" UI
+// action, not from a polling badge.
+func (net *Network) TopologyDrift(ctx context.Context, device string) ([]DriftEntry, error) {
+	node, err := net.BuildTopologyNode(device)
+	if err != nil {
+		return nil, err
+	}
+	defer node.Close()
+	// Connect transport so Drift can read the device CONFIG_DB.
+	if err := node.internal.ConnectTransport(ctx); err != nil {
+		return nil, fmt.Errorf("connecting to %s for topology drift: %w", device, err)
+	}
+	return node.Drift(ctx)
 }
 
 func (net *Network) checkPermission(perm auth.Permission, authCtx *auth.Context) error {

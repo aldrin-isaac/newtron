@@ -129,6 +129,9 @@ func TestAPICompleteness(t *testing.T) {
 			"InitDevice":          true,
 			// Connection
 			"ListNodes": true,
+			// Device status (issue #75A+B)
+			"ProbeOnline":    true, // GET /network/{netID}/node/{device}/status
+			"TopologyDrift":  true, // GET /network/{netID}/node/{device}/intent/topology-drift
 		},
 		"Node": {
 			// Lifecycle (exposed via connectAndExecute/connectAndRead)

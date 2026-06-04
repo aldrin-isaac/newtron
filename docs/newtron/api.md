@@ -134,6 +134,8 @@ Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/rec
 | `POST /intent/projection-diff` | Pre-commit diff for a hypothetical operation set (before/after/diff) |
 | GET | `/intent/tree` | Intent DAG tree view |
 | GET | `/intent/drift` | Drift between projection (expected) and CONFIG_DB (actual) |
+| GET | `/intent/topology-drift` | Drift between fresh topology.json projection and CONFIG_DB |
+| GET | `/status` | Cheap per-device badge: online + drift counts + has_unsaved_intents |
 | POST | `/intent/reconcile` | Deliver projection to device, eliminating drift |
 | POST | `/intent/save` | Persist intent DB back to topology.json |
 | POST | `/intent/reload` | Rebuild intent DB from topology.json |
@@ -2382,6 +2384,56 @@ the Intent operations group above; documented in §11 Wired intent
 operations). There is no network-wide `/network/{n}/drift` endpoint;
 operators iterate over `/network/{n}/topology/node` and call
 `/intent/drift` per node.
+
+### Device status — operator badge (issue #75A)
+
+`GET /newtron/v1/network/{netID}/node/{device}/status` produces the
+cheap operator-facing badge data without warming an SSH session. Newtcon
+polls this per device on a short timer to render `online / drift /
+unsaved` indicators.
+
+Response shape (`NodeStatus`):
+
+```
+{
+  "online": true,
+  "online_reason": "ssh_port_resolved",
+  "has_unsaved_intents": false,
+  "intent_source": "actuated",
+  "intent_drift_count": 0,
+  "topology_drift_count": 0
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `online` | `true` only when SSH port resolves AND a 500ms TCP probe to it succeeds. |
+| `online_reason` | One of `ssh_port_resolved`, `newtlab_not_realised`, `port_closed`, `unreachable`, `no_resolver`. Browser UI dispatches on this string rather than parsing free-form errors. |
+| `has_unsaved_intents` | True when the cached node has CRUD mutations not yet saved to topology.json. False when no node is cached. |
+| `intent_source` | `actuated` (built from device NEWTRON_INTENT), `topology` (built from topology.json), `loopback` (offline config testing), or `unloaded` (no cached node yet). |
+| `intent_drift_count` | Diff entries between cached projection and CONFIG_DB. Populated **only when the cached actor already has a live device connection** — otherwise `intent_drift_reason` explains why the count is `0` (typically `"not_connected"`). |
+| `topology_drift_count` | Diff entries between fresh topology.json projection and CONFIG_DB. Same opportunistic gate — see `topology_drift_reason`. For the always-fresh answer, call `GET /intent/topology-drift` directly. |
+
+Cost: sub-second when the runtime is available (one resolver call + one
+non-blocking TCP dial). The drift counts add at most one device-CONFIG_DB
+scan when the cached connection is already open.
+
+### Topology drift — on-demand (issue #75B)
+
+`GET /newtron/v1/network/{netID}/node/{device}/intent/topology-drift`
+answers "does the device CONFIG_DB diverge from topology.json right
+now?" — independent of the operator's in-flight in-memory edits.
+
+The handler builds a transient `TopologyNode` from topology.json, opens
+its own SSH session, runs `Drift`, and closes. Distinct from
+`/intent/drift`, which drifts against the cached in-memory projection
+(which may include unsaved CRUD).
+
+Strictly more expensive than `/status` (one fresh SSH session per call);
+invoke on demand from a "show topology drift" UI action, not from a
+polling badge.
+
+Response: `[]sonic.DriftEntry`, same shape as `/intent/drift`.
 
 ---
 

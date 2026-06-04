@@ -122,6 +122,61 @@ type ApplyQoSRequest struct {
 }
 
 // ============================================================================
+// HTTP Response Types — Node Status (issue #75A)
+// ============================================================================
+
+// IntentSource enumerates the source the cached projection was built from.
+// Wire-shape mirror of Node.HasActuatedIntent + actor mode (§13: same concept
+// = same name, even across in-memory state and wire payload). "unloaded" is
+// the wire-only addition for the case where the actor has never been touched
+// — a state with no in-memory representation but a real one for the operator.
+type IntentSource string
+
+const (
+	IntentSourceActuated IntentSource = "actuated"
+	IntentSourceTopology IntentSource = "topology"
+	IntentSourceLoopback IntentSource = "loopback"
+	IntentSourceUnloaded IntentSource = "unloaded"
+)
+
+// NodeStatus is the response body for GET /node/{device}/status. Designed
+// for newtcon's per-device badges: cheap to populate, no SSH session warmup,
+// drift counts opportunistic — present only when the cached actor already
+// has a live device connection.
+//
+// Mirrors what cached actor state + a non-blocking probe can produce; no
+// fields fabricated for the wire (§46).
+type NodeStatus struct {
+	// Online and OnlineReason classify whether the device's SSH port is
+	// reachable. OnlineReason is the canonical newtron.OnlineReason; the
+	// browser UI dispatches on this rather than parsing free-form strings.
+	Online       bool                  `json:"online"`
+	OnlineReason newtron.OnlineReason  `json:"online_reason"`
+
+	// HasUnsavedIntents reports Node.HasUnsavedIntents() if the actor has a
+	// cached node; false otherwise (no cached state = nothing unsaved).
+	HasUnsavedIntents bool `json:"has_unsaved_intents"`
+
+	// IntentSource describes what the cached projection was built from, or
+	// "unloaded" when no node is cached yet.
+	IntentSource IntentSource `json:"intent_source"`
+
+	// IntentDriftCount is the number of diff entries between the projection
+	// (built from cached intents) and the device CONFIG_DB. Populated only
+	// when the cached actor already has a live device connection — see
+	// IntentDriftReason. Honors the "cheap, no SSH" contract of /status.
+	IntentDriftCount  int    `json:"intent_drift_count"`
+	IntentDriftReason string `json:"intent_drift_reason,omitempty"`
+
+	// TopologyDriftCount is the number of diff entries between the projection
+	// built fresh from topology.json and the device CONFIG_DB. Same
+	// opportunistic gate as IntentDriftCount; for the full-fat answer, call
+	// GET /intent/topology-drift directly.
+	TopologyDriftCount  int    `json:"topology_drift_count"`
+	TopologyDriftReason string `json:"topology_drift_reason,omitempty"`
+}
+
+// ============================================================================
 // HTTP Request Types — Node write operations that need JSON bodies
 // ============================================================================
 
