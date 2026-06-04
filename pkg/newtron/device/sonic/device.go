@@ -79,7 +79,14 @@ func NewDevice(name string, profile *spec.ResolvedProfile) *Device {
 	}
 }
 
-// Connect establishes connection to the device's config_db via Redis
+// Connect establishes connection to the device's config_db via Redis.
+//
+// Failures partway through allocate resources (SSH tunnel goroutine,
+// Redis clients) without setting d.connected — and Disconnect gates
+// on d.connected, so a naive defer Disconnect() wouldn't reclaim
+// them. The success flag below clears a deferred cleanup once the
+// full transaction commits; until then closePartial releases
+// whichever resources were already allocated (issue #83).
 func (d *Device) Connect(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -87,6 +94,13 @@ func (d *Device) Connect(ctx context.Context) error {
 	if d.connected {
 		return nil
 	}
+
+	success := false
+	defer func() {
+		if !success {
+			d.closePartial()
+		}
+	}()
 
 	var addr string
 	if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
@@ -114,7 +128,6 @@ func (d *Device) Connect(ctx context.Context) error {
 	var err error
 	d.ConfigDB, err = d.client.GetAll()
 	if err != nil {
-		d.client.Close()
 		return fmt.Errorf("loading config_db from %s: %w", d.Name, err)
 	}
 
@@ -124,7 +137,6 @@ func (d *Device) Connect(ctx context.Context) error {
 	// Skipped for provisioning, which writes unified mode + restarts bgp.
 	if !d.SkipFrrcfgdCheck {
 		if err := d.requireFrrcfgd(); err != nil {
-			d.client.Close()
 			return err
 		}
 	}
@@ -157,9 +169,45 @@ func (d *Device) Connect(ctx context.Context) error {
 	}
 
 	d.connected = true
+	success = true
 	util.WithDevice(d.Name).Info("Connected")
 
 	return nil
+}
+
+// closePartial releases any clients or SSH tunnel allocated by a
+// Connect() that didn't complete. Reverse of the Connect transaction —
+// called from Connect's deferred cleanup when success stays false. Per
+// §15 (operational symmetry): the failure-path reverse mirrors the
+// success-path cleanup in Disconnect, but is independent of d.connected
+// (which is never set true on partial init).
+//
+// Each Close is best-effort: errors are absorbed because callers are
+// already in an error path and surfacing a secondary failure would
+// mask the primary cause. Fields are nilled after closing so a later
+// Disconnect (gated on d.connected) doesn't re-close the same handle —
+// SSHTunnel.Close in particular closes a channel and is not idempotent.
+func (d *Device) closePartial() {
+	if d.asicClient != nil {
+		_ = d.asicClient.Close()
+		d.asicClient = nil
+	}
+	if d.applClient != nil {
+		_ = d.applClient.Close()
+		d.applClient = nil
+	}
+	if d.stateClient != nil {
+		_ = d.stateClient.Close()
+		d.stateClient = nil
+	}
+	if d.client != nil {
+		_ = d.client.Close()
+		d.client = nil
+	}
+	if d.tunnel != nil {
+		_ = d.tunnel.Close()
+		d.tunnel = nil
+	}
 }
 
 // Disconnect closes the connection
