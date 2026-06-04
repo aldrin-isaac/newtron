@@ -944,23 +944,6 @@ func (n *Node) InitFromDeviceIntent(ctx context.Context) error {
 		return fmt.Errorf("connecting transport: %w", err)
 	}
 
-	// Step 2: Legacy STATE_DB intent migration.
-	// Intents were historically stored in STATE_DB (volatile). New writes go to
-	// CONFIG_DB (persistent across reboot). Migrate any legacy records before
-	// reading CONFIG_DB intents so they are visible in the subsequent read.
-	if stateClient := n.conn.StateClient(); stateClient != nil {
-		if legacyIntents, err := stateClient.ReadIntentFromStateDB(n.name); err != nil {
-			util.WithDevice(n.name).Warnf("reading legacy STATE_DB intent: %v", err)
-		} else if legacyIntents != nil {
-			util.WithDevice(n.name).Info("migrating intent from STATE_DB to CONFIG_DB")
-			if err := n.conn.Client().WriteIntent(n.name, legacyIntents); err != nil {
-				util.WithDevice(n.name).Warnf("writing intent to CONFIG_DB during migration: %v", err)
-			} else {
-				_ = stateClient.DeleteIntentFromStateDB(n.name)
-			}
-		}
-	}
-
 	// Initialize a fresh projection — intents will be replayed into it.
 	// The device's ConfigDB (n.conn.ConfigDB) is the actual state; the
 	// node's configDB is the projection built from intent replay.
@@ -1049,8 +1032,7 @@ func (n *Node) PingWithRetry(ctx context.Context, timeout time.Duration) error {
 
 // Lock acquires a distributed lock for configuration changes.
 // Transport guard: no-op when n.conn == nil (topology-offline mode).
-// After lock acquisition, performs legacy STATE_DB migration and drift
-// guard (actuated mode only).
+// After lock acquisition, runs the drift guard in actuated mode.
 //
 // Architecture §8: Lock acquires exclusive access. No-op without transport.
 // The projection is already fresh when Lock is called — execute() rebuilds
@@ -1070,21 +1052,6 @@ func (n *Node) Lock(ctx context.Context) error {
 		return err
 	}
 	n.locked = true
-
-	// Migrate any legacy STATE_DB intent to CONFIG_DB (one-time per device).
-	// New intents are always written to CONFIG_DB (persistent across reboot).
-	if stateClient := n.conn.StateClient(); stateClient != nil {
-		if legacyIntent, err := stateClient.ReadIntentFromStateDB(n.name); err != nil {
-			util.WithDevice(n.name).Warnf("reading legacy STATE_DB intent: %v", err)
-		} else if legacyIntent != nil {
-			util.WithDevice(n.name).Info("migrating intent from STATE_DB to CONFIG_DB")
-			if err := n.conn.Client().WriteIntent(n.name, legacyIntent); err != nil {
-				util.WithDevice(n.name).Warnf("writing intent to CONFIG_DB during migration: %v", err)
-			} else {
-				_ = stateClient.DeleteIntentFromStateDB(n.name)
-			}
-		}
-	}
 
 	// Drift guard (actuated mode only): refuse writes if device has
 	// drifted from its intents. Compares the projection (rebuilt by

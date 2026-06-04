@@ -1056,10 +1056,6 @@ func (c *StateDBClient) GetNeighbor(iface, ip string) (*NeighEntry, error)
 // Distributed locking
 func (c *StateDBClient) AcquireLock(device, holder string, ttlSeconds int) error
 func (c *StateDBClient) ReleaseLock(device, holder string) error
-
-// Legacy intent migration (one-time, intents now live in CONFIG_DB)
-func (c *StateDBClient) ReadIntentFromStateDB(device string) (*OperationIntent, error)
-func (c *StateDBClient) DeleteIntentFromStateDB(device string) error
 ```
 
 **`GetEntry`** reads a single STATE_DB entry as raw `map[string]string`. Returns `(nil, nil)` if the entry does not exist. Used by newtrun's `verifyStateDBExecutor` for generic table/key/field assertions.
@@ -1135,16 +1131,9 @@ return 1
 
 `Lock()` (refresh) → `fn()` (precondition reads from cache) → `Apply()` (writes to Redis, no reload) → `Unlock()` (episode ends). No post-Apply refresh — the next episode will refresh itself.
 
-### 5.5 Legacy Intent Migration
+### 5.5 Intent Storage Location
 
-STATE_DB previously held `NEWTRON_INTENT|<device>` entries as write-ahead manifests for crash recovery. This model has been replaced by the unified intent model in CONFIG_DB (§4.8).
-
-Intent records now live in CONFIG_DB as per-resource `NEWTRON_INTENT|<resource>` entries (e.g., `NEWTRON_INTENT|interface|Ethernet0`, `NEWTRON_INTENT|device`). Each record is an `Intent` struct (§4.8) that captures the operation, resolved parameters, and DAG relationships. The projection (expected CONFIG_DB state) is derived by replaying all intents — no separate crash-recovery mechanism is needed.
-
-Two legacy migration methods remain on `StateDBClient`:
-
-- `ReadIntentFromStateDB(device)` — reads the old `NEWTRON_INTENT|<device>` entry from STATE_DB. Used during `Lock()` for one-time migration: if a STATE_DB intent is found, it is migrated to CONFIG_DB and the STATE_DB entry is deleted.
-- `DeleteIntentFromStateDB(device)` — deletes the old STATE_DB entry after migration.
+Intent records live in CONFIG_DB as per-resource `NEWTRON_INTENT|<resource>` entries (e.g., `NEWTRON_INTENT|interface|Ethernet0`, `NEWTRON_INTENT|device`). Each record is an `Intent` struct (§4.8) that captures the operation, resolved parameters, and DAG relationships. The projection (expected CONFIG_DB state) is derived by replaying all intents — no separate crash-recovery mechanism is needed.
 
 **Interaction with locking:**
 
