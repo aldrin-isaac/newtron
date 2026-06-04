@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	stdnet "net"
-	"strings"
 	"time"
 
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
@@ -330,61 +330,47 @@ func (net *Network) SaveDeviceIntents(device string, steps []spec.TopologyStep) 
 // OnlineReason enumerates why a device is or isn't reachable. Tied to the
 // /node/{device}/status response field of the same name (issue #75A) so the
 // browser UI can render distinct indicators without parsing free-form
-// strings. The "unknown_" prefixed reasons mean "we have no topology runtime
-// to ask," which is distinct from "the device says no."
+// strings.
 type OnlineReason string
 
 const (
-	OnlineReasonSSHPortResolved   OnlineReason = "ssh_port_resolved"
+	OnlineReasonSSHPortResolved    OnlineReason = "ssh_port_resolved"
 	OnlineReasonNewtlabNotRealised OnlineReason = "newtlab_not_realised"
-	OnlineReasonPortClosed        OnlineReason = "port_closed"
-	OnlineReasonUnreachable       OnlineReason = "unreachable"
-	OnlineReasonNoResolver        OnlineReason = "no_resolver"
+	OnlineReasonPortClosed         OnlineReason = "port_closed"
+	OnlineReasonUnreachable        OnlineReason = "unreachable"
+	OnlineReasonNoResolver         OnlineReason = "no_resolver"
 )
 
 // ProbeOnline is the cheap reachability probe behind the /status endpoint:
 // resolve the SSH port via the configured PortResolver (no SSH session),
-// then TCP-dial it with a 500ms timeout. Returns (online, reason, err).
-// err is only set for resolver/probe failures that don't have a clean
-// reason mapping; reason carries the operator-facing classification.
+// then TCP-dial it with a 500ms timeout.
 //
-// Designed to be cheap enough for newtcon to poll one-per-device on a
-// short timer without warming an SSH connection each time.
-func (net *Network) ProbeOnline(ctx context.Context, device string) (bool, OnlineReason, error) {
+// Returns only the boolean + classified reason — there is no out-of-band
+// error class; every failure mode maps to a reason enum. Designed to be
+// cheap enough for newtcon to poll one-per-device on a short timer without
+// warming an SSH connection each time.
+func (net *Network) ProbeOnline(ctx context.Context, device string) (bool, OnlineReason) {
 	resolver := net.internal.PortResolver()
 	if resolver == nil {
 		// Real-hardware/test mode has no runtime to ask. Caller renders
 		// "no_resolver" as "unknown" in the UI.
-		return false, OnlineReasonNoResolver, nil
+		return false, OnlineReasonNoResolver
 	}
 	port, err := resolver.SSHPort(ctx, net.internal.TopologyName(), device)
 	if err != nil {
-		if isNewtlabNotRealised(err) {
-			return false, OnlineReasonNewtlabNotRealised, nil
+		var notInTopo *newtlabclient.NotInTopologyError
+		if errors.As(err, &notInTopo) {
+			return false, OnlineReasonNewtlabNotRealised
 		}
-		return false, OnlineReasonUnreachable, nil
+		return false, OnlineReasonUnreachable
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	conn, dialErr := stdnet.DialTimeout("tcp", addr, 500*time.Millisecond)
 	if dialErr != nil {
-		return false, OnlineReasonPortClosed, nil
+		return false, OnlineReasonPortClosed
 	}
 	_ = conn.Close()
-	return true, OnlineReasonSSHPortResolved, nil
-}
-
-// isNewtlabNotRealised classifies a PortResolver error as "the topology is
-// not deployed (or the device isn't in it)" vs. "the resolver itself is
-// unreachable." The newtlab client (pkg/newtlab/client/port_resolver.go)
-// surfaces "device %q not in newtlab topology %q" for the former — substring
-// match here mirrors the error format authored there. Avoids importing the
-// client package (one-way dependency newtron → newtlab is not desired).
-func isNewtlabNotRealised(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "not in newtlab topology") || strings.Contains(msg, "404")
+	return true, OnlineReasonSSHPortResolved
 }
 
 // TopologyDrift answers "does the device CONFIG_DB diverge from

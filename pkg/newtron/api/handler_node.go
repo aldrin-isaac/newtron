@@ -1171,11 +1171,7 @@ func (s *Server) handleNodeStatus(w http.ResponseWriter, r *http.Request) {
 		IntentSource: IntentSourceUnloaded,
 	}
 
-	online, reason, err := na.net.ProbeOnline(r.Context(), device)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
+	online, reason := na.net.ProbeOnline(r.Context(), device)
 	status.Online = online
 	status.OnlineReason = reason
 
@@ -1197,49 +1193,38 @@ func (s *Server) handleNodeStatus(w http.ResponseWriter, r *http.Request) {
 
 // fillNodeStatusFromActor reads the cached actor's node (if any) and fills
 // the actor-derived fields of status: intent_source, has_unsaved_intents,
-// and the two opportunistic drift counts. Must be called on the actor
+// and the opportunistic intent_drift_count. Must be called on the actor
 // goroutine so nodeActor.node access is race-free.
 //
-// Drift counts are computed only when the cached node already has transport
-// (Ping succeeds) — that's the "no new SSH session" gate. Failures are
-// surfaced via the *_reason fields, not by erroring the whole status call.
+// Intent drift is computed only when the cached node already has transport
+// (Ping succeeds) — that's the "no new SSH session" gate. Topology drift is
+// NOT computed here (issue #75A audit): it requires a fresh SSH session
+// inside the actor lock, which violates the "cheap" contract. Callers who
+// need it call GET /intent/topology-drift explicitly.
 func fillNodeStatusFromActor(status *NodeStatus, nodeActor *NodeActor, ctx context.Context) {
 	n := nodeActor.node
 	if n == nil {
 		status.IntentDriftReason = "not_connected"
-		status.TopologyDriftReason = "not_connected"
 		return
 	}
 	status.HasUnsavedIntents = n.HasUnsavedIntents()
 	if n.HasActuatedIntent() {
-		status.IntentSource = IntentSourceActuated
+		status.IntentSource = IntentSourceIntent
 	} else {
 		status.IntentSource = IntentSourceTopology
 	}
 
 	if err := n.Ping(ctx); err != nil {
 		status.IntentDriftReason = "not_connected"
-		status.TopologyDriftReason = "not_connected"
 		return
 	}
 
 	intentDrift, err := n.Drift(ctx)
 	if err != nil {
 		status.IntentDriftReason = "drift_query_failed"
-	} else {
-		status.IntentDriftCount = len(intentDrift)
-	}
-
-	if !nodeActor.net.HasTopology() {
-		status.TopologyDriftReason = "no_topology"
 		return
 	}
-	topoDrift, err := nodeActor.net.TopologyDrift(ctx, nodeActor.device)
-	if err != nil {
-		status.TopologyDriftReason = "drift_query_failed"
-		return
-	}
-	status.TopologyDriftCount = len(topoDrift)
+	status.IntentDriftCount = len(intentDrift)
 }
 
 func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {

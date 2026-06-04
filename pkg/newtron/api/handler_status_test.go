@@ -43,12 +43,8 @@ func TestHandleNodeStatus_NoResolverNoCache(t *testing.T) {
 	if status.IntentDriftReason != "not_connected" {
 		t.Errorf("IntentDriftReason: got %q, want not_connected", status.IntentDriftReason)
 	}
-	if status.TopologyDriftReason != "not_connected" {
-		t.Errorf("TopologyDriftReason: got %q, want not_connected", status.TopologyDriftReason)
-	}
-	if status.IntentDriftCount != 0 || status.TopologyDriftCount != 0 {
-		t.Errorf("drift counts: got intent=%d topology=%d, want 0/0",
-			status.IntentDriftCount, status.TopologyDriftCount)
+	if status.IntentDriftCount != 0 {
+		t.Errorf("IntentDriftCount: got %d, want 0", status.IntentDriftCount)
 	}
 }
 

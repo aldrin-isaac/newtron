@@ -126,23 +126,28 @@ type ApplyQoSRequest struct {
 // ============================================================================
 
 // IntentSource enumerates the source the cached projection was built from.
-// Wire-shape mirror of Node.HasActuatedIntent + actor mode (§13: same concept
-// = same name, even across in-memory state and wire payload). "unloaded" is
-// the wire-only addition for the case where the actor has never been touched
-// — a state with no in-memory representation but a real one for the operator.
+// Values mirror the Mode enum in mode.go (§13: same concept = same name);
+// IntentSourceUnloaded is the wire-only addition for the case where the
+// actor has never been touched — a state with no in-memory representation
+// but a real one for the operator.
 type IntentSource string
 
 const (
-	IntentSourceActuated IntentSource = "actuated"
-	IntentSourceTopology IntentSource = "topology"
-	IntentSourceLoopback IntentSource = "loopback"
-	IntentSourceUnloaded IntentSource = "unloaded"
+	IntentSourceIntent   IntentSource = "intent"   // matches ModeIntent (device-actuated)
+	IntentSourceTopology IntentSource = "topology" // matches ModeTopology
+	IntentSourceLoopback IntentSource = "loopback" // matches ModeLoopback
+	IntentSourceUnloaded IntentSource = "unloaded" // wire-only: no cached node
 )
 
 // NodeStatus is the response body for GET /node/{device}/status. Designed
 // for newtcon's per-device badges: cheap to populate, no SSH session warmup,
-// drift counts opportunistic — present only when the cached actor already
-// has a live device connection.
+// intent drift count opportunistic — present only when the cached actor
+// already has a live device connection.
+//
+// Topology drift is NOT in this payload (audit finding for issue #75A —
+// computing it requires a fresh SSH session inside the actor lock, which
+// breaks the "cheap" contract). Callers who want the topology-vs-device
+// diff call GET /intent/topology-drift directly.
 //
 // Mirrors what cached actor state + a non-blocking probe can produce; no
 // fields fabricated for the wire (§46).
@@ -150,8 +155,8 @@ type NodeStatus struct {
 	// Online and OnlineReason classify whether the device's SSH port is
 	// reachable. OnlineReason is the canonical newtron.OnlineReason; the
 	// browser UI dispatches on this rather than parsing free-form strings.
-	Online       bool                  `json:"online"`
-	OnlineReason newtron.OnlineReason  `json:"online_reason"`
+	Online       bool                 `json:"online"`
+	OnlineReason newtron.OnlineReason `json:"online_reason"`
 
 	// HasUnsavedIntents reports Node.HasUnsavedIntents() if the actor has a
 	// cached node; false otherwise (no cached state = nothing unsaved).
@@ -167,13 +172,6 @@ type NodeStatus struct {
 	// IntentDriftReason. Honors the "cheap, no SSH" contract of /status.
 	IntentDriftCount  int    `json:"intent_drift_count"`
 	IntentDriftReason string `json:"intent_drift_reason,omitempty"`
-
-	// TopologyDriftCount is the number of diff entries between the projection
-	// built fresh from topology.json and the device CONFIG_DB. Same
-	// opportunistic gate as IntentDriftCount; for the full-fat answer, call
-	// GET /intent/topology-drift directly.
-	TopologyDriftCount  int    `json:"topology_drift_count"`
-	TopologyDriftReason string `json:"topology_drift_reason,omitempty"`
 }
 
 // ============================================================================
