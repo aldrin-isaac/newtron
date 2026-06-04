@@ -127,6 +127,18 @@ var stepValidations = map[StepAction]stepValidation{
 		}
 		return nil
 	}},
+	ActionRunSuite: {custom: func(prefix string, step *Step) error {
+		if step.Suite == "" {
+			return fmt.Errorf("%s: run-suite requires suite", prefix)
+		}
+		// Reject names that could escape SuitesBase via path traversal.
+		// Mirrors pkg/newtrun/api.nameRE — duplicated here so the parser
+		// stays self-contained (and doesn't import its api subpackage).
+		if strings.ContainsAny(step.Suite, "/\\") || step.Suite == "." || step.Suite == ".." {
+			return fmt.Errorf("%s: invalid suite name %q (no path separators)", prefix, step.Suite)
+		}
+		return nil
+	}},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.
@@ -138,6 +150,22 @@ var stepFieldGetter = map[string]func(*Step) string{
 // stepValidations table.
 func validateStepFields(scenario string, index int, step *Step) error {
 	prefix := fmt.Sprintf("scenario %s step %d (%s)", scenario, index, step.Name)
+
+	// Cross-field guard: suite/parameters/targets are run-suite-only.
+	// Catching a typo (e.g. "wait" with targets) here is cheaper than
+	// silently dropping the fields and surfacing as a "step ran but
+	// nothing happened" mystery at runtime.
+	if step.Action != ActionRunSuite {
+		if step.Suite != "" {
+			return fmt.Errorf("%s: 'suite' is only valid for action run-suite (got action %q)", prefix, step.Action)
+		}
+		if len(step.Parameters) > 0 {
+			return fmt.Errorf("%s: 'parameters' is only valid for action run-suite (got action %q)", prefix, step.Action)
+		}
+		if len(step.Targets) > 0 {
+			return fmt.Errorf("%s: 'targets' is only valid for action run-suite (got action %q)", prefix, step.Action)
+		}
+	}
 
 	v, ok := stepValidations[step.Action]
 	if !ok {

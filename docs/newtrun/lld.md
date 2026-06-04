@@ -45,6 +45,7 @@ pkg/newtrun/                  # Engine (HTTP-agnostic orchestration core)
   steps_newtron.go            # ActionNewtron: URL expansion, jq, polling, batch
   steps_cli.go                # ActionNewtronCLI: subprocess execution
   steps_host.go               # ActionHostExec: SSH command execution
+  steps_run_suite.go          # ActionRunSuite: child Runner + depth-counter context
   deploy.go                   # Deploy/Ensure/Destroy via newtlab
   state.go                    # RunState, ScenarioState, StepState; SuiteStatusFromOutcome
   progress.go                 # ProgressReporter (7 callbacks), consoleProgress, StateReporter
@@ -319,6 +320,7 @@ The `newtron` action with `batch` runs N calls per device in sequence, collectin
 | `ActionWait` | `wait` | Sleep for `Duration`. |
 | `ActionProvision` | `topology-reconcile` | Single `Client.Reconcile(name, "topology", ...)` call per device — the newtron-server performs ConfigReload, lock, ReplaceAll, and SaveConfig internally. High-impact; inline-runs require explicit opt-in. |
 | `ActionVerifyProvisioning` | `verify-topology` | Compute drift between device CONFIG_DB and the topology projection. Zero drift = pass. |
+| `ActionRunSuite` | `run-suite` | Composition primitive: invoke another sibling suite (resolved under `Runner.SuitesBase`) as a single step. Child runs in-process with `NoDeploy=true`; depth-counter context bounds recursion to `MaxRunSuiteDepth` (default 5). Excluded from the default inline-allowed list — file-backed suites only. |
 
 ---
 
