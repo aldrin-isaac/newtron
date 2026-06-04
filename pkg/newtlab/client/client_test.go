@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -98,5 +99,82 @@ func TestLabStatus_5xx(t *testing.T) {
 	}
 	if se.StatusCode != http.StatusInternalServerError {
 		t.Errorf("StatusCode = %d, want 500", se.StatusCode)
+	}
+}
+
+// TestSSHPort_TopologyNotDeployed exercises the typed-error path: when
+// LabStatus 404s, PortResolver.SSHPort returns *NotInTopologyError so
+// callers like newtron's /status endpoint can dispatch on the error class
+// instead of substring-matching the message.
+func TestSSHPort_TopologyNotDeployed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "topology not deployed"})
+	}))
+	defer ts.Close()
+
+	r := NewPortResolver(New(ts.URL))
+	_, err := r.SSHPort(context.Background(), "ghost-lab", "switch1")
+	if err == nil {
+		t.Fatal("SSHPort: expected error, got nil")
+	}
+	nit, ok := err.(*NotInTopologyError)
+	if !ok {
+		t.Fatalf("err type = %T, want *NotInTopologyError", err)
+	}
+	if nit.Topology != "ghost-lab" {
+		t.Errorf("Topology = %q, want %q", nit.Topology, "ghost-lab")
+	}
+	if nit.Device != "" {
+		t.Errorf("Device = %q, want empty (404 means whole topology missing)", nit.Device)
+	}
+}
+
+// TestSSHPort_DeviceNotInTopology exercises the second typed-error path:
+// the topology is deployed but doesn't include the named device.
+func TestSSHPort_DeviceNotInTopology(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state := newtlab.LabState{
+			Name:  "1node-vs",
+			Nodes: map[string]*newtlab.NodeState{"switch1": {SSHPort: 13000}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": state})
+	}))
+	defer ts.Close()
+
+	r := NewPortResolver(New(ts.URL))
+	_, err := r.SSHPort(context.Background(), "1node-vs", "switch99")
+	nit, ok := err.(*NotInTopologyError)
+	if !ok {
+		t.Fatalf("err type = %T, want *NotInTopologyError", err)
+	}
+	if nit.Topology != "1node-vs" || nit.Device != "switch99" {
+		t.Errorf("error fields: got {%q, %q}, want {1node-vs, switch99}", nit.Topology, nit.Device)
+	}
+}
+
+// TestNotInTopologyError_SatisfiesNotReadyMarker locks in the contract
+// that *NotInTopologyError satisfies sonic.NotReadyError. newtron's
+// Network.ProbeOnline dispatches on this marker via errors.As — if
+// someone later renames or removes PortResolverNotReady, the dispatch
+// silently falls through to "unreachable" and this test catches it.
+//
+// Defined inline rather than importing sonic to keep the
+// newtlab/client → pkg/newtron/device/sonic dependency direction
+// matching production code (newtlab/client does NOT import sonic).
+func TestNotInTopologyError_SatisfiesNotReadyMarker(t *testing.T) {
+	// Local clone of the sonic.NotReadyError marker contract. Matching
+	// this interface is the production-code dispatch in newtron, so
+	// satisfying it here proves the production dispatch will work.
+	type notReadyMarker interface {
+		error
+		PortResolverNotReady()
+	}
+	var err error = &NotInTopologyError{Topology: "lab", Device: "dev"}
+	var marker notReadyMarker
+	if !errors.As(err, &marker) {
+		t.Fatalf("*NotInTopologyError does not satisfy the NotReadyError marker — dispatch in newtron.Network.ProbeOnline will silently fall through")
 	}
 }

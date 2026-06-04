@@ -1131,6 +1131,102 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+// handleTopologyDrift answers "does the device CONFIG_DB diverge from
+// topology.json?" with a freshly-built TopologyNode projection. Distinct
+// from handleDrift (issue #75B): that one drifts against the operator's
+// current in-memory edits; this one drifts against the on-disk topology.
+// Inevitably more expensive — opens a fresh SSH session per call — so it's
+// invoked on-demand, not for badge polling.
+func (s *Server) handleTopologyDrift(w http.ResponseWriter, r *http.Request) {
+	na, _ := s.requireNodeActor(w, r)
+	if na == nil {
+		return
+	}
+	device := r.PathValue("device")
+	entries, err := na.net.TopologyDrift(r.Context(), device)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, entries)
+}
+
+// handleNodeStatus produces the cheap operator-facing badge data for one
+// device (issue #75A). Online + reason come from a non-blocking TCP probe
+// against the SSH port; intent_source / has_unsaved_intents come from the
+// cached NodeActor state. Drift counts are populated opportunistically when
+// the cached actor already has a live device connection; otherwise the
+// *_reason field explains why the count is 0.
+//
+// "Cheap" here means "no new SSH session" — sub-second on a happy path. For
+// the full drift answer, callers use /intent/drift and /intent/topology-drift.
+func (s *Server) handleNodeStatus(w http.ResponseWriter, r *http.Request) {
+	na, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	device := r.PathValue("device")
+
+	status := NodeStatus{
+		IntentSource: IntentSourceUnloaded,
+	}
+
+	online, reason := na.net.ProbeOnline(r.Context(), device)
+	status.Online = online
+	status.OnlineReason = reason
+
+	// Read cached actor state under the actor's mutex so a concurrent
+	// mutation doesn't tear a Node pointer mid-read. The closure runs on
+	// the actor goroutine; nodeActor.node is owned by that goroutine.
+	val, doErr := nodeActor.do(r.Context(), func() (any, error) {
+		fillNodeStatusFromActor(&status, nodeActor, r.Context())
+		return nil, nil
+	})
+	_ = val
+	if doErr != nil {
+		writeError(w, doErr)
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, status)
+}
+
+// fillNodeStatusFromActor reads the cached actor's node (if any) and fills
+// the actor-derived fields of status: intent_source, has_unsaved_intents,
+// and the opportunistic intent_drift_count. Must be called on the actor
+// goroutine so nodeActor.node access is race-free.
+//
+// Intent drift is computed only when the cached node already has transport
+// (Ping succeeds) — that's the "no new SSH session" gate. Topology drift is
+// NOT computed here (issue #75A audit): it requires a fresh SSH session
+// inside the actor lock, which violates the "cheap" contract. Callers who
+// need it call GET /intent/topology-drift explicitly.
+func fillNodeStatusFromActor(status *NodeStatus, nodeActor *NodeActor, ctx context.Context) {
+	n := nodeActor.node
+	if n == nil {
+		status.IntentDriftReason = "not_connected"
+		return
+	}
+	status.HasUnsavedIntents = n.HasUnsavedIntents()
+	if n.HasActuatedIntent() {
+		status.IntentSource = IntentSourceIntent
+	} else {
+		status.IntentSource = IntentSourceTopology
+	}
+
+	if err := n.Ping(ctx); err != nil {
+		status.IntentDriftReason = "not_connected"
+		return
+	}
+
+	intentDrift, err := n.Drift(ctx)
+	if err != nil {
+		status.IntentDriftReason = "drift_query_failed"
+		return
+	}
+	status.IntentDriftCount = len(intentDrift)
+}
+
 func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
