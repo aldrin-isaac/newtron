@@ -91,7 +91,7 @@ func NewRunner(scenariosDir string) *Runner {
 // Ctrl-C even when the caller supplied context.Background(). Server-side
 // runs use this to cancel in-flight runners when the server shuts down or
 // when an operator POSTs to the stop endpoint.
-func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, error) {
+func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioResult, err error) {
 	if opts.Scenario == "" && opts.Target == "" && !opts.All {
 		return nil, fmt.Errorf("specify --scenario <name>, --target <name>, or --all")
 	}
@@ -166,19 +166,33 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 	r.progress(func(p ProgressReporter) { p.SuiteStart(suite.Topology, suite.Platform, scenarios) })
 	suiteStart := time.Now()
 
+	// Emit SuiteEnd from every path that returns after SuiteStart. The
+	// CLI client (cmd_start.go) cancels its SSE stream on the SuiteEnd
+	// event — when an early-return path (deploy failure, connect
+	// failure) skipped the SuiteEnd emission, the SSE stream stayed
+	// open forever and `newtrun start` hung indefinitely after the
+	// suite already finalized state.json. The defer-with-named-returns
+	// pattern guarantees every post-SuiteStart exit produces SuiteEnd
+	// with the right (results, err) tuple.
+	defer func() {
+		if len(scenarios) > 0 {
+			status := SuiteStatusFromOutcome(err, results)
+			r.progress(func(p ProgressReporter) { p.SuiteEnd(results, status, time.Since(suiteStart)) })
+		}
+	}()
+
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
 		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Topology)
-		cleanup, err := r.deployTopology(ctx, r.SpecDir, opts)
-		if err != nil {
-			var results []*ScenarioResult
+		cleanup, deployErr := r.deployTopology(ctx, r.SpecDir, opts)
+		if deployErr != nil {
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
 					Topology:    r.Topology,
 					Platform:    sc.Platform,
 					Status:      StepStatusError,
-					DeployError: &InfraError{Op: "deploy", Err: err},
+					DeployError: &InfraError{Op: "deploy", Err: deployErr},
 				})
 			}
 			return results, nil
@@ -199,15 +213,14 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 		fmt.Fprintf(os.Stderr, "newtrun: no-deploy mode — skipping device connections\n")
 	} else {
 		fmt.Fprintf(os.Stderr, "newtrun: connecting to devices...\n")
-		if err := r.connectDevices(); err != nil {
-			var results []*ScenarioResult
+		if connErr := r.connectDevices(); connErr != nil {
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
 					Topology:    r.Topology,
 					Platform:    sc.Platform,
 					Status:      StepStatusError,
-					DeployError: err,
+					DeployError: connErr,
 				})
 			}
 			return results, nil
@@ -223,8 +236,10 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 		deployedPlatform = r.discoveredPlatform
 	}
 
-	// Run all scenarios
-	results, err := r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
+	// Run all scenarios. Assigns the named-return results and err so
+	// the deferred SuiteEnd emission (registered just after SuiteStart)
+	// computes its status from the final tuple.
+	results, err = r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
 		r.opts = RunOptions{
 			Platform: platform,
 			NoDeploy: true,
@@ -244,17 +259,6 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 		return result, nil
 	})
 
-	// Always emit SuiteEnd before returning so reporters (the SSE wire,
-	// state.json) carry the terminal status. The status is computed from
-	// (err, results) via the shared helper — the same logic the server
-	// finalizer uses for state.json, so the SSE event and the persisted
-	// state can never disagree. Even single-scenario runs emit SuiteEnd
-	// now: the CLI's exit-code path keys off it, and skipping it for
-	// len==1 left ad-hoc runs without a terminal event.
-	if len(scenarios) > 0 {
-		status := SuiteStatusFromOutcome(err, results)
-		r.progress(func(p ProgressReporter) { p.SuiteEnd(results, status, time.Since(suiteStart)) })
-	}
 	return results, err
 }
 
