@@ -107,12 +107,12 @@ func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request)
 
 	// Snapshot the NodeActor map so iteration doesn't race with new actors
 	// being created mid-iteration.
-	na.mu.Lock()
+	na.nodeMu.Lock()
 	actors := make(map[string]*NodeActor, len(na.nodeActors))
 	for name, a := range na.nodeActors {
 		actors[name] = a
 	}
-	na.mu.Unlock()
+	na.nodeMu.Unlock()
 
 	deviceNames := make([]string, 0, len(actors))
 	for name := range actors {

@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -187,6 +188,80 @@ func TestLoader_LoadProfile_Caching(t *testing.T) {
 	if p1 != p2 {
 		t.Error("LoadProfile should return cached profile")
 	}
+}
+
+// TestLoader_LoadProfile_ConcurrentSameKey pins the cache mutex: N goroutines
+// calling LoadProfile for the same key under the race detector must complete
+// without "concurrent map read and map write" panics. Pre-mutex this test
+// reliably failed under `go test -race` because the cache write in
+// LoadProfile mutated l.profiles without coordination.
+func TestLoader_LoadProfile_ConcurrentSameKey(t *testing.T) {
+	tmpDir := createTestSpecDir(t)
+	defer os.RemoveAll(tmpDir)
+
+	loader := NewLoader(tmpDir)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	const n = 16
+	var wg sync.WaitGroup
+	wg.Add(n)
+	got := make([]*DeviceProfile, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			p, err := loader.LoadProfile("leaf1-ny")
+			if err != nil {
+				t.Errorf("goroutine %d: LoadProfile failed: %v", i, err)
+				return
+			}
+			got[i] = p
+		}(i)
+	}
+	wg.Wait()
+
+	// All goroutines should observe the same cached pointer once the dust
+	// settles — the double-check pattern guarantees exactly one publish.
+	for i := 1; i < n; i++ {
+		if got[i] != got[0] {
+			t.Errorf("goroutine %d saw a different pointer than goroutine 0 — cache double-check failed", i)
+		}
+	}
+}
+
+// TestLoader_LoadProfile_ConcurrentMixedKeys exercises the cache mutex with
+// different keys racing simultaneously. Same regression target — concurrent
+// map writes panic under -race without the mutex.
+func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
+	tmpDir := createTestSpecDir(t)
+	defer os.RemoveAll(tmpDir)
+
+	loader := NewLoader(tmpDir)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Profiles present in createTestSpecDir; if more get added there, this
+	// test trivially still passes.
+	keys := []string{"leaf1-ny", "leaf2-ny", "spine1-ny"}
+	const rounds = 8
+	var wg sync.WaitGroup
+	for r := 0; r < rounds; r++ {
+		for _, k := range keys {
+			wg.Add(1)
+			go func(k string) {
+				defer wg.Done()
+				if _, err := loader.LoadProfile(k); err != nil {
+					// Profile may not exist in fixture; that's fine — we
+					// only care about the absence of races, not that every
+					// key resolves.
+					_ = err
+				}
+			}(k)
+		}
+	}
+	wg.Wait()
 }
 
 func TestLoader_LoadProfile_NotFound(t *testing.T) {

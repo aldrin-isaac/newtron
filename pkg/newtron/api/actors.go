@@ -35,61 +35,61 @@ type response struct {
 // NetworkActor — serializes spec operations for a single Network
 // ============================================================================
 
-// NetworkActor owns a *newtron.Network and serializes all operations on it.
+// NetworkActor owns a *newtron.Network and serializes spec operations on it.
+//
+// Unlike NodeActor (which owns a cached transport + idle-timer and genuinely
+// needs a goroutine + select loop to interleave request handling with idle
+// cleanup), NetworkActor has no state that needs a goroutine — its .net is
+// immutable after construction and the nodeActors cache is protected by its
+// own mutex. The serialization here is just one-closure-at-a-time, which is
+// what a plain sync.Mutex provides. Calling it an "actor" preserves symmetry
+// with NodeActor at the API surface (both expose do()) without paying for a
+// goroutine that has nothing to do.
+//
+// Why serialize at all: several public *newtron.Network methods compose
+// multiple internal operations under separate locks (e.g. CreateService does
+// GetService under RLock, releases, then SaveService under Lock). The
+// composition needs atomicity that internal.RWMutex doesn't supply on its
+// own. The do() lock is what makes those compositions race-free.
 type NetworkActor struct {
 	net         *newtron.Network
 	idleTimeout time.Duration
 
-	// nodeActors maps device names to their NodeActors.
-	mu         sync.Mutex
-	nodeActors map[string]*NodeActor
+	// do is the spec-serialization lock taken by do().
+	do_ sync.Mutex
 
-	requests chan request
-	done     chan struct{}
+	// nodeMu guards the nodeActors map (read/written off the do_ path —
+	// e.g. handleServiceProjection snapshots the registry directly).
+	nodeMu     sync.Mutex
+	nodeActors map[string]*NodeActor
 }
 
-// newNetworkActor creates and starts a NetworkActor.
+// newNetworkActor creates a NetworkActor. No goroutine to start — do()
+// serializes via sync.Mutex.
 func newNetworkActor(net *newtron.Network, idleTimeout time.Duration) *NetworkActor {
-	na := &NetworkActor{
+	return &NetworkActor{
 		net:         net,
 		idleTimeout: idleTimeout,
 		nodeActors:  make(map[string]*NodeActor),
-		requests:    make(chan request, 64),
-		done:        make(chan struct{}),
-	}
-	go na.run()
-	return na
-}
-
-// run is the actor's event loop.
-func (na *NetworkActor) run() {
-	defer close(na.done)
-	for req := range na.requests {
-		val, err := req.fn()
-		req.result <- response{value: val, err: err}
 	}
 }
 
-// do sends a closure to the actor and waits for the result.
+// do runs fn under the spec-serialization lock. Context cancellation that
+// happened before fn could start is honored; once fn is running it owns the
+// lock until it returns.
 func (na *NetworkActor) do(ctx context.Context, fn func() (any, error)) (any, error) {
-	res := make(chan response, 1)
-	select {
-	case na.requests <- request{fn: fn, result: res}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	na.do_.Lock()
+	defer na.do_.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	select {
-	case r := <-res:
-		return r.value, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return fn()
 }
 
 // getNodeActor returns or creates a NodeActor for the given device.
 func (na *NetworkActor) getNodeActor(device string) *NodeActor {
-	na.mu.Lock()
-	defer na.mu.Unlock()
+	na.nodeMu.Lock()
+	defer na.nodeMu.Unlock()
 	if actor, ok := na.nodeActors[device]; ok {
 		return actor
 	}
@@ -103,28 +103,26 @@ func (na *NetworkActor) getNodeActor(device string) *NodeActor {
 // cached node is now stale and must be rebuilt from the new spec on next
 // access.
 func (na *NetworkActor) removeNodeActor(device string) {
-	na.mu.Lock()
+	na.nodeMu.Lock()
 	actor, ok := na.nodeActors[device]
 	if ok {
 		delete(na.nodeActors, device)
 	}
-	na.mu.Unlock()
+	na.nodeMu.Unlock()
 	if ok {
 		actor.stop()
 	}
 }
 
-// stop shuts down the NetworkActor and all its NodeActors.
+// stop shuts down all NodeActors and drops the cache. NetworkActor itself has
+// no goroutine to wind down.
 func (na *NetworkActor) stop() {
-	na.mu.Lock()
+	na.nodeMu.Lock()
 	for _, nodeActor := range na.nodeActors {
 		nodeActor.stop()
 	}
 	na.nodeActors = make(map[string]*NodeActor)
-	na.mu.Unlock()
-
-	close(na.requests)
-	<-na.done
+	na.nodeMu.Unlock()
 }
 
 // ============================================================================
