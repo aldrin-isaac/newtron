@@ -106,7 +106,6 @@ Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/rec
 | `/intent/projection` | Per-Node projection (RawConfigDB) from intent replay |
 | `POST /intent/projection-diff` | Pre-commit diff for a hypothetical operation set (before/after/diff) |
 | `/intent/tree` | Intent DAG tree view |
-| `/intents` | List all intent records |
 
 **Device Writes** (S8) -- `POST` under `/newtron/v1/network/{n}/node/{d}/...`
 
@@ -124,7 +123,6 @@ Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/rec
 | `/create-portchannel`, `/delete-portchannel` | Create/delete PortChannel |
 | `/add-portchannel-member`, `/remove-portchannel-member` | Add/remove PortChannel member |
 | `/add-bgp-evpn-peer`, `/remove-bgp-evpn-peer` | Add/remove EVPN overlay peer |
-| `/apply-qos`, `/remove-qos` | Apply/remove QoS (node-level) |
 
 **Intent Operations** (S11)
 
@@ -162,10 +160,9 @@ Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/rec
 | `/apply-service`, `/remove-service`, `/refresh-service` | Service lifecycle |
 | `/configure-interface`, `/unconfigure-interface` | Configure/unconfigure interface |
 | `/bind-acl`, `/unbind-acl` | ACL binding |
-| `/bind-macvpn`, `/unbind-macvpn` | MAC-VPN binding |
 | `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
 | `/apply-qos`, `/remove-qos` | QoS policy |
-| `/set-property` | Set port property |
+| `/set-property`, `/clear-property` | Set/clear port property |
 
 ---
 
@@ -1892,7 +1889,7 @@ Bind a MAC-VPN to a VLAN at the node level (maps VLAN to L2VNI).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `vlan_id` | integer | yes | VLAN ID |
-| `vni` | integer | yes | L2 VNI number |
+| `macvpn` | string | yes | MAC-VPN spec name (carries the L2VNI; resolved from the spec at apply time) |
 
 **Response (200):** `WriteResult`
 
@@ -2477,10 +2474,9 @@ Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethe
 | Service | `apply-service`, `remove-service`, `refresh-service` | `service`, `ip_address`, `vlan`, `peer_as` |
 | Interface config | `configure-interface`, `unconfigure-interface` | `vrf`, `ip`, `vlan_id`, `tagged` |
 | ACL | `bind-acl`, `unbind-acl` | `acl`, `direction` |
-| MAC-VPN | `bind-macvpn`, `unbind-macvpn` | `macvpn` |
 | BGP | `add-bgp-peer`, `remove-bgp-peer` | `neighbor_ip`, `remote_as` |
 | QoS | `apply-qos`, `remove-qos` | `policy` |
-| Port property | `set-property` | `property`, `value` |
+| Port property | `set-property`, `clear-property` | `property`, `value` (set only) |
 
 All endpoints use `POST` method.
 
@@ -2719,6 +2715,20 @@ Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 |-------|------|----------|-------------|
 | `property` | string | yes | Property name (e.g., `"mtu"`, `"admin_status"`) |
 | `value` | string | yes | Property value |
+
+**Response (200):** `WriteResult`
+
+#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/clear-property
+
+Clear a previously-set property on the interface (reverse of `set-property`).
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `property` | string | yes | Property name to clear (e.g., `"mtu"`, `"admin_status"`) |
 
 **Response (200):** `WriteResult`
 
