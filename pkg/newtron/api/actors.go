@@ -32,69 +32,98 @@ type response struct {
 }
 
 // ============================================================================
-// NetworkActor — serializes spec operations for a single Network
+// networkEntity — one registered network's API-layer state
 // ============================================================================
 
-// NetworkActor owns a *newtron.Network and serializes all operations on it.
-type NetworkActor struct {
+// networkEntity is the API layer's record for one registered network: it
+// pairs the engine's *newtron.Network with the spec directory it was loaded
+// from, a read/write lock that makes composed spec operations atomic, and
+// a cache of per-device NodeActors. The Server holds one of these per
+// registered netID.
+//
+// This is NOT an actor — no goroutine, no message passing, no isolated
+// state. NodeActor IS an actor (cached transport + idle-timer driven by a
+// select loop); the asymmetry is deliberate.
+//
+// Reads vs writes: spec reads (List/Show/Get) take RLock and run
+// concurrently with each other; spec writes (Create/Update/Delete/Add/
+// Remove) take Lock and are exclusive against everything else. Writers
+// serialize against each other because they share network.json's
+// persistence layer — splitting network.json into per-resource files
+// would unlock cross-category write parallelism, but that's a separate
+// change.
+//
+// Why serialize at all: several public *newtron.Network methods compose
+// multiple internal operations under separate locks (e.g. CreateService
+// does GetService under internal.RLock, releases, then SaveService under
+// internal.Lock). The composition needs atomicity that internal.RWMutex
+// doesn't supply on its own. The lock here is what makes the composition
+// race-free.
+type networkEntity struct {
 	net         *newtron.Network
+	specDir     string
 	idleTimeout time.Duration
 
-	// nodeActors maps device names to their NodeActors.
-	mu         sync.Mutex
-	nodeActors map[string]*NodeActor
+	// mu serializes spec writes against writes and against reads. Reads
+	// proceed concurrently with each other under RLock.
+	mu sync.RWMutex
 
-	requests chan request
-	done     chan struct{}
+	// nodeMu guards the nodeActors map (accessed off the mu path —
+	// e.g. handleServiceProjection snapshots the registry directly).
+	nodeMu     sync.Mutex
+	nodeActors map[string]*NodeActor
 }
 
-// newNetworkActor creates and starts a NetworkActor.
-func newNetworkActor(net *newtron.Network, idleTimeout time.Duration) *NetworkActor {
-	na := &NetworkActor{
+// newNetworkEntity creates a networkEntity for a registered network. No
+// goroutine to start — the read/write methods serialize via sync.RWMutex.
+func newNetworkEntity(net *newtron.Network, specDir string, idleTimeout time.Duration) *networkEntity {
+	return &networkEntity{
 		net:         net,
+		specDir:     specDir,
 		idleTimeout: idleTimeout,
 		nodeActors:  make(map[string]*NodeActor),
-		requests:    make(chan request, 64),
-		done:        make(chan struct{}),
-	}
-	go na.run()
-	return na
-}
-
-// run is the actor's event loop.
-func (na *NetworkActor) run() {
-	defer close(na.done)
-	for req := range na.requests {
-		val, err := req.fn()
-		req.result <- response{value: val, err: err}
 	}
 }
 
-// do sends a closure to the actor and waits for the result.
-func (na *NetworkActor) do(ctx context.Context, fn func() (any, error)) (any, error) {
-	res := make(chan response, 1)
-	select {
-	case na.requests <- request{fn: fn, result: res}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+// write runs fn under the spec write lock. Context cancellation that
+// happened before fn could start is honored; once fn is running it owns the
+// lock until it returns. Used by any handler that mutates Network state
+// (Create/Update/Delete/Add/Remove). Mutually exclusive against both other
+// writes and any in-flight reads.
+func (ne *networkEntity) write(ctx context.Context, fn func() (any, error)) (any, error) {
+	ne.mu.Lock()
+	defer ne.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	select {
-	case r := <-res:
-		return r.value, r.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	return fn()
+}
+
+// read runs fn under the spec read lock. Multiple read closures run
+// concurrently; a writer waits for all in-flight readers to finish (and
+// blocks new readers behind itself, per sync.RWMutex's writer-preference).
+// Used by every handler that observes Network state without mutating it
+// (List/Show/Get). Public read methods that bypass internal locked
+// accessors (e.g. raw Spec() iteration in ListIPVPNs) are race-free under
+// this lock because no writer can run while RLock is held.
+func (ne *networkEntity) read(ctx context.Context, fn func() (any, error)) (any, error) {
+	ne.mu.RLock()
+	defer ne.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
+	return fn()
 }
 
 // getNodeActor returns or creates a NodeActor for the given device.
-func (na *NetworkActor) getNodeActor(device string) *NodeActor {
-	na.mu.Lock()
-	defer na.mu.Unlock()
-	if actor, ok := na.nodeActors[device]; ok {
+func (ne *networkEntity) getNodeActor(device string) *NodeActor {
+	ne.nodeMu.Lock()
+	defer ne.nodeMu.Unlock()
+	if actor, ok := ne.nodeActors[device]; ok {
 		return actor
 	}
-	actor := newNodeActor(na.net, device, na.idleTimeout)
-	na.nodeActors[device] = actor
+	actor := newNodeActor(ne.net, device, ne.idleTimeout)
+	ne.nodeActors[device] = actor
 	return actor
 }
 
@@ -102,29 +131,27 @@ func (na *NetworkActor) getNodeActor(device string) *NodeActor {
 // the cache. Called by handlers that mutate or delete a topology device — the
 // cached node is now stale and must be rebuilt from the new spec on next
 // access.
-func (na *NetworkActor) removeNodeActor(device string) {
-	na.mu.Lock()
-	actor, ok := na.nodeActors[device]
+func (ne *networkEntity) removeNodeActor(device string) {
+	ne.nodeMu.Lock()
+	actor, ok := ne.nodeActors[device]
 	if ok {
-		delete(na.nodeActors, device)
+		delete(ne.nodeActors, device)
 	}
-	na.mu.Unlock()
+	ne.nodeMu.Unlock()
 	if ok {
 		actor.stop()
 	}
 }
 
-// stop shuts down the NetworkActor and all its NodeActors.
-func (na *NetworkActor) stop() {
-	na.mu.Lock()
-	for _, nodeActor := range na.nodeActors {
+// stop shuts down all NodeActors and drops the cache. The entity itself
+// has no goroutine to wind down.
+func (ne *networkEntity) stop() {
+	ne.nodeMu.Lock()
+	for _, nodeActor := range ne.nodeActors {
 		nodeActor.stop()
 	}
-	na.nodeActors = make(map[string]*NodeActor)
-	na.mu.Unlock()
-
-	close(na.requests)
-	<-na.done
+	ne.nodeActors = make(map[string]*NodeActor)
+	ne.nodeMu.Unlock()
 }
 
 // ============================================================================

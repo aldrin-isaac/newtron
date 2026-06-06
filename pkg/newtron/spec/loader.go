@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
@@ -13,13 +14,20 @@ import (
 // SpecDir is the default specification directory
 var SpecDir = "/etc/newtron"
 
-// Loader handles loading and validating specification files
+// Loader handles loading and validating specification files.
+//
+// All post-Load() access to the mutable in-memory state — the lazy-loaded
+// profile cache, and the network / topology pointers that get reassigned by
+// SaveNetwork / SaveTopology — is guarded by mu. platforms is read-only
+// after Load() (no setter reassigns it), so its accessors do not take mu.
 type Loader struct {
 	specDir   string
-	network   *NetworkSpecFile
 	platforms *PlatformSpecFile
-	topology  *TopologySpecFile // nil if topology.json doesn't exist
-	profiles  map[string]*DeviceProfile
+
+	mu       sync.RWMutex
+	network  *NetworkSpecFile
+	topology *TopologySpecFile // nil if topology.json doesn't exist
+	profiles map[string]*DeviceProfile
 }
 
 // NewLoader creates a new specification loader
@@ -70,11 +78,16 @@ func (l *Loader) Load() error {
 	return nil
 }
 
-// LoadProfile loads a device profile
+// LoadProfile loads a device profile, caching it for subsequent reads.
+// Concurrent first-time loads for the same name may each do the disk read,
+// but only one wins the cache slot; later callers see the cached value.
 func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
+	l.mu.RLock()
 	if profile, ok := l.profiles[deviceName]; ok {
+		l.mu.RUnlock()
 		return profile, nil
 	}
+	l.mu.RUnlock()
 
 	path := filepath.Join(l.specDir, "profiles", deviceName+".json")
 	data, err := os.ReadFile(path)
@@ -95,6 +108,14 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 		return nil, fmt.Errorf("validating profile %s: %w", deviceName, err)
 	}
 
+	// Double-check under the write lock — another goroutine may have raced
+	// us through the disk read; if so, return its cached copy so we don't
+	// re-publish a new pointer that callers already hold a reference to.
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if existing, ok := l.profiles[deviceName]; ok {
+		return existing, nil
+	}
 	l.profiles[deviceName] = &profile
 	return &profile, nil
 }
@@ -354,18 +375,26 @@ func (l *Loader) validateProfile(profile *DeviceProfile) error {
 	return v.Build()
 }
 
-// GetNetwork returns the network spec
+// GetNetwork returns the network spec. Reads l.network under RLock — the
+// pointer is reassigned by SaveNetwork.
 func (l *Loader) GetNetwork() *NetworkSpecFile {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.network
 }
 
-// GetPlatforms returns the platform spec
+// GetPlatforms returns the platform spec. platforms is set once at Load()
+// and never reassigned, so no lock is needed (the publication via the
+// outer Load() return value establishes the happens-before).
 func (l *Loader) GetPlatforms() *PlatformSpecFile {
 	return l.platforms
 }
 
 // GetTopology returns the topology spec, or nil if no topology.json was found.
+// Reads l.topology under RLock — the pointer is reassigned by SaveTopology.
 func (l *Loader) GetTopology() *TopologySpecFile {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.topology
 }
 
@@ -425,8 +454,11 @@ func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 
-	// Update the in-memory cache
+	// Update the in-memory cache under the write lock so concurrent
+	// LoadProfile readers see the new pointer atomically.
+	l.mu.Lock()
 	l.profiles[name] = profile
+	l.mu.Unlock()
 
 	return nil
 }
@@ -437,7 +469,9 @@ func (l *Loader) DeleteProfile(name string) error {
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("deleting profile %s: %w", name, err)
 	}
+	l.mu.Lock()
 	delete(l.profiles, name)
+	l.mu.Unlock()
 	return nil
 }
 
@@ -475,8 +509,11 @@ func (l *Loader) SaveNetwork(spec *NetworkSpecFile) error {
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 
-	// Update the in-memory copy
+	// Reassign the in-memory pointer under the write lock so concurrent
+	// GetNetwork readers see the new pointer atomically.
+	l.mu.Lock()
 	l.network = spec
+	l.mu.Unlock()
 
 	return nil
 }
@@ -515,8 +552,11 @@ func (l *Loader) SaveTopology(spec *TopologySpecFile) error {
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 
-	// Update the in-memory copy
+	// Reassign the in-memory pointer under the write lock so concurrent
+	// GetTopology readers see the new pointer atomically.
+	l.mu.Lock()
 	l.topology = spec
+	l.mu.Unlock()
 
 	return nil
 }
