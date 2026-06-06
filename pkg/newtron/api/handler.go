@@ -235,25 +235,25 @@ func decodeJSON(r *http.Request, v any) error {
 	return err
 }
 
-// requireNetwork looks up the NetworkActor or writes a 404.
-func (s *Server) requireNetwork(w http.ResponseWriter, r *http.Request) *NetworkActor {
+// requireNetwork looks up the networkScope or writes a 404.
+func (s *Server) requireNetwork(w http.ResponseWriter, r *http.Request) *networkScope {
 	netID := r.PathValue("netID")
-	na := s.getNetwork(netID)
-	if na == nil {
+	ns := s.getNetwork(netID)
+	if ns == nil {
 		writeError(w, &notRegisteredError{netID})
 		return nil
 	}
-	return na
+	return ns
 }
 
-// requireNodeActor looks up the NetworkActor and NodeActor, or writes an error.
-func (s *Server) requireNodeActor(w http.ResponseWriter, r *http.Request) (*NetworkActor, *NodeActor) {
-	na := s.requireNetwork(w, r)
-	if na == nil {
+// requireNodeActor looks up the networkScope and NodeActor, or writes an error.
+func (s *Server) requireNodeActor(w http.ResponseWriter, r *http.Request) (*networkScope, *NodeActor) {
+	ns := s.requireNetwork(w, r)
+	if ns == nil {
 		return nil, nil
 	}
 	device := r.PathValue("device")
-	return na, na.getNodeActor(device)
+	return ns, ns.getNodeActor(device)
 }
 
 // execOpts reads dry_run and no_save query params.

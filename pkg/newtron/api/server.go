@@ -40,9 +40,9 @@ type Server struct {
 	portResolver PortResolver
 }
 
-// networkEntry pairs a NetworkActor with its registration metadata.
+// networkEntry pairs a networkScope with its registration metadata.
 type networkEntry struct {
-	actor   *NetworkActor
+	scope   *networkScope
 	specDir string
 }
 
@@ -78,7 +78,7 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortR
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			for _, entry := range s.networks {
-				entry.actor.stop()
+				entry.scope.stop()
 			}
 			s.networks = make(map[string]*networkEntry)
 		}),
@@ -110,7 +110,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	}
 
 	s.networks[id] = &networkEntry{
-		actor:   newNetworkActor(net, s.idleTimeout),
+		scope:   newNetworkScope(net, s.idleTimeout),
 		specDir: specDir,
 	}
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
@@ -128,14 +128,14 @@ func (s *Server) UnregisterNetwork(id string) error {
 		return fmt.Errorf("network '%s' not registered", id)
 	}
 
-	entry.actor.stop()
+	entry.scope.stop()
 	delete(s.networks, id)
 	s.logger.Printf("unregistered network '%s'", id)
 	return nil
 }
 
-// ReloadNetwork stops the existing NetworkActor, reloads specs from disk,
-// and creates a fresh NetworkActor. SSH connections reconnect lazily on next request.
+// ReloadNetwork stops the existing networkScope, reloads specs from disk,
+// and creates a fresh networkScope. SSH connections reconnect lazily on next request.
 func (s *Server) ReloadNetwork(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,8 +145,8 @@ func (s *Server) ReloadNetwork(id string) error {
 		return &notRegisteredError{id}
 	}
 
-	// Stop old actor (drains all NodeActors and SSH connections)
-	entry.actor.stop()
+	// Stop old scope (drains all NodeActors and SSH connections)
+	entry.scope.stop()
 
 	// Reload specs from disk
 	net, err := newtron.LoadNetwork(entry.specDir, topologyName(entry.specDir), s.portResolver)
@@ -154,24 +154,24 @@ func (s *Server) ReloadNetwork(id string) error {
 		return fmt.Errorf("reloading specs from %s: %w", entry.specDir, err)
 	}
 
-	// Replace with new actor
+	// Replace with new scope
 	s.networks[id] = &networkEntry{
-		actor:   newNetworkActor(net, s.idleTimeout),
+		scope:   newNetworkScope(net, s.idleTimeout),
 		specDir: entry.specDir,
 	}
 	s.logger.Printf("reloaded network '%s' from %s", id, entry.specDir)
 	return nil
 }
 
-// getNetwork returns the NetworkActor for the given ID, or nil.
-func (s *Server) getNetwork(id string) *NetworkActor {
+// getNetwork returns the networkScope for the given ID, or nil.
+func (s *Server) getNetwork(id string) *networkScope {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	entry := s.networks[id]
 	if entry == nil {
 		return nil
 	}
-	return entry.actor
+	return entry.scope
 }
 
 // listNetworks returns info about all registered networks.
@@ -183,9 +183,9 @@ func (s *Server) listNetworks() []NetworkInfo {
 		result = append(result, NetworkInfo{
 			ID:          id,
 			SpecDir:     entry.specDir,
-			HasTopology: entry.actor.net.HasTopology(),
+			HasTopology: entry.scope.net.HasTopology(),
 			Topology:    topologyName(entry.specDir),
-			Nodes:       entry.actor.net.ListNodes(),
+			Nodes:       entry.scope.net.ListNodes(),
 		})
 	}
 	return result
