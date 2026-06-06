@@ -20,6 +20,28 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// Lock keys identify the persistence-boundary slices of Network state that
+// the lockManager hands out distinct *sync.RWMutex instances for. Each key
+// matches a single ownership scope:
+//
+//   - keyNetworkSpec covers everything in network.json (the OverridableSpecs
+//     maps plus Zones) and the file write that persists them.
+//   - keyTopology covers topology.json (Devices + Links) and the file write
+//     that persists them.
+//   - keyNodes covers the runtime *node.Node cache populated by GetNode.
+//
+// Profiles are not in this set — spec.Loader has its own RWMutex (added in
+// PR #100) and serializes per-profile correctly on its own.
+//
+// Lock-ordering rule (multi-key acquisitions): alphabetical by key string.
+// Verified for every cross-key call site in this file. Single-key callers
+// are exempt; the rule only kicks in when a caller needs more than one.
+const (
+	keyNetworkSpec lockKey = "network.json"
+	keyTopology    lockKey = "topology.json"
+	keyNodes       lockKey = "nodes"
+)
+
 // Network is the top-level object representing the entire network.
 // It loads and owns all specs, and creates Device instances within its context.
 //
@@ -50,11 +72,15 @@ type Network struct {
 	// Loader for loading device profiles (already initialized with Load())
 	loader *spec.Loader
 
-	// Connected devices (created in this Network's context)
+	// Connected devices (created in this Network's context). Protected by
+	// the keyNodes lock.
 	devices map[string]*node.Node
 
-	// Mutex for thread safety
-	mu sync.RWMutex
+	// locks hands out per-key *sync.RWMutex instances. See the lock key
+	// constants above for the keys in use here. Embedded as a value so
+	// Network's zero value works for tests that construct &Network{...}
+	// literally; lockManager itself is zero-value safe.
+	locks lockManager
 }
 
 // NewNetwork creates a new Network instance by loading all spec files.
@@ -114,56 +140,61 @@ func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, err
 
 // GetService returns a service definition by name.
 func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
-	return getSpec(&n.mu, n.spec.Services, "service", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Services, "service", util.NormalizeName(name))
 }
 
 // GetFilter returns a filter specification by name.
 func (n *Network) GetFilter(name string) (*spec.FilterSpec, error) {
-	return getSpec(&n.mu, n.spec.Filters, "filter", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Filters, "filter", util.NormalizeName(name))
 }
 
-// GetPlatform returns a platform definition by name.
+// GetPlatform returns a platform definition by name. Platforms are set once
+// at Load() and never mutated, so no lock is needed.
 func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error) {
-	return getSpec(&n.mu, n.platforms.Platforms, "platform", name)
+	p, ok := n.platforms.Platforms[name]
+	if !ok {
+		return nil, fmt.Errorf("platform '%s' not found", name)
+	}
+	return p, nil
 }
 
-// Platforms returns all platform definitions.
+// Platforms returns all platform definitions. Set once at Load(); no lock
+// is needed.
 func (n *Network) Platforms() map[string]*spec.PlatformSpec {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	return n.platforms.Platforms
 }
 
 // GetPrefixList returns a prefix list by name.
 func (n *Network) GetPrefixList(name string) ([]string, error) {
-	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.PrefixLists, "prefix list", util.NormalizeName(name))
 }
 
 // GetQoSPolicy returns a QoS policy by name.
 func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
-	return getSpec(&n.mu, n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
 }
 
 // GetIPVPN returns an IP-VPN definition by name.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
 }
 
 // GetMACVPN returns a MAC-VPN definition by name.
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.MACVPNs, "macvpn", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.MACVPNs, "macvpn", util.NormalizeName(name))
 }
 
 // GetRoutePolicy returns a route policy by name.
 func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
-	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.RoutePolicies, "route policy", util.NormalizeName(name))
 }
 
 // FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.
 // Returns ("", nil) if no MACVPN matches.
 func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	for name, def := range n.spec.MACVPNs {
 		if def.VNI == vni {
@@ -175,8 +206,9 @@ func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
 
 // ListServices returns all available service names.
 func (n *Network) ListServices() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.Services))
 	for name := range n.spec.Services {
@@ -187,8 +219,9 @@ func (n *Network) ListServices() []string {
 
 // ListFilters returns all available filter names.
 func (n *Network) ListFilters() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.Filters))
 	for name := range n.spec.Filters {
@@ -211,8 +244,9 @@ func (n *Network) persistSpec() error {
 
 // SaveIPVPN creates or updates an IP-VPN definition in network.json.
 func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	spec.NormalizeIPVPNRefs(def)
@@ -227,8 +261,9 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 // DeleteIPVPN removes an IP-VPN definition from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteIPVPN(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -245,8 +280,9 @@ func (n *Network) DeleteIPVPN(name string) error {
 
 // SaveMACVPN creates or updates a MAC-VPN definition in network.json.
 func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	// MACVPNSpec has no name-reference fields to normalize.
@@ -261,8 +297,9 @@ func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
 // DeleteMACVPN removes a MAC-VPN definition from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteMACVPN(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -279,8 +316,9 @@ func (n *Network) DeleteMACVPN(name string) error {
 
 // SaveQoSPolicy creates or updates a QoS policy in network.json.
 func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	// QoSPolicy has no name-reference fields to normalize.
@@ -295,8 +333,9 @@ func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
 // DeleteQoSPolicy removes a QoS policy from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteQoSPolicy(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -313,8 +352,9 @@ func (n *Network) DeleteQoSPolicy(name string) error {
 
 // SaveFilter creates or updates a filter in network.json.
 func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	spec.NormalizeFilterRefs(def)
@@ -329,8 +369,9 @@ func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 // DeleteFilter removes a filter from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteFilter(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -347,8 +388,9 @@ func (n *Network) DeleteFilter(name string) error {
 
 // SavePrefixList saves a prefix list to the network spec.
 func (n *Network) SavePrefixList(name string, prefixes []string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -361,8 +403,9 @@ func (n *Network) SavePrefixList(name string, prefixes []string) error {
 
 // DeletePrefixList deletes a prefix list from the network spec.
 func (n *Network) DeletePrefixList(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -389,8 +432,9 @@ func (n *Network) DeletePrefixList(name string) error {
 
 // SaveRoutePolicy saves a route policy to the network spec.
 func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -404,8 +448,9 @@ func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
 
 // DeleteRoutePolicy deletes a route policy from the network spec.
 func (n *Network) DeleteRoutePolicy(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -424,8 +469,9 @@ func (n *Network) DeleteRoutePolicy(name string) error {
 
 // ListPrefixLists returns all prefix list names.
 func (n *Network) ListPrefixLists() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.PrefixLists))
 	for name := range n.spec.PrefixLists {
@@ -436,8 +482,9 @@ func (n *Network) ListPrefixLists() []string {
 
 // ListRoutePolicies returns all route policy names.
 func (n *Network) ListRoutePolicies() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.RoutePolicies))
 	for name := range n.spec.RoutePolicies {
@@ -448,8 +495,9 @@ func (n *Network) ListRoutePolicies() []string {
 
 // SaveService creates or updates a service definition in network.json.
 func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	spec.NormalizeServiceRefs(def)
@@ -464,8 +512,9 @@ func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 // DeleteService removes a service definition from network.json.
 // Returns error if any interface has it applied (caller checks this).
 func (n *Network) DeleteService(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -475,8 +524,9 @@ func (n *Network) DeleteService(name string) error {
 
 // ListQoSPolicies returns all QoS policy names.
 func (n *Network) ListQoSPolicies() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	if n.spec.QoSPolicies == nil {
 		return nil
@@ -566,10 +616,11 @@ func (n *Network) SaveProfile(name string, profile *spec.DeviceProfile) error {
 func (n *Network) DeleteProfile(name string, force bool) error {
 	// A profile and a topology device share their name 1:1 — the profile
 	// "reference" from topology is the matching name in topology.Devices.
-	n.mu.RLock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.RLock()
 	topo := n.loader.GetTopology()
 	hasTopoDevice := topo != nil && topo.HasDevice(name)
-	n.mu.RUnlock()
+	topoMu.RUnlock()
 
 	if hasTopoDevice {
 		if !force {
@@ -592,8 +643,9 @@ func (n *Network) DeleteProfile(name string, force bool) error {
 
 // ListZones returns all zone names from the network spec.
 func (n *Network) ListZones() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.Zones))
 	for name := range n.spec.Zones {
@@ -604,8 +656,9 @@ func (n *Network) ListZones() []string {
 
 // GetZone returns a zone spec by name.
 func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	z, ok := n.spec.Zones[name]
 	if !ok {
@@ -616,8 +669,9 @@ func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
 
 // SaveZone creates or updates a zone in network.json.
 func (n *Network) SaveZone(name string, zone *spec.ZoneSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	if n.spec.Zones == nil {
 		n.spec.Zones = make(map[string]*spec.ZoneSpec)
@@ -629,8 +683,9 @@ func (n *Network) SaveZone(name string, zone *spec.ZoneSpec) error {
 // DeleteZone removes a zone from network.json.
 // Returns error if any profile references it.
 func (n *Network) DeleteZone(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	// Check for profiles in this zone
 	profiles := n.loader.ListProfiles()
@@ -656,8 +711,15 @@ func (n *Network) DeleteZone(name string) error {
 // The Device is created in this Network's context and has access to all
 // Network-level specs through its parent reference.
 func (n *Network) GetNode(name string) (*node.Node, error) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	// Lock-ordering rule: alphabetical by key. keyNetworkSpec < keyNodes.
+	// resolveProfile + buildResolvedSpecs read n.spec.Zones and other
+	// network.json maps; the cache write requires keyNodes.Lock.
+	netMu := n.locks.lock(keyNetworkSpec)
+	netMu.RLock()
+	defer netMu.RUnlock()
+	nodesMu := n.locks.lock(keyNodes)
+	nodesMu.Lock()
+	defer nodesMu.Unlock()
 
 	// Return existing device if already loaded
 	if dev, ok := n.devices[name]; ok {
@@ -750,8 +812,9 @@ func (n *Network) InitFromDeviceIntent(ctx context.Context, name string) (*node.
 
 // ListDevices returns names of all loaded devices.
 func (n *Network) ListNodes() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNodes)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.devices))
 	for name := range n.devices {
@@ -778,8 +841,9 @@ func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) er
 		return fmt.Errorf("device entry required")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyTopology)
+	mu.Lock()
+	defer mu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
@@ -821,8 +885,15 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 		return fmt.Errorf("topology device name required")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	// Lock-ordering rule: alphabetical by key. keyNodes < keyTopology.
+	// keyNodes covers the n.devices cache clear at the end of this method;
+	// keyTopology covers the topology.json mutation.
+	nodesMu := n.locks.lock(keyNodes)
+	nodesMu.Lock()
+	defer nodesMu.Unlock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.Lock()
+	defer topoMu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil || !topo.HasDevice(name) {
@@ -881,8 +952,15 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice)
 		return fmt.Errorf("device entry required")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	// Lock-ordering rule: alphabetical by key. keyNodes < keyTopology.
+	// keyNodes covers the n.devices cache clear at the end; keyTopology
+	// covers the topology.json mutation.
+	nodesMu := n.locks.lock(keyNodes)
+	nodesMu.Lock()
+	defer nodesMu.Unlock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.Lock()
+	defer topoMu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil || !topo.HasDevice(name) {
@@ -918,8 +996,9 @@ func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
 		return fmt.Errorf("link endpoints required (a, z)")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyTopology)
+	mu.Lock()
+	defer mu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
@@ -972,8 +1051,9 @@ func (n *Network) DeleteTopologyLink(endpoint string) error {
 		return fmt.Errorf("link endpoint required (device:interface)")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyTopology)
+	mu.Lock()
+	defer mu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
