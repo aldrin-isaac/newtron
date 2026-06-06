@@ -463,6 +463,63 @@ func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
 	return nil
 }
 
+// CreateProfile atomically creates a new profile file. Returns an error if
+// a profile with that name already exists (either in the in-memory cache
+// or on disk). The whole check + write runs under l.mu.Lock so concurrent
+// CreateProfile calls for the same name can't both succeed.
+//
+// Race-safe alternative to LoadProfile-then-SaveProfile composed at a
+// higher layer — the same composition used to live in public
+// (*newtron.Network).CreateProfile, which raced.
+func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Cache hit means it exists in memory.
+	if _, exists := l.profiles[name]; exists {
+		return fmt.Errorf("profile '%s' already exists", name)
+	}
+
+	// On-disk file may exist even when the cache hasn't seen it yet —
+	// e.g. profile was written before this Loader started, then not
+	// loaded yet. Check the filesystem too.
+	profileDir := filepath.Join(l.specDir, "profiles")
+	path := filepath.Join(profileDir, name+".json")
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("profile '%s' already exists", name)
+	}
+
+	// Inline what SaveProfile does (we already hold the lock).
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("creating profiles directory: %w", err)
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling profile %s: %w", name, err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(profileDir, "profile-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+	l.profiles[name] = profile
+	return nil
+}
+
 // DeleteProfile removes a device profile file and its cache entry.
 func (l *Loader) DeleteProfile(name string) error {
 	path := filepath.Join(l.specDir, "profiles", name+".json")

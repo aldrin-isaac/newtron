@@ -20,6 +20,28 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// Lock keys identify the persistence-boundary slices of Network state that
+// the lockManager hands out distinct *sync.RWMutex instances for. Each key
+// matches a single ownership scope:
+//
+//   - keyNetworkSpec covers everything in network.json (the OverridableSpecs
+//     maps plus Zones) and the file write that persists them.
+//   - keyTopology covers topology.json (Devices + Links) and the file write
+//     that persists them.
+//   - keyNodes covers the runtime *node.Node cache populated by GetNode.
+//
+// Profiles are not in this set — spec.Loader has its own RWMutex (added in
+// PR #100) and serializes per-profile correctly on its own.
+//
+// Lock-ordering rule (multi-key acquisitions): alphabetical by key string.
+// Verified for every cross-key call site in this file. Single-key callers
+// are exempt; the rule only kicks in when a caller needs more than one.
+const (
+	keyNetworkSpec lockKey = "network.json"
+	keyTopology    lockKey = "topology.json"
+	keyNodes       lockKey = "nodes"
+)
+
 // Network is the top-level object representing the entire network.
 // It loads and owns all specs, and creates Device instances within its context.
 //
@@ -50,11 +72,15 @@ type Network struct {
 	// Loader for loading device profiles (already initialized with Load())
 	loader *spec.Loader
 
-	// Connected devices (created in this Network's context)
+	// Connected devices (created in this Network's context). Protected by
+	// the keyNodes lock.
 	devices map[string]*node.Node
 
-	// Mutex for thread safety
-	mu sync.RWMutex
+	// locks hands out per-key *sync.RWMutex instances. See the lock key
+	// constants above for the keys in use here. Embedded as a value so
+	// Network's zero value works for tests that construct &Network{...}
+	// literally; lockManager itself is zero-value safe.
+	locks lockManager
 }
 
 // NewNetwork creates a new Network instance by loading all spec files.
@@ -114,56 +140,61 @@ func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, err
 
 // GetService returns a service definition by name.
 func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
-	return getSpec(&n.mu, n.spec.Services, "service", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Services, "service", util.NormalizeName(name))
 }
 
 // GetFilter returns a filter specification by name.
 func (n *Network) GetFilter(name string) (*spec.FilterSpec, error) {
-	return getSpec(&n.mu, n.spec.Filters, "filter", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Filters, "filter", util.NormalizeName(name))
 }
 
-// GetPlatform returns a platform definition by name.
+// GetPlatform returns a platform definition by name. Platforms are set once
+// at Load() and never mutated, so no lock is needed.
 func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error) {
-	return getSpec(&n.mu, n.platforms.Platforms, "platform", name)
+	p, ok := n.platforms.Platforms[name]
+	if !ok {
+		return nil, fmt.Errorf("platform '%s' not found", name)
+	}
+	return p, nil
 }
 
-// Platforms returns all platform definitions.
+// Platforms returns all platform definitions. Set once at Load(); no lock
+// is needed.
 func (n *Network) Platforms() map[string]*spec.PlatformSpec {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	return n.platforms.Platforms
 }
 
 // GetPrefixList returns a prefix list by name.
 func (n *Network) GetPrefixList(name string) ([]string, error) {
-	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.PrefixLists, "prefix list", util.NormalizeName(name))
 }
 
 // GetQoSPolicy returns a QoS policy by name.
 func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
-	return getSpec(&n.mu, n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
 }
 
 // GetIPVPN returns an IP-VPN definition by name.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
 }
 
 // GetMACVPN returns a MAC-VPN definition by name.
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.MACVPNs, "macvpn", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.MACVPNs, "macvpn", util.NormalizeName(name))
 }
 
 // GetRoutePolicy returns a route policy by name.
 func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
-	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.RoutePolicies, "route policy", util.NormalizeName(name))
 }
 
 // FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.
 // Returns ("", nil) if no MACVPN matches.
 func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	for name, def := range n.spec.MACVPNs {
 		if def.VNI == vni {
@@ -175,8 +206,9 @@ func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
 
 // ListServices returns all available service names.
 func (n *Network) ListServices() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.Services))
 	for name := range n.spec.Services {
@@ -187,8 +219,9 @@ func (n *Network) ListServices() []string {
 
 // ListFilters returns all available filter names.
 func (n *Network) ListFilters() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.Filters))
 	for name := range n.spec.Filters {
@@ -211,8 +244,9 @@ func (n *Network) persistSpec() error {
 
 // SaveIPVPN creates or updates an IP-VPN definition in network.json.
 func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	spec.NormalizeIPVPNRefs(def)
@@ -227,8 +261,9 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 // DeleteIPVPN removes an IP-VPN definition from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteIPVPN(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -245,8 +280,9 @@ func (n *Network) DeleteIPVPN(name string) error {
 
 // SaveMACVPN creates or updates a MAC-VPN definition in network.json.
 func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	// MACVPNSpec has no name-reference fields to normalize.
@@ -261,8 +297,9 @@ func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
 // DeleteMACVPN removes a MAC-VPN definition from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteMACVPN(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -279,8 +316,9 @@ func (n *Network) DeleteMACVPN(name string) error {
 
 // SaveQoSPolicy creates or updates a QoS policy in network.json.
 func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	// QoSPolicy has no name-reference fields to normalize.
@@ -295,8 +333,9 @@ func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
 // DeleteQoSPolicy removes a QoS policy from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteQoSPolicy(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -313,8 +352,9 @@ func (n *Network) DeleteQoSPolicy(name string) error {
 
 // SaveFilter creates or updates a filter in network.json.
 func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	spec.NormalizeFilterRefs(def)
@@ -329,8 +369,9 @@ func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 // DeleteFilter removes a filter from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteFilter(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -347,8 +388,9 @@ func (n *Network) DeleteFilter(name string) error {
 
 // SavePrefixList saves a prefix list to the network spec.
 func (n *Network) SavePrefixList(name string, prefixes []string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -361,8 +403,9 @@ func (n *Network) SavePrefixList(name string, prefixes []string) error {
 
 // DeletePrefixList deletes a prefix list from the network spec.
 func (n *Network) DeletePrefixList(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -389,8 +432,9 @@ func (n *Network) DeletePrefixList(name string) error {
 
 // SaveRoutePolicy saves a route policy to the network spec.
 func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -404,8 +448,9 @@ func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
 
 // DeleteRoutePolicy deletes a route policy from the network spec.
 func (n *Network) DeleteRoutePolicy(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -424,8 +469,9 @@ func (n *Network) DeleteRoutePolicy(name string) error {
 
 // ListPrefixLists returns all prefix list names.
 func (n *Network) ListPrefixLists() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.PrefixLists))
 	for name := range n.spec.PrefixLists {
@@ -436,8 +482,9 @@ func (n *Network) ListPrefixLists() []string {
 
 // ListRoutePolicies returns all route policy names.
 func (n *Network) ListRoutePolicies() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.RoutePolicies))
 	for name := range n.spec.RoutePolicies {
@@ -448,8 +495,9 @@ func (n *Network) ListRoutePolicies() []string {
 
 // SaveService creates or updates a service definition in network.json.
 func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 	spec.NormalizeServiceRefs(def)
@@ -464,8 +512,9 @@ func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 // DeleteService removes a service definition from network.json.
 // Returns error if any interface has it applied (caller checks this).
 func (n *Network) DeleteService(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	name = util.NormalizeName(name)
 
@@ -475,8 +524,9 @@ func (n *Network) DeleteService(name string) error {
 
 // ListQoSPolicies returns all QoS policy names.
 func (n *Network) ListQoSPolicies() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	if n.spec.QoSPolicies == nil {
 		return nil
@@ -488,7 +538,494 @@ func (n *Network) ListQoSPolicies() []string {
 	return names
 }
 
+// ============================================================================
+// Atomic Create methods — single-Lock check + write + persist
+// ============================================================================
+//
+// Each method holds keyNetworkSpec.Lock from the existence check through
+// the in-memory mutation and the disk persist. This replaces the pre-PR-B
+// pattern where the public layer composed internal.GetX (RLock + release)
+// with internal.SaveX (Lock + release) — two concurrent CreateX(name) calls
+// could both pass the existence check and both write, race-y. With the
+// lock held across the whole operation, exactly one CreateX wins.
+//
+// Error shape is preserved for callers: the existing public layer returned
+// `fmt.Errorf("X 'name' already exists", ...)` and so do these.
+
+// CreateService atomically creates a new service definition. Returns an
+// error if a service with the given name already exists.
+func (n *Network) CreateService(name string, def *spec.ServiceSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.Services[name]; exists {
+		return fmt.Errorf("service '%s' already exists", name)
+	}
+	spec.NormalizeServiceRefs(def)
+	if n.spec.Services == nil {
+		n.spec.Services = make(map[string]*spec.ServiceSpec)
+	}
+	n.spec.Services[name] = def
+	return n.persistSpec()
+}
+
+// CreateIPVPN atomically creates a new IP-VPN definition. Returns an error
+// if an IPVPN with the given name already exists.
+func (n *Network) CreateIPVPN(name string, def *spec.IPVPNSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.IPVPNs[name]; exists {
+		return fmt.Errorf("ipvpn '%s' already exists", name)
+	}
+	spec.NormalizeIPVPNRefs(def)
+	if n.spec.IPVPNs == nil {
+		n.spec.IPVPNs = make(map[string]*spec.IPVPNSpec)
+	}
+	n.spec.IPVPNs[name] = def
+	return n.persistSpec()
+}
+
+// CreateMACVPN atomically creates a new MAC-VPN definition. Returns an error
+// if a MACVPN with the given name already exists.
+func (n *Network) CreateMACVPN(name string, def *spec.MACVPNSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.MACVPNs[name]; exists {
+		return fmt.Errorf("macvpn '%s' already exists", name)
+	}
+	if n.spec.MACVPNs == nil {
+		n.spec.MACVPNs = make(map[string]*spec.MACVPNSpec)
+	}
+	n.spec.MACVPNs[name] = def
+	return n.persistSpec()
+}
+
+// CreateQoSPolicy atomically creates a new QoS policy. Returns an error
+// if a policy with the given name already exists.
+func (n *Network) CreateQoSPolicy(name string, def *spec.QoSPolicy) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.QoSPolicies[name]; exists {
+		return fmt.Errorf("QoS policy '%s' already exists", name)
+	}
+	if n.spec.QoSPolicies == nil {
+		n.spec.QoSPolicies = make(map[string]*spec.QoSPolicy)
+	}
+	n.spec.QoSPolicies[name] = def
+	return n.persistSpec()
+}
+
+// CreateFilter atomically creates a new filter. Returns an error if a
+// filter with the given name already exists.
+func (n *Network) CreateFilter(name string, def *spec.FilterSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.Filters[name]; exists {
+		return fmt.Errorf("filter '%s' already exists", name)
+	}
+	spec.NormalizeFilterRefs(def)
+	if n.spec.Filters == nil {
+		n.spec.Filters = make(map[string]*spec.FilterSpec)
+	}
+	n.spec.Filters[name] = def
+	return n.persistSpec()
+}
+
+// CreatePrefixList atomically creates a new prefix list. Returns an error
+// if a prefix list with the given name already exists.
+func (n *Network) CreatePrefixList(name string, prefixes []string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.PrefixLists[name]; exists {
+		return fmt.Errorf("prefix list '%s' already exists", name)
+	}
+	if n.spec.PrefixLists == nil {
+		n.spec.PrefixLists = make(map[string][]string)
+	}
+	n.spec.PrefixLists[name] = prefixes
+	return n.persistSpec()
+}
+
+// CreateRoutePolicy atomically creates a new route policy. Returns an error
+// if a route policy with the given name already exists.
+func (n *Network) CreateRoutePolicy(name string, def *spec.RoutePolicy) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.RoutePolicies[name]; exists {
+		return fmt.Errorf("route policy '%s' already exists", name)
+	}
+	spec.NormalizeRoutePolicyRefs(def)
+	if n.spec.RoutePolicies == nil {
+		n.spec.RoutePolicies = make(map[string]*spec.RoutePolicy)
+	}
+	n.spec.RoutePolicies[name] = def
+	return n.persistSpec()
+}
+
+// CreateZone atomically creates a new zone. Returns an error if a zone
+// with the given name already exists.
+func (n *Network) CreateZone(name string, zone *spec.ZoneSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, exists := n.spec.Zones[name]; exists {
+		return fmt.Errorf("zone '%s' already exists", name)
+	}
+	if n.spec.Zones == nil {
+		n.spec.Zones = make(map[string]*spec.ZoneSpec)
+	}
+	n.spec.Zones[name] = zone
+	return n.persistSpec()
+}
+
+// CreateProfile atomically creates a new device profile. Delegates to
+// spec.Loader.CreateProfile which holds Loader's RWMutex across the
+// existence check and the file write.
+func (n *Network) CreateProfile(name string, profile *spec.DeviceProfile) error {
+	return n.loader.CreateProfile(name, profile)
+}
+
+// ============================================================================
+// Atomic Add / Remove methods — read-modify-write under one Lock
+// ============================================================================
+//
+// Each method holds keyNetworkSpec.Lock across the parent lookup, the
+// child-collection mutation, and the disk persist. This replaces the
+// pre-PR-B pattern where the public layer composed internal.GetX + mutate
+// + internal.SaveX as separate critical sections — two concurrent AddX
+// calls could overwrite each other's mutations (last writer wins).
+
+// AddQoSQueueToPolicy atomically inserts a QoS queue at the given index in
+// a QoS policy. Returns an error if the policy doesn't exist or the index
+// is already populated.
+func (n *Network) AddQoSQueueToPolicy(policy string, queueID int, queue *spec.QoSQueue) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	p, ok := n.spec.QoSPolicies[policy]
+	if !ok {
+		return fmt.Errorf("QoS policy '%s' not found", policy)
+	}
+	for len(p.Queues) <= queueID {
+		p.Queues = append(p.Queues, nil)
+	}
+	if p.Queues[queueID] != nil {
+		return fmt.Errorf("queue %d already exists in policy '%s'", queueID, policy)
+	}
+	p.Queues[queueID] = queue
+	return n.persistSpec()
+}
+
+// RemoveQoSQueueFromPolicy atomically removes a QoS queue at the given
+// index from a QoS policy. Returns an error if the policy doesn't exist
+// or the index is out of range / empty. Trims trailing nil slots after
+// removal to match the pre-refactor public behavior.
+func (n *Network) RemoveQoSQueueFromPolicy(policy string, queueID int) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	p, ok := n.spec.QoSPolicies[policy]
+	if !ok {
+		return fmt.Errorf("QoS policy '%s' not found", policy)
+	}
+	if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
+		return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
+	}
+	p.Queues[queueID] = nil
+	for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
+		p.Queues = p.Queues[:len(p.Queues)-1]
+	}
+	return n.persistSpec()
+}
+
+// AddFilterRule atomically appends a rule to a filter and re-sorts the rule
+// slice by sequence number. Returns an error if the filter doesn't exist
+// or a rule with the same sequence already exists.
+func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	filter = util.NormalizeName(filter)
+	f, ok := n.spec.Filters[filter]
+	if !ok {
+		return fmt.Errorf("filter '%s' not found", filter)
+	}
+	for _, r := range f.Rules {
+		if r.Sequence == rule.Sequence {
+			return fmt.Errorf("rule with priority %d already exists in filter '%s'", rule.Sequence, filter)
+		}
+	}
+	f.Rules = append(f.Rules, rule)
+	sort.Slice(f.Rules, func(i, j int) bool {
+		return f.Rules[i].Sequence < f.Rules[j].Sequence
+	})
+	return n.persistSpec()
+}
+
+// RemoveFilterRule atomically removes a rule from a filter by sequence
+// number. Returns an error if the filter or rule doesn't exist.
+func (n *Network) RemoveFilterRule(filter string, sequence int) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	filter = util.NormalizeName(filter)
+	f, ok := n.spec.Filters[filter]
+	if !ok {
+		return fmt.Errorf("filter '%s' not found", filter)
+	}
+	found := false
+	newRules := make([]*spec.FilterRule, 0, len(f.Rules))
+	for _, r := range f.Rules {
+		if r.Sequence == sequence {
+			found = true
+			continue
+		}
+		newRules = append(newRules, r)
+	}
+	if !found {
+		return fmt.Errorf("rule with priority %d not found in filter '%s'", sequence, filter)
+	}
+	f.Rules = newRules
+	return n.persistSpec()
+}
+
+// AddPrefixToPrefixList atomically appends a prefix to a prefix list.
+// Returns an error if the list doesn't exist.
+func (n *Network) AddPrefixToPrefixList(prefixList string, prefix string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	prefixList = util.NormalizeName(prefixList)
+	prefixes, ok := n.spec.PrefixLists[prefixList]
+	if !ok {
+		return fmt.Errorf("prefix list '%s' not found", prefixList)
+	}
+	prefixes = append(prefixes, prefix)
+	n.spec.PrefixLists[prefixList] = prefixes
+	return n.persistSpec()
+}
+
+// RemovePrefixFromPrefixList atomically removes a prefix from a prefix
+// list. Returns an error if the list or prefix doesn't exist.
+func (n *Network) RemovePrefixFromPrefixList(prefixList string, prefix string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	prefixList = util.NormalizeName(prefixList)
+	prefixes, ok := n.spec.PrefixLists[prefixList]
+	if !ok {
+		return fmt.Errorf("prefix list '%s' not found", prefixList)
+	}
+	found := false
+	newPrefixes := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		if p == prefix {
+			found = true
+			continue
+		}
+		newPrefixes = append(newPrefixes, p)
+	}
+	if !found {
+		return fmt.Errorf("prefix '%s' not found in prefix list '%s'", prefix, prefixList)
+	}
+	n.spec.PrefixLists[prefixList] = newPrefixes
+	return n.persistSpec()
+}
+
+// AddRuleToRoutePolicy atomically appends a rule to a route policy and
+// re-sorts the rule slice by sequence number. Returns an error if the
+// policy doesn't exist or a rule with the same sequence already exists.
+func (n *Network) AddRuleToRoutePolicy(policy string, rule *spec.RoutePolicyRule) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	rp, ok := n.spec.RoutePolicies[policy]
+	if !ok {
+		return fmt.Errorf("route policy '%s' not found", policy)
+	}
+	for _, r := range rp.Rules {
+		if r.Sequence == rule.Sequence {
+			return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", rule.Sequence, policy)
+		}
+	}
+	rp.Rules = append(rp.Rules, rule)
+	sort.Slice(rp.Rules, func(i, j int) bool {
+		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+	})
+	return n.persistSpec()
+}
+
+// RemoveRuleFromRoutePolicy atomically removes a rule from a route policy
+// by sequence number. Returns an error if the policy or rule doesn't exist.
+func (n *Network) RemoveRuleFromRoutePolicy(policy string, sequence int) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	rp, ok := n.spec.RoutePolicies[policy]
+	if !ok {
+		return fmt.Errorf("route policy '%s' not found", policy)
+	}
+	found := false
+	newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
+	for _, r := range rp.Rules {
+		if r.Sequence == sequence {
+			found = true
+			continue
+		}
+		newRules = append(newRules, r)
+	}
+	if !found {
+		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", sequence, policy)
+	}
+	rp.Rules = newRules
+	return n.persistSpec()
+}
+
+// ============================================================================
+// Snapshot methods — fresh-copy reads under RLock
+// ============================================================================
+//
+// Each method takes keyNetworkSpec.RLock and returns a shallow copy of the
+// underlying map. Callers iterate the returned map freely without racing
+// any concurrent writer (the RLock blocks Lock until the snapshot is
+// built). These replace the pre-PR-B pattern where public ListIPVPNs et al
+// reached into net.internal.Spec() and iterated the raw map — a concurrent
+// Save mutating that map would panic the runtime under -race.
+
+// ServicesSnapshot returns a shallow copy of the Services map under read lock.
+func (n *Network) ServicesSnapshot() map[string]*spec.ServiceSpec {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.ServiceSpec, len(n.spec.Services))
+	for k, v := range n.spec.Services {
+		out[k] = v
+	}
+	return out
+}
+
+// IPVPNsSnapshot returns a shallow copy of the IPVPNs map under read lock.
+func (n *Network) IPVPNsSnapshot() map[string]*spec.IPVPNSpec {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.IPVPNSpec, len(n.spec.IPVPNs))
+	for k, v := range n.spec.IPVPNs {
+		out[k] = v
+	}
+	return out
+}
+
+// MACVPNsSnapshot returns a shallow copy of the MACVPNs map under read lock.
+func (n *Network) MACVPNsSnapshot() map[string]*spec.MACVPNSpec {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.MACVPNSpec, len(n.spec.MACVPNs))
+	for k, v := range n.spec.MACVPNs {
+		out[k] = v
+	}
+	return out
+}
+
+// FiltersSnapshot returns a shallow copy of the Filters map under read lock.
+func (n *Network) FiltersSnapshot() map[string]*spec.FilterSpec {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.FilterSpec, len(n.spec.Filters))
+	for k, v := range n.spec.Filters {
+		out[k] = v
+	}
+	return out
+}
+
+// QoSPoliciesSnapshot returns a shallow copy of the QoSPolicies map under read lock.
+func (n *Network) QoSPoliciesSnapshot() map[string]*spec.QoSPolicy {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.QoSPolicy, len(n.spec.QoSPolicies))
+	for k, v := range n.spec.QoSPolicies {
+		out[k] = v
+	}
+	return out
+}
+
+// RoutePoliciesSnapshot returns a shallow copy of the RoutePolicies map under read lock.
+func (n *Network) RoutePoliciesSnapshot() map[string]*spec.RoutePolicy {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.RoutePolicy, len(n.spec.RoutePolicies))
+	for k, v := range n.spec.RoutePolicies {
+		out[k] = v
+	}
+	return out
+}
+
+// PrefixListsSnapshot returns a shallow copy of the PrefixLists map under read lock.
+func (n *Network) PrefixListsSnapshot() map[string][]string {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string][]string, len(n.spec.PrefixLists))
+	for k, v := range n.spec.PrefixLists {
+		out[k] = v
+	}
+	return out
+}
+
+// ZonesSnapshot returns a shallow copy of the Zones map under read lock.
+func (n *Network) ZonesSnapshot() map[string]*spec.ZoneSpec {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	out := make(map[string]*spec.ZoneSpec, len(n.spec.Zones))
+	for k, v := range n.spec.Zones {
+		out[k] = v
+	}
+	return out
+}
+
 // Spec returns the raw network spec (for advanced access).
+//
+// Deprecated for read iteration — callers iterating any of the OverridableSpecs
+// maps without holding keyNetworkSpec.RLock will race with concurrent writers
+// and panic the runtime. Use a *Snapshot method instead.
 func (n *Network) Spec() *spec.NetworkSpecFile {
 	return n.spec
 }
@@ -566,10 +1103,11 @@ func (n *Network) SaveProfile(name string, profile *spec.DeviceProfile) error {
 func (n *Network) DeleteProfile(name string, force bool) error {
 	// A profile and a topology device share their name 1:1 — the profile
 	// "reference" from topology is the matching name in topology.Devices.
-	n.mu.RLock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.RLock()
 	topo := n.loader.GetTopology()
 	hasTopoDevice := topo != nil && topo.HasDevice(name)
-	n.mu.RUnlock()
+	topoMu.RUnlock()
 
 	if hasTopoDevice {
 		if !force {
@@ -592,8 +1130,9 @@ func (n *Network) DeleteProfile(name string, force bool) error {
 
 // ListZones returns all zone names from the network spec.
 func (n *Network) ListZones() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.spec.Zones))
 	for name := range n.spec.Zones {
@@ -604,8 +1143,9 @@ func (n *Network) ListZones() []string {
 
 // GetZone returns a zone spec by name.
 func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	z, ok := n.spec.Zones[name]
 	if !ok {
@@ -616,8 +1156,9 @@ func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
 
 // SaveZone creates or updates a zone in network.json.
 func (n *Network) SaveZone(name string, zone *spec.ZoneSpec) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	if n.spec.Zones == nil {
 		n.spec.Zones = make(map[string]*spec.ZoneSpec)
@@ -629,8 +1170,9 @@ func (n *Network) SaveZone(name string, zone *spec.ZoneSpec) error {
 // DeleteZone removes a zone from network.json.
 // Returns error if any profile references it.
 func (n *Network) DeleteZone(name string) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
 
 	// Check for profiles in this zone
 	profiles := n.loader.ListProfiles()
@@ -656,8 +1198,15 @@ func (n *Network) DeleteZone(name string) error {
 // The Device is created in this Network's context and has access to all
 // Network-level specs through its parent reference.
 func (n *Network) GetNode(name string) (*node.Node, error) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	// Lock-ordering rule: alphabetical by key. keyNetworkSpec < keyNodes.
+	// resolveProfile + buildResolvedSpecs read n.spec.Zones and other
+	// network.json maps; the cache write requires keyNodes.Lock.
+	netMu := n.locks.lock(keyNetworkSpec)
+	netMu.RLock()
+	defer netMu.RUnlock()
+	nodesMu := n.locks.lock(keyNodes)
+	nodesMu.Lock()
+	defer nodesMu.Unlock()
 
 	// Return existing device if already loaded
 	if dev, ok := n.devices[name]; ok {
@@ -750,8 +1299,9 @@ func (n *Network) InitFromDeviceIntent(ctx context.Context, name string) (*node.
 
 // ListDevices returns names of all loaded devices.
 func (n *Network) ListNodes() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	mu := n.locks.lock(keyNodes)
+	mu.RLock()
+	defer mu.RUnlock()
 
 	names := make([]string, 0, len(n.devices))
 	for name := range n.devices {
@@ -778,8 +1328,9 @@ func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) er
 		return fmt.Errorf("device entry required")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyTopology)
+	mu.Lock()
+	defer mu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
@@ -821,8 +1372,15 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 		return fmt.Errorf("topology device name required")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	// Lock-ordering rule: alphabetical by key. keyNodes < keyTopology.
+	// keyNodes covers the n.devices cache clear at the end of this method;
+	// keyTopology covers the topology.json mutation.
+	nodesMu := n.locks.lock(keyNodes)
+	nodesMu.Lock()
+	defer nodesMu.Unlock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.Lock()
+	defer topoMu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil || !topo.HasDevice(name) {
@@ -881,8 +1439,15 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice)
 		return fmt.Errorf("device entry required")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	// Lock-ordering rule: alphabetical by key. keyNodes < keyTopology.
+	// keyNodes covers the n.devices cache clear at the end; keyTopology
+	// covers the topology.json mutation.
+	nodesMu := n.locks.lock(keyNodes)
+	nodesMu.Lock()
+	defer nodesMu.Unlock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.Lock()
+	defer topoMu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil || !topo.HasDevice(name) {
@@ -918,8 +1483,9 @@ func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
 		return fmt.Errorf("link endpoints required (a, z)")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyTopology)
+	mu.Lock()
+	defer mu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
@@ -972,8 +1538,9 @@ func (n *Network) DeleteTopologyLink(endpoint string) error {
 		return fmt.Errorf("link endpoint required (device:interface)")
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	mu := n.locks.lock(keyTopology)
+	mu.Lock()
+	defer mu.Unlock()
 
 	topo := n.loader.GetTopology()
 	if topo == nil {

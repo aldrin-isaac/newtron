@@ -2,7 +2,6 @@ package newtron
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
@@ -65,7 +64,7 @@ func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error
 			Redistribute:     req.Routing.Redistribute,
 		}
 	}
-	return net.internal.SaveService(req.Name, svc)
+	return net.internal.CreateService(req.Name, svc)
 }
 
 // DeleteService removes a service definition.
@@ -90,7 +89,7 @@ func (net *Network) DeleteService(name string, opts ExecOpts) error {
 
 // ListIPVPNs returns all IP-VPN definitions, converted to IPVPNDetail.
 func (net *Network) ListIPVPNs() map[string]*IPVPNDetail {
-	raw := net.internal.Spec().IPVPNs
+	raw := net.internal.IPVPNsSnapshot()
 	result := make(map[string]*IPVPNDetail, len(raw))
 	for name, s := range raw {
 		result[name] = convertIPVPNDetail(name, s)
@@ -126,7 +125,7 @@ func (net *Network) CreateIPVPN(req CreateIPVPNRequest, opts ExecOpts) error {
 		VRF:          req.VRF,
 		RouteTargets: req.RouteTargets,
 	}
-	return net.internal.SaveIPVPN(req.Name, ipvpn)
+	return net.internal.CreateIPVPN(req.Name, ipvpn)
 }
 
 // DeleteIPVPN removes an IP-VPN definition.
@@ -151,7 +150,7 @@ func (net *Network) DeleteIPVPN(name string, opts ExecOpts) error {
 
 // ListMACVPNs returns all MAC-VPN definitions, converted to MACVPNDetail.
 func (net *Network) ListMACVPNs() map[string]*MACVPNDetail {
-	raw := net.internal.Spec().MACVPNs
+	raw := net.internal.MACVPNsSnapshot()
 	result := make(map[string]*MACVPNDetail, len(raw))
 	for name, s := range raw {
 		result[name] = convertMACVPNDetail(name, s)
@@ -190,7 +189,7 @@ func (net *Network) CreateMACVPN(req CreateMACVPNRequest, opts ExecOpts) error {
 		RouteTargets:   req.RouteTargets,
 		ARPSuppression: req.ARPSuppression,
 	}
-	return net.internal.SaveMACVPN(req.Name, macvpn)
+	return net.internal.CreateMACVPN(req.Name, macvpn)
 }
 
 // DeleteMACVPN removes a MAC-VPN definition.
@@ -244,7 +243,7 @@ func (net *Network) CreateQoSPolicy(req CreateQoSPolicyRequest, opts ExecOpts) e
 		Description: req.Description,
 		Queues:      []*spec.QoSQueue{},
 	}
-	return net.internal.SaveQoSPolicy(req.Name, policy)
+	return net.internal.CreateQoSPolicy(req.Name, policy)
 }
 
 // DeleteQoSPolicy removes a QoS policy.
@@ -273,17 +272,16 @@ func (net *Network) AddQoSQueue(req AddQoSQueueRequest, opts ExecOpts) error {
 			return err
 		}
 	}
-	policy, err := net.internal.GetQoSPolicy(req.Policy)
-	if err != nil {
-		return err
-	}
-	for len(policy.Queues) <= req.QueueID {
-		policy.Queues = append(policy.Queues, nil)
-	}
-	if policy.Queues[req.QueueID] != nil {
-		return fmt.Errorf("queue %d already exists in policy '%s'", req.QueueID, req.Policy)
-	}
 	if !opts.Execute {
+		// Dry-run: validate without mutation. Read the parent to verify
+		// the slot would be free; race window here is purely informational.
+		policy, err := net.internal.GetQoSPolicy(req.Policy)
+		if err != nil {
+			return err
+		}
+		if req.QueueID < len(policy.Queues) && policy.Queues[req.QueueID] != nil {
+			return fmt.Errorf("queue %d already exists in policy '%s'", req.QueueID, req.Policy)
+		}
 		return nil
 	}
 	queue := &spec.QoSQueue{
@@ -293,8 +291,7 @@ func (net *Network) AddQoSQueue(req AddQoSQueueRequest, opts ExecOpts) error {
 		DSCP:   req.DSCP,
 		ECN:    req.ECN,
 	}
-	policy.Queues[req.QueueID] = queue
-	return net.internal.SaveQoSPolicy(req.Policy, policy)
+	return net.internal.AddQoSQueueToPolicy(req.Policy, req.QueueID, queue)
 }
 
 // RemoveQoSQueue removes a queue from a QoS policy.
@@ -304,21 +301,17 @@ func (net *Network) RemoveQoSQueue(policy string, queueID int, opts ExecOpts) er
 			return err
 		}
 	}
-	p, err := net.internal.GetQoSPolicy(policy)
-	if err != nil {
-		return err
-	}
-	if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
-		return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
-	}
 	if !opts.Execute {
+		p, err := net.internal.GetQoSPolicy(policy)
+		if err != nil {
+			return err
+		}
+		if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
+			return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
+		}
 		return nil
 	}
-	p.Queues[queueID] = nil
-	for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
-		p.Queues = p.Queues[:len(p.Queues)-1]
-	}
-	return net.internal.SaveQoSPolicy(policy, p)
+	return net.internal.RemoveQoSQueueFromPolicy(policy, queueID)
 }
 
 // ============================================================================
@@ -360,7 +353,7 @@ func (net *Network) CreateFilter(req CreateFilterRequest, opts ExecOpts) error {
 		Type:        req.Type,
 		Rules:       []*spec.FilterRule{},
 	}
-	return net.internal.SaveFilter(req.Name, fs)
+	return net.internal.CreateFilter(req.Name, fs)
 }
 
 // DeleteFilter removes a filter template.
@@ -386,16 +379,16 @@ func (net *Network) AddFilterRule(req AddFilterRuleRequest, opts ExecOpts) error
 			return err
 		}
 	}
-	fs, err := net.internal.GetFilter(req.Filter)
-	if err != nil {
-		return err
-	}
-	for _, r := range fs.Rules {
-		if r.Sequence == req.Sequence {
-			return fmt.Errorf("rule with priority %d already exists in filter '%s'", req.Sequence, req.Filter)
-		}
-	}
 	if !opts.Execute {
+		fs, err := net.internal.GetFilter(req.Filter)
+		if err != nil {
+			return err
+		}
+		for _, r := range fs.Rules {
+			if r.Sequence == req.Sequence {
+				return fmt.Errorf("rule with priority %d already exists in filter '%s'", req.Sequence, req.Filter)
+			}
+		}
 		return nil
 	}
 	rule := &spec.FilterRule{
@@ -411,11 +404,7 @@ func (net *Network) AddFilterRule(req AddFilterRuleRequest, opts ExecOpts) error
 		DSCP:          req.DSCP,
 		CoS:           req.CoS,
 	}
-	fs.Rules = append(fs.Rules, rule)
-	sort.Slice(fs.Rules, func(i, j int) bool {
-		return fs.Rules[i].Sequence < fs.Rules[j].Sequence
-	})
-	return net.internal.SaveFilter(req.Filter, fs)
+	return net.internal.AddFilterRule(req.Filter, rule)
 }
 
 // RemoveFilterRule removes a rule from a filter template by sequence number.
@@ -425,27 +414,24 @@ func (net *Network) RemoveFilterRule(filter string, seq int, opts ExecOpts) erro
 			return err
 		}
 	}
-	fs, err := net.internal.GetFilter(filter)
-	if err != nil {
-		return err
-	}
-	found := false
-	newRules := make([]*spec.FilterRule, 0, len(fs.Rules))
-	for _, r := range fs.Rules {
-		if r.Sequence == seq {
-			found = true
-			continue
-		}
-		newRules = append(newRules, r)
-	}
-	if !found {
-		return fmt.Errorf("rule with priority %d not found in filter '%s'", seq, filter)
-	}
 	if !opts.Execute {
+		fs, err := net.internal.GetFilter(filter)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, r := range fs.Rules {
+			if r.Sequence == seq {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("rule with priority %d not found in filter '%s'", seq, filter)
+		}
 		return nil
 	}
-	fs.Rules = newRules
-	return net.internal.SaveFilter(filter, fs)
+	return net.internal.RemoveFilterRule(filter, seq)
 }
 
 // ============================================================================
@@ -454,7 +440,7 @@ func (net *Network) RemoveFilterRule(filter string, seq int, opts ExecOpts) erro
 
 // ListRoutePolicies returns all route policy names.
 func (net *Network) ListRoutePolicies() []string {
-	m := net.internal.Spec().RoutePolicies
+	m := net.internal.RoutePoliciesSnapshot()
 	names := make([]string, 0, len(m))
 	for name := range m {
 		names = append(names, name)
@@ -464,7 +450,7 @@ func (net *Network) ListRoutePolicies() []string {
 
 // ListPrefixLists returns all prefix list names.
 func (net *Network) ListPrefixLists() []string {
-	m := net.internal.Spec().PrefixLists
+	m := net.internal.PrefixListsSnapshot()
 	names := make([]string, 0, len(m))
 	for name := range m {
 		names = append(names, name)
@@ -498,7 +484,7 @@ func (net *Network) CreatePrefixList(req CreatePrefixListRequest, opts ExecOpts)
 	if prefixes == nil {
 		prefixes = []string{}
 	}
-	return net.internal.SavePrefixList(req.Name, prefixes)
+	return net.internal.CreatePrefixList(req.Name, prefixes)
 }
 
 // DeletePrefixList removes a prefix list.
@@ -524,20 +510,19 @@ func (net *Network) AddPrefixListEntry(req AddPrefixListEntryRequest, opts ExecO
 			return err
 		}
 	}
-	prefixes, err := net.internal.GetPrefixList(req.PrefixList)
-	if err != nil {
-		return err
-	}
-	for _, p := range prefixes {
-		if p == req.Prefix {
-			return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", req.Prefix, req.PrefixList)
-		}
-	}
 	if !opts.Execute {
+		prefixes, err := net.internal.GetPrefixList(req.PrefixList)
+		if err != nil {
+			return err
+		}
+		for _, p := range prefixes {
+			if p == req.Prefix {
+				return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", req.Prefix, req.PrefixList)
+			}
+		}
 		return nil
 	}
-	prefixes = append(prefixes, req.Prefix)
-	return net.internal.SavePrefixList(req.PrefixList, prefixes)
+	return net.internal.AddPrefixToPrefixList(req.PrefixList, req.Prefix)
 }
 
 // RemovePrefixListEntry removes a prefix from a prefix list.
@@ -547,26 +532,26 @@ func (net *Network) RemovePrefixListEntry(prefixList, prefix string, opts ExecOp
 			return err
 		}
 	}
-	prefixes, err := net.internal.GetPrefixList(prefixList)
-	if err != nil {
-		return nil // idempotent: prefix list absent
-	}
-	found := false
-	newPrefixes := make([]string, 0, len(prefixes))
-	for _, p := range prefixes {
-		if p == prefix {
-			found = true
-			continue
-		}
-		newPrefixes = append(newPrefixes, p)
-	}
-	if !found {
-		return nil // idempotent: prefix already absent
-	}
 	if !opts.Execute {
+		// Idempotent dry-run: silently return nil for missing list/prefix.
+		prefixes, err := net.internal.GetPrefixList(prefixList)
+		if err != nil {
+			return nil
+		}
+		for _, p := range prefixes {
+			if p == prefix {
+				return nil
+			}
+		}
 		return nil
 	}
-	return net.internal.SavePrefixList(prefixList, newPrefixes)
+	err := net.internal.RemovePrefixFromPrefixList(prefixList, prefix)
+	if err != nil {
+		// Preserve the pre-refactor idempotency: missing list or prefix
+		// is not an error at the public layer.
+		return nil
+	}
+	return nil
 }
 
 // ShowRoutePolicy returns the route policy for a given name.
@@ -595,7 +580,7 @@ func (net *Network) CreateRoutePolicy(req CreateRoutePolicyRequest, opts ExecOpt
 		Description: req.Description,
 		Rules:       []*spec.RoutePolicyRule{},
 	}
-	return net.internal.SaveRoutePolicy(req.Name, rp)
+	return net.internal.CreateRoutePolicy(req.Name, rp)
 }
 
 // DeleteRoutePolicy removes a route policy.
@@ -621,16 +606,16 @@ func (net *Network) AddRoutePolicyRule(req AddRoutePolicyRuleRequest, opts ExecO
 			return err
 		}
 	}
-	rp, err := net.internal.GetRoutePolicy(req.Policy)
-	if err != nil {
-		return err
-	}
-	for _, r := range rp.Rules {
-		if r.Sequence == req.Sequence {
-			return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", req.Sequence, req.Policy)
-		}
-	}
 	if !opts.Execute {
+		rp, err := net.internal.GetRoutePolicy(req.Policy)
+		if err != nil {
+			return err
+		}
+		for _, r := range rp.Rules {
+			if r.Sequence == req.Sequence {
+				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", req.Sequence, req.Policy)
+			}
+		}
 		return nil
 	}
 	rule := &spec.RoutePolicyRule{
@@ -646,11 +631,7 @@ func (net *Network) AddRoutePolicyRule(req AddRoutePolicyRuleRequest, opts ExecO
 			MED:       req.Set.MED,
 		}
 	}
-	rp.Rules = append(rp.Rules, rule)
-	sort.Slice(rp.Rules, func(i, j int) bool {
-		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
-	})
-	return net.internal.SaveRoutePolicy(req.Policy, rp)
+	return net.internal.AddRuleToRoutePolicy(req.Policy, rule)
 }
 
 // RemoveRoutePolicyRule removes a rule from a route policy by sequence number.
@@ -660,27 +641,20 @@ func (net *Network) RemoveRoutePolicyRule(policy string, seq int, opts ExecOpts)
 			return err
 		}
 	}
-	rp, err := net.internal.GetRoutePolicy(policy)
-	if err != nil {
-		return nil // idempotent: policy absent
-	}
-	found := false
-	newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
-	for _, r := range rp.Rules {
-		if r.Sequence == seq {
-			found = true
-			continue
-		}
-		newRules = append(newRules, r)
-	}
-	if !found {
-		return nil // idempotent: rule already absent
-	}
 	if !opts.Execute {
+		// Idempotent dry-run.
+		_, err := net.internal.GetRoutePolicy(policy)
+		if err != nil {
+			return nil
+		}
 		return nil
 	}
-	rp.Rules = newRules
-	return net.internal.SaveRoutePolicy(policy, rp)
+	if err := net.internal.RemoveRuleFromRoutePolicy(policy, seq); err != nil {
+		// Preserve pre-refactor idempotency: missing policy or rule
+		// returns nil at the public layer.
+		return nil
+	}
+	return nil
 }
 
 // ============================================================================

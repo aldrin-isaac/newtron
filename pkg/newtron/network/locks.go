@@ -15,7 +15,12 @@ type lockKey string
 // lockManager hands out one *sync.RWMutex per key on first request and
 // returns the same lock on every subsequent request. The locks outlive
 // any individual operation; lockManager guarantees there is exactly one
-// lock per key for the lifetime of a Network.
+// lock per key for the lifetime of the manager.
+//
+// The zero value is usable — the internal map is created on first call to
+// lock(). Embed lockManager as a value field in a struct that needs per-key
+// locks and the struct's zero value Just Works. newLockManager exists for
+// standalone construction (e.g. unit tests).
 //
 // Callers take the returned mutex with direct Lock / RLock + defer, the
 // same way Network's existing sync.RWMutex fields are used today
@@ -32,10 +37,14 @@ func newLockManager() *lockManager {
 }
 
 // lock returns the *sync.RWMutex for the given key. The same key always
-// yields the same lock; distinct keys yield distinct locks.
+// yields the same lock; distinct keys yield distinct locks. Safe to call
+// on a zero-value lockManager — the internal map is allocated on first use.
 func (lm *lockManager) lock(key lockKey) *sync.RWMutex {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
+	if lm.locks == nil {
+		lm.locks = make(map[lockKey]*sync.RWMutex)
+	}
 	if l, ok := lm.locks[key]; ok {
 		return l
 	}
