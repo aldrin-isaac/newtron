@@ -353,7 +353,7 @@ func (net *Network) ServiceProjection(ctx context.Context, service string, opts 
 
 ```go
 func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request) {
-    netActor := s.requireNetworkActor(w, r)
+    ne := s.requireNetwork(w, r)
     if netActor == nil {
         return
     }

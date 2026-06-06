@@ -13,76 +13,76 @@ For the architectural principles behind newtron, newtlab, and newtrun — includ
 ## 2. System Architecture
 
 ```
-                                          ┌─────────────────────────────────┐
-                                          │                                 │
-                                          │               CLI               │
-                                          │          (cmd/newtron)          │
-                                          │           HTTP client           │
-                                          │                                 │
-                                          └─────────────────────────────────┘
-                                            │
-                                            │ HTTP
-                                            │ (REST API)
-                                            ▼
-┌─────────────────────────┐               ┌─────────────────────────────────┐
-│                         │               │                                 │
-│         newtrun         │               │         newtron-server          │
-│     (pkg/newtrun/)      │  HTTP         │       (pkg/newtron/api/)        │
-│       HTTP client       │  (REST API)   │                                 │
-│                         │ ────────────▶ │                                 │
-└─────────────────────────┘               └─────────────────────────────────┘
-                                            │
-                                            │
-                                            ▼
-┌─────────────────────────┐               ┌─────────────────────────────────┐
-│                         │               │                                 │
-│        NodeActor        │               │          NetworkActor           │
-│     (1 per device)      │               │         (1 per network)         │
-│ caches *Node (SSH conn) │  manages      │          owns *Network          │
-│                         │ ◀──────────── │                                 │
-└─────────────────────────┘               └─────────────────────────────────┘
-  │                                         │
-  │                                         │
-  │                                         ▼
-  │                                       ┌─────────────────────────────────┐     ┌─────────────────────┐
-  │                                       │                                 │     │                     │
-  │                                       │          Network Layer          │     │                     │
-  │                                       │     (pkg/newtron/network/)      │     │     Spec Layer      │
-  │                                       │        Spec resolution,         │     │ (pkg/newtron/spec/) │
-  │                                       │      topology provisioning      │     │                     │
-  │                                       │                                 │ ──▶ │                     │
-  │                                       └─────────────────────────────────┘     └─────────────────────┘
-  │                                         │
-  │                                         │
-  │                                         ▼
-  │                                       ┌─────────────────────────────────┐
-  │                                       │                                 │
-  │                                       │           Node Layer            │
-  │                                       │   (pkg/newtron/network/node/)   │
-  │                                       │        Node, Interface,         │
-  │                  ConnectTransport()   │       ChangeSet, *_ops.go       │
-  └─────────────────────────────────────▶ │                                 │
-                                          └─────────────────────────────────┘
-                                            │
-                                            │
-                                            ▼
-                                          ┌─────────────────────────────────┐
-                                          │                                 │
-                                          │          Device Layer           │
-                                          │   (pkg/newtron/device/sonic/)   │
-                                          │    SSH Tunnel > ConfigDB(4)     │
-                                          │ StateDB(6), AppDB(0), AsicDB(1) │
-                                          │                                 │
-                                          └─────────────────────────────────┘
-                                            │
-                                            │
-                                            ▼
-                                          ┌─────────────────────────────────┐
-                                          │                                 │
-                                          │          SONiC Switch           │
-                                          │             (Redis)             │
-                                          │                                 │
-                                          └─────────────────────────────────┘
+                                                  ┌─────────────────────────────────┐
+                                                  │                                 │
+                                                  │               CLI               │
+                                                  │          (cmd/newtron)          │
+                                                  │           HTTP client           │
+                                                  │                                 │
+                                                  └─────────────────────────────────┘
+                                                    │
+                                                    │ HTTP
+                                                    │ (REST API)
+                                                    ▼
+┌─────────────────────────┐                       ┌─────────────────────────────────┐
+│                         │                       │                                 │
+│         newtrun         │                       │         newtron-server          │
+│     (pkg/newtrun/)      │  HTTP                 │       (pkg/newtron/api/)        │
+│       HTTP client       │  (REST API)           │                                 │
+│                         │ ────────────────────▶ │                                 │
+└─────────────────────────┘                       └─────────────────────────────────┘
+                                                    │
+                                                    │
+                                                    ▼
+┌─────────────────────────┐                       ┌─────────────────────────────────┐
+│                         │                       │                                 │
+│        NodeActor        │                       │          networkEntity          │
+│     (1 per device)      │                       │         (1 per network)         │
+│ caches *Node (SSH conn) │  manages              │          owns *Network          │
+│                         │ ◀──────────────────── │                                 │
+└─────────────────────────┘                       └─────────────────────────────────┘
+  │                                                 │
+  │                                                 │
+  │                                                 ▼
+  │                                               ┌─────────────────────────────────┐     ┌─────────────────────┐
+  │                                               │                                 │     │                     │
+  │                                               │          Network Layer          │     │                     │
+  │                                               │     (pkg/newtron/network/)      │     │     Spec Layer      │
+  │                                               │        Spec resolution,         │     │ (pkg/newtron/spec/) │
+  │                                               │      topology provisioning      │     │                     │
+  │                                               │                                 │ ──▶ │                     │
+  │                                               └─────────────────────────────────┘     └─────────────────────┘
+  │                                                 │
+  │                                                 │
+  │                                                 ▼
+  │                                               ┌─────────────────────────────────┐
+  │                                               │                                 │
+  │                                               │           Node Layer            │
+  │                                               │   (pkg/newtron/network/node/)   │
+  │                                               │        Node, Interface,         │
+  │                         ConnectTransport()    │       ChangeSet, *_ops.go       │
+  └─────────────────────────────────────────────▶ │                                 │
+                                                  └─────────────────────────────────┘
+                                                    │
+                                                    │
+                                                    ▼
+                                                  ┌─────────────────────────────────┐
+                                                  │                                 │
+                                                  │          Device Layer           │
+                                                  │   (pkg/newtron/device/sonic/)   │
+                                                  │    SSH Tunnel > ConfigDB(4)     │
+                                                  │ StateDB(6), AppDB(0), AsicDB(1) │
+                                                  │                                 │
+                                                  └─────────────────────────────────┘
+                                                    │
+                                                    │
+                                                    ▼
+                                                  ┌─────────────────────────────────┐
+                                                  │                                 │
+                                                  │          SONiC Switch           │
+                                                  │             (Redis)             │
+                                                  │                                 │
+                                                  └─────────────────────────────────┘
 ```
 
 ### 2.1 Layer Responsibilities
@@ -130,18 +130,20 @@ The governing principle: **a method belongs to the smallest object that has all 
 
 Whatever configuration can be right-shifted to the interface level, should be. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Overlay peering is device-specific — it derives from the device's profile and EVPN peers — so it lives on `Node.SetupEVPN()`.
 
-### 2.3 Actor Model
+### 2.3 Per-Network Registration and Per-Device Actors
 
-**newtron-server** is the central process. It manages network specs and device connections through a hierarchy of actors, and exposes all operations as an HTTP REST API. The CLI and newtrun are HTTP clients — they import `pkg/newtron/client/` and shared types, never internal packages.
+**newtron-server** is the central process. It manages network specs and device connections, and exposes all operations as an HTTP REST API. The CLI and newtrun are HTTP clients — they import `pkg/newtron/client/` and shared types, never internal packages.
 
-| Actor | Scope | Owns | One Per |
+| Type | Scope | Owns | One Per |
 |-------|-------|------|---------|
-| `NetworkActor` | Spec operations | `*newtron.Network`, all `NodeActor` instances | Registered network |
+| `networkEntity` | Per-network registration | `*newtron.Network`, the NodeActor cache | Registered network |
 | `NodeActor` | Device operations | Cached `*newtron.Node`, `*Network` ref from parent | Device name |
 
-`NetworkActor` is the parent. It serializes spec operations and creates `NodeActor` instances on demand when a device is first accessed. Each `NodeActor` caches the SSH connection with a configurable idle timeout (default 5 minutes), eliminating ~200ms SSH overhead per request. The actor model naturally queues concurrent requests — essential when operations involve SSH round-trips.
+`networkEntity` is the per-network record in the API server. It owns the engine `*Network` and a NodeActor cache. It is **not an actor** — it has no goroutine, no message channel, no isolated state for spec serialization. Spec atomicity is the engine layer's responsibility (see §8 Concurrency model). The API layer holds no spec lock of its own; handlers call `ne.net.X()` directly.
 
-Every request goes through `execute()`, which calls `RebuildProjection` before the operation function. This re-reads NEWTRON_INTENT from the device (when connected), rebuilds the projection from scratch, and ensures every operation sees fresh, authoritative state.
+`NodeActor` is a real actor: it owns a cached `*Node` (an SSH session + Redis tunnels) and an idle timer. Cached connections are reused across requests with a configurable idle timeout (default 5 minutes), eliminating ~200ms SSH overhead per request. Operations on the same device serialize through the actor's goroutine — essential when each operation involves multi-step SSH/Redis round-trips that must not interleave.
+
+Every device-operation request goes through `NodeActor.execute()`, which calls `RebuildProjection` before the operation function. This re-reads NEWTRON_INTENT from the device (when connected), rebuilds the projection from scratch, and ensures every operation sees fresh, authoritative state.
 
 Two dispatch patterns:
 
@@ -150,7 +152,7 @@ Two dispatch patterns:
 | `connectAndRead` | execute → RebuildProjection → Ping → fn | Show, list, status, health, drift |
 | `connectAndExecute` | execute → RebuildProjection → Execute(Lock→snapshot→fn→commit-or-restore→Unlock) | All mutating operations |
 
-HTTP handlers follow a two-step resolution: server → NetworkActor (by network ID) → NodeActor (by device name). Spec operations dispatch to the NetworkActor directly. Device operations dispatch to the NodeActor.
+HTTP handlers follow a two-step resolution: server → networkEntity (by network ID) → NodeActor (by device name). Spec operations call `ne.net.X()` directly. Device operations dispatch to the NodeActor.
 
 ## 3. Intent Pipeline
 
@@ -454,8 +456,8 @@ CLI (cmd/newtron)
   ▼
 newtron-server (pkg/newtron/api/)
   │  handleVLANCreate():
-  │    server.getNetwork("default")        → NetworkActor
-  │    networkActor.getNodeActor("leaf1")   → NodeActor
+  │    server.getNetwork("default")        → networkEntity
+  │    networkEntity.getNodeActor("leaf1")  → NodeActor
   │
   ▼
 NodeActor.execute(ctx, connectAndExecute)
@@ -485,15 +487,91 @@ Response → CLI
   CLI prints: "Changes applied successfully."
 ```
 
-A spec-only operation like `newtron service list` is simpler: CLI sends GET to server, server dispatches to NetworkActor (no NodeActor involved), NetworkActor reads specs from `*Network`, returns the list.
+A spec-only operation like `newtron service list` is simpler: CLI sends GET to server, the handler resolves the networkEntity for the network ID, and calls `ne.net.ListServices()` directly — no NodeActor, no API-layer lock. The engine layer's `keyNetworkSpec.RLock` is acquired inside `ListServices`, the underlying spec map is iterated under that lock, and the result is returned.
 
-## 8. Security
+## 8. Concurrency model
+
+Spec atomicity and runtime concurrency are owned by the layer that owns the data they protect (`DESIGN_PRINCIPLES_NEWTRON §27` — Single Owner). The API layer holds no spec lock of its own.
+
+### 8.1 Where locks live
+
+| Layer | Lock | Protects |
+|-------|------|----------|
+| `pkg/newtron/spec` | `spec.Loader.mu sync.RWMutex` | Profile cache + the `network` / `topology` pointer fields (reassigned by `SaveNetwork` / `SaveTopology`) |
+| `pkg/newtron/network` | `*network.Network`'s `lockManager` (per-key dynamic `sync.RWMutex`) | The maps in `NetworkSpecFile`, the maps in `TopologySpecFile`, the runtime `n.devices` cache |
+| `pkg/newtron/api` | None (for spec data); `networkEntity.nodeMu sync.Mutex` (for the NodeActor cache); per-device `NodeActor` goroutine | NodeActor registry + per-device operation serialization |
+
+`networkEntity` carries no spec lock. Every public Network method (Create/Update/Delete/Add/Remove/List/Show/Get/Snapshot) is engine-atomic on its own: it takes its key's lock, performs the composition under that lock, releases. The API layer just calls it.
+
+### 8.2 The three engine keys
+
+The lockManager (`pkg/newtron/network/locks.go`) hands out one `*sync.RWMutex` per key, lazily on first request. There are three:
+
+| Key | What it protects |
+|-----|------------------|
+| `keyNetworkSpec` | Everything in `network.json` — the 7 OverridableSpecs maps (Services, Filters, IPVPNs, MACVPNs, QoSPolicies, RoutePolicies, PrefixLists) plus Zones — and the `persistSpec` call that writes the file. |
+| `keyTopology` | `topology.json` — Devices, Links — and the `applyTopology` call that writes the file. |
+| `keyNodes` | The runtime `n.devices` cache populated by `GetNode`. Not persistent; just the API server's in-memory map of currently-built `*Node` instances. |
+
+Profile files are not covered by a Network-layer key. `spec.Loader` has its own RWMutex (added in PR #100) and serializes per-profile correctly on its own — the Loader's atomic `CreateProfile` does the check + file write + cache update under a single Lock.
+
+### 8.3 Atomicity
+
+Every public Create/Update/Delete/Add/Remove method on `*newtron.Network` is internally atomic. The atomic method holds the appropriate key's `Lock` from existence check through in-memory mutation through disk persist:
+
+```go
+// pkg/newtron/network/network.go
+func (n *Network) CreateService(name string, def *spec.ServiceSpec) error {
+    mu := n.locks.lock(keyNetworkSpec)
+    mu.Lock()
+    defer mu.Unlock()
+
+    name = util.NormalizeName(name)
+    if _, exists := n.spec.Services[name]; exists {
+        return fmt.Errorf("service '%s' already exists", name)
+    }
+    spec.NormalizeServiceRefs(def)
+    if n.spec.Services == nil {
+        n.spec.Services = make(map[string]*spec.ServiceSpec)
+    }
+    n.spec.Services[name] = def
+    return n.persistSpec()
+}
+```
+
+Two concurrent `CreateService("X")` calls cannot both succeed. The pre-#101 layout had the public layer compose internal `GetService` + `SaveService` as two separate critical sections; the gap between them was a TOCTOU race that the API-layer `networkEntity.mu` masked. With the engine layer atomic, the API-layer lock is no longer needed; PR #101 (Phase C) removed it.
+
+### 8.4 Concurrent reads
+
+Spec reads (List/Show/Get) take RLock on the same key and run concurrently with each other. For methods that need to iterate a whole spec map (`ListIPVPNs`, `ListMACVPNs`, etc.), the engine layer exposes `*Snapshot()` methods that build a shallow copy under RLock — callers iterate the copy with no race against any future writer.
+
+### 8.5 Cross-key operations and lock ordering
+
+A few engine methods touch more than one key. Examples in the current code:
+
+- `DeleteProfile` reads `topology.Devices` (under `keyTopology.RLock`) to decide whether to cascade-delete the matching topology device before calling `Loader.DeleteProfile`.
+- `DeleteTopologyDevice` and `UpdateTopologyDevice` both mutate `topology.Devices` (under `keyTopology.Lock`) and clear the matching entry from `n.devices` (under `keyNodes.Lock`).
+- `GetNode` reads `n.spec.Zones` via `resolveProfile` (`keyNetworkSpec.RLock`) and writes the lazy-loaded `*Node` to `n.devices` (`keyNodes.Lock`).
+
+The lock-ordering rule for any multi-key caller is: **acquire locks in alphabetical order of key string.** With the current three keys, alphabetical order is `keyNetworkSpec` < `keyNodes` < `keyTopology`. Every multi-key call site in `pkg/newtron/network/network.go` follows this rule; new ones must too.
+
+### 8.6 Cycle deadlocks
+
+The API layer carries no spec lock, so a handler cannot hold a lock across an outbound HTTP call. The cycle that drove issue #97 (newtron handler → newtlab loopback → newtron `/topology` handler → can't proceed because outer handler holds a Lock) is structurally impossible. `TestAPI_LoopbackHTTPDoesNotDeadlock` in `pkg/newtron/api/loopback_no_deadlock_test.go` pins this contract: a fake `PortResolver` makes a loopback HTTP call to `/topology` during `/host/host1` resolution; the chain must complete inside a 5-second deadline. If anyone reintroduces an API-layer lock-across-loopback, this test fails.
+
+### 8.7 Per-device serialization
+
+`NodeActor` is the one place a goroutine is genuinely needed. A device operation is a multi-step sequence — `RebuildProjection`, `Lock`, `Apply`, `Verify`, `Save`, `Unlock`, idle-timer reset — touching CONFIG_DB on a remote system over SSH. Two concurrent operations on the same device would race the device's CONFIG_DB; the NodeActor goroutine + select loop serializes them. This is a property of the device, not of newtron's internal state, so there is no way to push it lower in the stack.
+
+The asymmetry between `networkEntity` (not an actor) and `NodeActor` (actually an actor) is deliberate — they protect different things at different layers.
+
+## 9. Security
 
 Redis on SONiC has no authentication and listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile. In integration tests, a standalone Redis container is used without SSH.
 
 Permission types are defined covering service operations, resource CRUD, spec authoring, and device cleanup. Read/view operations have no permission requirement. **Current status:** permission types exist in code but are not enforced at the HTTP layer. The server has no authentication middleware — it is designed for trusted-network deployment (localhost or VPN).
 
-## 9. Testing
+## 10. Testing
 
 | Tier | How | Purpose |
 |------|-----|---------|
@@ -502,7 +580,7 @@ Permission types are defined covering service operations, resource CRUD, spec au
 
 E2E testing uses the newtrun framework (see [newtrun HLD](../newtrun/hld.md) and [newtrun HOWTO](../newtrun/howto.md)).
 
-## 10. Cross-References
+## 11. Cross-References
 
 | Topic | Document |
 |-------|----------|
@@ -544,8 +622,8 @@ E2E testing uses the newtrun framework (see [newtrun HLD](../newtrun/hld.md) and
 
 | Term | Definition |
 |------|------------|
-| **newtron-server** | Central HTTP server. Owns `NetworkActor` instances; device connections owned by `NodeActor` instances within. |
-| **NetworkActor** | Parent actor that owns `*newtron.Network`, serializes spec operations, creates/manages `NodeActor` instances. One per network. |
+| **newtron-server** | Central HTTP server. Owns `networkEntity` instances; device connections owned by `NodeActor` instances within. |
+| **networkEntity** | Per-network registration record that owns the engine `*newtron.Network` and a NodeActor cache. Not an actor — no goroutine, no message channel, no spec lock. Spec atomicity is the engine layer's responsibility via per-key locks. One per network. |
 | **NodeActor** | Child actor that serializes device operations and caches `*newtron.Node` (SSH connection) with idle timeout. One per device. |
 | **Abstract Node** | Node whose intent DB and projection are populated from intent replay, not from a device. Same code path in all three states — different intent source. |
 | **Abstract Topology** | `topology.json` — network-level intent declaring what devices, ports, and steps should exist. Container of Abstract Nodes. |
