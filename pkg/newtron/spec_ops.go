@@ -65,7 +65,7 @@ func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error
 			Redistribute:     req.Routing.Redistribute,
 		}
 	}
-	return net.internal.SaveService(req.Name, svc)
+	return net.internal.CreateService(req.Name, svc)
 }
 
 // DeleteService removes a service definition.
@@ -90,7 +90,7 @@ func (net *Network) DeleteService(name string, opts ExecOpts) error {
 
 // ListIPVPNs returns all IP-VPN definitions, converted to IPVPNDetail.
 func (net *Network) ListIPVPNs() map[string]*IPVPNDetail {
-	raw := net.internal.Spec().IPVPNs
+	raw := net.internal.IPVPNsSnapshot()
 	result := make(map[string]*IPVPNDetail, len(raw))
 	for name, s := range raw {
 		result[name] = convertIPVPNDetail(name, s)
@@ -126,7 +126,7 @@ func (net *Network) CreateIPVPN(req CreateIPVPNRequest, opts ExecOpts) error {
 		VRF:          req.VRF,
 		RouteTargets: req.RouteTargets,
 	}
-	return net.internal.SaveIPVPN(req.Name, ipvpn)
+	return net.internal.CreateIPVPN(req.Name, ipvpn)
 }
 
 // DeleteIPVPN removes an IP-VPN definition.
@@ -151,7 +151,7 @@ func (net *Network) DeleteIPVPN(name string, opts ExecOpts) error {
 
 // ListMACVPNs returns all MAC-VPN definitions, converted to MACVPNDetail.
 func (net *Network) ListMACVPNs() map[string]*MACVPNDetail {
-	raw := net.internal.Spec().MACVPNs
+	raw := net.internal.MACVPNsSnapshot()
 	result := make(map[string]*MACVPNDetail, len(raw))
 	for name, s := range raw {
 		result[name] = convertMACVPNDetail(name, s)
