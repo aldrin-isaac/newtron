@@ -276,19 +276,16 @@ func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+// handleListPlatforms returns the platforms.json contents. Bypasses
+// NetworkActor.do() for the same reason as handleTopology — newtlab.NewLab
+// fetches this over loopback HTTP while another NetworkActor closure may be
+// in flight (issue #307).
 func (s *Server) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
 	na := s.requireNetwork(w, r)
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
-		return na.net.ListPlatforms(), nil
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, na.net.ListPlatforms())
 }
 
 func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
@@ -356,23 +353,24 @@ func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Reques
 // handleTopology returns the full topology spec (devices + links + metadata)
 // as `spec.TopologySpecFile`. §46: canonical substrate exposed directly,
 // alongside the names-only summary at /topology/node.
+//
+// Bypasses NetworkActor.do() because newtlab.NewLab fetches the topology
+// over loopback HTTP while a NetworkActor closure (e.g. handleGetHostProfile
+// resolving an SSH port) is mid-flight. Queuing this read on the same actor
+// goroutine deadlocks until the http.Client times out — see issue #307.
+// The read returns an immutable pointer from spec data loaded at startup,
+// so serialization isn't load-bearing for it.
 func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	na := s.requireNetwork(w, r)
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
-		topo := na.net.GetTopology()
-		if topo == nil {
-			return nil, &newtron.NotFoundError{Resource: "topology", Name: ""}
-		}
-		return topo, nil
-	})
-	if err != nil {
-		writeError(w, err)
+	topo := na.net.GetTopology()
+	if topo == nil {
+		writeError(w, &newtron.NotFoundError{Resource: "topology", Name: ""})
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, val)
+	httputil.WriteJSON(w, http.StatusOK, topo)
 }
 
 // ============================================================================
@@ -1108,15 +1106,17 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+// handleShowProfile returns the device profile for a named device. Bypasses
+// NetworkActor.do() for the same reason as handleTopology — newtlab.NewLab
+// fetches each device profile over loopback HTTP while another NetworkActor
+// closure may be in flight (issue #307).
 func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
 	na := s.requireNetwork(w, r)
 	if na == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
-		return na.net.ShowProfile(name)
-	})
+	val, err := na.net.ShowProfile(name)
 	if err != nil {
 		writeError(w, err)
 		return
