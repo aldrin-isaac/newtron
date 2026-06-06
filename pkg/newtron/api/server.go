@@ -174,6 +174,20 @@ func (s *Server) getNetwork(id string) *NetworkActor {
 	return entry.actor
 }
 
+// Network returns the underlying *newtron.Network registered under id, or nil
+// when no such network is registered. Exposed so co-located engines (e.g.
+// newt-server's newtlab handler) can read spec data directly instead of
+// looping back through HTTP — see issue #97.
+func (s *Server) Network(id string) *newtron.Network {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry := s.networks[id]
+	if entry == nil {
+		return nil
+	}
+	return entry.actor.net
+}
+
 // listNetworks returns info about all registered networks.
 func (s *Server) listNetworks() []NetworkInfo {
 	s.mu.RLock()

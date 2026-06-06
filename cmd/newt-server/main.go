@@ -36,7 +36,6 @@ import (
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
-	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	newtrunapi "github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 	"github.com/aldrin-isaac/newtron/pkg/version"
 )
@@ -86,14 +85,17 @@ func main() {
 		Logger:         logger,
 		NewtlabClient:  newtlabClient,
 	})
-	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
-	// owns spec files). In the composed binary this is an in-process
-	// loopback call to the newtron handler mounted on the same mux.
-	newtronAPIClient := newtronclient.New("http://"+*listen, *netID)
+	// newtlab consumes spec data via newtron (§27 — newtron owns spec
+	// files). In the composed binary newtlab and newtron share a process,
+	// so we wire an in-process accessor instead of looping back through
+	// HTTP. The loopback path deadlocked the NetworkActor when one of
+	// newtron's actor closures triggered the cycle — see issue #97.
+	// Split-process deployments (bin/newtlab-server + bin/newtron-server)
+	// continue to use the HTTP client.
 	newtlabSrv := newtlabapi.NewServer(newtlabapi.Config{
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
-		NewtronClient:  newtronAPIClient,
+		NewtronClient:  &inprocSpecClient{server: newtronSrv, netID: *netID},
 	})
 
 	// Compose the route tree. Each engine's Handler() already returns
