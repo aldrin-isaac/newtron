@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Read the Go toolchain version from go.mod so this workflow
+          # stays in lockstep with what the codebase actually compiles
+          # against.
+          go-version-file: go.mod
+          # actions/setup-go's cache is keyed on go.sum; opting in
+          # shaves a minute or two off cold builds with no maintenance
+          # cost.
+          cache: true
+
+      - name: go build ./...
+        run: go build ./...
+
+      - name: go vet ./...
+        run: go vet ./...
+
+      # -race catches the kind of concurrency regression the engine-
+      # layer refactor (#101) just protected against. -count=1
+      # disables the test cache so failures aren't masked across runs.
+      - name: go test -race ./...
+        run: go test -race ./... -count=1 -timeout 5m
