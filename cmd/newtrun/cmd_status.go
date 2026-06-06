@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -143,8 +144,15 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 		return json.NewEncoder(os.Stdout).Encode(state)
 	}
 
+	return renderSuiteStatus(os.Stdout, suite, state, detail)
+}
+
+// renderSuiteStatus writes the human-readable status view for one suite
+// to out. Extracted from printSuiteStatus so the rendering can be tested
+// without spinning up a real HTTP client.
+func renderSuiteStatus(out io.Writer, suite string, state *newtrun.RunState, detail bool) error {
 	// Header
-	fmt.Printf("newtrun: %s\n", suite)
+	fmt.Fprintf(out, "newtrun: %s\n", suite)
 
 	// Topology info
 	topology := resolveTopologyFromState(state)
@@ -152,34 +160,34 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 	if topology != "" {
 		topoStatus = checkTopologyStatus(topology)
 	}
-	fmt.Printf("  topology:  %s (%s)\n", topology, topoStatus)
+	fmt.Fprintf(out, "  topology:  %s (%s)\n", topology, topoStatus)
 
 	// Platform
 	platform := state.Platform
 	if platform == "" {
 		platform = "default"
 	}
-	fmt.Printf("  platform:  %s\n", platform)
+	fmt.Fprintf(out, "  platform:  %s\n", platform)
 
 	// Target
 	if state.Target != "" {
-		fmt.Printf("  target:    %s\n", state.Target)
+		fmt.Fprintf(out, "  target:    %s\n", state.Target)
 	}
 
 	// Runner status. The server-mode runner is a goroutine under the
 	// registry, not a separate OS process, so the legacy PID display
 	// was retired with the AcquireLock/ReleaseLock helpers.
-	fmt.Printf("  status:    %s\n", colorRunStatus(state.Status, string(state.Status)))
+	fmt.Fprintf(out, "  status:    %s\n", colorRunStatus(state.Status, string(state.Status)))
 
 	// Timing
 	if !state.Started.IsZero() {
 		ago := time.Since(state.Started).Round(time.Second)
-		fmt.Printf("  started:   %s (%s ago)\n", state.Started.Format(newtrun.DateTimeFormat), ago)
+		fmt.Fprintf(out, "  started:   %s (%s ago)\n", state.Started.Format(newtrun.DateTimeFormat), ago)
 	}
 	if !state.Finished.IsZero() {
 		ago := time.Since(state.Finished).Round(time.Second)
 		duration := state.Finished.Sub(state.Started).Round(time.Second)
-		fmt.Printf("  finished:  %s (%s ago, took %s)\n", state.Finished.Format(newtrun.DateTimeFormat), ago, duration)
+		fmt.Fprintf(out, "  finished:  %s (%s ago, took %s)\n", state.Finished.Format(newtrun.DateTimeFormat), ago, duration)
 	}
 
 	// Scenario summary
@@ -188,12 +196,25 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 		for _, sc := range state.Scenarios {
 			totalSteps += sc.TotalSteps
 		}
-		fmt.Printf("  scenarios: %d (%d steps total)\n", len(state.Scenarios), totalSteps)
+		fmt.Fprintf(out, "  scenarios: %d (%d steps total)\n", len(state.Scenarios), totalSteps)
+	}
+
+	// Issue #93: when the suite reached a terminal status but no scenario
+	// ever updated its own status (every entry's Status field is empty),
+	// the scenario table renders as 22 rows of "—" alongside a "failed"
+	// header — a contradiction. Detect that combination and replace the
+	// misleading table with a single explanatory line. The most common
+	// way to hit it is a deploy or connect failure that aborts the run
+	// before iterateScenarios fires.
+	if len(state.Scenarios) > 0 && suiteTerminatedBeforeAnyScenario(state) {
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "  (suite terminated before any scenarios were attempted)\n")
+		return nil
 	}
 
 	// Scenario table
 	if len(state.Scenarios) > 0 {
-		fmt.Println()
+		fmt.Fprintln(out)
 
 		t := cli.NewTable("#", "SCENARIO", "STEPS", "STATUS", "REQUIRES", "DURATION").WithPrefix("  ")
 
@@ -241,21 +262,41 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 		}
 
 		// Summary line
-		fmt.Printf("\n  progress: %d/%d passed", passed, len(state.Scenarios))
+		fmt.Fprintf(out, "\n  progress: %d/%d passed", passed, len(state.Scenarios))
 		if failed > 0 {
-			fmt.Printf(", %d failed", failed)
+			fmt.Fprintf(out, ", %d failed", failed)
 		}
 		if errored > 0 {
-			fmt.Printf(", %d errored", errored)
+			fmt.Fprintf(out, ", %d errored", errored)
 		}
 		pending := len(state.Scenarios) - passed - failed - errored - running
 		if pending > 0 {
-			fmt.Printf(", %d pending", pending)
+			fmt.Fprintf(out, ", %d pending", pending)
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 	}
 
 	return nil
+}
+
+// suiteTerminatedBeforeAnyScenario returns true when the suite reached a
+// terminal status but no scenario ever updated its own status — every
+// entry in state.Scenarios has an empty Status. This is the case
+// described by issue #93: the renderer would otherwise show a table of
+// "—" rows alongside a "failed" header, contradicting itself. Common
+// cause is a deploy or connect failure that aborts the run before
+// iterateScenarios fires.
+func suiteTerminatedBeforeAnyScenario(state *newtrun.RunState) bool {
+	switch state.Status {
+	case newtrun.SuiteStatusRunning, newtrun.SuiteStatusPausing:
+		return false
+	}
+	for _, sc := range state.Scenarios {
+		if sc.Status != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // printDetailView prints per-step results for each scenario that has them.
