@@ -7,37 +7,37 @@ import (
 	"time"
 )
 
-// Test-local categories. Real category constants land in the PR that adds
+// Test-local keys. Real key constants land in the PR that adds
 // lockManager's first non-test caller.
 const (
-	catTestA lockCategory = "test:a"
-	catTestB lockCategory = "test:b"
+	keyTestA lockKey = "test:a"
+	keyTestB lockKey = "test:b"
 )
 
-// TestLockManager_SameCategoryReturnsSameLock pins the core invariant:
-// the same category resolves to the same *sync.RWMutex on every call.
-// Without this, atomicity claims built on lockManager would silently
-// break — two callers asking for the "services" lock would each get a
-// different mutex and serialization would disappear.
-func TestLockManager_SameCategoryReturnsSameLock(t *testing.T) {
+// TestLockManager_SameKeyReturnsSameLock pins the core invariant: the
+// same key resolves to the same *sync.RWMutex on every call. Without
+// this, atomicity claims built on lockManager would silently break —
+// two callers asking for the "services" lock would each get a different
+// mutex and serialization would disappear.
+func TestLockManager_SameKeyReturnsSameLock(t *testing.T) {
 	lm := newLockManager()
-	a1 := lm.lock(catTestA)
-	a2 := lm.lock(catTestA)
+	a1 := lm.lock(keyTestA)
+	a2 := lm.lock(keyTestA)
 	if a1 != a2 {
-		t.Errorf("same category returned different locks: %p vs %p", a1, a2)
+		t.Errorf("same key returned different locks: %p vs %p", a1, a2)
 	}
 }
 
-// TestLockManager_DistinctCategoriesGetDistinctLocks pins the other half
-// of the invariant: distinct categories never share a lock. Without this,
-// cross-category parallelism (the whole point of the manager) would
-// collapse — every category would alias to one mutex.
-func TestLockManager_DistinctCategoriesGetDistinctLocks(t *testing.T) {
+// TestLockManager_DistinctKeysGetDistinctLocks pins the other half of
+// the invariant: distinct keys never share a lock. Without this, the
+// per-key parallelism (the whole point of the manager) would collapse —
+// every key would alias to one mutex.
+func TestLockManager_DistinctKeysGetDistinctLocks(t *testing.T) {
 	lm := newLockManager()
-	a := lm.lock(catTestA)
-	b := lm.lock(catTestB)
+	a := lm.lock(keyTestA)
+	b := lm.lock(keyTestB)
 	if a == b {
-		t.Error("distinct categories returned the same lock")
+		t.Error("distinct keys returned the same lock")
 	}
 }
 
@@ -55,7 +55,7 @@ func TestLockManager_ConcurrentLookupsAreSafe(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func(i int) {
 			defer wg.Done()
-			seen[i] = lm.lock(catTestA)
+			seen[i] = lm.lock(keyTestA)
 		}(i)
 	}
 	wg.Wait()
@@ -66,21 +66,21 @@ func TestLockManager_ConcurrentLookupsAreSafe(t *testing.T) {
 	}
 }
 
-// TestLockManager_CategoryLockIsAUsableRWMutex is a smoke test that the
+// TestLockManager_KeyedLockIsAUsableRWMutex is a smoke test that the
 // lock returned by lockManager actually behaves like an RWMutex — a held
 // writer excludes new readers. Not testing sync.RWMutex itself (Go does
 // that); testing that lockManager.lock returns a usable RWMutex rather
 // than something weird.
-func TestLockManager_CategoryLockIsAUsableRWMutex(t *testing.T) {
+func TestLockManager_KeyedLockIsAUsableRWMutex(t *testing.T) {
 	lm := newLockManager()
-	l := lm.lock(catTestA)
+	l := lm.lock(keyTestA)
 	l.Lock()
 
 	var readerEntered atomic.Bool
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		otherL := lm.lock(catTestA)
+		otherL := lm.lock(keyTestA)
 		otherL.RLock()
 		readerEntered.Store(true)
 		otherL.RUnlock()
