@@ -699,6 +699,221 @@ func (n *Network) CreateZone(name string, zone *spec.ZoneSpec) error {
 	return n.persistSpec()
 }
 
+// CreateProfile atomically creates a new device profile. Delegates to
+// spec.Loader.CreateProfile which holds Loader's RWMutex across the
+// existence check and the file write.
+func (n *Network) CreateProfile(name string, profile *spec.DeviceProfile) error {
+	return n.loader.CreateProfile(name, profile)
+}
+
+// ============================================================================
+// Atomic Add / Remove methods — read-modify-write under one Lock
+// ============================================================================
+//
+// Each method holds keyNetworkSpec.Lock across the parent lookup, the
+// child-collection mutation, and the disk persist. This replaces the
+// pre-PR-B pattern where the public layer composed internal.GetX + mutate
+// + internal.SaveX as separate critical sections — two concurrent AddX
+// calls could overwrite each other's mutations (last writer wins).
+
+// AddQoSQueueToPolicy atomically inserts a QoS queue at the given index in
+// a QoS policy. Returns an error if the policy doesn't exist or the index
+// is already populated.
+func (n *Network) AddQoSQueueToPolicy(policy string, queueID int, queue *spec.QoSQueue) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	p, ok := n.spec.QoSPolicies[policy]
+	if !ok {
+		return fmt.Errorf("QoS policy '%s' not found", policy)
+	}
+	for len(p.Queues) <= queueID {
+		p.Queues = append(p.Queues, nil)
+	}
+	if p.Queues[queueID] != nil {
+		return fmt.Errorf("queue %d already exists in policy '%s'", queueID, policy)
+	}
+	p.Queues[queueID] = queue
+	return n.persistSpec()
+}
+
+// RemoveQoSQueueFromPolicy atomically removes a QoS queue at the given
+// index from a QoS policy. Returns an error if the policy doesn't exist
+// or the index is out of range / empty. Trims trailing nil slots after
+// removal to match the pre-refactor public behavior.
+func (n *Network) RemoveQoSQueueFromPolicy(policy string, queueID int) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	p, ok := n.spec.QoSPolicies[policy]
+	if !ok {
+		return fmt.Errorf("QoS policy '%s' not found", policy)
+	}
+	if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
+		return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
+	}
+	p.Queues[queueID] = nil
+	for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
+		p.Queues = p.Queues[:len(p.Queues)-1]
+	}
+	return n.persistSpec()
+}
+
+// AddFilterRule atomically appends a rule to a filter and re-sorts the rule
+// slice by sequence number. Returns an error if the filter doesn't exist
+// or a rule with the same sequence already exists.
+func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	filter = util.NormalizeName(filter)
+	f, ok := n.spec.Filters[filter]
+	if !ok {
+		return fmt.Errorf("filter '%s' not found", filter)
+	}
+	for _, r := range f.Rules {
+		if r.Sequence == rule.Sequence {
+			return fmt.Errorf("rule with priority %d already exists in filter '%s'", rule.Sequence, filter)
+		}
+	}
+	f.Rules = append(f.Rules, rule)
+	sort.Slice(f.Rules, func(i, j int) bool {
+		return f.Rules[i].Sequence < f.Rules[j].Sequence
+	})
+	return n.persistSpec()
+}
+
+// RemoveFilterRule atomically removes a rule from a filter by sequence
+// number. Returns an error if the filter or rule doesn't exist.
+func (n *Network) RemoveFilterRule(filter string, sequence int) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	filter = util.NormalizeName(filter)
+	f, ok := n.spec.Filters[filter]
+	if !ok {
+		return fmt.Errorf("filter '%s' not found", filter)
+	}
+	found := false
+	newRules := make([]*spec.FilterRule, 0, len(f.Rules))
+	for _, r := range f.Rules {
+		if r.Sequence == sequence {
+			found = true
+			continue
+		}
+		newRules = append(newRules, r)
+	}
+	if !found {
+		return fmt.Errorf("rule with priority %d not found in filter '%s'", sequence, filter)
+	}
+	f.Rules = newRules
+	return n.persistSpec()
+}
+
+// AddPrefixToPrefixList atomically appends a prefix to a prefix list.
+// Returns an error if the list doesn't exist.
+func (n *Network) AddPrefixToPrefixList(prefixList string, prefix string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	prefixList = util.NormalizeName(prefixList)
+	prefixes, ok := n.spec.PrefixLists[prefixList]
+	if !ok {
+		return fmt.Errorf("prefix list '%s' not found", prefixList)
+	}
+	prefixes = append(prefixes, prefix)
+	n.spec.PrefixLists[prefixList] = prefixes
+	return n.persistSpec()
+}
+
+// RemovePrefixFromPrefixList atomically removes a prefix from a prefix
+// list. Returns an error if the list or prefix doesn't exist.
+func (n *Network) RemovePrefixFromPrefixList(prefixList string, prefix string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	prefixList = util.NormalizeName(prefixList)
+	prefixes, ok := n.spec.PrefixLists[prefixList]
+	if !ok {
+		return fmt.Errorf("prefix list '%s' not found", prefixList)
+	}
+	found := false
+	newPrefixes := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		if p == prefix {
+			found = true
+			continue
+		}
+		newPrefixes = append(newPrefixes, p)
+	}
+	if !found {
+		return fmt.Errorf("prefix '%s' not found in prefix list '%s'", prefix, prefixList)
+	}
+	n.spec.PrefixLists[prefixList] = newPrefixes
+	return n.persistSpec()
+}
+
+// AddRuleToRoutePolicy atomically appends a rule to a route policy and
+// re-sorts the rule slice by sequence number. Returns an error if the
+// policy doesn't exist or a rule with the same sequence already exists.
+func (n *Network) AddRuleToRoutePolicy(policy string, rule *spec.RoutePolicyRule) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	rp, ok := n.spec.RoutePolicies[policy]
+	if !ok {
+		return fmt.Errorf("route policy '%s' not found", policy)
+	}
+	for _, r := range rp.Rules {
+		if r.Sequence == rule.Sequence {
+			return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", rule.Sequence, policy)
+		}
+	}
+	rp.Rules = append(rp.Rules, rule)
+	sort.Slice(rp.Rules, func(i, j int) bool {
+		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+	})
+	return n.persistSpec()
+}
+
+// RemoveRuleFromRoutePolicy atomically removes a rule from a route policy
+// by sequence number. Returns an error if the policy or rule doesn't exist.
+func (n *Network) RemoveRuleFromRoutePolicy(policy string, sequence int) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	rp, ok := n.spec.RoutePolicies[policy]
+	if !ok {
+		return fmt.Errorf("route policy '%s' not found", policy)
+	}
+	found := false
+	newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
+	for _, r := range rp.Rules {
+		if r.Sequence == sequence {
+			found = true
+			continue
+		}
+		newRules = append(newRules, r)
+	}
+	if !found {
+		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", sequence, policy)
+	}
+	rp.Rules = newRules
+	return n.persistSpec()
+}
+
 // ============================================================================
 // Snapshot methods — fresh-copy reads under RLock
 // ============================================================================

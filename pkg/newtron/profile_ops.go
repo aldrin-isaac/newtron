@@ -59,7 +59,7 @@ func (net *Network) CreateProfile(req CreateDeviceProfileRequest, opts ExecOpts)
 			ClusterID:      req.EVPN.ClusterID,
 		}
 	}
-	return net.internal.SaveProfile(req.Name, profile)
+	return net.internal.CreateProfile(req.Name, profile)
 }
 
 // DeleteProfile removes a device profile. force=true cascade-deletes any
@@ -116,7 +116,7 @@ func (net *Network) CreateZone(req CreateZoneRequest, opts ExecOpts) error {
 		return nil
 	}
 	zone := &spec.ZoneSpec{}
-	return net.internal.SaveZone(req.Name, zone)
+	return net.internal.CreateZone(req.Name, zone)
 }
 
 // DeleteZone removes a zone.
