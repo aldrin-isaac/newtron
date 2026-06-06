@@ -64,7 +64,7 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListServices(), nil
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowService(name)
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func (s *Server) handleListIPVPNs(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListIPVPNs(), nil
 	})
 	if err != nil {
@@ -173,7 +173,7 @@ func (s *Server) handleShowIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowIPVPN(name)
 	})
 	if err != nil {
@@ -188,7 +188,7 @@ func (s *Server) handleListMACVPNs(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListMACVPNs(), nil
 	})
 	if err != nil {
@@ -204,7 +204,7 @@ func (s *Server) handleShowMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowMACVPN(name)
 	})
 	if err != nil {
@@ -219,7 +219,7 @@ func (s *Server) handleListQoSPolicies(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListQoSPolicies(), nil
 	})
 	if err != nil {
@@ -235,7 +235,7 @@ func (s *Server) handleShowQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowQoSPolicy(name)
 	})
 	if err != nil {
@@ -250,7 +250,7 @@ func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListFilters(), nil
 	})
 	if err != nil {
@@ -266,7 +266,7 @@ func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowFilter(name)
 	})
 	if err != nil {
@@ -294,7 +294,7 @@ func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowPlatform(name)
 	})
 	if err != nil {
@@ -310,7 +310,7 @@ func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request)
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListRoutePolicies(), nil
 	})
 	if err != nil {
@@ -325,7 +325,7 @@ func (s *Server) handleListPrefixLists(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListPrefixLists(), nil
 	})
 	if err != nil {
@@ -340,7 +340,7 @@ func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Reques
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.TopologyDeviceNames(), nil
 	})
 	if err != nil {
@@ -394,7 +394,7 @@ func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "name and device required"})
 		return
 	}
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.AddTopologyDevice(req.Name, req.Device)
 	})
 	if err != nil {
@@ -416,7 +416,7 @@ func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request
 	}
 	name := r.PathValue("name")
 	force := r.URL.Query().Get("force") == "true"
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteTopologyDevice(name, force)
 	})
 	if err != nil {
@@ -442,7 +442,7 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.UpdateTopologyDevice(name, &device)
 	})
 	if err != nil {
@@ -466,7 +466,7 @@ func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.AddTopologyLink(&link)
 	})
 	if err != nil {
@@ -492,7 +492,7 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 		return
 	}
 	endpoint := device + ":" + iface
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteTopologyLink(endpoint)
 	})
 	if err != nil {
@@ -514,7 +514,7 @@ func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.NotFoundError{Resource: "host device", Name: name})
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.GetHostProfile(r.Context(), name)
 	})
 	if err != nil {
@@ -529,7 +529,7 @@ func (s *Server) handleGetAllFeatures(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.GetAllFeatures(), nil
 	})
 	if err != nil {
@@ -545,7 +545,7 @@ func (s *Server) handleGetFeatureDependencies(w http.ResponseWriter, r *http.Req
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.GetFeatureDependencies(name), nil
 	})
 	if err != nil {
@@ -570,7 +570,7 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateService(req, opts)
 	})
 	if err != nil {
@@ -593,7 +593,7 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteService(req.Name, opts)
 	})
 	if err != nil {
@@ -614,7 +614,7 @@ func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateIPVPN(req, opts)
 	})
 	if err != nil {
@@ -637,7 +637,7 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteIPVPN(req.Name, opts)
 	})
 	if err != nil {
@@ -658,7 +658,7 @@ func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateMACVPN(req, opts)
 	})
 	if err != nil {
@@ -681,7 +681,7 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteMACVPN(req.Name, opts)
 	})
 	if err != nil {
@@ -702,7 +702,7 @@ func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateQoSPolicy(req, opts)
 	})
 	if err != nil {
@@ -725,7 +725,7 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteQoSPolicy(req.Name, opts)
 	})
 	if err != nil {
@@ -746,7 +746,7 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.AddQoSQueue(req, opts)
 	})
 	if err != nil {
@@ -770,7 +770,7 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.RemoveQoSQueue(req.Policy, req.QueueID, opts)
 	})
 	if err != nil {
@@ -791,7 +791,7 @@ func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateFilter(req, opts)
 	})
 	if err != nil {
@@ -814,7 +814,7 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteFilter(req.Name, opts)
 	})
 	if err != nil {
@@ -835,7 +835,7 @@ func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.AddFilterRule(req, opts)
 	})
 	if err != nil {
@@ -859,7 +859,7 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.RemoveFilterRule(req.Filter, req.Sequence, opts)
 	})
 	if err != nil {
@@ -879,7 +879,7 @@ func (s *Server) handleShowPrefixList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowPrefixList(name)
 	})
 	if err != nil {
@@ -900,7 +900,7 @@ func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreatePrefixList(req, opts)
 	})
 	if err != nil {
@@ -923,7 +923,7 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeletePrefixList(req.Name, opts)
 	})
 	if err != nil {
@@ -944,7 +944,7 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.AddPrefixListEntry(req, opts)
 	})
 	if err != nil {
@@ -968,7 +968,7 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.RemovePrefixListEntry(req.PrefixList, req.Prefix, opts)
 	})
 	if err != nil {
@@ -988,7 +988,7 @@ func (s *Server) handleShowRoutePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowRoutePolicy(name)
 	})
 	if err != nil {
@@ -1009,7 +1009,7 @@ func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateRoutePolicy(req, opts)
 	})
 	if err != nil {
@@ -1032,7 +1032,7 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteRoutePolicy(req.Name, opts)
 	})
 	if err != nil {
@@ -1053,7 +1053,7 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.AddRoutePolicyRule(req, opts)
 	})
 	if err != nil {
@@ -1077,7 +1077,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.RemoveRoutePolicyRule(req.Policy, req.Sequence, opts)
 	})
 	if err != nil {
@@ -1096,7 +1096,7 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListProfiles(), nil
 	})
 	if err != nil {
@@ -1135,7 +1135,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateProfile(req, opts)
 	})
 	if err != nil {
@@ -1159,7 +1159,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	force := r.URL.Query().Get("force") == "true"
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteProfile(req.Name, opts, force)
 	})
 	if err != nil {
@@ -1178,7 +1178,7 @@ func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ListZones(), nil
 	})
 	if err != nil {
@@ -1194,7 +1194,7 @@ func (s *Server) handleShowZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.ShowZone(name)
 	})
 	if err != nil {
@@ -1215,7 +1215,7 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.CreateZone(req, opts)
 	})
 	if err != nil {
@@ -1238,7 +1238,7 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := na.do(r.Context(), func() (any, error) {
+	_, err := na.write(r.Context(), func() (any, error) {
 		return nil, na.net.DeleteZone(req.Name, opts)
 	})
 	if err != nil {
@@ -1259,7 +1259,7 @@ func (s *Server) handlePlatformSupportsFeature(w http.ResponseWriter, r *http.Re
 	}
 	platform := r.PathValue("name")
 	feature := r.PathValue("feature")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return map[string]bool{"supported": na.net.PlatformSupportsFeature(platform, feature)}, nil
 	})
 	if err != nil {
@@ -1275,7 +1275,7 @@ func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	feature := r.PathValue("name")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.read(r.Context(), func() (any, error) {
 		return na.net.GetUnsupportedDueTo(feature), nil
 	})
 	if err != nil {
@@ -1296,7 +1296,7 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	// Body is optional — force defaults to false.
 	_ = decodeJSON(r, &req)
 	device := r.PathValue("device")
-	val, err := na.do(r.Context(), func() (any, error) {
+	val, err := na.write(r.Context(), func() (any, error) {
 		err := na.net.InitDevice(r.Context(), device, req.Force)
 		if errors.Is(err, newtron.ErrAlreadyInitialized) {
 			return map[string]string{"status": "already_initialized"}, nil

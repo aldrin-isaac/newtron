@@ -41,31 +41,40 @@ type response struct {
 // needs a goroutine + select loop to interleave request handling with idle
 // cleanup), NetworkActor has no state that needs a goroutine — its .net is
 // immutable after construction and the nodeActors cache is protected by its
-// own mutex. The serialization here is just one-closure-at-a-time, which is
-// what a plain sync.Mutex provides. Calling it an "actor" preserves symmetry
-// with NodeActor at the API surface (both expose do()) without paying for a
-// goroutine that has nothing to do.
+// own mutex. The serialization here is just lock-bracketed closures, which is
+// what sync.RWMutex provides. Calling it an "actor" preserves symmetry with
+// NodeActor at the API surface (both expose do-like methods) without paying
+// for a goroutine that has nothing to do.
+//
+// Reads vs writes: spec reads (List/Show/Get) take RLock and run concurrently
+// with each other; spec writes (Create/Update/Delete/Add/Remove) take Lock
+// and are exclusive against everything else. Writers serialize against each
+// other because they share network.json's persistence layer — splitting
+// network.json into per-resource files would unlock cross-category write
+// parallelism, but that's a separate change.
 //
 // Why serialize at all: several public *newtron.Network methods compose
 // multiple internal operations under separate locks (e.g. CreateService does
-// GetService under RLock, releases, then SaveService under Lock). The
-// composition needs atomicity that internal.RWMutex doesn't supply on its
-// own. The do() lock is what makes those compositions race-free.
+// GetService under internal.RLock, releases, then SaveService under
+// internal.Lock). The composition needs atomicity that internal.RWMutex
+// doesn't supply on its own. NetworkActor's lock is what makes the
+// composition race-free.
 type NetworkActor struct {
 	net         *newtron.Network
 	idleTimeout time.Duration
 
-	// do is the spec-serialization lock taken by do().
-	do_ sync.Mutex
+	// mu serializes spec writes against writes and against reads. Reads
+	// proceed concurrently with each other under RLock.
+	mu sync.RWMutex
 
-	// nodeMu guards the nodeActors map (read/written off the do_ path —
+	// nodeMu guards the nodeActors map (accessed off the mu path —
 	// e.g. handleServiceProjection snapshots the registry directly).
 	nodeMu     sync.Mutex
 	nodeActors map[string]*NodeActor
 }
 
-// newNetworkActor creates a NetworkActor. No goroutine to start — do()
-// serializes via sync.Mutex.
+// newNetworkActor creates a NetworkActor. No goroutine to start — the
+// read/write methods serialize via sync.RWMutex.
 func newNetworkActor(net *newtron.Network, idleTimeout time.Duration) *NetworkActor {
 	return &NetworkActor{
 		net:         net,
@@ -74,12 +83,30 @@ func newNetworkActor(net *newtron.Network, idleTimeout time.Duration) *NetworkAc
 	}
 }
 
-// do runs fn under the spec-serialization lock. Context cancellation that
+// write runs fn under the spec write lock. Context cancellation that
 // happened before fn could start is honored; once fn is running it owns the
-// lock until it returns.
-func (na *NetworkActor) do(ctx context.Context, fn func() (any, error)) (any, error) {
-	na.do_.Lock()
-	defer na.do_.Unlock()
+// lock until it returns. Used by any handler that mutates Network state
+// (Create/Update/Delete/Add/Remove). Mutually exclusive against both other
+// writes and any in-flight reads.
+func (na *NetworkActor) write(ctx context.Context, fn func() (any, error)) (any, error) {
+	na.mu.Lock()
+	defer na.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return fn()
+}
+
+// read runs fn under the spec read lock. Multiple read closures run
+// concurrently; a writer waits for all in-flight readers to finish (and
+// blocks new readers behind itself, per sync.RWMutex's writer-preference).
+// Used by every handler that observes Network state without mutating it
+// (List/Show/Get). Public read methods that bypass internal locked
+// accessors (e.g. raw Spec() iteration in ListIPVPNs) are race-free under
+// this lock because no writer can run while RLock is held.
+func (na *NetworkActor) read(ctx context.Context, fn func() (any, error)) (any, error) {
+	na.mu.RLock()
+	defer na.mu.RUnlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
