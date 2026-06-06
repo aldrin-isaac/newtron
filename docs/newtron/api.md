@@ -503,8 +503,8 @@ Unregister a network. Closes all cached SSH connections for the network.
 ### POST /newtron/v1/network/{netID}/reload
 
 Reload a network's specs from disk without restarting the server. Stops the existing
-NetworkActor (draining all NodeActors and SSH connections), reloads specs from the
-stored spec directory, and creates a fresh NetworkActor. SSH connections reconnect
+networkEntity (draining all NodeActors and SSH connections), reloads specs from the
+stored spec directory, and creates a fresh networkEntity. SSH connections reconnect
 lazily on the next request.
 
 Use this after modifying spec files on disk (manually or via another tool) to pick
@@ -548,8 +548,9 @@ specs, QoS policies, filters, platforms, device profiles, zones, and topology
 metadata. They do not connect to any device; they read what was loaded from the
 spec directory at registration time.
 
-All spec read endpoints require a registered network (`{netID}`) and are serialized
-through the NetworkActor to prevent concurrent modification during spec writes.
+All spec read endpoints require a registered network (`{netID}`). Atomicity is
+provided by the engine layer: each Network method acquires a per-key lock internally,
+so concurrent reads and writes are safe without any API-layer coordination.
 
 ### Spec Resource Endpoints (List / Show)
 
@@ -788,7 +789,8 @@ Check whether a platform supports a specific feature.
 These endpoints create and delete spec definitions (services, VPNs, QoS policies,
 filters, device profiles, zones, prefix lists, route policies). They modify the
 in-memory spec and persist changes to the spec directory on disk. Like spec reads,
-they are serialized through the NetworkActor.
+atomicity is provided by the engine layer: each Network method acquires its key's
+lock internally before composing or persisting the spec change.
 
 All spec write endpoints use RPC-style naming: `POST .../create-X` and
 `POST .../delete-X`. They accept the `dry_run` query parameter. When `dry_run=true`,
@@ -3375,7 +3377,10 @@ newtron-server -addr :9090 -spec-dir /etc/newtron -net-id prod -idle-timeout 10m
 
 The server uses an actor model to manage device connections:
 
-- Each registered network gets a **NetworkActor** that serializes spec operations.
+- Each registered network gets a **networkEntity**: a per-network registration record
+  that owns the engine `*Network` and a NodeActor cache. It is not an actor — it
+  holds no goroutine and no spec lock. Spec atomicity lives in the engine layer via
+  per-key locks (`keyNetworkSpec`, `keyTopology`, `keyNodes`).
 - Each device gets a **NodeActor** (created on first access) that serializes
   device operations and caches the SSH connection.
 - The SSH tunnel is reused across requests. Each request still refreshes CONFIG_DB

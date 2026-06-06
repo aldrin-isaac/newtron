@@ -58,7 +58,7 @@ If an example needs to be simpler, simplify by removing fields — not by changi
 
 ## 3. Architecture Diagrams Show Relationships, Not Just Boxes — HLD
 
-Containment (NetworkActor manages NodeActors), data flow direction (Network Layer → Node Layer via `Connect()`), and ownership (who holds what reference) must be visible in the diagram. Parallel boxes with no connecting lines misrepresent the architecture.
+Containment (networkEntity owns the NodeActor cache), data flow direction (Network Layer → Node Layer via `Connect()`), and ownership (who holds what reference) must be visible in the diagram. Parallel boxes with no connecting lines misrepresent the architecture.
 
 When drawing a diagram, ask:
 - Which component creates/owns which?

@@ -37,45 +37,33 @@ type response struct {
 
 // networkEntity is the API layer's record for one registered network: it
 // pairs the engine's *newtron.Network with the spec directory it was loaded
-// from, a read/write lock that makes composed spec operations atomic, and
-// a cache of per-device NodeActors. The Server holds one of these per
-// registered netID.
+// from and a cache of per-device NodeActors. The Server holds one of these
+// per registered netID.
 //
 // This is NOT an actor — no goroutine, no message passing, no isolated
-// state. NodeActor IS an actor (cached transport + idle-timer driven by a
-// select loop); the asymmetry is deliberate.
+// state, no spec serialization. NodeActor IS an actor (cached transport +
+// idle-timer driven by a select loop); the asymmetry is deliberate.
 //
-// Reads vs writes: spec reads (List/Show/Get) take RLock and run
-// concurrently with each other; spec writes (Create/Update/Delete/Add/
-// Remove) take Lock and are exclusive against everything else. Writers
-// serialize against each other because they share network.json's
-// persistence layer — splitting network.json into per-resource files
-// would unlock cross-category write parallelism, but that's a separate
-// change.
-//
-// Why serialize at all: several public *newtron.Network methods compose
-// multiple internal operations under separate locks (e.g. CreateService
-// does GetService under internal.RLock, releases, then SaveService under
-// internal.Lock). The composition needs atomicity that internal.RWMutex
-// doesn't supply on its own. The lock here is what makes the composition
-// race-free.
+// Spec serialization lives at the engine layer. *newtron.Network's public
+// Create/Update/Delete/Add/Remove methods are internally atomic — they
+// compose check + mutate + persist under a single keyNetworkSpec.Lock (or
+// keyTopology.Lock for topology methods). Reads (List/Show/Get/Snapshot)
+// take the corresponding RLock and run concurrently. The API layer has no
+// lock of its own around spec data; handlers call ne.net.X() directly.
+// See docs/newtron/hld.md "Concurrency model" for the full ownership map.
 type networkEntity struct {
 	net         *newtron.Network
 	specDir     string
 	idleTimeout time.Duration
 
-	// mu serializes spec writes against writes and against reads. Reads
-	// proceed concurrently with each other under RLock.
-	mu sync.RWMutex
-
-	// nodeMu guards the nodeActors map (accessed off the mu path —
-	// e.g. handleServiceProjection snapshots the registry directly).
+	// nodeMu guards the nodeActors map. Not a spec lock — protects the
+	// API layer's own runtime cache. handleServiceProjection snapshots
+	// the registry directly through this mutex.
 	nodeMu     sync.Mutex
 	nodeActors map[string]*NodeActor
 }
 
-// newNetworkEntity creates a networkEntity for a registered network. No
-// goroutine to start — the read/write methods serialize via sync.RWMutex.
+// newNetworkEntity creates a networkEntity for a registered network.
 func newNetworkEntity(net *newtron.Network, specDir string, idleTimeout time.Duration) *networkEntity {
 	return &networkEntity{
 		net:         net,
@@ -83,36 +71,6 @@ func newNetworkEntity(net *newtron.Network, specDir string, idleTimeout time.Dur
 		idleTimeout: idleTimeout,
 		nodeActors:  make(map[string]*NodeActor),
 	}
-}
-
-// write runs fn under the spec write lock. Context cancellation that
-// happened before fn could start is honored; once fn is running it owns the
-// lock until it returns. Used by any handler that mutates Network state
-// (Create/Update/Delete/Add/Remove). Mutually exclusive against both other
-// writes and any in-flight reads.
-func (ne *networkEntity) write(ctx context.Context, fn func() (any, error)) (any, error) {
-	ne.mu.Lock()
-	defer ne.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return fn()
-}
-
-// read runs fn under the spec read lock. Multiple read closures run
-// concurrently; a writer waits for all in-flight readers to finish (and
-// blocks new readers behind itself, per sync.RWMutex's writer-preference).
-// Used by every handler that observes Network state without mutating it
-// (List/Show/Get). Public read methods that bypass internal locked
-// accessors (e.g. raw Spec() iteration in ListIPVPNs) are race-free under
-// this lock because no writer can run while RLock is held.
-func (ne *networkEntity) read(ctx context.Context, fn func() (any, error)) (any, error) {
-	ne.mu.RLock()
-	defer ne.mu.RUnlock()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return fn()
 }
 
 // getNodeActor returns or creates a NodeActor for the given device.

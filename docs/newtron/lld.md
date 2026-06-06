@@ -22,7 +22,7 @@ pkg/newtron/                          # Public API — all external consumers im
 ```
 pkg/newtron/api/                      # HTTP server — actor model, JSON handlers, middleware
     server.go                         # Server struct, Start/Stop, Register/Unregister
-    actors.go                         # NetworkActor, NodeActor, connection caching
+    actors.go                         # networkEntity, NodeActor, connection caching
     handler.go                        # Route registration (buildMux), JSON helpers
     handler_node.go                   # Node operation handlers
     handler_network.go                # Network/spec operation handlers
@@ -1412,7 +1412,7 @@ Tracing `POST /newtron/v1/network/default/node/leaf1/create-vlan` with `{"id": 1
 ```
 1. HTTP layer (handler_node.go)
    handleCreateVLAN parses JSON body → VLANConfig{VlanID: 100, Description: "servers"}
-   Resolves NetworkActor → NodeActor
+   Resolves networkEntity → NodeActor
    Calls connectAndExecute(fn)
 
 2. Actor layer (actors.go)
