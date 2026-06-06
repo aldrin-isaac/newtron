@@ -8,17 +8,17 @@ import (
 	"time"
 )
 
-// TestNetworkScope_ReadsRunConcurrently pins the parallelism contract from
+// TestNetworkEntity_ReadsRunConcurrently pins the parallelism contract from
 // issue #99: multiple read closures must be able to run simultaneously under
-// ns.read(). The probe blocks each closure on a barrier so the test fails if
+// ne.read(). The probe blocks each closure on a barrier so the test fails if
 // the closures are serialized — under sync.Mutex.Lock, the first closure
 // would hold the lock while waiting on the barrier and no other closure
 // could enter; under sync.RWMutex.RLock, all N closures enter in parallel
 // and the barrier releases them at once.
-func TestNetworkScope_ReadsRunConcurrently(t *testing.T) {
+func TestNetworkEntity_ReadsRunConcurrently(t *testing.T) {
 	s := newTestServer(t)
-	ns := s.getNetwork("default")
-	if ns == nil {
+	ne := s.getNetwork("default")
+	if ne == nil {
 		t.Fatal("default network not registered")
 	}
 
@@ -32,7 +32,7 @@ func TestNetworkScope_ReadsRunConcurrently(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = ns.read(context.Background(), func() (any, error) {
+			_, _ = ne.read(context.Background(), func() (any, error) {
 				if inside.Add(1) == N {
 					close(allInside)
 				}
@@ -44,22 +44,22 @@ func TestNetworkScope_ReadsRunConcurrently(t *testing.T) {
 
 	select {
 	case <-allInside:
-		// All N closures got inside ns.read concurrently — parallelism works.
+		// All N closures got inside ne.read concurrently — parallelism works.
 	case <-time.After(2 * time.Second):
-		t.Fatalf("only %d of %d read closures entered concurrently — ns.read is serializing", inside.Load(), N)
+		t.Fatalf("only %d of %d read closures entered concurrently — ne.read is serializing", inside.Load(), N)
 	}
 	close(release)
 	wg.Wait()
 }
 
-// TestNetworkScope_WritesSerializeAgainstWrites pins the writer-exclusion
+// TestNetworkEntity_WritesSerializeAgainstWrites pins the writer-exclusion
 // contract: two concurrent write closures must not overlap. Counts the
 // number of writers in flight at any moment; if it ever exceeds 1, the
 // mutual exclusion is broken.
-func TestNetworkScope_WritesSerializeAgainstWrites(t *testing.T) {
+func TestNetworkEntity_WritesSerializeAgainstWrites(t *testing.T) {
 	s := newTestServer(t)
-	ns := s.getNetwork("default")
-	if ns == nil {
+	ne := s.getNetwork("default")
+	if ne == nil {
 		t.Fatal("default network not registered")
 	}
 
@@ -72,7 +72,7 @@ func TestNetworkScope_WritesSerializeAgainstWrites(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = ns.write(context.Background(), func() (any, error) {
+			_, _ = ne.write(context.Background(), func() (any, error) {
 				now := inFlight.Add(1)
 				for {
 					prev := maxObserved.Load()
@@ -95,14 +95,14 @@ func TestNetworkScope_WritesSerializeAgainstWrites(t *testing.T) {
 	}
 }
 
-// TestNetworkScope_WriterExcludesReaders pins the writer-vs-reader exclusion:
+// TestNetworkEntity_WriterExcludesReaders pins the writer-vs-reader exclusion:
 // while a writer holds Lock, no reader can enter RLock. Verified by holding
 // the writer for a measurable duration and confirming the reader does not
 // complete until the writer releases.
-func TestNetworkScope_WriterExcludesReaders(t *testing.T) {
+func TestNetworkEntity_WriterExcludesReaders(t *testing.T) {
 	s := newTestServer(t)
-	ns := s.getNetwork("default")
-	if ns == nil {
+	ne := s.getNetwork("default")
+	if ne == nil {
 		t.Fatal("default network not registered")
 	}
 
@@ -110,7 +110,7 @@ func TestNetworkScope_WriterExcludesReaders(t *testing.T) {
 	writerRelease := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
-		_, _ = ns.write(context.Background(), func() (any, error) {
+		_, _ = ne.write(context.Background(), func() (any, error) {
 			close(writerHolding)
 			<-writerRelease
 			return nil, nil
@@ -122,7 +122,7 @@ func TestNetworkScope_WriterExcludesReaders(t *testing.T) {
 
 	readerEntered := make(chan struct{})
 	go func() {
-		_, _ = ns.read(context.Background(), func() (any, error) {
+		_, _ = ne.read(context.Background(), func() (any, error) {
 			close(readerEntered)
 			return nil, nil
 		})

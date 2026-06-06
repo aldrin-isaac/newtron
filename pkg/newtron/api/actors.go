@@ -32,15 +32,18 @@ type response struct {
 }
 
 // ============================================================================
-// networkScope — per-network spec-serialization + NodeActor cache
+// networkEntity — one registered network's API-layer state
 // ============================================================================
 
-// networkScope holds a *newtron.Network plus the per-network state the API
-// layer wraps around it: a read/write lock that makes composed spec
-// operations atomic, and a cache of per-device NodeActors. It is NOT an
-// actor — no goroutine, no message passing, no isolated state. NodeActor
-// IS an actor (cached transport + idle-timer driven by a select loop);
-// the asymmetry is deliberate.
+// networkEntity is the API layer's record for one registered network: it
+// pairs the engine's *newtron.Network with the spec directory it was loaded
+// from, a read/write lock that makes composed spec operations atomic, and
+// a cache of per-device NodeActors. The Server holds one of these per
+// registered netID.
+//
+// This is NOT an actor — no goroutine, no message passing, no isolated
+// state. NodeActor IS an actor (cached transport + idle-timer driven by a
+// select loop); the asymmetry is deliberate.
 //
 // Reads vs writes: spec reads (List/Show/Get) take RLock and run
 // concurrently with each other; spec writes (Create/Update/Delete/Add/
@@ -54,10 +57,11 @@ type response struct {
 // multiple internal operations under separate locks (e.g. CreateService
 // does GetService under internal.RLock, releases, then SaveService under
 // internal.Lock). The composition needs atomicity that internal.RWMutex
-// doesn't supply on its own. networkScope's lock is what makes the
-// composition race-free.
-type networkScope struct {
+// doesn't supply on its own. The lock here is what makes the composition
+// race-free.
+type networkEntity struct {
 	net         *newtron.Network
+	specDir     string
 	idleTimeout time.Duration
 
 	// mu serializes spec writes against writes and against reads. Reads
@@ -70,11 +74,12 @@ type networkScope struct {
 	nodeActors map[string]*NodeActor
 }
 
-// newNetworkScope creates a networkScope. No goroutine to start — the
-// read/write methods serialize via sync.RWMutex.
-func newNetworkScope(net *newtron.Network, idleTimeout time.Duration) *networkScope {
-	return &networkScope{
+// newNetworkEntity creates a networkEntity for a registered network. No
+// goroutine to start — the read/write methods serialize via sync.RWMutex.
+func newNetworkEntity(net *newtron.Network, specDir string, idleTimeout time.Duration) *networkEntity {
+	return &networkEntity{
 		net:         net,
+		specDir:     specDir,
 		idleTimeout: idleTimeout,
 		nodeActors:  make(map[string]*NodeActor),
 	}
@@ -85,9 +90,9 @@ func newNetworkScope(net *newtron.Network, idleTimeout time.Duration) *networkSc
 // lock until it returns. Used by any handler that mutates Network state
 // (Create/Update/Delete/Add/Remove). Mutually exclusive against both other
 // writes and any in-flight reads.
-func (ns *networkScope) write(ctx context.Context, fn func() (any, error)) (any, error) {
-	ns.mu.Lock()
-	defer ns.mu.Unlock()
+func (ne *networkEntity) write(ctx context.Context, fn func() (any, error)) (any, error) {
+	ne.mu.Lock()
+	defer ne.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -101,9 +106,9 @@ func (ns *networkScope) write(ctx context.Context, fn func() (any, error)) (any,
 // (List/Show/Get). Public read methods that bypass internal locked
 // accessors (e.g. raw Spec() iteration in ListIPVPNs) are race-free under
 // this lock because no writer can run while RLock is held.
-func (ns *networkScope) read(ctx context.Context, fn func() (any, error)) (any, error) {
-	ns.mu.RLock()
-	defer ns.mu.RUnlock()
+func (ne *networkEntity) read(ctx context.Context, fn func() (any, error)) (any, error) {
+	ne.mu.RLock()
+	defer ne.mu.RUnlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -111,14 +116,14 @@ func (ns *networkScope) read(ctx context.Context, fn func() (any, error)) (any, 
 }
 
 // getNodeActor returns or creates a NodeActor for the given device.
-func (ns *networkScope) getNodeActor(device string) *NodeActor {
-	ns.nodeMu.Lock()
-	defer ns.nodeMu.Unlock()
-	if actor, ok := ns.nodeActors[device]; ok {
+func (ne *networkEntity) getNodeActor(device string) *NodeActor {
+	ne.nodeMu.Lock()
+	defer ne.nodeMu.Unlock()
+	if actor, ok := ne.nodeActors[device]; ok {
 		return actor
 	}
-	actor := newNodeActor(ns.net, device, ns.idleTimeout)
-	ns.nodeActors[device] = actor
+	actor := newNodeActor(ne.net, device, ne.idleTimeout)
+	ne.nodeActors[device] = actor
 	return actor
 }
 
@@ -126,27 +131,27 @@ func (ns *networkScope) getNodeActor(device string) *NodeActor {
 // the cache. Called by handlers that mutate or delete a topology device — the
 // cached node is now stale and must be rebuilt from the new spec on next
 // access.
-func (ns *networkScope) removeNodeActor(device string) {
-	ns.nodeMu.Lock()
-	actor, ok := ns.nodeActors[device]
+func (ne *networkEntity) removeNodeActor(device string) {
+	ne.nodeMu.Lock()
+	actor, ok := ne.nodeActors[device]
 	if ok {
-		delete(ns.nodeActors, device)
+		delete(ne.nodeActors, device)
 	}
-	ns.nodeMu.Unlock()
+	ne.nodeMu.Unlock()
 	if ok {
 		actor.stop()
 	}
 }
 
-// stop shuts down all NodeActors and drops the cache. The scope itself
+// stop shuts down all NodeActors and drops the cache. The entity itself
 // has no goroutine to wind down.
-func (ns *networkScope) stop() {
-	ns.nodeMu.Lock()
-	for _, nodeActor := range ns.nodeActors {
+func (ne *networkEntity) stop() {
+	ne.nodeMu.Lock()
+	for _, nodeActor := range ne.nodeActors {
 		nodeActor.stop()
 	}
-	ns.nodeActors = make(map[string]*NodeActor)
-	ns.nodeMu.Unlock()
+	ne.nodeActors = make(map[string]*NodeActor)
+	ne.nodeMu.Unlock()
 }
 
 // ============================================================================

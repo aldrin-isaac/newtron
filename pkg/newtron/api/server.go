@@ -28,7 +28,7 @@ type Server struct {
 	*httputil.Server
 
 	mu       sync.RWMutex
-	networks map[string]*networkEntry
+	networks map[string]*networkEntity
 
 	idleTimeout time.Duration
 	logger      *log.Logger
@@ -40,11 +40,6 @@ type Server struct {
 	portResolver PortResolver
 }
 
-// networkEntry pairs a networkScope with its registration metadata.
-type networkEntry struct {
-	scope   *networkScope
-	specDir string
-}
 
 // NewServer creates a new API server. idleTimeout controls how long SSH
 // connections to devices are cached between requests. Use 0 for the default
@@ -63,7 +58,7 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortR
 		idleTimeout = DefaultIdleTimeout
 	}
 	s := &Server{
-		networks:     make(map[string]*networkEntry),
+		networks:     make(map[string]*networkEntity),
 		idleTimeout:  idleTimeout,
 		logger:       logger,
 		portResolver: portResolver,
@@ -77,10 +72,10 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortR
 		httputil.OnShutdown(func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			for _, entry := range s.networks {
-				entry.scope.stop()
+			for _, entity := range s.networks {
+				entity.stop()
 			}
-			s.networks = make(map[string]*networkEntry)
+			s.networks = make(map[string]*networkEntity)
 		}),
 	)
 	return s
@@ -109,10 +104,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
 
-	s.networks[id] = &networkEntry{
-		scope:   newNetworkScope(net, s.idleTimeout),
-		specDir: specDir,
-	}
+	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout)
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
 	return nil
 }
@@ -123,55 +115,49 @@ func (s *Server) UnregisterNetwork(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, exists := s.networks[id]
+	entity, exists := s.networks[id]
 	if !exists {
 		return fmt.Errorf("network '%s' not registered", id)
 	}
 
-	entry.scope.stop()
+	entity.stop()
 	delete(s.networks, id)
 	s.logger.Printf("unregistered network '%s'", id)
 	return nil
 }
 
-// ReloadNetwork stops the existing networkScope, reloads specs from disk,
-// and creates a fresh networkScope. SSH connections reconnect lazily on next request.
+// ReloadNetwork stops the existing networkEntity, reloads specs from disk,
+// and creates a fresh networkEntity. SSH connections reconnect lazily on
+// next request.
 func (s *Server) ReloadNetwork(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, exists := s.networks[id]
+	entity, exists := s.networks[id]
 	if !exists {
 		return &notRegisteredError{id}
 	}
 
-	// Stop old scope (drains all NodeActors and SSH connections)
-	entry.scope.stop()
+	// Stop old entity (drains all NodeActors and SSH connections)
+	entity.stop()
 
 	// Reload specs from disk
-	net, err := newtron.LoadNetwork(entry.specDir, topologyName(entry.specDir), s.portResolver)
+	net, err := newtron.LoadNetwork(entity.specDir, topologyName(entity.specDir), s.portResolver)
 	if err != nil {
-		return fmt.Errorf("reloading specs from %s: %w", entry.specDir, err)
+		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
 	}
 
-	// Replace with new scope
-	s.networks[id] = &networkEntry{
-		scope:   newNetworkScope(net, s.idleTimeout),
-		specDir: entry.specDir,
-	}
-	s.logger.Printf("reloaded network '%s' from %s", id, entry.specDir)
+	// Replace with new entity
+	s.networks[id] = newNetworkEntity(net, entity.specDir, s.idleTimeout)
+	s.logger.Printf("reloaded network '%s' from %s", id, entity.specDir)
 	return nil
 }
 
-// getNetwork returns the networkScope for the given ID, or nil.
-func (s *Server) getNetwork(id string) *networkScope {
+// getNetwork returns the networkEntity for the given ID, or nil.
+func (s *Server) getNetwork(id string) *networkEntity {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	entry := s.networks[id]
-	if entry == nil {
-		return nil
-	}
-	return entry.scope
+	return s.networks[id]
 }
 
 // listNetworks returns info about all registered networks.
@@ -179,13 +165,13 @@ func (s *Server) listNetworks() []NetworkInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]NetworkInfo, 0, len(s.networks))
-	for id, entry := range s.networks {
+	for id, entity := range s.networks {
 		result = append(result, NetworkInfo{
 			ID:          id,
-			SpecDir:     entry.specDir,
-			HasTopology: entry.scope.net.HasTopology(),
-			Topology:    topologyName(entry.specDir),
-			Nodes:       entry.scope.net.ListNodes(),
+			SpecDir:     entity.specDir,
+			HasTopology: entity.net.HasTopology(),
+			Topology:    topologyName(entity.specDir),
+			Nodes:       entity.net.ListNodes(),
 		})
 	}
 	return result

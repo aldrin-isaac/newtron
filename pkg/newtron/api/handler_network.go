@@ -60,12 +60,12 @@ func (s *Server) handleReloadNetwork(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListServices(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListServices(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -75,13 +75,13 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowService(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowService(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -98,8 +98,8 @@ func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
 // §11 + §46: each per-Node slice is the canonical []sonic.DriftEntry
 // vocabulary. Aggregated into *newtron.ServiceProjectionResult.
 func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	serviceName := r.PathValue("name")
@@ -107,12 +107,12 @@ func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request)
 
 	// Snapshot the NodeActor map so iteration doesn't race with new actors
 	// being created mid-iteration.
-	ns.nodeMu.Lock()
-	actors := make(map[string]*NodeActor, len(ns.nodeActors))
-	for name, a := range ns.nodeActors {
+	ne.nodeMu.Lock()
+	actors := make(map[string]*NodeActor, len(ne.nodeActors))
+	for name, a := range ne.nodeActors {
 		actors[name] = a
 	}
-	ns.nodeMu.Unlock()
+	ne.nodeMu.Unlock()
 
 	deviceNames := make([]string, 0, len(actors))
 	for name := range actors {
@@ -153,12 +153,12 @@ func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleListIPVPNs(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListIPVPNs(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListIPVPNs(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -168,13 +168,13 @@ func (s *Server) handleListIPVPNs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowIPVPN(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowIPVPN(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowIPVPN(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -184,12 +184,12 @@ func (s *Server) handleShowIPVPN(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListMACVPNs(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListMACVPNs(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListMACVPNs(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -199,13 +199,13 @@ func (s *Server) handleListMACVPNs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowMACVPN(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowMACVPN(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowMACVPN(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -215,12 +215,12 @@ func (s *Server) handleShowMACVPN(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListQoSPolicies(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListQoSPolicies(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListQoSPolicies(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -230,13 +230,13 @@ func (s *Server) handleListQoSPolicies(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowQoSPolicy(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowQoSPolicy(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowQoSPolicy(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -246,12 +246,12 @@ func (s *Server) handleShowQoSPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListFilters(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListFilters(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -261,13 +261,13 @@ func (s *Server) handleListFilters(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowFilter(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowFilter(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -278,12 +278,12 @@ func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
 
 // handleListPlatforms returns the platforms.json contents.
 func (s *Server) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListPlatforms(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListPlatforms(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -293,13 +293,13 @@ func (s *Server) handleListPlatforms(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowPlatform(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowPlatform(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -310,12 +310,12 @@ func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
 
 
 func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListRoutePolicies(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListRoutePolicies(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -325,12 +325,12 @@ func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleListPrefixLists(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListPrefixLists(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListPrefixLists(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -340,12 +340,12 @@ func (s *Server) handleListPrefixLists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.TopologyDeviceNames(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.TopologyDeviceNames(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -358,12 +358,12 @@ func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Reques
 // as `spec.TopologySpecFile`. §46: canonical substrate exposed directly,
 // alongside the names-only summary at /topology/node.
 func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		topo := ns.net.GetTopology()
+	val, err := ne.read(r.Context(), func() (any, error) {
+		topo := ne.net.GetTopology()
 		if topo == nil {
 			return nil, &newtron.NotFoundError{Resource: "topology", Name: ""}
 		}
@@ -384,8 +384,8 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 // {name, device: TopologyDevice}. 409 on duplicate name; 400 on missing
 // profile / invalid body.
 func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req TopologyNodeCreateRequest
@@ -397,8 +397,8 @@ func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "name and device required"})
 		return
 	}
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.AddTopologyDevice(req.Name, req.Device)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.AddTopologyDevice(req.Name, req.Device)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -413,20 +413,20 @@ func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request
 // Also closes any api-layer NodeActor cache for this name (handler cleanup
 // per Q4 design).
 func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
 	force := r.URL.Query().Get("force") == "true"
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteTopologyDevice(name, force)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteTopologyDevice(name, force)
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	ns.removeNodeActor(name) // clear stale cache; spec entry is gone
+	ne.removeNodeActor(name) // clear stale cache; spec entry is gone
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"deleted": name})
 }
 
@@ -435,8 +435,8 @@ func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request
 // when name doesn't exist. Closes the api-layer NodeActor cache so the next
 // request rebuilds from the new spec.
 func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
@@ -445,14 +445,14 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.UpdateTopologyDevice(name, &device)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.UpdateTopologyDevice(name, &device)
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	ns.removeNodeActor(name) // built node now reflects stale spec
+	ne.removeNodeActor(name) // built node now reflects stale spec
 	httputil.WriteJSON(w, http.StatusOK, &device)
 }
 
@@ -460,8 +460,8 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 // TopologyLink (a, z endpoint strings). 409 when either endpoint is already
 // wired; 400 on validation failure.
 func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var link spec.TopologyLink
@@ -469,8 +469,8 @@ func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.AddTopologyLink(&link)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.AddTopologyLink(&link)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -484,8 +484,8 @@ func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request
 // most one link, so a single endpoint uniquely identifies it. 404 when no
 // link contains the endpoint.
 func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	device := r.PathValue("device")
@@ -495,8 +495,8 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 		return
 	}
 	endpoint := device + ":" + iface
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteTopologyLink(endpoint)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteTopologyLink(endpoint)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -506,19 +506,19 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
 	// Only return profiles for actual host devices, not switches.
 	// The client uses 200 vs 404 from this endpoint to classify devices.
-	if !ns.net.IsHostDevice(name) {
+	if !ne.net.IsHostDevice(name) {
 		writeError(w, &newtron.NotFoundError{Resource: "host device", Name: name})
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.GetHostProfile(r.Context(), name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.GetHostProfile(r.Context(), name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -528,12 +528,12 @@ func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetAllFeatures(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.GetAllFeatures(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.GetAllFeatures(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -543,13 +543,13 @@ func (s *Server) handleGetAllFeatures(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetFeatureDependencies(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.GetFeatureDependencies(name), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.GetFeatureDependencies(name), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -563,8 +563,8 @@ func (s *Server) handleGetFeatureDependencies(w http.ResponseWriter, r *http.Req
 // ============================================================================
 
 func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateServiceRequest
@@ -573,8 +573,8 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateService(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateService(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -584,8 +584,8 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -596,8 +596,8 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteService(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteService(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -607,8 +607,8 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateIPVPNRequest
@@ -617,8 +617,8 @@ func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateIPVPN(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateIPVPN(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -628,8 +628,8 @@ func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -640,8 +640,8 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteIPVPN(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteIPVPN(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -651,8 +651,8 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateMACVPNRequest
@@ -661,8 +661,8 @@ func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateMACVPN(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateMACVPN(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -672,8 +672,8 @@ func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -684,8 +684,8 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteMACVPN(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteMACVPN(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -695,8 +695,8 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateQoSPolicyRequest
@@ -705,8 +705,8 @@ func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateQoSPolicy(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateQoSPolicy(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -716,8 +716,8 @@ func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -728,8 +728,8 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteQoSPolicy(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteQoSPolicy(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -739,8 +739,8 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.AddQoSQueueRequest
@@ -749,8 +749,8 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.AddQoSQueue(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.AddQoSQueue(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -760,8 +760,8 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -773,8 +773,8 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.RemoveQoSQueue(req.Policy, req.QueueID, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.RemoveQoSQueue(req.Policy, req.QueueID, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -784,8 +784,8 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateFilterRequest
@@ -794,8 +794,8 @@ func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateFilter(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateFilter(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -805,8 +805,8 @@ func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -817,8 +817,8 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteFilter(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteFilter(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -828,8 +828,8 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.AddFilterRuleRequest
@@ -838,8 +838,8 @@ func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.AddFilterRule(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.AddFilterRule(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -849,8 +849,8 @@ func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -862,8 +862,8 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.RemoveFilterRule(req.Filter, req.Sequence, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.RemoveFilterRule(req.Filter, req.Sequence, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -877,13 +877,13 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 // ============================================================================
 
 func (s *Server) handleShowPrefixList(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowPrefixList(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowPrefixList(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -893,8 +893,8 @@ func (s *Server) handleShowPrefixList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreatePrefixListRequest
@@ -903,8 +903,8 @@ func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreatePrefixList(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreatePrefixList(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -914,8 +914,8 @@ func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -926,8 +926,8 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeletePrefixList(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeletePrefixList(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -937,8 +937,8 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.AddPrefixListEntryRequest
@@ -947,8 +947,8 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.AddPrefixListEntry(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.AddPrefixListEntry(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -958,8 +958,8 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -971,8 +971,8 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.RemovePrefixListEntry(req.PrefixList, req.Prefix, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.RemovePrefixListEntry(req.PrefixList, req.Prefix, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -986,13 +986,13 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 // ============================================================================
 
 func (s *Server) handleShowRoutePolicy(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowRoutePolicy(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowRoutePolicy(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1002,8 +1002,8 @@ func (s *Server) handleShowRoutePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateRoutePolicyRequest
@@ -1012,8 +1012,8 @@ func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateRoutePolicy(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateRoutePolicy(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1023,8 +1023,8 @@ func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -1035,8 +1035,8 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteRoutePolicy(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteRoutePolicy(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1046,8 +1046,8 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.AddRoutePolicyRuleRequest
@@ -1056,8 +1056,8 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.AddRoutePolicyRule(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.AddRoutePolicyRule(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1067,8 +1067,8 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -1080,8 +1080,8 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.RemoveRoutePolicyRule(req.Policy, req.Sequence, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.RemoveRoutePolicyRule(req.Policy, req.Sequence, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1095,12 +1095,12 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 // ============================================================================
 
 func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListProfiles(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListProfiles(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1111,13 +1111,13 @@ func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 
 // handleShowProfile returns the device profile for a named device.
 func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowProfile(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowProfile(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1127,8 +1127,8 @@ func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateDeviceProfileRequest
@@ -1137,8 +1137,8 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateProfile(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateProfile(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1148,8 +1148,8 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -1161,8 +1161,8 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	force := r.URL.Query().Get("force") == "true"
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteProfile(req.Name, opts, force)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteProfile(req.Name, opts, force)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1176,12 +1176,12 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ListZones(), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ListZones(), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1191,13 +1191,13 @@ func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShowZone(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.ShowZone(name)
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.ShowZone(name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1207,8 +1207,8 @@ func (s *Server) handleShowZone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req newtron.CreateZoneRequest
@@ -1217,8 +1217,8 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.CreateZone(req, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.CreateZone(req, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1228,8 +1228,8 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -1240,8 +1240,8 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	_, err := ns.write(r.Context(), func() (any, error) {
-		return nil, ns.net.DeleteZone(req.Name, opts)
+	_, err := ne.write(r.Context(), func() (any, error) {
+		return nil, ne.net.DeleteZone(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1255,14 +1255,14 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (s *Server) handlePlatformSupportsFeature(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	platform := r.PathValue("name")
 	feature := r.PathValue("feature")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return map[string]bool{"supported": ns.net.PlatformSupportsFeature(platform, feature)}, nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return map[string]bool{"supported": ne.net.PlatformSupportsFeature(platform, feature)}, nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1272,13 +1272,13 @@ func (s *Server) handlePlatformSupportsFeature(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	feature := r.PathValue("name")
-	val, err := ns.read(r.Context(), func() (any, error) {
-		return ns.net.GetUnsupportedDueTo(feature), nil
+	val, err := ne.read(r.Context(), func() (any, error) {
+		return ne.net.GetUnsupportedDueTo(feature), nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1288,8 +1288,8 @@ func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
-	ns := s.requireNetwork(w, r)
-	if ns == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
 	var req struct {
@@ -1298,8 +1298,8 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	// Body is optional — force defaults to false.
 	_ = decodeJSON(r, &req)
 	device := r.PathValue("device")
-	val, err := ns.write(r.Context(), func() (any, error) {
-		err := ns.net.InitDevice(r.Context(), device, req.Force)
+	val, err := ne.write(r.Context(), func() (any, error) {
+		err := ne.net.InitDevice(r.Context(), device, req.Force)
 		if errors.Is(err, newtron.ErrAlreadyInitialized) {
 			return map[string]string{"status": "already_initialized"}, nil
 		}
