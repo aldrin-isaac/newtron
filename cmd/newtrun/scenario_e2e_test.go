@@ -54,9 +54,8 @@ func newE2EServer(t *testing.T) (ts *httptest.Server, suitesBase string) {
 		t.Fatalf("mkdir suites: %v", err)
 	}
 	srv := api.NewServer(api.Config{
-		SuitesBase:     suitesBase,
-		TopologiesBase: filepath.Join(t.TempDir(), "topologies"),
-		Logger:         log.New(io.Discard, "", 0),
+		SuitesBase: suitesBase,
+		Logger:     log.New(io.Discard, "", 0),
 	})
 	ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
