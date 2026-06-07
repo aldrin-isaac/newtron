@@ -433,7 +433,10 @@ memory.
 
 ### POST /newtron/v1/network
 
-Register a new network from a spec directory.
+Register a network. By default the endpoint registers an *existing* spec
+directory. Pass `scaffold: true` to have the server create an empty spec
+layout at `spec_dir` (three zero-valued spec files plus an empty `profiles/`
+subdirectory) and register it in one call.
 
 **Request body:**
 
@@ -441,6 +444,17 @@ Register a new network from a spec directory.
 |-------|------|----------|-------------|
 | `id` | string | yes | Unique network identifier (e.g., `"default"`) |
 | `spec_dir` | string | yes | Absolute path to the spec directory |
+| `scaffold` | bool | no | Create the empty spec layout at `spec_dir` before registering. Default `false`. |
+| `description` | string | no | Free-text description seeded into `topology.json` (only used when `scaffold=true`). |
+
+**Behavior matrix:**
+
+| `scaffold` | `spec_dir` state | Outcome |
+|------------|------------------|---------|
+| `false` (default) | exists with valid specs | 201, register |
+| `false` | missing or invalid | 500 spec load error |
+| `true` | missing or empty | scaffold + register, 201 |
+| `true` | already initialized | 409 |
 
 **Response (201):**
 
@@ -448,13 +462,22 @@ Register a new network from a spec directory.
 {"data": {"id": "default"}}
 ```
 
-**Status codes:** 201 created, 400 missing fields or invalid JSON, 409 ID already registered, 500 spec directory load error
+**Status codes:** 201 created, 400 missing fields or invalid JSON, 409 ID already registered or scaffold-into-initialized-dir, 500 spec directory load error
 
-**Example:**
+**Examples:**
+
+Register an existing spec directory:
 
 ```
 POST /newtron/v1/network
 {"id": "lab", "spec_dir": "/etc/newtron/lab"}
+```
+
+Scaffold a new empty network in one call:
+
+```
+POST /newtron/v1/network
+{"id": "demo-1", "spec_dir": "/var/topologies/demo-1/specs", "scaffold": true, "description": "Demo network"}
 ```
 
 ### GET /newtron/v1/network

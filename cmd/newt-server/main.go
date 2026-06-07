@@ -49,7 +49,7 @@ func main() {
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories (newtrun)")
-	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories (newtrun + newtlab)")
+	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories (newtlab lab-spec resolution)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -81,10 +81,9 @@ func main() {
 	// newtrun-server it's cross-process. Either way newtrun's runner
 	// stays a client of newtlab, never a co-writer.
 	newtrunSrv := newtrunapi.NewServer(newtrunapi.Config{
-		SuitesBase:     *suitesBase,
-		TopologiesBase: *topologiesBase,
-		Logger:         logger,
-		NewtlabClient:  newtlabClient,
+		SuitesBase:    *suitesBase,
+		Logger:        logger,
+		NewtlabClient: newtlabClient,
 	})
 	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
 	// owns spec files). In the composed binary this is an in-process

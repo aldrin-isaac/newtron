@@ -30,7 +30,6 @@ const defaultListen = "127.0.0.1:19081"
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories")
-	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories")
 	newtlabServer := flag.String("newtlab-server", "http://127.0.0.1:18080", "newtlab-server base URL; deploy/destroy/status route through this HTTP surface (§27 — newtlab owns LabState). Empty disables newtlab calls (CLI-only / real-hardware deployments).")
 	flag.Parse()
 
@@ -46,9 +45,8 @@ func main() {
 	// Empty --newtlab-server leaves the client nil; Runner.Run rejects
 	// deploy in that case with a clear error.
 	cfg := api.Config{
-		SuitesBase:     *suitesBase,
-		TopologiesBase: *topologiesBase,
-		Logger:         logger,
+		SuitesBase: *suitesBase,
+		Logger:     logger,
 	}
 	if *newtlabServer != "" {
 		cfg.NewtlabClient = newtlabclient.New(*newtlabServer)

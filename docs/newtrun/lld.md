@@ -58,7 +58,6 @@ pkg/newtrun/newtrun/v1/              # HTTP server package
   runs.go                     # All run handlers + reconcileStaleStatus + finalizers + newRunID
   suites.go                   # /newtrun/v1/suites endpoints + list-scenarios + nameRE
   scenarios.go                # GET/PUT/DELETE per-scenario + atomic write + path resolution
-  topologies.go               # GET /newtrun/v1/topologies
   registry.go                 # RunRegistry, RegistryEntry, AlreadyRunningError
   safety.go                   # InlineSafetyPolicy, SafetyViolation
   reporter.go                 # HTTPReporter (implements ProgressReporter, publishes to broker)
@@ -79,12 +78,12 @@ cmd/newtrun/                  # CLI binary (thin HTTP-client surface)
   cmd_list.go                 # list suites and scenarios via GET /newtrun/v1/suites/...
   cmd_suites.go               # GET /newtrun/v1/suites
   cmd_scenario.go             # scenario CRUD subcommands + suite create/delete
-  cmd_topologies.go           # GET /newtrun/v1/topologies
+  cmd_topologies.go           # delegates to newtron: GET/POST /newtron/v1/network
   cmd_actions.go              # static action vocabulary help
   scenario_e2e_test.go        # CLI→server E2E tests
 
 cmd/newtrun-server/           # Server binary entry point
-  main.go                     # --listen, --suites-base, --topologies-base
+  main.go                     # --listen, --suites-base
 ```
 
 The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client → pkg/newtrun/api → pkg/newtrun`. `pkg/newtrun/` is HTTP-agnostic — it knows nothing about the server. `pkg/newtrun/newtrun/v1/` adapts the engine to HTTP. `pkg/newtrun/client/` consumes the HTTP surface.
@@ -750,7 +749,6 @@ type Server struct {
 | Field | Default |
 |-------|---------|
 | `SuitesBase` | `newtrun/suites` |
-| `TopologiesBase` | `newtrun/topologies` |
 | `NewtronServer` | `http://127.0.0.1:18080` |
 | `NetworkID` | `default` |
 | `InlineURLPrefix` | empty (no URL restriction enforced by default; see [§8.7](#87-inlinesafetypolicy)) |
@@ -848,7 +846,7 @@ Run after the Runner goroutine returns. Both delegate to `SuiteStatusFromOutcome
 
 ### 8.9 Route registration
 
-`buildHandler()` (in `server.go`) registers the HTTP routes against `http.ServeMux`. See [api.md](api.md) for the canonical list; the handler functions are spread across `runs.go` / `suites.go` / `scenarios.go` / `topologies.go` per `docs/DESIGN_PRINCIPLES.md` §28 (file-level feature cohesion).
+`buildHandler()` (in `server.go`) registers the HTTP routes against `http.ServeMux`. See [api.md](api.md) for the canonical list; the handler functions are spread across `runs.go` / `suites.go` / `scenarios.go` per `docs/DESIGN_PRINCIPLES.md` §28 (file-level feature cohesion).
 
 ---
 
@@ -881,7 +879,6 @@ type Client struct {
 | `GetScenario(ctx, suite, name)` | GET /newtrun/v1/suites/{suite}/scenarios/{name} |
 | `PutScenario(ctx, suite, name, body)` | PUT /newtrun/v1/suites/{suite}/scenarios/{name} |
 | `DeleteScenario(ctx, suite, name)` | DELETE /newtrun/v1/suites/{suite}/scenarios/{name} |
-| `ListTopologies(ctx)` | GET /newtrun/v1/topologies |
 
 ### 9.2 Transport helpers
 
@@ -1086,7 +1083,8 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 | `suites` | GET /newtrun/v1/suites | Hidden alias of `list`. |
 | `suite create/delete <name>` | POST/DELETE /newtrun/v1/suites | Per [§8](#8-http-server-package-pkgnewtrunapi). |
 | `scenario list/get/put/delete` | /newtrun/v1/suites/{suite}/scenarios* | Per [§8](#8-http-server-package-pkgnewtrunapi). |
-| `topologies` | GET /newtrun/v1/topologies | List server-visible topologies. |
+| `topologies` | GET /newtron/v1/network | List newtron-registered networks (delegated). |
+| `topology create <name>` | POST /newtron/v1/network with `scaffold=true` | Scaffold an empty spec layout and register it with newtron in one call. |
 | `actions` | static | Help text describing the action vocabulary. |
 | `version` | static | Build info. |
 

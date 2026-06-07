@@ -15,9 +15,21 @@ import (
 // ============================================================================
 
 // RegisterNetworkRequest is the body for POST /network.
+//
+// When Scaffold is true, the server creates an empty spec layout at SpecDir
+// (three zero-valued spec files plus an empty profiles/ subdirectory) before
+// registering, and Description seeds topology.json. When Scaffold is false
+// (the default), SpecDir must already contain valid specs — the same
+// register-existing flow the endpoint has always had.
+//
+// Scaffold + register-existing as one wire operation avoids a two-call
+// dance (scaffold-then-register) and keeps newtron the sole owner of the
+// spec-directory layout (§27 Single Owner).
 type RegisterNetworkRequest struct {
-	ID      string `json:"id"`
-	SpecDir string `json:"spec_dir"`
+	ID          string `json:"id"`
+	SpecDir     string `json:"spec_dir"`
+	Scaffold    bool   `json:"scaffold,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // NetworkInfo is returned when listing or showing a registered network.

@@ -27,19 +27,14 @@ func newTestServer(t *testing.T) (*Server, func()) {
 	t.Setenv("HOME", tmpDir)
 
 	suitesBase := filepath.Join(tmpDir, "suites")
-	topologiesBase := filepath.Join(tmpDir, "topologies")
 	if err := os.MkdirAll(suitesBase, 0755); err != nil {
 		t.Fatalf("mkdir suitesBase: %v", err)
-	}
-	if err := os.MkdirAll(topologiesBase, 0755); err != nil {
-		t.Fatalf("mkdir topologiesBase: %v", err)
 	}
 	t.Setenv("NEWTRUN_SUITES_BASE", suitesBase)
 
 	srv := NewServer(Config{
-		SuitesBase:     suitesBase,
-		TopologiesBase: topologiesBase,
-		Logger:         log.New(io.Discard, "", 0),
+		SuitesBase: suitesBase,
+		Logger:     log.New(io.Discard, "", 0),
 	})
 	return srv, func() {}
 }
@@ -167,60 +162,6 @@ func TestGetRunNotFound(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404", resp.StatusCode)
-	}
-}
-
-func TestListTopologiesEmptyBaseReturnsEmptyList(t *testing.T) {
-	srv, cleanup := newTestServer(t)
-	defer cleanup()
-	ts := httptest.NewServer(srv.buildHandler())
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/newtrun/v1/topologies")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var body httputil.APIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	data, ok := body.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("data: got %T", body.Data)
-	}
-	tops, ok := data["topologies"].([]any)
-	if !ok {
-		t.Fatalf("topologies: got %T", data["topologies"])
-	}
-	if len(tops) != 0 {
-		t.Errorf("topologies: got %d, want 0", len(tops))
-	}
-}
-
-func TestListTopologiesReturnsSubdirs(t *testing.T) {
-	srv, cleanup := newTestServer(t)
-	defer cleanup()
-	for _, name := range []string{"topo-a", "topo-b"} {
-		if err := os.MkdirAll(filepath.Join(srv.cfg.TopologiesBase, name), 0755); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-	}
-	ts := httptest.NewServer(srv.buildHandler())
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/newtrun/v1/topologies")
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	var body httputil.APIResponse
-	_ = json.NewDecoder(resp.Body).Decode(&body)
-	data := body.Data.(map[string]any)
-	tops := data["topologies"].([]any)
-	if len(tops) != 2 {
-		t.Errorf("got %d topologies, want 2: %+v", len(tops), tops)
 	}
 }
 

@@ -20,10 +20,6 @@ type Config struct {
 	// it when handling POST /newtrun/v1/runs.
 	SuitesBase string
 
-	// TopologiesBase is the directory under which topology directories live.
-	// Defaults to "newtrun/topologies". Returned by GET /newtrun/v1/topologies.
-	TopologiesBase string
-
 	// NewtronServer is the newtron-server URL the server-side runners
 	// connect to for topology discovery. Per-run NewtronServer in the
 	// StartRunRequest overrides this. Defaults to http://127.0.0.1:18080.
@@ -69,9 +65,6 @@ func NewServer(cfg Config) *Server {
 	}
 	if cfg.SuitesBase == "" {
 		cfg.SuitesBase = "newtrun/suites"
-	}
-	if cfg.TopologiesBase == "" {
-		cfg.TopologiesBase = "newtrun/topologies"
 	}
 	if cfg.NewtronServer == "" {
 		cfg.NewtronServer = "http://127.0.0.1:18080"
@@ -144,8 +137,6 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/pause", s.handlePauseRun)
 	mux.HandleFunc("POST /newtrun/v1/runs/{suite}/stop", s.handleStopRun)
 	mux.HandleFunc("GET /newtrun/v1/runs/{suite}/events", s.handleRunEvents)
-	mux.HandleFunc("GET /newtrun/v1/topologies", s.handleListTopologies)
-	mux.HandleFunc("POST /newtrun/v1/topologies", s.handleCreateTopology)
 	mux.HandleFunc("GET /newtrun/v1/suites", s.handleListSuites)
 	mux.HandleFunc("POST /newtrun/v1/suites", s.handleCreateSuite)
 	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}", s.handleDeleteSuite)

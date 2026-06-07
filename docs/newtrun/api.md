@@ -457,45 +457,18 @@ Removes the file. Same lookup rule as GET.
 
 ## 9. Topologies
 
-### `GET /newtrun/v1/topologies`
+Newtrun does not expose topology endpoints — newtron owns the spec
+directory layout (§27 Single Owner). To list or create networks, call
+newtron directly:
 
-Returns the topology names discoverable under `topologies_base`. Missing base directory returns an empty array.
+| Operation | Endpoint |
+|-----------|----------|
+| List registered networks | `GET /newtron/v1/network` |
+| Scaffold + register a new network in one call | `POST /newtron/v1/network` with `scaffold: true` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
 
-**Response:** 200 with `data` being a `TopologiesResponse`:
-
-```json
-{ "data": { "topologies": ["1node-vs", "2node-vs", "2node-vs-service"] } }
-```
-
-### `POST /newtrun/v1/topologies`
-
-Bootstraps a new topology directory under `topologies_base`. The new directory ships with zero-valued `topology.json`, `platforms.json`, and `network.json` plus an empty `profiles/` subdirectory — the minimum set newtron's spec loader requires. The returned `spec_dir` is the value the caller passes to `POST /newtron/v1/network` to register the topology as a newtron Network.
-
-**Request body** — `CreateTopologyRequest`:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Directory name. Must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — same gate suite names go through. |
-| `description` | string | no | Free-text description seeded into `topology.json` so a listing already carries context. |
-
-**Response:** 201 with `data` being a `CreateTopologyResponse`:
-
-```json
-{ "data": { "name": "demo-1", "spec_dir": "newtrun/topologies/demo-1/specs" } }
-```
-
-400 on invalid name or malformed body. 409 if the topology already exists.
-
-**Chained operator flow:**
-
-```
-POST /newtrun/v1/topologies {name:"demo-1"}                              → 201 {name, spec_dir}
-POST /newtron/v1/network    {id:"demo-1", spec_dir:"…/demo-1/specs"}     → 201 {id}
-POST /newtron/v1/network/demo-1/topology/create-node {name, device:{…}}  → 201
-…
-```
-
-The operator never touches the filesystem. Closes issue #76.
+The `newtrun topologies` and `newtrun topology create` CLI subcommands
+have been repointed to these newtron endpoints — operator surface is
+unchanged; the wire is just shorter.
 
 ---
 
@@ -681,9 +654,9 @@ The per-scenario summary used in `suite_start` events and `GET /newtrun/v1/suite
 
 Fields: `name`, `description`, `topology`, `platform`, `step_count`, `requires`.
 
-### `HealthResponse`, `SuitesResponse`, `TopologiesResponse`
+### `HealthResponse`, `SuitesResponse`
 
-Single-field wrappers around the relevant array or scalar. See examples in [§3](#3-server-management), [§7](#7-suite-management), [§9](#9-topologies).
+Single-field wrappers around the relevant array or scalar. See examples in [§3](#3-server-management) and [§7](#7-suite-management). Topology listing is owned by newtron — see the [newtron API](../newtron/api.md#get-newtronv1network).
 
 ### Event payloads
 
@@ -691,4 +664,4 @@ Single-field wrappers around the relevant array or scalar. See examples in [§3]
 
 ---
 
-*This document was source-traced against `pkg/newtrun/newtrun/v1/server.go` (route table), `runs.go`, `suites.go`, `scenarios.go`, `topologies.go`, and `types.go`. Every endpoint claim was verified by reading the handler. If you find a discrepancy, the code is the authority — please open an issue or PR.*
+*This document was source-traced against `pkg/newtrun/newtrun/v1/server.go` (route table), `runs.go`, `suites.go`, `scenarios.go`, and `types.go`. Every endpoint claim was verified by reading the handler. If you find a discrepancy, the code is the authority — please open an issue or PR.*

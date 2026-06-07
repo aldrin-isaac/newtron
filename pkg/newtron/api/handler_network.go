@@ -26,9 +26,20 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: "id and spec_dir are required"})
 		return
 	}
-	if err := s.RegisterNetwork(req.ID, req.SpecDir); err != nil {
-		writeError(w, err)
-		return
+	if req.Scaffold {
+		if err := s.ScaffoldAndRegister(req.ID, req.SpecDir, req.Description); err != nil {
+			if errors.Is(err, spec.ErrAlreadyInitialized) {
+				httputil.WriteError(w, http.StatusConflict, err)
+				return
+			}
+			writeError(w, err)
+			return
+		}
+	} else {
+		if err := s.RegisterNetwork(req.ID, req.SpecDir); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"id": req.ID})
 }

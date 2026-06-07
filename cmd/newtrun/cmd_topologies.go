@@ -4,36 +4,34 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
+	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
-// newTopologiesCmd is the plural form: list-only, matches the existing
-// `suites` / `actions` listing commands. Authoring lives under the
-// singular `topology` command below.
+// newTopologiesCmd lists newtron-registered networks. The CLI surface keeps
+// the "topology" noun because it matches the operator vocabulary used in
+// suite YAML and the newtrun mental model; the underlying call is to
+// newtron, the single owner of spec data.
 func newTopologiesCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "topologies",
-		Short: "List available topologies known to newtrun-server",
+		Short: "List topologies (newtron-registered networks)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := newClient()
-			ctx := cmd.Context()
-			if err := requireServer(ctx, c); err != nil {
-				return err
-			}
-			names, err := c.ListTopologies(ctx)
+			c := newNewtronClient("")
+			infos, err := c.ListNetworks()
 			if err != nil {
-				return err
+				return fmt.Errorf("list networks: %w", err)
 			}
-			fmt.Println("newtrun topologies")
+			fmt.Println("newtron-registered networks")
 			fmt.Println()
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  TOPOLOGY")
-			for _, name := range names {
-				fmt.Fprintf(w, "  %s\n", name)
+			fmt.Fprintln(w, "  ID\tSPEC_DIR")
+			for _, info := range infos {
+				fmt.Fprintf(w, "  %s\t%s\n", info.ID, info.SpecDir)
 			}
 			return w.Flush()
 		},
@@ -41,47 +39,68 @@ func newTopologiesCmd() *cobra.Command {
 }
 
 // newTopologyCmd is the singular form: create (and future delete) of
-// topology directories. Mirrors the `suite create` pattern so an
-// operator who knows one knows the other.
+// topologies. Mirrors the `suite create` pattern so an operator who knows
+// one knows the other.
 func newTopologyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "topology",
-		Short: "Create or manage topology directories via newtrun-server",
+		Short: "Create or manage topologies (newtron networks)",
 	}
 	cmd.AddCommand(newTopologyCreateCmd())
 	return cmd
 }
 
 func newTopologyCreateCmd() *cobra.Command {
-	var description string
+	var (
+		description    string
+		topologiesBase string
+	)
 	c := &cobra.Command{
 		Use:   "create <name>",
-		Short: "Bootstrap a new topology directory on the server",
-		Long: `Bootstrap a new topology directory with zero-valued spec files
-(topology.json, platforms.json, network.json) and an empty profiles/ subdirectory.
-The returned spec_dir is the value to pass to newtron's POST /newtron/v1/network
-when registering this topology as a network.`,
+		Short: "Scaffold a new topology and register it with newtron",
+		Long: `Scaffold a new topology directory with zero-valued spec files
+(topology.json, platforms.json, network.json) plus an empty profiles/
+subdirectory, then register it as a newtron network in one call.
+
+The spec_dir defaults to <topologies-base>/<name>/specs (resolved
+against the current working directory). Override the base with
+--topologies-base.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return createTopology(cmd.Context(), args[0], description)
+			return createTopology(cmd.Context(), args[0], description, topologiesBase)
 		},
 	}
 	c.Flags().StringVar(&description, "description", "", "free-text description seeded into topology.json")
+	c.Flags().StringVar(&topologiesBase, "topologies-base", "newtrun/topologies", "base directory under which the topology dir is created")
 	return c
 }
 
-func createTopology(ctx context.Context, name, description string) error {
-	c := newClient()
-	if err := requireServer(ctx, c); err != nil {
-		return err
-	}
-	resp, err := c.CreateTopology(ctx, api.CreateTopologyRequest{
-		Name:        name,
-		Description: description,
-	})
+func createTopology(_ context.Context, name, description, topologiesBase string) error {
+	specDir, err := filepath.Abs(filepath.Join(topologiesBase, name, "specs"))
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve spec_dir: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "created topology %s at %s\n", resp.Name, resp.SpecDir)
+	c := newNewtronClient(name)
+	if err := c.ScaffoldNetwork(specDir, description); err != nil {
+		return fmt.Errorf("scaffold network %q: %w", name, err)
+	}
+	fmt.Fprintf(os.Stderr, "created topology %s at %s\n", name, specDir)
 	return nil
+}
+
+// newNewtronClient builds a newtron client pointed at the same base URL
+// the rest of the CLI uses for newtrun (newt-server runs both engines on
+// one port; --newtrun-server already names "newt-server or newtrun-server
+// directly"). For server-level calls like ListNetworks, networkID is
+// ignored; for network-scoped calls (e.g. ScaffoldNetwork), pass the
+// target network's ID.
+func newNewtronClient(networkID string) *newtronclient.Client {
+	url := newtrunServerFlag
+	if url == "" {
+		url = os.Getenv("NEWTRUN_SERVER")
+	}
+	if url == "" {
+		url = "http://127.0.0.1:18080"
+	}
+	return newtronclient.New(url, networkID)
 }

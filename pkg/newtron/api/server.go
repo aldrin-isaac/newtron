@@ -11,6 +11,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // PortResolver is newtron's public contract for resolving runtime
@@ -107,6 +108,21 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout)
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
 	return nil
+}
+
+// ScaffoldAndRegister creates an empty spec layout at specDir (the three
+// zero-valued spec files newtron's Loader requires plus an empty profiles/
+// subdirectory), then registers the resulting network under id. description
+// flows into topology.json.
+//
+// Returns spec.ErrAlreadyInitialized if specDir already contains spec files;
+// the caller maps this to 409 Conflict. The scaffold step is a no-op for
+// other failure modes — RegisterNetwork's normal errors apply.
+func (s *Server) ScaffoldAndRegister(id, specDir, description string) error {
+	if err := spec.Scaffold(specDir, description); err != nil {
+		return err
+	}
+	return s.RegisterNetwork(id, specDir)
 }
 
 // UnregisterNetwork removes a registered network. Stops all NodeActors
