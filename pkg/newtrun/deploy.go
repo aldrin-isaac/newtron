@@ -17,9 +17,9 @@ import (
 // through newtlab-server's HTTP surface, not in-process via
 // newtlab.NewLab from the runner process.
 type LabClient interface {
-	LabStatus(ctx context.Context, topology string) (*newtlab.LabState, error)
-	Deploy(ctx context.Context, topology string, opts api.DeployRequest) error
-	Destroy(ctx context.Context, topology string) error
+	LabStatus(ctx context.Context, lab string) (*newtlab.LabState, error)
+	Deploy(ctx context.Context, lab string, opts api.DeployRequest) error
+	Destroy(ctx context.Context, lab string) error
 }
 
 // Ensure: *newtlabclient.Client satisfies LabClient.

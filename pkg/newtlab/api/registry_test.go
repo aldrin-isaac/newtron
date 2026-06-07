@@ -34,14 +34,14 @@ func TestRegistryRejectsConcurrentDeployOfSameTopology(t *testing.T) {
 
 	_, _, err = r.Acquire(context.Background(), "topo1")
 	if err == nil {
-		t.Fatal("second Acquire on same topology should fail")
+		t.Fatal("second Acquire on same lab should fail")
 	}
 	var already *AlreadyDeployingError
 	if !errors.As(err, &already) {
 		t.Errorf("err type = %T, want *AlreadyDeployingError", err)
 	}
-	if already.Topology != "topo1" {
-		t.Errorf("Topology = %q, want %q", already.Topology, "topo1")
+	if already.Lab != "topo1" {
+		t.Errorf("Lab = %q, want %q", already.Lab, "topo1")
 	}
 }
 

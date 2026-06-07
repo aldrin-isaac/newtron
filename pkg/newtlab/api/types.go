@@ -2,8 +2,8 @@
 //
 // The server exposes newtlab's existing canonical types (LabState,
 // NodeState, LinkState from pkg/newtlab) over HTTP so consumers like
-// the newtcon browser frontend can deploy, destroy, and observe lab
-// topologies without dropping to a shell.
+// the newtcon browser frontend can deploy, destroy, and observe labs
+// without dropping to a shell.
 //
 // Per DESIGN_PRINCIPLES_NEWTRON.md §46 (Wire Shape Mirrors Canonical
 // Types), the HTTP responses serialize the canonical in-memory types
@@ -21,17 +21,17 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
-// TopologyListItem is one entry in GET /api/topologies. The list comes
-// from newtlab.ListLabs() — names of every lab with a state directory,
-// running or not. Use GET /api/topologies/{name}/status to determine
-// whether the lab is currently up.
-type TopologyListItem struct {
+// LabListItem is one entry in GET /api/labs. The list comes from
+// newtlab.ListLabs() — names of every lab with a state directory,
+// running or not. Use GET /api/labs/{name}/status to determine whether
+// the lab is currently up.
+type LabListItem struct {
 	Name string `json:"name"`
 }
 
-// DeployRequest is the optional POST /api/topologies/{name}/deploy body.
-// All fields default to zero (no provision, no host filter). Operators
-// that need the equivalent of `bin/newtlab deploy --provision` set
+// DeployRequest is the optional POST /api/labs/{name}/deploy body. All
+// fields default to zero (no provision, no host filter). Operators that
+// need the equivalent of `bin/newtlab deploy --provision` set
 // Provision = true.
 type DeployRequest struct {
 	// Provision, when true, runs newtlab's post-deploy provisioning pass
@@ -52,13 +52,13 @@ type DeployRequest struct {
 	Parallel int `json:"parallel,omitempty"`
 }
 
-// DeployResponse is returned by POST /api/topologies/{name}/deploy with
-// HTTP 202. The deploy runs asynchronously; subscribe to
-// /api/topologies/{name}/events for phase events, or poll
-// /api/topologies/{name}/status to observe terminal state.
+// DeployResponse is returned by POST /api/labs/{name}/deploy with HTTP
+// 202. The deploy runs asynchronously; subscribe to
+// /api/labs/{name}/events for phase events, or poll
+// /api/labs/{name}/status to observe terminal state.
 type DeployResponse struct {
-	Topology string `json:"topology"`
-	Started  string `json:"started"` // RFC3339
+	Lab     string `json:"lab"`
+	Started string `json:"started"` // RFC3339
 }
 
 // StatusResponse mirrors newtlab.LabState directly. Returning the
@@ -69,11 +69,11 @@ type StatusResponse struct {
 }
 
 // EventType identifies the SSE event kind emitted on
-// /api/topologies/{name}/events. The set mirrors the
-// `phase, detail` pairs newtlab.Lab.OnProgress emits during Deploy and
-// Destroy. Unknown phases pass through as EventPhase with the raw phase
-// string in the payload, so SSE consumers never miss a tick even if
-// newtlab adds a new phase tomorrow.
+// /api/labs/{name}/events. The set mirrors the `phase, detail` pairs
+// newtlab.Lab.OnProgress emits during Deploy and Destroy. Unknown
+// phases pass through as EventPhase with the raw phase string in the
+// payload, so SSE consumers never miss a tick even if newtlab adds a
+// new phase tomorrow.
 type EventType string
 
 const (
@@ -92,10 +92,10 @@ const (
 )
 
 // Event is one SSE event the server emits on
-// GET /api/topologies/{name}/events. Type discriminates Payload's
-// concrete shape. Implements httputil.Eventable so the generic SSE
-// stream writer can emit Type as the SSE `event:` token and Payload
-// as the `data:` JSON body.
+// GET /api/labs/{name}/events. Type discriminates Payload's concrete
+// shape. Implements httputil.Eventable so the generic SSE stream writer
+// can emit Type as the SSE `event:` token and Payload as the `data:`
+// JSON body.
 type Event struct {
 	Type    EventType `json:"type"`
 	Payload any       `json:"payload"`

@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// DeployRegistry tracks in-flight deploy operations, one per topology
-// name. Concurrent deploy requests for the same topology are rejected
-// with AlreadyDeployingError (mapped to 409 Conflict). Different
-// topologies deploy concurrently.
+// DeployRegistry tracks in-flight deploy operations, one per lab name.
+// Concurrent deploy requests for the same lab are rejected with
+// AlreadyDeployingError (mapped to 409 Conflict). Different labs deploy
+// concurrently.
 //
 // The registry only tracks the async Deploy operation — synchronous
 // operations (status, start, stop, destroy, provision) bypass it. This
@@ -27,21 +27,21 @@ type DeployRegistry struct {
 }
 
 type deployEntry struct {
-	Topology string
-	Started  time.Time
-	cancel   context.CancelFunc
+	Lab     string
+	Started time.Time
+	cancel  context.CancelFunc
 }
 
 // AlreadyDeployingError is returned by Acquire when another deploy is
-// already in flight for the topology. Handlers map it to 409 Conflict.
+// already in flight for the lab. Handlers map it to 409 Conflict.
 type AlreadyDeployingError struct {
-	Topology string
-	Started  time.Time
+	Lab     string
+	Started time.Time
 }
 
 func (e *AlreadyDeployingError) Error() string {
 	return fmt.Sprintf("deploy of %q is already in flight (started %s ago)",
-		e.Topology, time.Since(e.Started).Round(time.Second))
+		e.Lab, time.Since(e.Started).Round(time.Second))
 }
 
 // NewDeployRegistry constructs an empty registry.
@@ -51,31 +51,31 @@ func NewDeployRegistry() *DeployRegistry {
 	}
 }
 
-// Acquire registers a deploy for the topology. Returns the per-deploy
+// Acquire registers a deploy for the lab. Returns the per-deploy
 // context (cancellable by the registry) and an unregister function the
 // caller invokes on completion. Returns AlreadyDeployingError if the
-// topology already has an in-flight deploy.
-func (r *DeployRegistry) Acquire(ctx context.Context, topology string) (context.Context, func(), error) {
+// lab already has an in-flight deploy.
+func (r *DeployRegistry) Acquire(ctx context.Context, lab string) (context.Context, func(), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if existing, ok := r.entries[topology]; ok {
+	if existing, ok := r.entries[lab]; ok {
 		return nil, nil, &AlreadyDeployingError{
-			Topology: topology,
-			Started:  existing.Started,
+			Lab:     lab,
+			Started: existing.Started,
 		}
 	}
 	deployCtx, cancel := context.WithCancel(ctx)
 	entry := &deployEntry{
-		Topology: topology,
-		Started:  time.Now(),
-		cancel:   cancel,
+		Lab:     lab,
+		Started: time.Now(),
+		cancel:  cancel,
 	}
-	r.entries[topology] = entry
+	r.entries[lab] = entry
 	release := func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		if current, ok := r.entries[topology]; ok && current == entry {
-			delete(r.entries, topology)
+		if current, ok := r.entries[lab]; ok && current == entry {
+			delete(r.entries, lab)
 		}
 		cancel()
 	}
