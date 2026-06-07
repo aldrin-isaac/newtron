@@ -252,6 +252,15 @@ data-driven: it fires when the request both opts in via
 Network spec write endpoints (S5) also accept `dry_run` -- when `"true"`, the spec
 is validated but not persisted to disk.
 
+### URL Path Style
+
+Two rules describe every path in this reference:
+
+- **Collection nouns are plural.** `/networks`, `/networks/{n}/services`, `/networks/{n}/nodes/{d}/interfaces`, `/networks/{n}/nodes/{d}/routes/{vrf}/{prefix...}`. Both list (`GET /noun`) and single-resource (`GET /noun/{id}`) paths share the plural form, matching the JSON spec keys (`services: {...}`, `zones: {...}`) and Go field names (`Services`, `Zones`).
+- **Action verbs and singletons stay singular.** Action paths are verb-noun forms — `create-service`, `delete-vlan`, `apply-service`, `bind-acl`, `setup-device`, `restart-daemon`. Status/view paths name a singleton — `/health`, `/info`, `/status`, `/bgp/status`, `/intent/projection`, `/intent/tree`, `/intent/drift`, `/intent/reconcile`. The one spec-view singleton is `/networks/{n}/topology` (a network has one topology). Database names — `/configdb`, `/statedb` — stay singular (each is one DB).
+
+This split is what distinguishes a noun a consumer can list ("there are zero or more *services* on this network") from a verb the server performs ("apply *this* service to *this* interface"). When in doubt, the route table in `pkg/newtron/api/handler.go` is authoritative.
+
 ### Path Parameters
 
 **Interface names** containing slashes (e.g., `Ethernet0/1`) must be URL-encoded:
@@ -259,7 +268,7 @@ is validated but not persisted to disk.
 
 **Route prefixes** use Go 1.22's `{prefix...}` catch-all pattern, which captures
 the remainder of the path including slashes. A prefix like `10.0.0.0/24` is passed
-as a literal path segment: `/route/default/10.0.0.0/24`.
+as a literal path segment: `/routes/default/10.0.0.0/24`.
 
 **VLAN IDs** and **queue IDs** in path parameters are parsed as integers. Invalid
 integers return 400.
