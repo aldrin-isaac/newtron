@@ -11,55 +11,55 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 100}
 
   - name: configure-bridged-eth1-untagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {vlan_id: 100, tagged: false}
 
   - name: configure-bridged-eth3-untagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet3/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet3/configure-interface
     params: {vlan_id: 100, tagged: false}
 
   - name: configure-bridged-eth2-tagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet2/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet2/configure-interface
     params: {vlan_id: 100, tagged: true}
 
   - name: verify-vlan100-exists
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-member-eth1-untagged
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1
     expect:
       jq: '.tagging_mode == "untagged"'
 
   - name: verify-member-eth2-tagged
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet2
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet2
     expect:
       jq: '.tagging_mode == "tagged"'
 
   - name: verify-member-eth3-untagged
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet3
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet3
     expect:
       jq: '.tagging_mode == "untagged"'
 
@@ -68,7 +68,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l"}
     poll:
       timeout: 60s
@@ -80,7 +80,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l"}
     poll:
       timeout: 60s

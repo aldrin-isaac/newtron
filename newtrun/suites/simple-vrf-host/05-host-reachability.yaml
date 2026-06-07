@@ -30,7 +30,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Ethernet2 10.10.1.0"}
     poll:
       timeout: 10s

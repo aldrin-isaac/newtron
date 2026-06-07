@@ -77,7 +77,7 @@ steps:
   - name: check-bgp
     action: newtron
     devices: all
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     expect:
       jq: 'length > 0 and all(.[]; .status == "pass")'
 `
@@ -757,14 +757,14 @@ steps:
   - name: apply-service
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/interface/Ethernet0/service
+    url: /nodes/{{device}}/interfaces/Ethernet0/service
     method: POST
     params:
       service: transit
   - name: remove-service
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/interface/Ethernet0/service
+    url: /nodes/{{device}}/interfaces/Ethernet0/service
     method: DELETE
 `)
 

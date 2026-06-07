@@ -12,14 +12,14 @@ steps:
   - name: verify-no-bgp-neighbor-underlay-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-bgp-neighbor-underlay-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
     expect:
       jq: '.exists == false'
 
@@ -27,42 +27,42 @@ steps:
   - name: verify-no-eth0-base
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-eth1-base
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet4/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet4/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-eth0-ip-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-eth0-ip-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-eth1-ip-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet4%7C10.20.0.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet4%7C10.20.0.1%2F31/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-eth1-ip-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet4%7C10.20.1.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet4%7C10.20.1.1%2F31/exists
     expect:
       jq: '.exists == false'
 
@@ -70,42 +70,42 @@ steps:
   - name: verify-no-vlan100
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan200
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan300-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan300/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan300/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan300-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VLAN/Vlan300/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan300/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan400-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan400-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
       jq: '.exists == false'
 
@@ -113,35 +113,35 @@ steps:
   - name: verify-no-vlan100-eth1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet4/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet4/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan300-eth2-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan300%7CEthernet8/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan300%7CEthernet8/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan300-eth2-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan300%7CEthernet8/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan300%7CEthernet8/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan400-eth3-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan400%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan400%7CEthernet12/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan400-eth3-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan400%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan400%7CEthernet12/exists
     expect:
       jq: '.exists == false'
 
@@ -149,21 +149,21 @@ steps:
   - name: verify-no-vlan100-intf
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan300-intf
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan300/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan300/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vlan400-intf
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan400/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400/exists
     expect:
       jq: '.exists == false'
 
@@ -171,21 +171,21 @@ steps:
   - name: verify-no-vrf-local
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VRF/Vrf_local/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_local/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vrf-irb-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VRF/Vrf_IRB/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-vrf-irb-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VRF/Vrf_IRB/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB/exists
     expect:
       jq: '.exists == false'
 
@@ -193,35 +193,35 @@ steps:
   - name: verify-no-binding-eth1-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-binding-eth3-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-binding-eth3-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-binding-eth0-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-binding-eth0-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
@@ -229,14 +229,14 @@ steps:
   - name: verify-no-tunnel-map-300
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50300_Vlan300/exists
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50300_Vlan300/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-tunnel-map-400
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan400/exists
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan400/exists
     expect:
       jq: '.exists == false'
 
@@ -244,14 +244,14 @@ steps:
   - name: verify-no-suppress-300
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan300/exists
+    url: /nodes/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan300/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-suppress-400
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan400/exists
+    url: /nodes/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan400/exists
     expect:
       jq: '.exists == false'
 
@@ -259,7 +259,7 @@ steps:
   - name: verify-no-evpn-rt-irb
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_IRB%7CL2VPN_EVPN%7C65000%3A50002/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_IRB%7CL2VPN_EVPN%7C65000%3A50002/exists
     expect:
       jq: '.exists == false'
 
@@ -267,14 +267,14 @@ steps:
   - name: verify-no-bgp-evpn-vni-50300
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_EVPN_VNI/default%7C50300/exists
+    url: /nodes/{{device}}/configdb/BGP_EVPN_VNI/default%7C50300/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-bgp-evpn-vni-50400
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_EVPN_VNI/default%7C50400/exists
+    url: /nodes/{{device}}/configdb/BGP_EVPN_VNI/default%7C50400/exists
     expect:
       jq: '.exists == false'
 
@@ -282,7 +282,7 @@ steps:
   - name: verify-no-bgp-globals-vrf-irb
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/Vrf_IRB/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/Vrf_IRB/exists
     expect:
       jq: '.exists == false'
 
@@ -290,14 +290,14 @@ steps:
   - name: verify-no-bgp-af-vrf-irb-ipv4
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cipv4_unicast/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cipv4_unicast/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-bgp-af-vrf-irb-l2vpn
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cl2vpn_evpn/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cl2vpn_evpn/exists
     expect:
       jq: '.exists == false'
 
@@ -305,7 +305,7 @@ steps:
   - name: verify-no-redistribute-vrf-irb
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
+    url: /nodes/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
       jq: '.exists == false'
 
@@ -313,7 +313,7 @@ steps:
   - name: verify-no-sag-global
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/SAG_GLOBAL/IPv4/exists
+    url: /nodes/{{device}}/configdb/SAG_GLOBAL/IPv4/exists
     expect:
       jq: '.exists == false'
 
@@ -321,7 +321,7 @@ steps:
   - name: verify-no-static-route
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24/exists
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24/exists
     expect:
       jq: '.exists == false'
 
@@ -329,14 +329,14 @@ steps:
   - name: verify-no-portchannel-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
+    url: /nodes/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-portchannel-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
+    url: /nodes/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
     expect:
       jq: '.exists == false'
 
@@ -344,14 +344,14 @@ steps:
   - name: verify-no-portchannel-member-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet16/exists
+    url: /nodes/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet16/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-portchannel-member-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet16/exists
+    url: /nodes/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet16/exists
     expect:
       jq: '.exists == false'
 
@@ -359,7 +359,7 @@ steps:
   - name: verify-no-acl-table
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
+    url: /nodes/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
     expect:
       jq: '.exists == false'
 
@@ -367,7 +367,7 @@ steps:
   - name: verify-no-binding-eth10-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet40/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet40/exists
     expect:
       jq: '.exists == false'
 
@@ -375,7 +375,7 @@ steps:
   - name: verify-no-route-map
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ROUTE_MAP
+    url: /nodes/{{device}}/configdb/ROUTE_MAP
     expect:
       jq: 'length == 0'
 
@@ -383,7 +383,7 @@ steps:
   - name: verify-no-prefix-set
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PREFIX_SET
+    url: /nodes/{{device}}/configdb/PREFIX_SET
     expect:
       jq: 'length == 0'
 
@@ -391,6 +391,6 @@ steps:
   - name: verify-no-qos-map
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT_QOS_MAP/Ethernet44/exists
+    url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet44/exists
     expect:
       jq: '.exists == false'

@@ -17,7 +17,7 @@ import (
 // ListNetworks returns all registered networks.
 func (c *Client) ListNetworks() ([]api.NetworkInfo, error) {
 	var result []api.NetworkInfo
-	if err := c.doGet("/newtron/v1/network", &result); err != nil {
+	if err := c.doGet("/newtron/v1/networks", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -60,7 +60,7 @@ func (c *Client) GetTopology() (*spec.TopologySpecFile, error) {
 // TopologyDeviceNames returns the sorted device names from the topology.
 func (c *Client) TopologyDeviceNames() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/topology/node", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/topology/nodes", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -69,7 +69,7 @@ func (c *Client) TopologyDeviceNames() ([]string, error) {
 // IsHostDevice checks if a device is a virtual host (non-SONiC).
 func (c *Client) IsHostDevice(name string) (bool, error) {
 	var result newtron.HostProfile
-	err := c.doGet(c.networkPath()+"/host/"+url.PathEscape(name), &result)
+	err := c.doGet(c.networkPath()+"/hosts/"+url.PathEscape(name), &result)
 	if err != nil {
 		if se, ok := err.(*ServerError); ok && se.StatusCode == 404 {
 			return false, nil
@@ -82,7 +82,7 @@ func (c *Client) IsHostDevice(name string) (bool, error) {
 // GetHostProfile returns SSH connection params for a host device.
 func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
 	var result newtron.HostProfile
-	if err := c.doGet(c.networkPath()+"/host/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/hosts/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -95,7 +95,7 @@ func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
 // ListProfiles returns all device profile names.
 func (c *Client) ListProfiles() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/profile", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/profiles", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -105,7 +105,7 @@ func (c *Client) ListProfiles() ([]string, error) {
 // single device.
 func (c *Client) ShowProfile(name string) (*spec.DeviceProfile, error) {
 	var result spec.DeviceProfile
-	if err := c.doGet(c.networkPath()+"/profile/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/profiles/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -142,7 +142,7 @@ func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts, force bool) e
 // ListZones returns all zone names.
 func (c *Client) ListZones() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/zone", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/zones", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -151,7 +151,7 @@ func (c *Client) ListZones() ([]string, error) {
 // ShowZone returns details of a named zone.
 func (c *Client) ShowZone(name string) (*newtron.ZoneDetail, error) {
 	var result newtron.ZoneDetail
-	if err := c.doGet(c.networkPath()+"/zone/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/zones/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -177,7 +177,7 @@ func (c *Client) DeleteZone(name string, opts newtron.ExecOpts) error {
 // ListServices returns all service names.
 func (c *Client) ListServices() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/service", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/services", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -186,7 +186,7 @@ func (c *Client) ListServices() ([]string, error) {
 // ShowService returns details of a named service.
 func (c *Client) ShowService(name string) (*newtron.ServiceDetail, error) {
 	var result newtron.ServiceDetail
-	if err := c.doGet(c.networkPath()+"/service/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/services/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -195,7 +195,7 @@ func (c *Client) ShowService(name string) (*newtron.ServiceDetail, error) {
 // ListIPVPNs returns all IP-VPN specs keyed by name.
 func (c *Client) ListIPVPNs() (map[string]*newtron.IPVPNDetail, error) {
 	var result map[string]*newtron.IPVPNDetail
-	if err := c.doGet(c.networkPath()+"/ipvpn", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/ipvpns", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -204,7 +204,7 @@ func (c *Client) ListIPVPNs() (map[string]*newtron.IPVPNDetail, error) {
 // ShowIPVPN returns details of a named IP-VPN.
 func (c *Client) ShowIPVPN(name string) (*newtron.IPVPNDetail, error) {
 	var result newtron.IPVPNDetail
-	if err := c.doGet(c.networkPath()+"/ipvpn/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/ipvpns/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -213,7 +213,7 @@ func (c *Client) ShowIPVPN(name string) (*newtron.IPVPNDetail, error) {
 // ListMACVPNs returns all MAC-VPN specs keyed by name.
 func (c *Client) ListMACVPNs() (map[string]*newtron.MACVPNDetail, error) {
 	var result map[string]*newtron.MACVPNDetail
-	if err := c.doGet(c.networkPath()+"/macvpn", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/macvpns", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -222,7 +222,7 @@ func (c *Client) ListMACVPNs() (map[string]*newtron.MACVPNDetail, error) {
 // ShowMACVPN returns details of a named MAC-VPN.
 func (c *Client) ShowMACVPN(name string) (*newtron.MACVPNDetail, error) {
 	var result newtron.MACVPNDetail
-	if err := c.doGet(c.networkPath()+"/macvpn/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/macvpns/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -231,7 +231,7 @@ func (c *Client) ShowMACVPN(name string) (*newtron.MACVPNDetail, error) {
 // ListQoSPolicies returns all QoS policy names.
 func (c *Client) ListQoSPolicies() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/qos-policy", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/qos-policies", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -240,7 +240,7 @@ func (c *Client) ListQoSPolicies() ([]string, error) {
 // ShowQoSPolicy returns details of a named QoS policy.
 func (c *Client) ShowQoSPolicy(name string) (*newtron.QoSPolicyDetail, error) {
 	var result newtron.QoSPolicyDetail
-	if err := c.doGet(c.networkPath()+"/qos-policy/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/qos-policies/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -249,7 +249,7 @@ func (c *Client) ShowQoSPolicy(name string) (*newtron.QoSPolicyDetail, error) {
 // ListFilters returns all filter names.
 func (c *Client) ListFilters() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/filter", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/filters", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -258,7 +258,7 @@ func (c *Client) ListFilters() ([]string, error) {
 // ShowFilter returns details of a named filter.
 func (c *Client) ShowFilter(name string) (*newtron.FilterDetail, error) {
 	var result newtron.FilterDetail
-	if err := c.doGet(c.networkPath()+"/filter/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/filters/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -267,7 +267,7 @@ func (c *Client) ShowFilter(name string) (*newtron.FilterDetail, error) {
 // ListPlatforms returns the canonical *spec.PlatformSpecFile (§46).
 func (c *Client) ListPlatforms() (*spec.PlatformSpecFile, error) {
 	var result spec.PlatformSpecFile
-	if err := c.doGet(c.networkPath()+"/platform", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/platforms", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -277,7 +277,7 @@ func (c *Client) ListPlatforms() (*spec.PlatformSpecFile, error) {
 // single platform.
 func (c *Client) ShowPlatform(name string) (*spec.PlatformSpec, error) {
 	var result spec.PlatformSpec
-	if err := c.doGet(c.networkPath()+"/platform/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/platforms/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -286,7 +286,7 @@ func (c *Client) ShowPlatform(name string) (*spec.PlatformSpec, error) {
 // ListRoutePolicies returns all route policy names.
 func (c *Client) ListRoutePolicies() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/route-policy", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/route-policies", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -295,7 +295,7 @@ func (c *Client) ListRoutePolicies() ([]string, error) {
 // ListPrefixLists returns all prefix list names.
 func (c *Client) ListPrefixLists() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/prefix-list", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/prefix-lists", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -304,7 +304,7 @@ func (c *Client) ListPrefixLists() ([]string, error) {
 // ShowPrefixList returns the detail for a prefix list.
 func (c *Client) ShowPrefixList(name string) (*newtron.PrefixListDetail, error) {
 	var result newtron.PrefixListDetail
-	if err := c.doGet(c.networkPath()+"/prefix-list/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/prefix-lists/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -340,7 +340,7 @@ func (c *Client) RemovePrefixListEntry(prefixList, prefix string, opts newtron.E
 // ShowRoutePolicy returns the detail for a route policy.
 func (c *Client) ShowRoutePolicy(name string) (*newtron.RoutePolicyDetail, error) {
 	var result newtron.RoutePolicyDetail
-	if err := c.doGet(c.networkPath()+"/route-policy/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/route-policies/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -376,7 +376,7 @@ func (c *Client) RemoveRoutePolicyRule(policy string, seq int, opts newtron.Exec
 // GetAllFeatures returns all feature names.
 func (c *Client) GetAllFeatures() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/feature", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/features", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -385,7 +385,7 @@ func (c *Client) GetAllFeatures() ([]string, error) {
 // GetFeatureDependencies returns dependencies of a feature.
 func (c *Client) GetFeatureDependencies(feature string) ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/feature/"+url.PathEscape(feature)+"/dependency", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/features/"+url.PathEscape(feature)+"/dependencies", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -394,7 +394,7 @@ func (c *Client) GetFeatureDependencies(feature string) ([]string, error) {
 // PlatformSupportsFeature checks if a platform supports a feature.
 func (c *Client) PlatformSupportsFeature(platform, feature string) (bool, error) {
 	var result map[string]bool
-	path := c.networkPath() + "/platform/" + url.PathEscape(platform) + "/supports/" + url.PathEscape(feature)
+	path := c.networkPath() + "/platforms/" + url.PathEscape(platform) + "/supports/" + url.PathEscape(feature)
 	if err := c.doGet(path, &result); err != nil {
 		return false, err
 	}
@@ -404,7 +404,7 @@ func (c *Client) PlatformSupportsFeature(platform, feature string) (bool, error)
 // GetUnsupportedDueTo returns features unsupported because a base feature is missing.
 func (c *Client) GetUnsupportedDueTo(feature string) ([]string, error) {
 	var result []string
-	path := c.networkPath() + "/feature/" + url.PathEscape(feature) + "/unsupported-due-to"
+	path := c.networkPath() + "/features/" + url.PathEscape(feature) + "/unsupported-due-to"
 	if err := c.doGet(path, &result); err != nil {
 		return nil, err
 	}

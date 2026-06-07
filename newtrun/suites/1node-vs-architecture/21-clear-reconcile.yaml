@@ -17,13 +17,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/clear?mode=topology
+    url: /nodes/{{device}}/intent/clear?mode=topology
 
   # Verify empty tree
   - name: verify-empty-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | length == 0'
 
@@ -32,7 +32,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile?mode=topology
+    url: /nodes/{{device}}/intent/reconcile?mode=topology
 
   # Wait for config to settle
   - name: wait-settle
@@ -43,7 +43,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -53,7 +53,7 @@ steps:
   - name: verify-bgp-wiped
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default/exists
     expect:
       jq: '.exists == false'
 
@@ -61,7 +61,7 @@ steps:
   - name: verify-loopback-wiped
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
+    url: /nodes/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
     expect:
       jq: '.exists == false'
 
@@ -69,7 +69,7 @@ steps:
   - name: verify-intents-wiped
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/device/exists
     expect:
       jq: '.exists == false'
 
@@ -78,7 +78,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   - name: reprovision
     action: topology-reconcile
@@ -88,7 +88,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-after-reload
     action: wait
@@ -98,7 +98,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
     poll:
       timeout: 30s
@@ -108,7 +108,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -120,7 +120,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -129,6 +129,6 @@ steps:
   - name: verify-restored
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

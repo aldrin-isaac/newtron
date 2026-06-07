@@ -13,7 +13,7 @@ import (
 
 // ReplayStep dispatches a topology step to the appropriate Node or Interface method.
 // The step URL identifies the operation; interface-scoped operations include the
-// interface name in the URL (e.g., "/interface/Ethernet0/apply-service").
+// interface name in the URL (e.g., "/interfaces/Ethernet0/apply-service").
 //
 // Used by the topology provisioner to replay pre-computed steps against an
 // abstract Node, and by reconstruct paths to replay intent records.
@@ -277,20 +277,20 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 // This is the inverse of parseStepURL — both Snapshot and IntentToStep use this encoder.
 func stepURL(op, interfaceName string) string {
 	if interfaceName != "" {
-		return "/interface/" + interfaceName + "/" + op
+		return "/interfaces/" + interfaceName + "/" + op
 	}
 	return "/" + op
 }
 
 // parseStepURL extracts the operation name and optional interface name from a step URL.
 // Node-level:      "/setup-device"                → op="setup-device", iface=""
-// Interface-level: "/interface/Ethernet0/apply-service" → op="apply-service", iface="Ethernet0"
+// Interface-level: "/interfaces/Ethernet0/apply-service" → op="apply-service", iface="Ethernet0"
 func parseStepURL(url string) (op string, ifaceName string) {
 	url = strings.TrimPrefix(url, "/")
 	parts := strings.Split(url, "/")
 
-	if len(parts) >= 3 && parts[0] == "interface" {
-		// /interface/{name}/{op}
+	if len(parts) >= 3 && parts[0] == "interfaces" {
+		// /interfaces/{name}/{op}
 		return parts[len(parts)-1], parts[1]
 	}
 	// /op

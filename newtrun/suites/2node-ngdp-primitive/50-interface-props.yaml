@@ -12,19 +12,19 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet10/configure-interface
 
   - name: set-mtu-9100
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/set-property
+    url: /nodes/{{device}}/interfaces/Ethernet10/set-property
     params: {property: mtu, value: "9100"}
 
   - name: verify-mtu
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT/Ethernet10
+    url: /nodes/{{device}}/configdb/PORT/Ethernet10
     expect:
       jq: '.mtu == "9100"'
 
@@ -32,13 +32,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/set-property
+    url: /nodes/{{device}}/interfaces/Ethernet10/set-property
     params: {property: admin_status, value: down}
 
   - name: verify-admin-down
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT/Ethernet10
+    url: /nodes/{{device}}/configdb/PORT/Ethernet10
     expect:
       jq: '.admin_status == "down"'
 
@@ -46,13 +46,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/set-property
+    url: /nodes/{{device}}/interfaces/Ethernet10/set-property
     params: {property: admin_status, value: up}
 
   - name: verify-admin-up
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT/Ethernet10
+    url: /nodes/{{device}}/configdb/PORT/Ethernet10
     expect:
       jq: '.admin_status == "up"'
 
@@ -60,13 +60,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/set-property
+    url: /nodes/{{device}}/interfaces/Ethernet10/set-property
     params: {property: description, value: "test-interface-props"}
 
   - name: verify-description
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT/Ethernet10
+    url: /nodes/{{device}}/configdb/PORT/Ethernet10
     expect:
       jq: '.description == "test-interface-props"'
 
@@ -75,18 +75,18 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/clear-property
+    url: /nodes/{{device}}/interfaces/Ethernet10/clear-property
     params: {property: mtu}
 
   - name: clear-description
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/clear-property
+    url: /nodes/{{device}}/interfaces/Ethernet10/clear-property
     params: {property: description}
 
   - name: unconfigure-ethernet10
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet10/unconfigure-interface

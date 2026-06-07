@@ -166,7 +166,7 @@ steps:
 
 func TestSafetyURLPrefixEnforced(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
-	p.AllowedURLPrefixes = []string{"/api/network/"}
+	p.AllowedURLPrefixes = []string{"/api/networks/"}
 	s := mustParse(t, `
 name: ok
 topology: t
@@ -187,7 +187,7 @@ steps:
 
 func TestSafetyURLPrefixAccepted(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
-	p.AllowedURLPrefixes = []string{"/api/network/"}
+	p.AllowedURLPrefixes = []string{"/api/networks/"}
 	s := mustParse(t, `
 name: ok
 topology: t
@@ -195,7 +195,7 @@ steps:
   - name: call
     action: newtron
     method: POST
-    url: /api/network/default/node/sw1/something
+    url: /api/networks/default/nodes/sw1/something
 `)
 	if err := p.Validate(s); err != nil {
 		t.Errorf("expected accept, got: %v", err)

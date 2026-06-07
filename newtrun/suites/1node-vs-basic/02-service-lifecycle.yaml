@@ -11,7 +11,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/apply-service
+    url: /nodes/{{device}}/interfaces/Ethernet0/apply-service
     params:
       service: transit
       ip_address: "10.1.0.0/31"
@@ -21,7 +21,7 @@ steps:
   - name: verify-binding
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == true'
 
@@ -29,7 +29,7 @@ steps:
   - name: verify-interface
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0/exists
     expect:
       jq: '.exists == true'
 
@@ -37,7 +37,7 @@ steps:
   - name: verify-bgp-neighbor
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1
     expect:
       jq: '.asn == "65002"'
 
@@ -46,13 +46,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/remove-service
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-service
 
   # Verify binding removed
   - name: verify-binding-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
@@ -60,6 +60,6 @@ steps:
   - name: verify-bgp-neighbor-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
       jq: '.exists == false'

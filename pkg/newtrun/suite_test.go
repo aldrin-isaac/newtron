@@ -472,7 +472,7 @@ func TestSuite_EffectiveParameters_RequiredWithoutDefault(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestScenarioIsParameterized_DetectsURL(t *testing.T) {
-	sc := &Scenario{Steps: []Step{{URL: "/node/{{target.device}}/x"}}}
+	sc := &Scenario{Steps: []Step{{URL: "/nodes/{{target.device}}/x"}}}
 	if !ScenarioIsParameterized(sc) {
 		t.Errorf("expected parameterized")
 	}
@@ -497,7 +497,7 @@ func TestScenarioIsParameterized_DetectsParamInParams(t *testing.T) {
 }
 
 func TestScenarioIsParameterized_EmbeddedTargetIsFalse(t *testing.T) {
-	sc := &Scenario{Steps: []Step{{URL: "/node/{{device}}/x"}}}
+	sc := &Scenario{Steps: []Step{{URL: "/nodes/{{device}}/x"}}}
 	if ScenarioIsParameterized(sc) {
 		t.Errorf("scenario with {{device}} is embedded-target, not parameterized")
 	}
@@ -550,7 +550,7 @@ steps:
   - name: set
     action: newtron
     method: POST
-    url: /node/{{target.device}}/x
+    url: /nodes/{{target.device}}/x
     params:
       value: "{{param.admin_status}}"
 `,
@@ -657,7 +657,7 @@ steps:
   - name: x
     action: newtron
     method: GET
-    url: /node/{{target.interface}}/x
+    url: /nodes/{{target.interface}}/x
 `,
 	})
 	_, err := LoadSuite(dir)
@@ -702,7 +702,7 @@ steps:
     action: newtron
     method: GET
     devices: [s1]
-    url: /node/{{target.device}}/x
+    url: /nodes/{{target.device}}/x
 `,
 	})
 	_, err := LoadSuite(dir)
@@ -723,7 +723,7 @@ steps:
   - name: x
     action: newtron
     method: GET
-    url: /node/{{device}}/x/{{target.device}}
+    url: /nodes/{{device}}/x/{{target.device}}
 `,
 	})
 	_, err := LoadSuite(dir)

@@ -137,7 +137,7 @@ func (p InlineSafetyPolicy) Validate(s *newtrun.Scenario) error {
 
 // urlAllowed returns true when the URL matches any allowed prefix. URLs
 // in newtrun scenarios are typically relative paths under the newtron-
-// server base ("/api/network/.../apply-service"); the prefix check is a
+// server base ("/api/networks/.../apply-service"); the prefix check is a
 // simple HasPrefix.
 func urlAllowed(url string, prefixes []string) bool {
 	for _, p := range prefixes {

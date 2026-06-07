@@ -22,15 +22,15 @@ func TestParseStepURL(t *testing.T) {
 		{"/create-vrf", "create-vrf", ""},
 		{"/create-vlan", "create-vlan", ""},
 		{"/create-portchannel", "create-portchannel", ""},
-		{"/interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
-		{"/interface/Ethernet4/configure-interface", "configure-interface", "Ethernet4"},
-		{"/interface/Ethernet12/add-bgp-peer", "add-bgp-peer", "Ethernet12"},
-		{"/interface/Ethernet0/set-property", "set-property", "Ethernet0"},
-		{"/interface/Ethernet0/bind-acl", "bind-acl", "Ethernet0"},
-		{"/interface/Ethernet0/apply-qos", "apply-qos", "Ethernet0"},
+		{"/interfaces/Ethernet0/apply-service", "apply-service", "Ethernet0"},
+		{"/interfaces/Ethernet4/configure-interface", "configure-interface", "Ethernet4"},
+		{"/interfaces/Ethernet12/add-bgp-peer", "add-bgp-peer", "Ethernet12"},
+		{"/interfaces/Ethernet0/set-property", "set-property", "Ethernet0"},
+		{"/interfaces/Ethernet0/bind-acl", "bind-acl", "Ethernet0"},
+		{"/interfaces/Ethernet0/apply-qos", "apply-qos", "Ethernet0"},
 		// No leading slash
 		{"setup-device", "setup-device", ""},
-		{"interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
+		{"interfaces/Ethernet0/apply-service", "apply-service", "Ethernet0"},
 	}
 	for _, tt := range tests {
 		op, iface := parseStepURL(tt.url)
@@ -210,7 +210,7 @@ func TestReplayStepMissingInterface(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
 	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL:    "/interface/Ethernet99/apply-service",
+		URL:    "/interfaces/Ethernet99/apply-service",
 		Params: map[string]any{"service": "transit"},
 	})
 	if err == nil {
@@ -224,13 +224,13 @@ func TestReplayStepSetProperty(t *testing.T) {
 	// set-property intent has parent "interface|Ethernet0", so
 	// configure-interface must run first to create that parent intent.
 	if err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL:    "/interface/Ethernet0/configure-interface",
+		URL:    "/interfaces/Ethernet0/configure-interface",
 		Params: map[string]any{"ip": "10.1.100.1/24"},
 	}); err != nil {
 		t.Fatalf("configure-interface prerequisite: %v", err)
 	}
 	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/interface/Ethernet0/set-property",
+		URL: "/interfaces/Ethernet0/set-property",
 		Params: map[string]any{
 			"property": "mtu",
 			"value":    "1500",
@@ -249,7 +249,7 @@ func TestReplayStepConfigureInterface(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
 	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/interface/Ethernet0/configure-interface",
+		URL: "/interfaces/Ethernet0/configure-interface",
 		Params: map[string]any{
 			"ip": "10.1.100.1/24",
 		},
@@ -276,7 +276,7 @@ func TestReplayStepConfigureInterfaceBridged(t *testing.T) {
 	}
 	// Configure interface in bridged mode
 	err = ReplayStep(ctx, n, spec.TopologyStep{
-		URL:    "/interface/Ethernet0/configure-interface",
+		URL:    "/interfaces/Ethernet0/configure-interface",
 		Params: map[string]any{"vlan_id": float64(100), "tagged": false},
 	})
 	if err != nil {

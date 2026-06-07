@@ -1178,7 +1178,7 @@ The tree is built server-side and rendered client-side:
    kind than their parent are marked as leaves (§12.3.1 multi-parent rendering).
 
 2. **API**: The tree is returned as a JSON structure via
-   `GET /network/{netID}/node/{device}/intent/tree`.
+   `GET /networks/{netID}/nodes/{device}/intent/tree`.
 
 3. **CLI** (`cmd_intent.go`): `printIntentTree` renders the pre-built
    `IntentTreeNode` tree with Unicode box-drawing connectors. It does not
@@ -1198,7 +1198,7 @@ func intentKind(resource string) string {
 ### 12.6 API Endpoint
 
 ```
-GET /network/{netID}/node/{device}/intent/tree[?kind=vlan&resource=100&ancestors=true]
+GET /networks/{netID}/nodes/{device}/intent/tree[?kind=vlan&resource=100&ancestors=true]
 ```
 
 Returns the same tree structure as JSON for programmatic access:

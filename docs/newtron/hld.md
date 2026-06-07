@@ -449,7 +449,7 @@ A concrete trace of `newtron leaf1 vlan create 100 --name servers -x` from keyst
 
 ```
 CLI (cmd/newtron)
-  │  Sends POST /newtron/v1/network/default/node/leaf1/vlan
+  │  Sends POST /newtron/v1/networks/default/node/leaf1/vlan
   │  Body: {"id": 100, "name": "servers"}
   │  Query: ?execute=true
   │
@@ -557,7 +557,7 @@ The lock-ordering rule for any multi-key caller is: **acquire locks in alphabeti
 
 ### 8.6 Cycle deadlocks
 
-The API layer carries no spec lock, so a handler cannot hold a lock across an outbound HTTP call. The cycle that drove issue #97 (newtron handler → newtlab loopback → newtron `/topology` handler → can't proceed because outer handler holds a Lock) is structurally impossible. `TestAPI_LoopbackHTTPDoesNotDeadlock` in `pkg/newtron/api/loopback_no_deadlock_test.go` pins this contract: a fake `PortResolver` makes a loopback HTTP call to `/topology` during `/host/host1` resolution; the chain must complete inside a 5-second deadline. If anyone reintroduces an API-layer lock-across-loopback, this test fails.
+The API layer carries no spec lock, so a handler cannot hold a lock across an outbound HTTP call. The cycle that drove issue #97 (newtron handler → newtlab loopback → newtron `/topology` handler → can't proceed because outer handler holds a Lock) is structurally impossible. `TestAPI_LoopbackHTTPDoesNotDeadlock` in `pkg/newtron/api/loopback_no_deadlock_test.go` pins this contract: a fake `PortResolver` makes a loopback HTTP call to `/topology` during `/hosts/host1` resolution; the chain must complete inside a 5-second deadline. If anyone reintroduces an API-layer lock-across-loopback, this test fails.
 
 ### 8.7 Per-device serialization
 

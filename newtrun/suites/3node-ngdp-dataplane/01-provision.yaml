@@ -13,7 +13,7 @@ steps:
     action: newtron
     devices: [spine, leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-reload
     action: wait
@@ -22,7 +22,7 @@ steps:
   - name: verify-bgp
     action: newtron
     devices: [spine, leaf1, leaf2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s

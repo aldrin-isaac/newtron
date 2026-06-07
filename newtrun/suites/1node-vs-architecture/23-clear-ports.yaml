@@ -22,7 +22,7 @@ steps:
   - name: verify-port-before
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT
+    url: /nodes/{{device}}/configdb/PORT
     expect:
       jq: 'length > 0'
 
@@ -31,13 +31,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/clear?mode=topology
+    url: /nodes/{{device}}/intent/clear?mode=topology
 
   # Verify PORT still exists on device (clear+reconcile doesn't delete PORT)
   - name: verify-port-after-clear
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PORT
+    url: /nodes/{{device}}/configdb/PORT
     expect:
       jq: 'length > 0'
 
@@ -46,4 +46,4 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology

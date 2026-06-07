@@ -17,28 +17,28 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {ip: "10.1.100.1/24"}
 
   - name: configure-eth1-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {ip: "10.1.200.1/24"}
 
   # Verify interface IPs in CONFIG_DB
   - name: verify-ip-leaf1
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.1.100.1%2F24/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1%7C10.1.100.1%2F24/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-ip-leaf2
     action: newtron
     devices: [leaf2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.1.200.1%2F24/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1%7C10.1.200.1%2F24/exists
     expect:
       jq: '.exists == true'
 
@@ -56,7 +56,7 @@ steps:
   - name: verify-route-leaf1
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/route/default/10.1.200.0/24
+    url: /nodes/{{device}}/route/default/10.1.200.0/24
     poll:
       timeout: 30s
       interval: 3s
@@ -66,7 +66,7 @@ steps:
   - name: verify-route-leaf2
     action: newtron
     devices: [leaf2]
-    url: /node/{{device}}/route/default/10.1.100.0/24
+    url: /nodes/{{device}}/route/default/10.1.100.0/24
     poll:
       timeout: 30s
       interval: 3s
@@ -123,13 +123,13 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: unconfigure-eth1-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: wait-port-mode-change
     action: wait

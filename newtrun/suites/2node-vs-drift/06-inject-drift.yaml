@@ -18,7 +18,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 DEL 'INTERFACE|Ethernet0|10.1.0.0/31'"}
     expect:
       jq: '.output | contains("1")'
@@ -27,7 +27,7 @@ steps:
   - name: verify-deleted
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
       jq: '.exists == false'
 
@@ -37,7 +37,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"}
     expect:
       jq: '.output | contains("1")'
@@ -46,7 +46,7 @@ steps:
   - name: verify-extra-exists
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan999
+    url: /nodes/{{device}}/configdb/VLAN/Vlan999
     expect:
       jq: '.vlanid == "999"'
 
@@ -57,7 +57,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 99999"}
     expect:
       jq: '.output | contains("0")'
@@ -66,6 +66,6 @@ steps:
   - name: verify-modified
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "99999"'

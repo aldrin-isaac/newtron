@@ -501,7 +501,7 @@ type TopologyDevice struct {
 // TopologyStep is a single provisioning operation in the topology.
 // URL identifies the operation (last segment = verb, e.g., "/configure-bgp").
 // Interface-scoped operations include the interface name in the URL
-// (e.g., "/interface/Ethernet0/apply-service").
+// (e.g., "/interfaces/Ethernet0/apply-service").
 // Params are structured JSON values matching the API request format.
 type TopologyStep struct {
 	URL    string         `json:"url"`

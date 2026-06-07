@@ -91,7 +91,7 @@ func TestPersistHook_TopologyJSONReflectsWriteWhenRequested(t *testing.T) {
 	before := stepURLCount(deviceSteps(t, loadTopologyJSON(t, specDir), "switch1"), "/create-vlan")
 
 	w := httpPostJSON(t, s,
-		"/newtron/v1/network/default/node/switch1/create-vlan?mode=topology&persist=topology",
+		"/newtron/v1/networks/default/nodes/switch1/create-vlan?mode=topology&persist=topology",
 		map[string]any{"id": 991, "description": "persist hook test"})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("POST: got %d, want 201; body: %s", w.Code, w.Body.String())
@@ -119,7 +119,7 @@ func TestPersistHook_TopologyJSONUntouchedWhenAbsent(t *testing.T) {
 	}
 
 	w := httpPostJSON(t, s,
-		"/newtron/v1/network/default/node/switch1/create-vlan?mode=topology",
+		"/newtron/v1/networks/default/nodes/switch1/create-vlan?mode=topology",
 		map[string]any{"id": 992})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("POST: got %d, want 201; body: %s", w.Code, w.Body.String())
@@ -160,7 +160,7 @@ func TestPersistHook_ReadOnlyHandlerIsNoOp(t *testing.T) {
 	}
 
 	w := httpDo(t, s, http.MethodGet,
-		"/newtron/v1/network/default/node/switch1/intent/projection?mode=topology&persist=topology",
+		"/newtron/v1/networks/default/nodes/switch1/intent/projection?mode=topology&persist=topology",
 	)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET: got %d, want 200; body: %s", w.Code, w.Body.String())

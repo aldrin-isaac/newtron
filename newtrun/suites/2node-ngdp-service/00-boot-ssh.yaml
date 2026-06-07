@@ -9,7 +9,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "echo ok"}
     poll:
       timeout: 120s
@@ -21,7 +21,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "echo ok"}
     poll:
       timeout: 120s
@@ -36,7 +36,7 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params:
       command: >-
         up=$(systemctl show swss.service --property=ActiveEnterTimestampMonotonic --value);

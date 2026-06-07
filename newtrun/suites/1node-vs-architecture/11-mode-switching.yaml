@@ -19,7 +19,7 @@ steps:
   - name: topology-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'
 
@@ -27,7 +27,7 @@ steps:
   - name: actuated-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'
 
@@ -35,7 +35,7 @@ steps:
   - name: back-to-topology
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'
 
@@ -46,14 +46,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan?mode=topology
+    url: /nodes/{{device}}/create-vlan?mode=topology
     params: {id: 600}
 
   # Verify the unsaved VLAN is in the topology tree
   - name: verify-unsaved-in-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/create-vlan")'
 
@@ -61,7 +61,7 @@ steps:
   - name: mode-switch-blocked-by-unsaved
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect_failure: true
     expect:
       contains: unsaved
@@ -71,12 +71,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   # Now actuated mode should work
   - name: actuated-after-reload
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'

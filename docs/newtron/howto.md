@@ -178,7 +178,7 @@ If you modify spec files on disk (manually or via another tool) while the server
 To pick up changes without restarting the server:
 
 ```bash
-curl -X POST http://localhost:18080/newtron/v1/network/default/reload
+curl -X POST http://localhost:18080/newtron/v1/networks/default/reload
 ```
 
 Or via the Go client:

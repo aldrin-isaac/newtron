@@ -16,7 +16,7 @@ steps:
   - name: verify-drift-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: >-
         length == 3
@@ -28,6 +28,6 @@ steps:
   - name: verify-drift-sw2-still-clean
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'

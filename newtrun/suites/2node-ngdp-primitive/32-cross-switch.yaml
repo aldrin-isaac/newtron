@@ -11,27 +11,27 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {ip: "10.20.0.1/31"}
 
   - name: configure-eth1-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {ip: "10.20.1.1/31"}
 
   - name: verify-ip-sw1-eth1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.0.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.0.1%2F31/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-ip-sw2-eth1
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
     expect:
       jq: '.exists == true'
 
@@ -40,7 +40,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "ip addr show Ethernet1"}
     poll:
       timeout: 90s
@@ -52,7 +52,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "ip addr show Ethernet1"}
     poll:
       timeout: 90s
@@ -64,7 +64,7 @@ steps:
   - name: verify-route-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/route/default/10.20.1.0/31
+    url: /nodes/{{device}}/route/default/10.20.1.0/31
     poll:
       timeout: 60s
       interval: 5s
@@ -74,7 +74,7 @@ steps:
   - name: verify-route-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/route/default/10.20.0.0/31
+    url: /nodes/{{device}}/route/default/10.20.0.0/31
     poll:
       timeout: 60s
       interval: 5s
@@ -97,7 +97,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.0.0"}
     poll:
       timeout: 30s
@@ -109,7 +109,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.1.0"}
     poll:
       timeout: 30s

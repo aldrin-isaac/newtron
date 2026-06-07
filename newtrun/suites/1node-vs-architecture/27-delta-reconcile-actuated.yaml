@@ -14,28 +14,28 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32'"}
 
   - name: inject-extra
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan888' vlanid 888"}
 
   - name: inject-modified
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 88888"}
 
   # Verify drift exists
   - name: verify-drift-before
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length >= 3'
 
@@ -44,7 +44,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile?reconcile=delta
+    url: /nodes/{{device}}/intent/reconcile?reconcile=delta
     expect:
       jq: '.mode == "delta" and .applied >= 3'
 
@@ -52,7 +52,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -61,7 +61,7 @@ steps:
   - name: verify-loopback-restored
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
+    url: /nodes/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
     expect:
       jq: '.exists == true'
 
@@ -69,7 +69,7 @@ steps:
   - name: verify-extra-vlan-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan888/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan888/exists
     expect:
       jq: '.exists == false'
 
@@ -77,7 +77,7 @@ steps:
   - name: verify-asn-corrected
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "65001"'
 
@@ -85,7 +85,7 @@ steps:
   - name: verify-zero-drift
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -94,12 +94,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 801}
 
   - name: cleanup-vlan
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 801}

@@ -24,20 +24,20 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet0/configure-interface
     params: {ip: "10.1.0.0/31"}
 
   - name: configure-eth0-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet0/configure-interface
     params: {ip: "10.1.0.1/31"}
 
   - name: verify-ip-eth0-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
       jq: '.exists == true'
 
@@ -46,7 +46,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "ip addr show Ethernet0"}
     poll:
       timeout: 60s
@@ -58,7 +58,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "ip addr show Ethernet0"}
     poll:
       timeout: 60s
@@ -71,27 +71,27 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/add-bgp-peer
+    url: /nodes/{{device}}/interfaces/Ethernet0/add-bgp-peer
     params: {remote_as: 65002}
 
   - name: bgp-add-neighbor-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/add-bgp-peer
+    url: /nodes/{{device}}/interfaces/Ethernet0/add-bgp-peer
     params: {remote_as: 65001}
 
   - name: verify-bgp-neighbor-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-bgp-neighbor-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
     expect:
       jq: '.exists == true'
 
@@ -100,7 +100,7 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
 
   # Step 6: Poll for 'router bgp' in FRR running-config.
@@ -108,7 +108,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -120,7 +120,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -132,7 +132,7 @@ steps:
   - name: verify-bgp-underlay-switch1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s
@@ -142,7 +142,7 @@ steps:
   - name: verify-bgp-underlay-switch2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s

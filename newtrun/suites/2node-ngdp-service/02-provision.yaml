@@ -20,7 +20,7 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   # Wait for all services to fully restart after config reload.
   # CiscoVS platform takes longer than VPP to stabilize.
@@ -33,7 +33,7 @@ steps:
   - name: verify-bgp
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s

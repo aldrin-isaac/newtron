@@ -96,7 +96,7 @@ var actionMeta = map[newtrun.StepAction]actionMetadata{
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/create-vlan
+  url: /nodes/{{device}}/create-vlan
   params: {id: 100}`,
 	},
 	newtrun.ActionNewtronCLI: {

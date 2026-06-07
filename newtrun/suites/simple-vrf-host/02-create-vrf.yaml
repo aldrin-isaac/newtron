@@ -14,14 +14,14 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/create-vrf
+    url: /nodes/{{device}}/create-vrf
     params: {name: Vrf_CUSTOMER}
 
   # Verify VRF|Vrf_CUSTOMER is in CONFIG_DB.
   - name: verify-vrf-config-db
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VRF/Vrf_CUSTOMER/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_CUSTOMER/exists
     expect:
       jq: '.exists == true'
 
@@ -30,7 +30,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "ip vrf show"}
     poll:
       timeout: 60s
@@ -44,7 +44,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "redis-cli -n 1 keys 'ASIC_STATE:SAI_OBJECT_TYPE_VIRTUAL_ROUTER:*' | wc -l"}
     poll:
       timeout: 120s

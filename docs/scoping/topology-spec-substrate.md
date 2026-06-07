@@ -13,7 +13,7 @@ network's structural shape (devices and links). Per
 `DESIGN_PRINCIPLES_NEWTRON.md` §7, topology is a network-scoped
 definition newtron owns.
 
-- [newtron#14](https://github.com/aldrin-isaac/newtron/issues/14) — Full topology read endpoint (`GET /network/{netID}/topology`)
+- [newtron#14](https://github.com/aldrin-isaac/newtron/issues/14) — Full topology read endpoint (`GET /networks/{netID}/topology`)
 - [newtron#15](https://github.com/aldrin-isaac/newtron/issues/15) — Topology node CRUD (`create-node`, `delete-node`, `update-node`)
 - [newtron#16](https://github.com/aldrin-isaac/newtron/issues/16) — Topology link CRUD (`create-link`, `delete-link`)
 
@@ -82,7 +82,7 @@ _Landed on branch `impl/phase-1-newtron-substrate-gaps` (Phase 1 batch)._
 
 **§46 (load-bearing):** the `TopologySpecFile` is canonical
 substrate that the spec loader already builds in memory. Today's
-`GET /topology/node` returns device names only (`[]string`) — the
+`GET /topology/nodes` returns device names only (`[]string`) — the
 "summary instead of canonical" pattern §46 explicitly rejects.
 Exposing the full typed substrate directly is the resolution.
 
@@ -123,10 +123,10 @@ Returns `*spec.TopologySpecFile` with existing JSON tags (devices,
 links, metadata).
 
 **Route** in `pkg/newtron/api/handler.go`, alongside the existing
-`/topology/node` route:
+`/topology/nodes` route:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/topology", s.handleTopology)
+mux.HandleFunc("GET /networks/{netID}/topology", s.handleTopology)
 ```
 
 **Tests:** assert round-trip JSON shape matches `TopologySpecFile`;
@@ -212,9 +212,9 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 **Routes** in `pkg/newtron/api/handler.go`:
 
 ```go
-mux.HandleFunc("POST /network/{netID}/topology/create-node", s.handleCreateTopologyNode)
-mux.HandleFunc("DELETE /network/{netID}/topology/node/{name}", s.handleDeleteTopologyNode)
-mux.HandleFunc("PUT /network/{netID}/topology/node/{name}", s.handleUpdateTopologyNode)
+mux.HandleFunc("POST /networks/{netID}/topology/create-node", s.handleCreateTopologyNode)
+mux.HandleFunc("DELETE /networks/{netID}/topology/nodes/{name}", s.handleDeleteTopologyNode)
+mux.HandleFunc("PUT /networks/{netID}/topology/nodes/{name}", s.handleUpdateTopologyNode)
 ```
 
 **Request types** in `pkg/newtron/api/types.go`:
@@ -250,7 +250,7 @@ filing a separate gap for it.
 
 _Landed on branch `impl/phase-5-topology-crud` (Phase 5 batch, same commit as
 #15). URL shape: `POST /topology/create-link` (body = TopologyLink) +
-`DELETE /topology/link/{device}/{interface}` (single endpoint uniquely
+`DELETE /topology/links/{device}/{interface}` (single endpoint uniquely
 identifies the link). Add refuses with `*ConflictError` when either
 endpoint is already wired._
 
@@ -292,8 +292,8 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 **Routes:**
 
 ```go
-mux.HandleFunc("POST /network/{netID}/topology/create-link", s.handleCreateTopologyLink)
-mux.HandleFunc("DELETE /network/{netID}/topology/link", s.handleDeleteTopologyLink)
+mux.HandleFunc("POST /networks/{netID}/topology/create-link", s.handleCreateTopologyLink)
+mux.HandleFunc("DELETE /networks/{netID}/topology/link", s.handleDeleteTopologyLink)
 ```
 
 `DELETE` takes the body convention (avoids URL-escaping

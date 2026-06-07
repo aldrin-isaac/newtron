@@ -65,7 +65,7 @@ steps:
   - name: link-prevents-node-delete
     action: newtron
     method: DELETE
-    url: /topology/node/switch2
+    url: /topology/nodes/switch2
     expect_failure: true
     expect:
       contains: "has 1 reference"
@@ -73,14 +73,14 @@ steps:
   - name: delete-link-by-single-endpoint
     action: newtron
     method: DELETE
-    url: /topology/link/switch1/Ethernet0
+    url: /topology/links/switch1/Ethernet0
     expect:
       jq: '.deleted == "switch1:Ethernet0"'
 
   - name: delete-switch2-now-unblocked
     action: newtron
     method: DELETE
-    url: /topology/node/switch2
+    url: /topology/nodes/switch2
     expect:
       jq: '.deleted == "switch2"'
 

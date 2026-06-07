@@ -23,14 +23,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan?mode=topology
+    url: /nodes/{{device}}/create-vlan?mode=topology
     params: {id: 900}
 
   # Verify VLAN in topology tree
   - name: verify-vlan-in-topology
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/create-vlan")'
 
@@ -39,7 +39,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/save?mode=topology
+    url: /nodes/{{device}}/intent/save?mode=topology
 
   # Switch to actuated mode — the actuated node is built from device
   # NEWTRON_INTENT, which does NOT include the topology-only VLAN 900
@@ -47,7 +47,7 @@ steps:
   - name: actuated-tree-no-topology-vlan
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | all(.[]; .url != "/create-vlan")'
 
@@ -55,7 +55,7 @@ steps:
   - name: verify-vlan-not-on-device
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan900/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan900/exists
     expect:
       jq: '.exists == false'
 
@@ -68,7 +68,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-after-reload
     action: wait
@@ -78,7 +78,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
     poll:
       timeout: 30s
@@ -88,7 +88,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -100,7 +100,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -109,7 +109,7 @@ steps:
   - name: verify-vlan-on-device-after-reconcile
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan900/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan900/exists
     expect:
       jq: '.exists == true'
 
@@ -117,7 +117,7 @@ steps:
   - name: actuated-tree-has-vlan
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | any(.[]; .url == "/create-vlan")'
 
@@ -126,18 +126,18 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 900}
 
   - name: save-cleanup
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/save
+    url: /nodes/{{device}}/intent/save
 
   # Reload topology to pick up the cleaned-up save
   - name: reload-topology-cleanup
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology

@@ -32,7 +32,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params:
       command: >-
         sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|vlan|950'
@@ -47,7 +47,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params:
       command: "sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|device' _children 'vlan|950'"
 
@@ -57,7 +57,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params:
       command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan950' vlanid 950"
 
@@ -67,7 +67,7 @@ steps:
   - name: tree-sees-external-intent
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | any(.[]; .url == "/create-vlan")'
 
@@ -77,7 +77,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params:
       command: >-
         sudo redis-cli -n 4 DEL 'NEWTRON_INTENT|vlan|950' 'VLAN|Vlan950'
@@ -87,13 +87,13 @@ steps:
   - name: verify-clean-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | all(.[]; .url != "/create-vlan")'
 
   - name: verify-clean-drift
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

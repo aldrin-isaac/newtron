@@ -11,13 +11,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet40/configure-interface
 
   - name: create-acl-table
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-acl
+    url: /nodes/{{device}}/create-acl
     params:
       name: TEST_ACL
       type: L3
@@ -26,7 +26,7 @@ steps:
   - name: verify-acl-table-created
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
+    url: /nodes/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
     expect:
       jq: '.exists == true'
 
@@ -34,7 +34,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-acl-rule
+    url: /nodes/{{device}}/add-acl-rule
     params:
       acl: TEST_ACL
       rule_name: RULE_10
@@ -45,7 +45,7 @@ steps:
   - name: verify-acl-rule-10
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_10
+    url: /nodes/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_10
     expect:
       jq: '.PACKET_ACTION == "FORWARD" and .PRIORITY == "10" and .SRC_IP == "10.0.0.0/8"'
 
@@ -53,7 +53,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-acl-rule
+    url: /nodes/{{device}}/add-acl-rule
     params:
       acl: TEST_ACL
       rule_name: RULE_20
@@ -64,7 +64,7 @@ steps:
   - name: verify-acl-rule-20
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_20
+    url: /nodes/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_20
     expect:
       jq: '.PACKET_ACTION == "DROP" and .PRIORITY == "20"'
 
@@ -72,13 +72,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/bind-acl
+    url: /nodes/{{device}}/interfaces/Ethernet40/bind-acl
     params: {acl: TEST_ACL, direction: ingress}
 
   - name: verify-acl-bound
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL
+    url: /nodes/{{device}}/configdb/ACL_TABLE/TEST_ACL
     expect:
       jq: '.ports == "Ethernet40"'
 
@@ -86,20 +86,20 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/unbind-acl
+    url: /nodes/{{device}}/interfaces/Ethernet40/unbind-acl
     params: {acl: TEST_ACL}
 
   - name: delete-acl-rule-20
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-acl-rule
+    url: /nodes/{{device}}/remove-acl-rule
     params: {acl: TEST_ACL, rule: RULE_20}
 
   - name: verify-rule-20-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_20/exists
+    url: /nodes/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_20/exists
     expect:
       jq: '.exists == false'
 
@@ -107,13 +107,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-acl-rule
+    url: /nodes/{{device}}/remove-acl-rule
     params: {acl: TEST_ACL, rule: RULE_10}
 
   - name: verify-rule-10-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_10/exists
+    url: /nodes/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_10/exists
     expect:
       jq: '.exists == false'
 
@@ -121,13 +121,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-acl
+    url: /nodes/{{device}}/delete-acl
     params: {name: TEST_ACL}
 
   - name: verify-acl-table-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
+    url: /nodes/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
     expect:
       jq: '.exists == false'
 
@@ -136,4 +136,4 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet40/unconfigure-interface

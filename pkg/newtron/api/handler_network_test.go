@@ -23,7 +23,7 @@ func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
 		Scaffold:    true,
 		Description: "scaffold test",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/network", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
@@ -60,7 +60,7 @@ func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
 		SpecDir:  specDir,
 		Scaffold: true,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/network", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
@@ -83,7 +83,7 @@ func TestRegisterNetwork_NoScaffold_MissingSpecDir(t *testing.T) {
 		ID:      "demo-3",
 		SpecDir: specDir,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/network", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 

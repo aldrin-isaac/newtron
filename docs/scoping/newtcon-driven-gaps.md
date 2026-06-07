@@ -48,7 +48,7 @@ substrate cluster they touch:
 | `#5` | A. Projection | Per-resource summary views, or device CONFIG_DB raw reads | `Projection` (output of `ExportEntries`) |
 | `#4` | A. Projection | Free-text preview string + entry count for hypothetical mutations | Before-`Projection` + After-`Projection` + `[]DriftEntry` |
 | `#6` | A. Projection | Per-device intent records, or spec definitions, requiring N-call stitching | Per-Node `[]DriftEntry` slice for the service |
-| `#14` | C. Topology spec | `GET /topology/node` returning names only (`[]string`) | Full `TopologySpecFile` (devices + links + metadata) |
+| `#14` | C. Topology spec | `GET /topology/nodes` returning names only (`[]string`) | Full `TopologySpecFile` (devices + links + metadata) |
 | `#15` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyDevice` directly, via typed `create-node`/`delete-node`/`update-node` |
 | `#16` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyLink` directly, via typed `create-link`/`delete-link` |
 | `#17` | D. Device reality | N×M stitched per-table-per-key reads, no internal-consistency guarantee | Full `RawConfigDB` snapshot from `GetRawOwnedTables` |
@@ -113,9 +113,9 @@ additions.
   resolution and `writeJSON` / `writeError` for response.
 - **Routes** are registered in `pkg/newtron/api/handler.go`
   (`buildMux()`) with HTTP-method-prefixed paths:
-  `"GET /network/{netID}/node/{device}/intent/..."`. Intent operations
+  `"GET /network/{netID}/nodes/{device}/intent/..."`. Intent operations
   live under `/intent/`; CONFIG_DB reads under `/configdb/`; service
-  reads under `/service/{service}/`; topology operations under
+  reads under `/services/{service}/`; topology operations under
   `/topology/`.
 - **Public Node methods** are PascalCase verbs returning
   `(value, error)` or just `value`. No `Get*` prefix; the method's

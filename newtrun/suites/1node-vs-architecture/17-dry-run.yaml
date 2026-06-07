@@ -20,14 +20,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan?dry_run=true
+    url: /nodes/{{device}}/create-vlan?dry_run=true
     params: {id: 800}
 
   # Verify intent was NOT written to device (dry-run restores intent DB)
   - name: verify-no-intent-after-dry-run
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/vlan%7C800/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/vlan%7C800/exists
     expect:
       jq: '.exists == false'
 
@@ -35,7 +35,7 @@ steps:
   - name: verify-no-configdb-after-dry-run
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan800/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan800/exists
     expect:
       jq: '.exists == false'
 
@@ -43,7 +43,7 @@ steps:
   - name: verify-zero-drift-after-dry-run
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -51,7 +51,7 @@ steps:
   - name: verify-tree-unchanged-after-dry-run
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree
+    url: /nodes/{{device}}/intent/tree
     expect:
       jq: '.steps | all(.[]; .url != "/create-vlan")'
 
@@ -60,13 +60,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 800}
 
   - name: verify-real-vlan-exists
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan800/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan800/exists
     expect:
       jq: '.exists == true'
 
@@ -75,12 +75,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 800}
 
   - name: verify-clean
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

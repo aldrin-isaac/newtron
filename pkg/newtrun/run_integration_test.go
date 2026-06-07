@@ -20,7 +20,7 @@ import (
 // fired and each StepResult carries its TargetBinding.
 //
 // The scenario uses `wait` so it runs without a newtron-server
-// dependency. A faux GET /network/<id>/info handler stands in for
+// dependency. A faux GET /networks/<id>/info handler stands in for
 // newtron-server so connectToServer succeeds.
 func TestRun_ParameterizedSuite_EndToEnd(t *testing.T) {
 	scenariosDir := t.TempDir()
@@ -60,7 +60,7 @@ steps:
 	// devices) return empty data — --no-deploy mode skips connection.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/newtron/v1/network":
+		case r.URL.Path == "/newtron/v1/networks":
 			_, _ = w.Write([]byte(`{"data":[{"id":"test-net","topology":"synthetic","has_topology":true,"spec_dir":""}]}`))
 		case strings.HasSuffix(r.URL.Path, "/topology/devices"):
 			_, _ = w.Write([]byte(`{"data":[]}`))

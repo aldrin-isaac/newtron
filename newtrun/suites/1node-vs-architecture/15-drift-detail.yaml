@@ -17,7 +17,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 55555"}
 
   # Verify the drift entry for the modified BGP_GLOBALS includes field detail.
@@ -29,7 +29,7 @@ steps:
   - name: drift-has-field-detail
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: >-
         [.[] | select(.type == "modified" and .table == "BGP_GLOBALS")]
@@ -41,13 +41,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan777' vlanid 777"}
 
   - name: drift-extra-has-identity
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: >-
         [.[] | select(.type == "extra" and .table == "VLAN" and .key == "Vlan777")]
@@ -58,12 +58,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 65001; sudo redis-cli -n 4 DEL 'VLAN|Vlan777'"}
 
   - name: verify-clean
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

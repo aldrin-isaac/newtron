@@ -16,7 +16,7 @@ description: |
 
   Provisions switch1, applies TRANSIT service to Ethernet0 with a
   representative IP + peer-AS, then queries
-  /network/{n}/service/TRANSIT/projection and asserts:
+  /networks/{n}/services/TRANSIT/projection and asserts:
     - response carries one Nodes entry for switch1.
     - the diff includes an INTERFACE entry for Ethernet0|10.1.0.0/31.
     - the diff includes a BGP_NEIGHBOR entry for the peer (10.1.0.1).
@@ -36,7 +36,7 @@ steps:
   - name: query-service-projection
     action: newtron
     method: GET
-    url: /service/TRANSIT/projection
+    url: /services/TRANSIT/projection
     expect:
       jq: >-
         .service == "TRANSIT"

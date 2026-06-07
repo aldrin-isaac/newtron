@@ -127,7 +127,7 @@ func (n *Node) ProjectionDiff(ctx context.Context, ops []spec.TopologyStep) (*no
 // layer's handleServiceProjection, which iterates over NodeActors and calls
 // this method on each Node that BindsService). Newtcon and other HTTP
 // consumers read this substrate via the network-scoped endpoint
-// GET /network/{n}/service/{name}/projection (returns *ServiceProjection),
+// GET /networks/{n}/services/{name}/projection (returns *ServiceProjection),
 // not directly per-Node.
 func (n *Node) ServiceProjection(ctx context.Context, serviceName string) ([]sonic.DriftEntry, error) {
 	return n.internal.ServiceProjection(ctx, serviceName)

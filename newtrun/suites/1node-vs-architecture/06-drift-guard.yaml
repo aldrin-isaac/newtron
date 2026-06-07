@@ -17,7 +17,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 300}
     expect_failure: true
     expect:
@@ -28,7 +28,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vrf
+    url: /nodes/{{device}}/create-vrf
     params: {name: Vrf_BLOCKED}
     expect_failure: true
     expect:
@@ -40,14 +40,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan?mode=topology
+    url: /nodes/{{device}}/create-vlan?mode=topology
     params: {id: 300}
 
   # Verify the VLAN intent IS in the topology tree (still in topology mode)
   - name: verify-vlan-in-topology-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/create-vlan")'
 
@@ -57,7 +57,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   # Verify the VLAN is NOT on the device — topology offline mode doesn't
   # write to Redis. This step runs in actuated mode (no ?mode=topology),
@@ -65,6 +65,6 @@ steps:
   - name: verify-vlan-not-on-device
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan300/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan300/exists
     expect:
       jq: '.exists == false'

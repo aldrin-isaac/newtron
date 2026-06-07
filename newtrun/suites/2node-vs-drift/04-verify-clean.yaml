@@ -15,14 +15,14 @@ steps:
   - name: verify-drift-clean-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'
 
   - name: verify-drift-clean-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'
 
@@ -32,14 +32,14 @@ steps:
   - name: verify-bgp-globals-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "65001" and .router_id == "10.0.0.1"'
 
   - name: verify-bgp-globals-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "65002" and .router_id == "10.0.0.2"'
 
@@ -47,14 +47,14 @@ steps:
   - name: verify-transit-ip-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-transit-ip-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
     expect:
       jq: '.exists == true'
 
@@ -62,7 +62,7 @@ steps:
   - name: verify-vlan100-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100
     expect:
       jq: '.vlanid == "100"'
 
@@ -70,6 +70,6 @@ steps:
   - name: verify-no-vlan999-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan999/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan999/exists
     expect:
       jq: '.exists == false'

@@ -14,14 +14,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/clear?mode=topology
+    url: /nodes/{{device}}/intent/clear?mode=topology
 
   # Save the empty state to topology.json
   - name: save-empty
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/save?mode=topology
+    url: /nodes/{{device}}/intent/save?mode=topology
     expect:
       jq: '.steps | length == 0'
 
@@ -30,12 +30,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   - name: verify-still-empty
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | length == 0'
 
@@ -44,7 +44,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/setup-device?mode=topology
+    url: /nodes/{{device}}/setup-device?mode=topology
     params:
       fields:
         hostname: switch1
@@ -55,6 +55,6 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/save?mode=topology
+    url: /nodes/{{device}}/intent/save?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'

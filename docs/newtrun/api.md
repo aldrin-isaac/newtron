@@ -463,8 +463,8 @@ newtron directly:
 
 | Operation | Endpoint |
 |-----------|----------|
-| List registered networks | `GET /newtron/v1/network` |
-| Scaffold + register a new network in one call | `POST /newtron/v1/network` with `scaffold: true` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
+| List registered networks | `GET /newtron/v1/networks` |
+| Scaffold + register a new network in one call | `POST /newtron/v1/networks` with `scaffold: true` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
 
 The `newtrun topologies` and `newtrun topology create` CLI subcommands
 have been repointed to these newtron endpoints — operator surface is

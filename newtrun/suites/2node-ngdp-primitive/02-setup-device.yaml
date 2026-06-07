@@ -12,7 +12,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/setup-device
+    url: /nodes/{{device}}/setup-device
     params:
       fields:
         hostname: switch1
@@ -27,7 +27,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/setup-device
+    url: /nodes/{{device}}/setup-device
     params:
       fields:
         hostname: switch2
@@ -42,76 +42,76 @@ steps:
   - name: verify-loopback-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+    url: /nodes/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-loopback-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+    url: /nodes/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-device-metadata-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/DEVICE_METADATA/localhost
+    url: /nodes/{{device}}/configdb/DEVICE_METADATA/localhost
     expect:
       jq: '.bgp_asn == "65001"'
 
   - name: verify-bgp-globals-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "65001"'
 
   - name: verify-bgp-globals-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "65002"'
 
   - name: verify-vxlan-tunnel-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
       jq: '.src_ip == "10.0.0.1"'
 
   - name: verify-vxlan-tunnel-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
       jq: '.src_ip == "10.0.0.2"'
 
   - name: verify-vxlan-nvo-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
+    url: /nodes/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
     expect:
       jq: '.source_vtep == "vtep1"'
 
   - name: verify-bgp-l2vpn-af-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-intent-device-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/device/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-intent-device-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/device/exists
     expect:
       jq: '.exists == true'

@@ -18,14 +18,14 @@ steps:
     action: newtron
     devices: [leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 100}
 
   - name: create-vlan-200
     action: newtron
     devices: [leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 200}
 
   # Physical members: host1 on VLAN 100 (leaf1), host2 on VLAN 200 (leaf2)
@@ -33,14 +33,14 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {vlan_id: 100, tagged: false}
 
   - name: configure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {vlan_id: 200, tagged: false}
 
   # =========================================================================
@@ -54,7 +54,7 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/configure-irb
+    url: /nodes/{{device}}/configure-irb
     params:
       vlan_id: 100
       ip_address: "192.168.100.1/24"
@@ -63,7 +63,7 @@ steps:
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/configure-irb
+    url: /nodes/{{device}}/configure-irb
     params:
       vlan_id: 100
       ip_address: "192.168.100.1/24"
@@ -72,7 +72,7 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/configure-irb
+    url: /nodes/{{device}}/configure-irb
     params:
       vlan_id: 200
       ip_address: "192.168.200.1/24"
@@ -81,7 +81,7 @@ steps:
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/configure-irb
+    url: /nodes/{{device}}/configure-irb
     params:
       vlan_id: 200
       ip_address: "192.168.200.1/24"
@@ -96,28 +96,28 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/bind-macvpn
+    url: /nodes/{{device}}/bind-macvpn
     params: {vlan_id: 100, macvpn: servers-vlan100}
 
   - name: bind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/bind-macvpn
+    url: /nodes/{{device}}/bind-macvpn
     params: {vlan_id: 100, macvpn: servers-vlan100}
 
   - name: bind-macvpn-200-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/bind-macvpn
+    url: /nodes/{{device}}/bind-macvpn
     params: {vlan_id: 200, macvpn: storage-vlan200}
 
   - name: bind-macvpn-200-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/bind-macvpn
+    url: /nodes/{{device}}/bind-macvpn
     params: {vlan_id: 200, macvpn: storage-vlan200}
 
   - name: wait-vxlan-convergence
@@ -242,80 +242,80 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/unbind-macvpn
+    url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 200}
 
   - name: unbind-macvpn-200-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/unbind-macvpn
+    url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 200}
 
   - name: unbind-macvpn-100-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/unbind-macvpn
+    url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 100}
 
   - name: unbind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/unbind-macvpn
+    url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 100}
 
   - name: remove-svi-200-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/unconfigure-irb
+    url: /nodes/{{device}}/unconfigure-irb
     params: {vlan_id: 200}
 
   - name: remove-svi-200-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/unconfigure-irb
+    url: /nodes/{{device}}/unconfigure-irb
     params: {vlan_id: 200}
 
   - name: remove-svi-100-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/unconfigure-irb
+    url: /nodes/{{device}}/unconfigure-irb
     params: {vlan_id: 100}
 
   - name: remove-svi-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/unconfigure-irb
+    url: /nodes/{{device}}/unconfigure-irb
     params: {vlan_id: 100}
 
   - name: unconfigure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: unconfigure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: delete-vlan-200
     action: newtron
     devices: [leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 200}
 
   - name: delete-vlan-100
     action: newtron
     devices: [leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 100}

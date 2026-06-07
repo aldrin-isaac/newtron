@@ -141,7 +141,7 @@ result := WriteResult{
 
 **Tests:** extend `pkg/newtron/api/api_test.go` to assert `Changes`
 is populated and matches the per-table-per-key-per-field shape on at
-least one apply path (e.g., `POST /network/{n}/node/{d}/vlan`
+least one apply path (e.g., `POST /network/{n}/nodes/{d}/vlans`
 create-vlan, which has well-known ChangeSet output).
 
 **Estimated effort:** single PR. One field, one assignment per

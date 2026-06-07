@@ -117,12 +117,12 @@ func TestAPICompleteness(t *testing.T) {
 			"DeleteZone":    true,
 			// Topology / Provision
 			"HasTopology":           true,
-			"GetTopology":           true, // #14: GET /network/{netID}/topology
-			"AddTopologyDevice":     true, // #15: POST /network/{netID}/topology/create-node
-			"DeleteTopologyDevice":  true, // #15: DELETE /network/{netID}/topology/node/{name}
-			"UpdateTopologyDevice":  true, // #15: PUT /network/{netID}/topology/node/{name}
-			"AddTopologyLink":       true, // #16: POST /network/{netID}/topology/create-link
-			"DeleteTopologyLink":    true, // #16: DELETE /network/{netID}/topology/link/{device}/{interface}
+			"GetTopology":           true, // #14: GET /networks/{netID}/topology
+			"AddTopologyDevice":     true, // #15: POST /networks/{netID}/topology/create-node
+			"DeleteTopologyDevice":  true, // #15: DELETE /networks/{netID}/topology/nodes/{name}
+			"UpdateTopologyDevice":  true, // #15: PUT /networks/{netID}/topology/nodes/{name}
+			"AddTopologyLink":       true, // #16: POST /networks/{netID}/topology/create-link
+			"DeleteTopologyLink":    true, // #16: DELETE /networks/{netID}/topology/links/{device}/{interface}
 			"TopologyDeviceNames":   true,
 			"IsHostDevice":        true,
 			"GetHostProfile":      true,
@@ -130,8 +130,8 @@ func TestAPICompleteness(t *testing.T) {
 			// Connection
 			"ListNodes": true,
 			// Device status (issue #75A+B)
-			"ProbeOnline":    true, // GET /network/{netID}/node/{device}/status
-			"TopologyDrift":  true, // GET /network/{netID}/node/{device}/intent/topology-drift
+			"ProbeOnline":    true, // GET /networks/{netID}/nodes/{device}/status
+			"TopologyDrift":  true, // GET /networks/{netID}/nodes/{device}/intent/topology-drift
 		},
 		"Node": {
 			// Lifecycle (exposed via connectAndExecute/connectAndRead)
@@ -161,7 +161,7 @@ func TestAPICompleteness(t *testing.T) {
 			"QueryConfigDB":       true,
 			"ConfigDBTableKeys":   true,
 			"ConfigDBEntryExists": true,
-			"ConfigDBSnapshot":    true, // #17: GET /network/{netID}/node/{device}/configdb
+			"ConfigDBSnapshot":    true, // #17: GET /networks/{netID}/nodes/{device}/configdb
 			"QueryStateDB":        true,
 			// Write operations
 			"AddBGPEVPNPeer":          true,
@@ -191,8 +191,8 @@ func TestAPICompleteness(t *testing.T) {
 			"RestartService":          true,
 			"ExecCommand":             true,
 			// Intent operations
-			"Projection":     true, // #5: GET /network/{netID}/node/{device}/intent/projection
-			"ProjectionDiff": true, // #4: POST /network/{netID}/node/{device}/intent/projection-diff
+			"Projection":     true, // #5: GET /networks/{netID}/nodes/{device}/intent/projection
+			"ProjectionDiff": true, // #4: POST /networks/{netID}/nodes/{device}/intent/projection-diff
 			"Tree":           true,
 			"Drift":          true,
 			"Reconcile":      true,
@@ -347,7 +347,7 @@ func decodeAPIResponse(t *testing.T, w *httptest.ResponseRecorder) httputil.APIR
 func TestHandleTopology_ReturnsSpecFile(t *testing.T) {
 	s := newTestServer(t)
 
-	w := httpDo(t, s, http.MethodGet, "/newtron/v1/network/default/topology")
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/topology")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -381,7 +381,7 @@ func TestHandleProjection_ReturnsRawConfigDB(t *testing.T) {
 	s := newTestServer(t)
 
 	w := httpDo(t, s, http.MethodGet,
-		"/newtron/v1/network/default/node/switch1/intent/projection?mode=topology")
+		"/newtron/v1/networks/default/nodes/switch1/intent/projection?mode=topology")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -413,7 +413,7 @@ func TestHandleProjection_ReturnsRawConfigDB(t *testing.T) {
 func TestHandleConfigDBSnapshot_RouteRegistered(t *testing.T) {
 	s := newTestServer(t)
 
-	w := httpDo(t, s, http.MethodGet, "/newtron/v1/network/default/node/switch1/configdb")
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/nodes/switch1/configdb")
 	if w.Code == http.StatusNotFound || w.Code == http.StatusMethodNotAllowed {
 		t.Fatalf("route not registered: status = %d", w.Code)
 	}

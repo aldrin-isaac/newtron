@@ -10,14 +10,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 800}
 
   # Verify it exists
   - name: verify-vlan800
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan800
+    url: /nodes/{{device}}/configdb/VLAN/Vlan800
     expect:
       jq: '.vlanid == "800"'
 
@@ -25,7 +25,7 @@ steps:
   - name: verify-drift-still-clean
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -34,5 +34,5 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 800}

@@ -12,13 +12,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/unconfigure-irb
+    url: /nodes/{{device}}/unconfigure-irb
     params: {vlan_id: 100}
 
   - name: verify-svi-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
     expect:
       jq: '.exists == false'
 
@@ -27,24 +27,24 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet2/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet2/unconfigure-interface
 
   - name: unconfigure-bridged-ethernet3
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet3/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet3/unconfigure-interface
 
   - name: unconfigure-bridged-ethernet1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: verify-member-eth1-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1/exists
     expect:
       jq: '.exists == false'
 
@@ -53,13 +53,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 100}
 
   - name: verify-vlan100-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == false'
 
@@ -68,12 +68,12 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: verify-ip-removed
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
     expect:
       jq: '.exists == false'
 
@@ -82,12 +82,12 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/delete-vrf
+    url: /nodes/{{device}}/delete-vrf
     params: {name: Vrf_local}
 
   - name: verify-vrf-removed
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VRF/Vrf_local/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_local/exists
     expect:
       jq: '.exists == false'

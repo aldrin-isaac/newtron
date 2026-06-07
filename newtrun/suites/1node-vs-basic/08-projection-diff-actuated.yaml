@@ -29,7 +29,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/projection-diff
+    url: /nodes/{{device}}/intent/projection-diff
     params:
       operations:
         - url: /create-vlan
@@ -47,6 +47,6 @@ steps:
   - name: verify-state-unchanged-no-drift
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

@@ -20,21 +20,21 @@ steps:
   - name: no-interface-eth0
     action: newtron
     devices: [spine, leaf1, leaf2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0/exists
     expect:
       jq: '.exists == false'
 
   - name: no-interface-eth1-leafs
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1/exists
     expect:
       jq: '.exists == false'
 
   - name: no-interface-eth1-spine
     action: newtron
     devices: [spine]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet1/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet1/exists
     expect:
       jq: '.exists == false'
 
@@ -45,14 +45,14 @@ steps:
   - name: no-vni-map-10100
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100/exists
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100/exists
     expect:
       jq: '.exists == false'
 
   - name: no-vni-map-10200
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10200_Vlan200/exists
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10200_Vlan200/exists
     expect:
       jq: '.exists == false'
 
@@ -63,14 +63,14 @@ steps:
   - name: no-arp-suppress-vlan100
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan100/exists
+    url: /nodes/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan100/exists
     expect:
       jq: '.exists == false'
 
   - name: no-arp-suppress-vlan200
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan200/exists
+    url: /nodes/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan200/exists
     expect:
       jq: '.exists == false'
 
@@ -81,14 +81,14 @@ steps:
   - name: no-svi-vlan100
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
     expect:
       jq: '.exists == false'
 
   - name: no-svi-vlan200
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan200/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan200/exists
     expect:
       jq: '.exists == false'
 
@@ -99,7 +99,7 @@ steps:
   - name: no-sag-global
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/SAG_GLOBAL/IPv4/exists
+    url: /nodes/{{device}}/configdb/SAG_GLOBAL/IPv4/exists
     expect:
       jq: '.exists == false'
 
@@ -110,14 +110,14 @@ steps:
   - name: no-vlan100
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == false'
 
   - name: no-vlan200
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
       jq: '.exists == false'
 
@@ -128,13 +128,13 @@ steps:
   - name: no-binding-eth0
     action: newtron
     devices: [spine, leaf1, leaf2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
   - name: no-binding-eth1
     action: newtron
     devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet1/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet1/exists
     expect:
       jq: '.exists == false'

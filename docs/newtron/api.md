@@ -42,72 +42,72 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 
 | Method | Path | What it does |
 |--------|------|--------------|
-| POST | `/network` | Register a network |
-| GET | `/network` | List networks |
-| POST | `/network/{n}/unregister` | Unregister a network |
-| POST | `/network/{n}/reload` | Reload specs from disk |
-| GET | `/network/{n}/service` | List services (also: `/ipvpn`, `/macvpn`, `/qos-policy`, `/filter`, `/platform`, `/route-policy`, `/prefix-list`) |
-| GET | `/network/{n}/service/{name}` | Show service (also: ipvpn, macvpn, qos-policy, filter, platform, route-policy, prefix-list) |
-| GET | `/network/{n}/service/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
-| GET | `/network/{n}/profile` | List device profile names |
-| GET | `/network/{n}/profile/{name}` | Show device profile |
-| GET | `/network/{n}/zone` | List zone names |
-| GET | `/network/{n}/zone/{name}` | Show zone |
-| GET | `/network/{n}/topology` | Full topology spec (devices, links, metadata) |
-| GET | `/network/{n}/topology/node` | List topology device names |
-| GET | `/network/{n}/host/{name}` | Get host profile |
-| GET | `/network/{n}/feature` | List features (also: `/{name}/dependency`, `/{name}/unsupported-due-to`) |
-| GET | `/network/{n}/platform/{name}/supports/{feature}` | Check platform feature support |
-| POST | `/network/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
-| POST | `/network/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
-| POST | `/network/{n}/create-profile` | Create device profile |
-| POST | `/network/{n}/delete-profile` | Delete device profile |
-| POST | `/network/{n}/create-zone` | Create zone |
-| POST | `/network/{n}/delete-zone` | Delete zone |
-| POST | `/network/{n}/add-qos-queue` | Add queue to QoS policy |
-| POST | `/network/{n}/remove-qos-queue` | Remove queue from QoS policy |
-| POST | `/network/{n}/add-filter-rule` | Add rule to filter |
-| POST | `/network/{n}/remove-filter-rule` | Remove rule from filter |
-| POST | `/network/{n}/add-prefix-list-entry` | Add entry to prefix list |
-| POST | `/network/{n}/remove-prefix-list-entry` | Remove entry from prefix list |
-| POST | `/network/{n}/add-route-policy-rule` | Add rule to route policy |
-| POST | `/network/{n}/remove-route-policy-rule` | Remove rule from route policy |
+| POST | `/networks` | Register a network |
+| GET | `/networks` | List networks |
+| POST | `/networks/{n}/unregister` | Unregister a network |
+| POST | `/networks/{n}/reload` | Reload specs from disk |
+| GET | `/networks/{n}/services` | List services (also: `/ipvpns`, `/macvpns`, `/qos-policies`, `/filters`, `/platforms`, `/route-policies`, `/prefix-lists`) |
+| GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
+| GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
+| GET | `/networks/{n}/profiles` | List device profile names |
+| GET | `/networks/{n}/profiles/{name}` | Show device profile |
+| GET | `/networks/{n}/zones` | List zone names |
+| GET | `/networks/{n}/zones/{name}` | Show zone |
+| GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
+| GET | `/networks/{n}/topology/nodes` | List topology device names |
+| GET | `/networks/{n}/hosts/{name}` | Get host profile |
+| GET | `/networks/{n}/features` | List features (also: `/{name}/dependencies`, `/{name}/unsupported-due-to`) |
+| GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
+| POST | `/networks/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
+| POST | `/networks/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
+| POST | `/networks/{n}/create-profile` | Create device profile |
+| POST | `/networks/{n}/delete-profile` | Delete device profile |
+| POST | `/networks/{n}/create-zone` | Create zone |
+| POST | `/networks/{n}/delete-zone` | Delete zone |
+| POST | `/networks/{n}/add-qos-queue` | Add queue to QoS policy |
+| POST | `/networks/{n}/remove-qos-queue` | Remove queue from QoS policy |
+| POST | `/networks/{n}/add-filter-rule` | Add rule to filter |
+| POST | `/networks/{n}/remove-filter-rule` | Remove rule from filter |
+| POST | `/networks/{n}/add-prefix-list-entry` | Add entry to prefix list |
+| POST | `/networks/{n}/remove-prefix-list-entry` | Remove entry from prefix list |
+| POST | `/networks/{n}/add-route-policy-rule` | Add rule to route policy |
+| POST | `/networks/{n}/remove-route-policy-rule` | Remove rule from route policy |
 
 **Provisioning** (S6)
 
 | Method | Path | What it does |
 |--------|------|--------------|
-| POST | `/network/{n}/node/{d}/init-device` | Initialize device (clean factory config) |
+| POST | `/networks/{n}/nodes/{d}/init-device` | Initialize device (clean factory config) |
 
-Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/reconcile?mode=topology` (S11).
+Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/reconcile?mode=topology` (S11).
 
-**Device Reads** (S7) -- all `GET /newtron/v1/network/{n}/node/{d}/...`
+**Device Reads** (S7) -- all `GET /newtron/v1/networks/{n}/nodes/{d}/...`
 
 | Path suffix | Returns |
 |-------------|---------|
 | `/info` | Device overview |
-| `/interface` | Interface list |
-| `/interface/{i}` | Interface detail |
-| `/interface/{i}/binding` | Service binding |
-| `/vlan` | VLAN list |
-| `/vlan/{id}` | VLAN detail |
-| `/vrf` | VRF list |
-| `/vrf/{name}` | VRF detail |
-| `/acl` | ACL list |
-| `/acl/{name}` | ACL detail |
+| `/interfaces` | Interface list |
+| `/interfaces/{i}` | Interface detail |
+| `/interfaces/{i}/binding` | Service binding |
+| `/vlans` | VLAN list |
+| `/vlans/{id}` | VLAN detail |
+| `/vrfs` | VRF list |
+| `/vrfs/{name}` | VRF detail |
+| `/acls` | ACL list |
+| `/acls/{name}` | ACL detail |
 | `/bgp/status` | BGP status + neighbors |
 | `/bgp/check` | BGP session check |
 | `/evpn/status` | EVPN overlay status |
 | `/health` | Health report |
-| `/lag`, `/lag/{name}` | LAG list / detail |
-| `/neighbor` | BGP sessions (alias for `/bgp/check`) |
-| `/route/{vrf}/{prefix...}` | APP_DB route lookup |
-| `/route-asic/{prefix...}` | ASIC_DB route lookup |
+| `/lags`, `/lags/{name}` | LAG list / detail |
+| `/neighbors` | BGP sessions (alias for `/bgp/check`) |
+| `/routes/{vrf}/{prefix...}` | APP_DB route lookup |
+| `/routes-asic/{prefix...}` | ASIC_DB route lookup |
 | `/intent/projection` | Per-Node projection (RawConfigDB) from intent replay |
 | `POST /intent/projection-diff` | Pre-commit diff for a hypothetical operation set (before/after/diff) |
 | `/intent/tree` | Intent DAG tree view |
 
-**Device Writes** (S8) -- `POST` under `/newtron/v1/network/{n}/node/{d}/...`
+**Device Writes** (S8) -- `POST` under `/newtron/v1/networks/{n}/nodes/{d}/...`
 
 | Path suffix | What it does |
 |-------------|--------------|
@@ -153,7 +153,7 @@ Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/rec
 | `GET /configdb/{table}/{key}/exists` | Check CONFIG_DB entry exists |
 | `GET /statedb/{table}/{key}` | Read STATE_DB entry |
 
-**Interface Operations** (S12) -- all `POST /newtron/v1/network/{n}/node/{d}/interface/{i}/...`
+**Interface Operations** (S12) -- all `POST /newtron/v1/networks/{n}/nodes/{d}/interfaces/{i}/...`
 
 | Path suffix | What it does |
 |-------------|--------------|
@@ -239,8 +239,8 @@ mutation, while still holding the per-device actor lock — no window of
 "device updated but topology.json doesn't know yet."
 
 Applies to handlers that mutate the intent tree through the unified
-`execute()` entry point (every `/node/{device}/...` and
-`/node/{device}/interface/{name}/...` mutating write). The hook is
+`execute()` entry point (every `/nodes/{device}/...` and
+`/nodes/{device}/interfaces/{name}/...` mutating write). The hook is
 data-driven: it fires when the request both opts in via
 `?persist=topology` AND the handler dirtied the intent tree
 (`Node.HasUnsavedIntents()`). That gate makes three categories no-ops:
@@ -288,7 +288,7 @@ is reused. See [S15 Server Configuration](#15-server-configuration) for tuning.
 A complete curl example showing the request/response cycle:
 
 ```bash
-curl -s -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/create-vlan \
+curl -s -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{"id": 100, "description": "Customer VLAN"}' | jq .
 ```
@@ -308,7 +308,7 @@ curl -s -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/c
 On error:
 
 ```bash
-curl -s -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/create-vlan \
+curl -s -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{}' | jq .
 ```
@@ -345,8 +345,8 @@ See [S3 Server Management](#3-server-management).
 
 ```bash
 # Per-device: clean factory CONFIG_DB, then load topology spec and deliver
-curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/init-device
-curl -X POST 'http://localhost:18080/newtron/v1/network/default/node/switch1/intent/reconcile?mode=topology'
+curl -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/init-device
+curl -X POST 'http://localhost:18080/newtron/v1/networks/default/nodes/switch1/intent/reconcile?mode=topology'
 ```
 
 This is the canonical "spec → device" path: init-device clears factory entries,
@@ -358,10 +358,10 @@ See [S6 Provisioning](#6-provisioning) and [S11](#11-intent-operations).
 
 ```bash
 # Check that BGP sessions came up
-curl http://localhost:18080/newtron/v1/network/default/node/switch1/bgp/check
+curl http://localhost:18080/newtron/v1/networks/default/node/switch1/bgp/check
 
 # Run full health check
-curl http://localhost:18080/newtron/v1/network/default/node/switch1/health
+curl http://localhost:18080/newtron/v1/networks/default/node/switch1/health
 ```
 
 See [S7 Node Read Operations](#7-node-read-operations).
@@ -370,7 +370,7 @@ See [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Apply a service to an interface
-curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/interface/Ethernet0/apply-service \
+curl -X POST http://localhost:18080/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service \
   -H "Content-Type: application/json" \
   -d '{"service": "customer-l3", "ip_address": "10.1.1.1/30"}'
 ```
@@ -384,10 +384,10 @@ See [S12 Interface Operations](#12-interface-operations).
 ```bash
 # Post-facto: confirm projection (intent replay) matches device CONFIG_DB.
 # Empty drift array ≡ every newtron write is actualized on the device.
-curl http://localhost:18080/newtron/v1/network/default/node/switch1/intent/drift
+curl http://localhost:18080/newtron/v1/networks/default/nodes/switch1/intent/drift
 
 # Check a specific route in the forwarding table
-curl http://localhost:18080/newtron/v1/network/default/node/switch1/route/default/10.1.1.0/30
+curl http://localhost:18080/newtron/v1/networks/default/node/switch1/route/default/10.1.1.0/30
 ```
 
 Per-write verification (did THIS specific write land?) is reported inline on
@@ -399,15 +399,15 @@ and [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Preview a change without applying (dry-run)
-curl -X POST 'http://localhost:18080/newtron/v1/network/default/node/switch1/create-vlan?dry_run=true' \
+curl -X POST 'http://localhost:18080/newtron/v1/networks/default/node/switch1/create-vlan?dry_run=true' \
   -H "Content-Type: application/json" \
   -d '{"id": 200, "description": "New VLAN"}'
 
 # Refresh a service after spec changes
-curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/interface/Ethernet0/refresh-service
+curl -X POST http://localhost:18080/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/refresh-service
 
 # Remove a service
-curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/interface/Ethernet0/remove-service
+curl -X POST http://localhost:18080/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/remove-service
 ```
 
 ### Batching multiple operations
@@ -431,7 +431,7 @@ before any spec reads, device operations, or provisioning can occur. Registratio
 loads the spec directory (network.json, device profiles, service definitions) into
 memory.
 
-### POST /newtron/v1/network
+### POST /newtron/v1/networks
 
 Register a network. By default the endpoint registers an *existing* spec
 directory. Pass `scaffold: true` to have the server create an empty spec
@@ -469,18 +469,18 @@ subdirectory) and register it in one call.
 Register an existing spec directory:
 
 ```
-POST /newtron/v1/network
+POST /newtron/v1/networks
 {"id": "lab", "spec_dir": "/etc/newtron/lab"}
 ```
 
 Scaffold a new empty network in one call:
 
 ```
-POST /newtron/v1/network
+POST /newtron/v1/networks
 {"id": "demo-1", "spec_dir": "/var/topologies/demo-1/specs", "scaffold": true, "description": "Demo network"}
 ```
 
-### GET /newtron/v1/network
+### GET /newtron/v1/networks
 
 List all registered networks.
 
@@ -502,7 +502,7 @@ List all registered networks.
 The `nodes` field lists device names from the topology file (empty if `has_topology`
 is false).
 
-### POST /newtron/v1/network/{netID}/unregister
+### POST /newtron/v1/networks/{netID}/unregister
 
 Unregister a network. Closes all cached SSH connections for the network.
 
@@ -520,7 +520,7 @@ Unregister a network. Closes all cached SSH connections for the network.
 
 **Status codes:** 200 success, 500 network not registered or has active node connections
 
-### POST /newtron/v1/network/{netID}/reload
+### POST /newtron/v1/networks/{netID}/reload
 
 Reload a network's specs from disk without restarting the server. Stops the existing
 networkEntity (draining all NodeActors and SSH connections), reloads specs from the
@@ -547,7 +547,7 @@ up changes without a full server restart.
 **Example:**
 
 ```
-POST /newtron/v1/network/default/reload
+POST /newtron/v1/networks/default/reload
 ```
 
 **Notes:**
@@ -579,28 +579,28 @@ one by name returns a single object (or 404 if not found):
 
 | Resource | List endpoint | Show endpoint | Response type |
 |----------|--------------|---------------|---------------|
-| Services | `GET /newtron/v1/network/{netID}/service` | `GET .../service/{name}` | [`ServiceDetail`](#servicedetail) |
-| IP-VPNs | `GET /newtron/v1/network/{netID}/ipvpn` | `GET .../ipvpn/{name}` | [`IPVPNDetail`](#ipvpndetail) |
-| MAC-VPNs | `GET /newtron/v1/network/{netID}/macvpn` | `GET .../macvpn/{name}` | [`MACVPNDetail`](#macvpndetail) |
-| QoS Policies | `GET /newtron/v1/network/{netID}/qos-policy` | `GET .../qos-policy/{name}` | [`QoSPolicyDetail`](#qospolicydetail) |
-| Filters | `GET /newtron/v1/network/{netID}/filter` | `GET .../filter/{name}` | [`FilterDetail`](#filterdetail) |
-| Platforms | `GET /newtron/v1/network/{netID}/platform` | `GET .../platform/{name}` | [`PlatformDetail`](#platformdetail) |
-| Route Policies | `GET /newtron/v1/network/{netID}/route-policy` | `GET .../route-policy/{name}` | Route policy detail |
-| Prefix Lists | `GET /newtron/v1/network/{netID}/prefix-list` | `GET .../prefix-list/{name}` | Prefix list detail |
-| Profiles | `GET /newtron/v1/network/{netID}/profile` | `GET .../profile/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
-| Zones | `GET /newtron/v1/network/{netID}/zone` | `GET .../zone/{name}` | [`ZoneDetail`](#zonedetail) |
+| Services | `GET /newtron/v1/networks/{netID}/services` | `GET .../services/{name}` | [`ServiceDetail`](#servicedetail) |
+| IP-VPNs | `GET /newtron/v1/networks/{netID}/ipvpns` | `GET .../ipvpns/{name}` | [`IPVPNDetail`](#ipvpndetail) |
+| MAC-VPNs | `GET /newtron/v1/networks/{netID}/macvpns` | `GET .../macvpns/{name}` | [`MACVPNDetail`](#macvpndetail) |
+| QoS Policies | `GET /newtron/v1/networks/{netID}/qos-policies` | `GET .../qos-policies/{name}` | [`QoSPolicyDetail`](#qospolicydetail) |
+| Filters | `GET /newtron/v1/networks/{netID}/filters` | `GET .../filters/{name}` | [`FilterDetail`](#filterdetail) |
+| Platforms | `GET /newtron/v1/networks/{netID}/platforms` | `GET .../platforms/{name}` | [`PlatformDetail`](#platformdetail) |
+| Route Policies | `GET /newtron/v1/networks/{netID}/route-policies` | `GET .../route-policies/{name}` | Route policy detail |
+| Prefix Lists | `GET /newtron/v1/networks/{netID}/prefix-lists` | `GET .../prefix-lists/{name}` | Prefix list detail |
+| Profiles | `GET /newtron/v1/networks/{netID}/profiles` | `GET .../profiles/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
+| Zones | `GET /newtron/v1/networks/{netID}/zones` | `GET .../zones/{name}` | [`ZoneDetail`](#zonedetail) |
 
 All response types are defined in [S13 Types Reference](#13-types-reference).
 
 **Example:**
 
 ```
-GET /newtron/v1/network/default/service          -> {"data": [ ... array of ServiceDetail ... ]}
-GET /newtron/v1/network/default/service/transit  -> {"data": { ... single ServiceDetail ... }}
-GET /newtron/v1/network/default/service/missing  -> {"error": "not found: service 'missing'"}
+GET /newtron/v1/networks/default/service          -> {"data": [ ... array of ServiceDetail ... ]}
+GET /newtron/v1/networks/default/service/transit  -> {"data": { ... single ServiceDetail ... }}
+GET /newtron/v1/networks/default/service/missing  -> {"error": "not found: service 'missing'"}
 ```
 
-#### GET /newtron/v1/network/{netID}/service/{name}/projection
+#### GET /newtron/v1/networks/{netID}/services/{name}/projection
 
 Returns the per-Node projection slices the named service contributes. For each
 loaded Node that binds the service via an actuated `apply-service` intent, the
@@ -625,7 +625,7 @@ projection) and returns the resulting `[]sonic.DriftEntry` per Node.
 **Example:**
 
 ```
-GET /newtron/v1/network/default/service/TRANSIT/projection
+GET /newtron/v1/networks/default/service/TRANSIT/projection
 {
   "data": {
     "service": "TRANSIT",
@@ -651,7 +651,7 @@ _Lands newtron#6 (Phase 3 — Cluster A.6 / per-service projection slice)._
 
 ### Topology
 
-#### GET /newtron/v1/network/{netID}/topology
+#### GET /newtron/v1/networks/{netID}/topology
 
 Returns the full topology spec as `TopologySpecFile` — the canonical typed
 substrate newtron uses internally (devices, links, newtlab metadata).
@@ -664,7 +664,7 @@ empty).
 
 _Lands newtron#14 (Cluster C — topology spec substrate, §46)._
 
-#### POST /newtron/v1/network/{netID}/topology/create-node
+#### POST /newtron/v1/networks/{netID}/topology/create-node
 
 Adds a device entry to `topology.json`. The matching profile file
 (`profiles/{name}.json`) must already exist; if absent, the call returns 400
@@ -682,7 +682,7 @@ with the resolution path included.
 **Errors:** 409 with `*ConflictError` if a device with this name already
 exists; 400 if the profile file is missing or the body is invalid.
 
-#### DELETE /newtron/v1/network/{netID}/topology/node/{name}
+#### DELETE /newtron/v1/networks/{netID}/topology/nodes/{name}
 
 Removes a device entry from `topology.json`. Default behavior **refuses**
 when any link still references the device — operator must delete those
@@ -700,7 +700,7 @@ implicit). Closes any api-layer NodeActor cache for this name.
 `References` listing the referring links) when `force` is absent and links
 remain wired to the device.
 
-#### PUT /newtron/v1/network/{netID}/topology/node/{name}
+#### PUT /newtron/v1/networks/{netID}/topology/nodes/{name}
 
 Replaces the device entry at `name` with the body (full-replacement
 semantics — no partial patch). Closes the api-layer NodeActor cache so the
@@ -715,7 +715,7 @@ next request rebuilds from the new spec.
 **Errors:** 404 when the name doesn't exist; 400 if profile missing or body
 invalid.
 
-#### POST /newtron/v1/network/{netID}/topology/create-link
+#### POST /newtron/v1/networks/{netID}/topology/create-link
 
 Adds a link to `topology.json`. Refuses when either endpoint is already
 wired to another link (a port participates in at most one link). Validates
@@ -729,7 +729,7 @@ declared on its device's `Ports` map.
 **Errors:** 409 with `*ConflictError` when an endpoint is already wired;
 400 when an endpoint device or interface is unknown.
 
-#### DELETE /newtron/v1/network/{netID}/topology/link/{device}/{interface}
+#### DELETE /newtron/v1/networks/{netID}/topology/links/{device}/{interface}
 
 Removes the link containing the given `{device, interface}` endpoint.
 Single-endpoint identification: a port participates in at most one link, so
@@ -744,7 +744,7 @@ one endpoint uniquely identifies the link.
 _All five CRUD endpoints land newtron#15 + #16 (Phase 5 — topology spec
 substrate CRUD). §7 + §15 + §27 + §46._
 
-#### GET /newtron/v1/network/{netID}/topology/node
+#### GET /newtron/v1/networks/{netID}/topology/nodes
 
 List device names from the topology file.
 
@@ -758,7 +758,7 @@ List device names from the topology file.
 
 ### Hosts
 
-#### GET /newtron/v1/network/{netID}/host/{name}
+#### GET /newtron/v1/networks/{netID}/hosts/{name}
 
 Get the host profile for a virtual host device. Returns 404 for switch devices
 (even if they exist in the topology) -- the client uses 200 vs 404 from this
@@ -770,13 +770,13 @@ endpoint to classify devices as hosts vs switches.
 
 ### Features
 
-#### GET /newtron/v1/network/{netID}/feature
+#### GET /newtron/v1/networks/{netID}/features
 
 List all features and their support status.
 
 **Response (200):** Feature map
 
-#### GET /newtron/v1/network/{netID}/feature/{name}/dependency
+#### GET /newtron/v1/networks/{netID}/features/{name}/dependency
 
 Get the dependency list for a feature.
 
@@ -784,13 +784,13 @@ Get the dependency list for a feature.
 
 **Response (200):** Array of dependency strings
 
-#### GET /newtron/v1/network/{netID}/feature/{name}/unsupported-due-to
+#### GET /newtron/v1/networks/{netID}/features/{name}/unsupported-due-to
 
 Get the features that cause a given feature to be unsupported.
 
 **Response (200):** Array of blocking feature strings
 
-#### GET /newtron/v1/network/{netID}/platform/{name}/supports/{feature}
+#### GET /newtron/v1/networks/{netID}/platforms/{name}/supports/{feature}
 
 Check whether a platform supports a specific feature.
 
@@ -818,7 +818,7 @@ the spec is validated but not persisted.
 
 ### Services
 
-#### POST /newtron/v1/network/{netID}/create-service
+#### POST /newtron/v1/networks/{netID}/create-service
 
 Create a new service definition.
 
@@ -849,7 +849,7 @@ Create a new service definition.
 **Example:**
 
 ```
-POST /newtron/v1/network/default/create-service
+POST /newtron/v1/networks/default/create-service
 {
   "name": "customer-l3",
   "type": "evpn-routed",
@@ -858,7 +858,7 @@ POST /newtron/v1/network/default/create-service
 }
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-service
+#### POST /newtron/v1/networks/{netID}/delete-service
 
 Delete a service definition.
 
@@ -880,7 +880,7 @@ Delete a service definition.
 
 ### IP-VPNs
 
-#### POST /newtron/v1/network/{netID}/create-ipvpn
+#### POST /newtron/v1/networks/{netID}/create-ipvpn
 
 Create a new IP-VPN definition.
 
@@ -902,7 +902,7 @@ Create a new IP-VPN definition.
 {"data": {"name": "customer-vpn"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-ipvpn
+#### POST /newtron/v1/networks/{netID}/delete-ipvpn
 
 Delete an IP-VPN definition.
 
@@ -922,7 +922,7 @@ Delete an IP-VPN definition.
 
 ### MAC-VPNs
 
-#### POST /newtron/v1/network/{netID}/create-macvpn
+#### POST /newtron/v1/networks/{netID}/create-macvpn
 
 Create a new MAC-VPN definition.
 
@@ -947,7 +947,7 @@ Create a new MAC-VPN definition.
 {"data": {"name": "l2-segment"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-macvpn
+#### POST /newtron/v1/networks/{netID}/delete-macvpn
 
 Delete a MAC-VPN definition.
 
@@ -967,7 +967,7 @@ Delete a MAC-VPN definition.
 
 ### QoS Policies
 
-#### POST /newtron/v1/network/{netID}/create-qos-policy
+#### POST /newtron/v1/networks/{netID}/create-qos-policy
 
 Create a new (empty) QoS policy definition.
 
@@ -986,7 +986,7 @@ Create a new (empty) QoS policy definition.
 {"data": {"name": "standard-qos"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-qos-policy
+#### POST /newtron/v1/networks/{netID}/delete-qos-policy
 
 Delete a QoS policy definition.
 
@@ -1004,7 +1004,7 @@ Delete a QoS policy definition.
 {"data": {"status": "deleted"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/add-qos-queue
+#### POST /newtron/v1/networks/{netID}/add-qos-queue
 
 Add a queue to a QoS policy.
 
@@ -1028,7 +1028,7 @@ Add a queue to a QoS policy.
 {"data": {"queue_id": 0}}
 ```
 
-#### POST /newtron/v1/network/{netID}/remove-qos-queue
+#### POST /newtron/v1/networks/{netID}/remove-qos-queue
 
 Remove a queue from a QoS policy.
 
@@ -1049,7 +1049,7 @@ Remove a queue from a QoS policy.
 
 ### Filters
 
-#### POST /newtron/v1/network/{netID}/create-filter
+#### POST /newtron/v1/networks/{netID}/create-filter
 
 Create a new (empty) filter definition.
 
@@ -1069,7 +1069,7 @@ Create a new (empty) filter definition.
 {"data": {"name": "customer-acl"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-filter
+#### POST /newtron/v1/networks/{netID}/delete-filter
 
 Delete a filter definition.
 
@@ -1087,7 +1087,7 @@ Delete a filter definition.
 {"data": {"status": "deleted"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/add-filter-rule
+#### POST /newtron/v1/networks/{netID}/add-filter-rule
 
 Add a rule to a filter.
 
@@ -1117,7 +1117,7 @@ Add a rule to a filter.
 {"data": {"seq": 10}}
 ```
 
-#### POST /newtron/v1/network/{netID}/remove-filter-rule
+#### POST /newtron/v1/networks/{netID}/remove-filter-rule
 
 Remove a rule from a filter.
 
@@ -1138,7 +1138,7 @@ Remove a rule from a filter.
 
 ### Prefix Lists
 
-#### POST /newtron/v1/network/{netID}/create-prefix-list
+#### POST /newtron/v1/networks/{netID}/create-prefix-list
 
 Create a new prefix list.
 
@@ -1156,7 +1156,7 @@ Create a new prefix list.
 {"data": {"name": "customer-prefixes"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-prefix-list
+#### POST /newtron/v1/networks/{netID}/delete-prefix-list
 
 Delete a prefix list.
 
@@ -1174,7 +1174,7 @@ Delete a prefix list.
 {"data": {"status": "deleted"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/add-prefix-list-entry
+#### POST /newtron/v1/networks/{netID}/add-prefix-list-entry
 
 Add an entry to a prefix list.
 
@@ -1193,7 +1193,7 @@ Add an entry to a prefix list.
 {"data": {"prefix": "10.0.0.0/8"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/remove-prefix-list-entry
+#### POST /newtron/v1/networks/{netID}/remove-prefix-list-entry
 
 Remove an entry from a prefix list.
 
@@ -1214,7 +1214,7 @@ Remove an entry from a prefix list.
 
 ### Route Policies
 
-#### POST /newtron/v1/network/{netID}/create-route-policy
+#### POST /newtron/v1/networks/{netID}/create-route-policy
 
 Create a new route policy.
 
@@ -1232,7 +1232,7 @@ Create a new route policy.
 {"data": {"name": "import-policy"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/delete-route-policy
+#### POST /newtron/v1/networks/{netID}/delete-route-policy
 
 Delete a route policy.
 
@@ -1250,7 +1250,7 @@ Delete a route policy.
 {"data": {"status": "deleted"}}
 ```
 
-#### POST /newtron/v1/network/{netID}/add-route-policy-rule
+#### POST /newtron/v1/networks/{netID}/add-route-policy-rule
 
 Add a rule to a route policy.
 
@@ -1270,7 +1270,7 @@ Add a rule to a route policy.
 {"data": {"seq": 10}}
 ```
 
-#### POST /newtron/v1/network/{netID}/remove-route-policy-rule
+#### POST /newtron/v1/networks/{netID}/remove-route-policy-rule
 
 Remove a rule from a route policy.
 
@@ -1295,7 +1295,7 @@ Profiles are stored as individual JSON files under `profiles/{name}.json` in the
 spec directory. They define per-device settings (management IP, loopback, zone,
 platform, EVPN peering).
 
-#### POST /newtron/v1/network/{netID}/create-profile
+#### POST /newtron/v1/networks/{netID}/create-profile
 
 Create a new device profile.
 
@@ -1324,7 +1324,7 @@ Create a new device profile.
 
 **Status codes:** 201 created, 400 validation error, 409 already exists
 
-#### POST /newtron/v1/network/{netID}/delete-profile
+#### POST /newtron/v1/networks/{netID}/delete-profile
 
 Delete a device profile.
 
@@ -1349,7 +1349,7 @@ Delete a device profile.
 Zones group devices by location or function and can carry zone-level spec
 overrides. They are stored in the `zones` map within `network.json`.
 
-#### POST /newtron/v1/network/{netID}/create-zone
+#### POST /newtron/v1/networks/{netID}/create-zone
 
 Create a new zone.
 
@@ -1369,7 +1369,7 @@ Create a new zone.
 
 **Status codes:** 201 created, 400 validation error, 409 already exists
 
-#### POST /newtron/v1/network/{netID}/delete-zone
+#### POST /newtron/v1/networks/{netID}/delete-zone
 
 Delete a zone. Returns error if any device profile references this zone.
 
@@ -1396,9 +1396,9 @@ Delete a zone. Returns error if any device profile references this zone.
 Provisioning brings a device from clean-factory to fully-configured-per-topology.
 It is decomposed into two operations:
 
-1. **`POST /newtron/v1/network/{n}/node/{d}/init-device`** — clean factory CONFIG_DB entries
+1. **`POST /newtron/v1/networks/{n}/nodes/{d}/init-device`** — clean factory CONFIG_DB entries
    that would conflict with newtron-managed state. Idempotent. See below.
-2. **`POST /newtron/v1/network/{n}/node/{d}/intent/reconcile`** with `?mode=topology` — load
+2. **`POST /newtron/v1/networks/{n}/nodes/{d}/intent/reconcile`** with `?mode=topology` — load
    the topology spec into the projection and deliver it to the device. This is
    the canonical "spec → device" path. See §11.
 
@@ -1407,9 +1407,9 @@ provisioning pipeline — provisioning and reconciliation are two sides of the s
 coin (substrate-faithful, §46): the only difference is whether the projection
 starts from topology spec (provisioning) or from the device's existing intents
 (maintenance reconcile). For network-wide provisioning, iterate over
-`/network/{n}/topology/node` and call init-device + intent/reconcile per node.
+`/networks/{n}/topology/nodes` and call init-device + intent/reconcile per node.
 
-### POST /newtron/v1/network/{netID}/node/{device}/init-device
+### POST /newtron/v1/networks/{netID}/nodes/{device}/init-device
 
 Initialize a device by cleaning factory CONFIG_DB entries that conflict with
 newtron-managed configuration. Idempotent -- returns `"already_initialized"`
@@ -1450,7 +1450,7 @@ establishes an SSH connection that is cached for subsequent requests.
 
 ### Device Overview
 
-#### GET /newtron/v1/network/{netID}/node/{device}/info
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/info
 
 Get a structured overview of the device.
 
@@ -1480,13 +1480,13 @@ Get a structured overview of the device.
 
 ### Interfaces
 
-#### GET /newtron/v1/network/{netID}/node/{device}/interface
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/interfaces
 
 List all interfaces with summary status.
 
 **Response (200):** Array of `InterfaceSummary` (see [S13](#interfacesummary))
 
-#### GET /newtron/v1/network/{netID}/node/{device}/interface/{name}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}
 
 Show detailed properties of a single interface.
 
@@ -1496,7 +1496,7 @@ Show detailed properties of a single interface.
 
 **Status codes:** 200 success, 404 interface not found
 
-#### GET /newtron/v1/network/{netID}/node/{device}/interface/{name}/binding
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/binding
 
 Show the service binding on an interface.
 
@@ -1506,13 +1506,13 @@ Show the service binding on an interface.
 
 ### VLANs
 
-#### GET /newtron/v1/network/{netID}/node/{device}/vlan
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/vlans
 
 List all VLANs with summary status.
 
 **Response (200):** Array of `VLANStatusEntry` (see [S13](#vlanstatusentry))
 
-#### GET /newtron/v1/network/{netID}/node/{device}/vlan/{id}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/vlans/{id}
 
 Show a single VLAN with full details.
 
@@ -1524,13 +1524,13 @@ Show a single VLAN with full details.
 
 ### VRFs
 
-#### GET /newtron/v1/network/{netID}/node/{device}/vrf
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/vrfs
 
 List all VRFs with operational state.
 
 **Response (200):** Array of `VRFStatusEntry` (see [S13](#vrfstatusentry))
 
-#### GET /newtron/v1/network/{netID}/node/{device}/vrf/{name}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/vrfs/{name}
 
 Show a VRF with its interfaces and BGP neighbors.
 
@@ -1542,13 +1542,13 @@ Show a VRF with its interfaces and BGP neighbors.
 
 ### ACLs
 
-#### GET /newtron/v1/network/{netID}/node/{device}/acl
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/acls
 
 List all ACL tables with summary info.
 
 **Response (200):** Array of `ACLTableSummary` (see [S13](#acltablesummary))
 
-#### GET /newtron/v1/network/{netID}/node/{device}/acl/{name}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/acls/{name}
 
 Show an ACL table with all its rules.
 
@@ -1560,7 +1560,7 @@ Show an ACL table with all its rules.
 
 ### BGP
 
-#### GET /newtron/v1/network/{netID}/node/{device}/bgp/status
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/bgp/status
 
 Get BGP status including local AS, router ID, and all neighbors with operational state.
 
@@ -1590,7 +1590,7 @@ Get BGP status including local AS, router ID, and all neighbors with operational
 }
 ```
 
-#### GET /newtron/v1/network/{netID}/node/{device}/bgp/check
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/bgp/check
 
 Check BGP session states. Returns the same data as `bgp/status` (both call
 `CheckBGPSessions` internally) but is semantically a health probe -- clients
@@ -1600,7 +1600,7 @@ use it to assert that all sessions are established.
 
 ### EVPN
 
-#### GET /newtron/v1/network/{netID}/node/{device}/evpn/status
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/evpn/status
 
 Get EVPN overlay status: VTEP tunnels, NVO configuration, VNI mappings, L3VNI
 VRF bindings, remote VTEPs, and VNI count.
@@ -1609,7 +1609,7 @@ VRF bindings, remote VTEPs, and VNI count.
 
 ### Health
 
-#### GET /newtron/v1/network/{netID}/node/{device}/health
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/health
 
 Run a comprehensive health check on the device. Includes CONFIG_DB verification
 (comparing committed config against running config) and operational checks (BGP
@@ -1635,13 +1635,13 @@ sessions, interface status).
 
 ### LAGs
 
-#### GET /newtron/v1/network/{netID}/node/{device}/lag
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/lags
 
 List all LAGs (PortChannels) with member and operational status.
 
 **Response (200):** Array of `LAGStatusEntry` (see [S13](#lagstatusentry))
 
-#### GET /newtron/v1/network/{netID}/node/{device}/lag/{name}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/lags/{name}
 
 Show a single LAG with full details.
 
@@ -1653,7 +1653,7 @@ Show a single LAG with full details.
 
 ### Neighbors
 
-#### GET /newtron/v1/network/{netID}/node/{device}/neighbor
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/neighbors
 
 Get BGP session state. This is functionally identical to `bgp/check` -- both
 call `CheckBGPSessions` internally and return `BGPStatusResult`.
@@ -1662,7 +1662,7 @@ call `CheckBGPSessions` internally and return `BGPStatusResult`.
 
 ### Routes
 
-#### GET /newtron/v1/network/{netID}/node/{device}/route/{vrf}/{prefix...}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/routes/{vrf}/{prefix...}
 
 Look up a route in APP_DB (FRR's routing table as synced by fpmsyncd).
 
@@ -1678,10 +1678,10 @@ Look up a route in APP_DB (FRR's routing table as synced by fpmsyncd).
 **Example:**
 
 ```
-GET /newtron/v1/network/default/node/switch1/route/default/10.0.0.0/24
+GET /newtron/v1/networks/default/node/switch1/route/default/10.0.0.0/24
 ```
 
-#### GET /newtron/v1/network/{netID}/node/{device}/route-asic/{prefix...}
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/routes-asic/{prefix...}
 
 Look up a route in ASIC_DB (SAI route table as programmed by orchagent).
 
@@ -1692,12 +1692,12 @@ Look up a route in ASIC_DB (SAI route table as programmed by orchagent).
 **Example:**
 
 ```
-GET /newtron/v1/network/default/node/switch1/route-asic/10.0.0.0/24
+GET /newtron/v1/networks/default/node/switch1/route-asic/10.0.0.0/24
 ```
 
 ### Intent Tree
 
-#### GET /newtron/v1/network/{netID}/node/{device}/intent/tree
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/intent/tree
 
 Get a tree view of the intent DAG (directed acyclic graph). The intent tree
 shows parent-child relationships between intent records.
@@ -1725,7 +1725,7 @@ reports the change count, whether changes were applied, verified, and saved.
 
 ### Setup Device
 
-#### POST /newtron/v1/network/{netID}/node/{device}/setup-device
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/setup-device
 
 Unified baseline setup that configures device metadata, loopback interface, BGP
 globals, VTEP (optional), and route reflector (optional) in a single operation.
@@ -1758,7 +1758,7 @@ The `route_reflector` object:
 **Example:**
 
 ```
-POST /newtron/v1/network/default/node/switch1/setup-device
+POST /newtron/v1/networks/default/node/switch1/setup-device
 {
   "fields": {"hostname": "switch1"},
   "source_ip": "10.0.0.1"
@@ -1767,7 +1767,7 @@ POST /newtron/v1/network/default/node/switch1/setup-device
 
 ### VLANs
 
-#### POST /newtron/v1/network/{netID}/node/{device}/create-vlan
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/create-vlan
 
 Create a VLAN on the device.
 
@@ -1785,11 +1785,11 @@ Create a VLAN on the device.
 **Example:**
 
 ```
-POST /newtron/v1/network/default/node/switch1/create-vlan?dry_run=true
+POST /newtron/v1/networks/default/node/switch1/create-vlan?dry_run=true
 {"id": 100, "description": "Customer VLAN"}
 ```
 
-#### POST /newtron/v1/network/{netID}/node/{device}/delete-vlan
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/delete-vlan
 
 Delete a VLAN and all its members.
 
@@ -1805,7 +1805,7 @@ Delete a VLAN and all its members.
 
 ### IRB (SVI)
 
-#### POST /newtron/v1/network/{netID}/node/{device}/configure-irb
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/configure-irb
 
 Configure an IRB interface (SVI) -- creates the Vlan*N* interface with optional
 VRF binding, IP address, and anycast MAC.
@@ -1823,7 +1823,7 @@ VRF binding, IP address, and anycast MAC.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/unconfigure-irb
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/unconfigure-irb
 
 Remove an IRB interface (SVI) configuration.
 
@@ -1839,7 +1839,7 @@ Remove an IRB interface (SVI) configuration.
 
 ### VRFs
 
-#### POST /newtron/v1/network/{netID}/node/{device}/create-vrf
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/create-vrf
 
 Create a VRF.
 
@@ -1853,7 +1853,7 @@ Create a VRF.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/delete-vrf
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/delete-vrf
 
 Delete a VRF and clean up all associated resources (interfaces, routes, VNI
 mappings).
@@ -1870,7 +1870,7 @@ mappings).
 
 ### IP-VPN Binding
 
-#### POST /newtron/v1/network/{netID}/node/{device}/bind-ipvpn
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/bind-ipvpn
 
 Bind an IP-VPN to a VRF (sets up L3VNI, route targets, EVPN VNI configuration).
 
@@ -1885,7 +1885,7 @@ Bind an IP-VPN to a VRF (sets up L3VNI, route targets, EVPN VNI configuration).
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/unbind-ipvpn
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/unbind-ipvpn
 
 Unbind the IP-VPN from a VRF (tears down L3VNI infrastructure).
 
@@ -1901,7 +1901,7 @@ Unbind the IP-VPN from a VRF (tears down L3VNI infrastructure).
 
 ### MAC-VPN Binding (Node-Level)
 
-#### POST /newtron/v1/network/{netID}/node/{device}/bind-macvpn
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/bind-macvpn
 
 Bind a MAC-VPN to a VLAN at the node level (maps VLAN to L2VNI).
 
@@ -1916,7 +1916,7 @@ Bind a MAC-VPN to a VLAN at the node level (maps VLAN to L2VNI).
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/unbind-macvpn
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/unbind-macvpn
 
 Unbind the MAC-VPN from a VLAN at the node level.
 
@@ -1932,7 +1932,7 @@ Unbind the MAC-VPN from a VLAN at the node level.
 
 ### Static Routes
 
-#### POST /newtron/v1/network/{netID}/node/{device}/add-static-route
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/add-static-route
 
 Add a static route.
 
@@ -1949,7 +1949,7 @@ Add a static route.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/remove-static-route
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-static-route
 
 Remove a static route.
 
@@ -1966,7 +1966,7 @@ Remove a static route.
 
 ### ACLs
 
-#### POST /newtron/v1/network/{netID}/node/{device}/create-acl
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/create-acl
 
 Create an ACL table.
 
@@ -1984,7 +1984,7 @@ Create an ACL table.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/delete-acl
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/delete-acl
 
 Delete an ACL table and all its rules.
 
@@ -1998,7 +1998,7 @@ Delete an ACL table and all its rules.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/add-acl-rule
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/add-acl-rule
 
 Add a rule to an ACL table.
 
@@ -2020,7 +2020,7 @@ Add a rule to an ACL table.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/remove-acl-rule
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-acl-rule
 
 Remove a rule from an ACL table.
 
@@ -2037,7 +2037,7 @@ Remove a rule from an ACL table.
 
 ### PortChannels
 
-#### POST /newtron/v1/network/{netID}/node/{device}/create-portchannel
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/create-portchannel
 
 Create a PortChannel (LAG).
 
@@ -2056,7 +2056,7 @@ Create a PortChannel (LAG).
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/delete-portchannel
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/delete-portchannel
 
 Delete a PortChannel and remove all members.
 
@@ -2070,7 +2070,7 @@ Delete a PortChannel and remove all members.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/add-portchannel-member
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/add-portchannel-member
 
 Add an interface to a PortChannel.
 
@@ -2085,7 +2085,7 @@ Add an interface to a PortChannel.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/remove-portchannel-member
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-portchannel-member
 
 Remove an interface from a PortChannel.
 
@@ -2102,7 +2102,7 @@ Remove an interface from a PortChannel.
 
 ### BGP EVPN Peers
 
-#### POST /newtron/v1/network/{netID}/node/{device}/add-bgp-evpn-peer
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/add-bgp-evpn-peer
 
 Add a BGP EVPN overlay peer. These are loopback-to-loopback eBGP sessions for
 L2VPN EVPN address family exchange.
@@ -2120,7 +2120,7 @@ L2VPN EVPN address family exchange.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/remove-bgp-evpn-peer
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-bgp-evpn-peer
 
 Remove a BGP EVPN overlay peer.
 
@@ -2136,14 +2136,14 @@ Remove a BGP EVPN overlay peer.
 
 ### QoS at the node level (substrate-only annotation)
 
-Newtron does NOT expose node-level `POST /node/{device}/apply-qos` or
-`POST /node/{device}/remove-qos` endpoints. QoS apply/remove is an
+Newtron does NOT expose node-level `POST /nodes/{device}/apply-qos` or
+`POST /nodes/{device}/remove-qos` endpoints. QoS apply/remove is an
 interface-scoped operation (per `DESIGN_PRINCIPLES_NEWTRON.md` §6: "The
 interface is the point of service delivery, unit of lifecycle"). The
 wired endpoints are:
 
-- `POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/apply-qos`
-- `POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/remove-qos`
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos`
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos`
 
 See §QoS Bindings (Interface-Level) below for the canonical interfaces.
 
@@ -2171,7 +2171,7 @@ present in CONFIG_DB. Drift is the canonical "intent vs reality" diff
 is reported inline on the originating write via `WriteResult.Verification` or
 the 409 envelope of `VerificationFailedError`.
 
-### POST /newtron/v1/network/{netID}/node/{device}/reload-config
+### POST /newtron/v1/networks/{netID}/nodes/{device}/reload-config
 
 Trigger a SONiC config reload on the device (`config reload -y`). This reloads
 CONFIG_DB from `/etc/sonic/config_db.json` and restarts all SONiC services.
@@ -2180,7 +2180,7 @@ CONFIG_DB from `/etc/sonic/config_db.json` and restarts all SONiC services.
 
 **Response (200):** `null` data on success
 
-### POST /newtron/v1/network/{netID}/node/{device}/save-config
+### POST /newtron/v1/networks/{netID}/nodes/{device}/save-config
 
 Save the running CONFIG_DB to `/etc/sonic/config_db.json` (`config save -y`).
 
@@ -2188,7 +2188,7 @@ Save the running CONFIG_DB to `/etc/sonic/config_db.json` (`config save -y`).
 
 **Response (200):** `null` data on success
 
-### POST /newtron/v1/network/{netID}/node/{device}/restart-daemon
+### POST /newtron/v1/networks/{netID}/nodes/{device}/restart-daemon
 
 Restart a SONiC daemon on the device (`systemctl restart <daemon>`).
 
@@ -2200,7 +2200,7 @@ Restart a SONiC daemon on the device (`systemctl restart <daemon>`).
 
 **Response (200):** `null` data on success
 
-### POST /newtron/v1/network/{netID}/node/{device}/ssh-command
+### POST /newtron/v1/networks/{netID}/nodes/{device}/ssh-command
 
 Execute an arbitrary SSH command on the device and return the output.
 
@@ -2223,7 +2223,7 @@ Execute an arbitrary SSH command on the device and return the output.
 These endpoints provide direct access to SONiC Redis databases for debugging and
 inspection. They use `connectAndRead` -- no `dry_run`/`no_save`.
 
-### GET /newtron/v1/network/{netID}/node/{device}/configdb
+### GET /newtron/v1/networks/{netID}/nodes/{device}/configdb
 
 Returns the device's actual CONFIG_DB state as a single internally-consistent
 snapshot (`sonic.RawConfigDB` — `map[table]map[key]map[field]string`). One
@@ -2241,7 +2241,7 @@ hundreds of per-key requests and lose internal consistency mid-read.
 
 _Lands newtron#17 (Cluster D — device-reality substrate, §46)._
 
-### GET /newtron/v1/network/{netID}/node/{device}/configdb/{table}
+### GET /newtron/v1/networks/{netID}/nodes/{device}/configdb/{table}
 
 List all keys in a CONFIG_DB table.
 
@@ -2249,7 +2249,7 @@ List all keys in a CONFIG_DB table.
 
 **Response (200):** Array of key strings
 
-### GET /newtron/v1/network/{netID}/node/{device}/configdb/{table}/{key}
+### GET /newtron/v1/networks/{netID}/nodes/{device}/configdb/{table}/{key}
 
 Get all fields of a CONFIG_DB entry.
 
@@ -2260,10 +2260,10 @@ Get all fields of a CONFIG_DB entry.
 **Example:**
 
 ```
-GET /newtron/v1/network/default/node/switch1/configdb/VLAN/Vlan100
+GET /newtron/v1/networks/default/node/switch1/configdb/VLAN/Vlan100
 ```
 
-### GET /newtron/v1/network/{netID}/node/{device}/configdb/{table}/{key}/exists
+### GET /newtron/v1/networks/{netID}/nodes/{device}/configdb/{table}/{key}/exists
 
 Check if a CONFIG_DB entry exists.
 
@@ -2275,7 +2275,7 @@ Check if a CONFIG_DB entry exists.
 {"data": {"exists": true}}
 ```
 
-### GET /newtron/v1/network/{netID}/node/{device}/statedb/{table}/{key}
+### GET /newtron/v1/networks/{netID}/nodes/{device}/statedb/{table}/{key}
 
 Get all fields of a STATE_DB entry.
 
@@ -2294,13 +2294,13 @@ typed `NEWTRON_INTENT` rows in CONFIG_DB (`DESIGN_PRINCIPLES_NEWTRON.md`
 
 ### Substrate-only: intent records as a bulk list
 
-Newtron does NOT expose a bulk `GET /node/{device}/intents` HTTP endpoint
+Newtron does NOT expose a bulk `GET /nodes/{device}/intents` HTTP endpoint
 that returns every `NEWTRON_INTENT` row. The substrate is reachable via two
 typed substrate paths instead:
 
-- `GET /node/{device}/intent/tree` returns the structured intent DAG with
+- `GET /nodes/{device}/intent/tree` returns the structured intent DAG with
   parent/child relationships (the operator-meaningful view).
-- `GET /node/{device}/configdb/NEWTRON_INTENT` returns the raw CONFIG_DB
+- `GET /nodes/{device}/configdb/NEWTRON_INTENT` returns the raw CONFIG_DB
   table (the per-key generic substrate read).
 
 The bulk-list endpoint as a separate route would be derivative of these two
@@ -2312,11 +2312,11 @@ list. Consumers needing the flat list use `configdb/NEWTRON_INTENT`.
 
 ### Wired intent operations
 
-#### GET /newtron/v1/network/{netID}/node/{device}/intent/tree
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/intent/tree
 
 Get a tree view of the intent DAG. See [S7 Intent Tree](#intent-tree) for query parameters.
 
-#### GET /newtron/v1/network/{netID}/node/{device}/intent/projection
+#### GET /newtron/v1/networks/{netID}/nodes/{device}/intent/projection
 
 Returns the per-table per-key per-field expected state derived from intent
 replay (`sonic.RawConfigDB`). This is the typed projection representing
@@ -2334,7 +2334,7 @@ fails.
 
 _Lands newtron#5 (Cluster A — projection substrate, §46)._
 
-#### POST /newtron/v1/network/{netID}/node/{device}/intent/projection-diff
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/intent/projection-diff
 
 Returns the projection delta a hypothetical set of operations would produce
 on top of the Node's current intent DB. Operations are applied in-memory
@@ -2360,7 +2360,7 @@ before do) at the substrate level.
 **Example:**
 
 ```
-POST /newtron/v1/network/default/node/switch1/intent/projection-diff
+POST /newtron/v1/networks/default/nodes/switch1/intent/projection-diff
 {
   "operations": [
     { "url": "/create-vlan", "params": { "vlan_id": 100 } }
@@ -2425,13 +2425,13 @@ verb has a reverse already; the operator composes them per task).
 
 Per-device drift detection is exposed via `GET /intent/drift` (under
 the Intent operations group above; documented in §11 Wired intent
-operations). There is no network-wide `/network/{n}/drift` endpoint;
-operators iterate over `/network/{n}/topology/node` and call
+operations). There is no network-wide `/networks/{n}/drift` endpoint;
+operators iterate over `/networks/{n}/topology/nodes` and call
 `/intent/drift` per node.
 
 ### Device status — operator badge (issue #75A) {#device-status}
 
-`GET /newtron/v1/network/{netID}/node/{device}/status` produces the
+`GET /newtron/v1/networks/{netID}/nodes/{device}/status` produces the
 cheap operator-facing badge data without warming an SSH session. Newtcon
 polls this per device on a short timer to render `online / drift /
 unsaved` indicators. Listed in the quick reference (§7) as `/status`.
@@ -2464,7 +2464,7 @@ the actor lock. Use the dedicated endpoint below.
 
 ### Topology drift — on-demand (issue #75B) {#topology-drift}
 
-`GET /newtron/v1/network/{netID}/node/{device}/intent/topology-drift`
+`GET /newtron/v1/networks/{netID}/nodes/{device}/intent/topology-drift`
 answers "does the device CONFIG_DB diverge from topology.json right
 now?" — independent of the operator's in-flight in-memory edits. Listed
 in the quick reference (§7) as `/intent/topology-drift`.
@@ -2490,7 +2490,7 @@ primary way to apply and manage services. All use `connectAndExecute` and accept
 
 Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethernet0/1`.
 
-**Quick reference** -- all interface endpoints under `.../interface/{name}/`:
+**Quick reference** -- all interface endpoints under `.../interfaces/{name}/`:
 
 | Category | Endpoints | Key params |
 |----------|-----------|------------|
@@ -2509,7 +2509,7 @@ The three core service operations: apply, remove, refresh. These are the most
 frequently used endpoints in the API -- most network automation workflows center
 on applying services to interfaces.
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/apply-service
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-service
 
 Apply a service definition to the interface. Creates all required CONFIG_DB
 infrastructure (VLANs, VRFs, VNI mappings, route policies, ACLs, QoS) based
@@ -2532,7 +2532,7 @@ on the service type.
 **Example:**
 
 ```
-POST /newtron/v1/network/default/node/switch1/interface/Ethernet0/apply-service
+POST /newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service
 {
   "service": "customer-l3",
   "ip_address": "10.1.1.1/30"
@@ -2570,7 +2570,7 @@ With `?dry_run=true`, changes are not applied and `preview` shows the diff:
 }
 ```
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/remove-service
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-service
 
 Remove the service binding from the interface. Tears down all CONFIG_DB
 infrastructure that was created by `apply-service`, using the stored binding
@@ -2582,7 +2582,7 @@ infrastructure that was created by `apply-service`, using the stored binding
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/refresh-service
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/refresh-service
 
 Refresh the service binding -- removes the current configuration and re-applies
 from the current spec. Use after spec changes to update a running service
@@ -2596,7 +2596,7 @@ without manual remove+apply.
 
 ### Interface Configuration
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/configure-interface
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/configure-interface
 
 Configure an interface in routed mode (VRF + IP) or bridged mode (VLAN membership).
 The two modes are mutually exclusive.
@@ -2614,7 +2614,7 @@ The two modes are mutually exclusive.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/unconfigure-interface
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unconfigure-interface
 
 Remove all configuration from an interface (VRF binding, IP addresses, VLAN
 membership). Returns the interface to its unconfigured state.
@@ -2627,7 +2627,7 @@ membership). Returns the interface to its unconfigured state.
 
 ### ACL Binding
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/bind-acl
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-acl
 
 Bind an ACL to the interface.
 
@@ -2642,7 +2642,7 @@ Bind an ACL to the interface.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/unbind-acl
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-acl
 
 Unbind an ACL from the interface.
 
@@ -2662,16 +2662,16 @@ MAC-VPN binding (mapping a VLAN to an L2VNI) is a **node-level** operation,
 not an interface-level one — MAC-VPN entries pin to the device's VLAN
 state rather than to a specific interface. The wired endpoints are:
 
-- `POST /newtron/v1/network/{netID}/node/{device}/bind-macvpn` — see §Node-level
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/bind-macvpn` — see §Node-level
   Service Composition above.
-- `POST /newtron/v1/network/{netID}/node/{device}/unbind-macvpn` — same.
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/unbind-macvpn` — same.
 
-The earlier `/interface/{name}/bind-macvpn` and `/interface/{name}/unbind-macvpn`
+The earlier `/interfaces/{name}/bind-macvpn` and `/interfaces/{name}/unbind-macvpn`
 paths in this document were never implemented.
 
 ### BGP Peer
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/add-bgp-peer
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/add-bgp-peer
 
 Add a BGP peer scoped to this interface.
 
@@ -2688,7 +2688,7 @@ Add a BGP peer scoped to this interface.
 
 **Response (201):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/remove-bgp-peer
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-bgp-peer
 
 Remove the BGP peer from this interface.
 
@@ -2700,7 +2700,7 @@ Remove the BGP peer from this interface.
 
 ### QoS
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/apply-qos
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos
 
 Apply a QoS policy to this interface.
 
@@ -2714,7 +2714,7 @@ Apply a QoS policy to this interface.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/remove-qos
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos
 
 Remove the QoS policy from this interface.
 
@@ -2726,7 +2726,7 @@ Remove the QoS policy from this interface.
 
 ### Port Property
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/set-property
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/set-property
 
 Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 
@@ -2741,7 +2741,7 @@ Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/network/{netID}/node/{device}/interface/{name}/clear-property
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/clear-property
 
 Clear a previously-set property on the interface (reverse of `set-property`).
 
@@ -2926,7 +2926,7 @@ Returned by `GET .../interface/{name}`.
 
 #### ServiceBindingDetail
 
-Returned by `GET .../interface/{name}/binding`.
+Returned by `GET .../interfaces/{name}/binding`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -2938,7 +2938,7 @@ Returned by `GET .../interface/{name}/binding`.
 
 #### VLANStatusEntry
 
-Returned by `GET .../vlan` and `GET .../vlan/{id}`.
+Returned by `GET .../vlan` and `GET .../vlans/{id}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -2974,7 +2974,7 @@ Returned in array by `GET .../vrf`.
 
 #### VRFDetail
 
-Returned by `GET .../vrf/{name}`.
+Returned by `GET .../vrfs/{name}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3007,7 +3007,7 @@ Returned in array by `GET .../acl`.
 
 #### ACLTableDetail
 
-Returned by `GET .../acl/{name}`.
+Returned by `GET .../acls/{name}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3035,7 +3035,7 @@ Returned by `GET .../acl/{name}`.
 
 #### BGPStatusResult
 
-Returned by `GET .../bgp/status`, `GET .../bgp/check`, and `GET .../neighbor`.
+Returned by `GET .../bgp/status`, `GET .../bgp/check`, and `GET .../neighbors`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3117,7 +3117,7 @@ Returned by `GET .../health`.
 
 #### LAGStatusEntry
 
-Returned by `GET .../lag` and `GET .../lag/{name}`.
+Returned by `GET .../lag` and `GET .../lags/{name}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3132,7 +3132,7 @@ Returned by `GET .../lag` and `GET .../lag/{name}`.
 
 #### RouteEntry
 
-Returned by `GET .../route/{vrf}/{prefix...}` and `GET .../route-asic/{prefix...}`.
+Returned by `GET .../routes/{vrf}/{prefix...}` and `GET .../routes-asic/{prefix...}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3153,7 +3153,7 @@ Returned by `GET .../route/{vrf}/{prefix...}` and `GET .../route-asic/{prefix...
 
 #### HostProfile
 
-Returned by `GET .../host/{name}`.
+Returned by `GET .../hosts/{name}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3170,7 +3170,7 @@ internal implementation details.
 
 #### ServiceDetail
 
-Returned by `GET .../service` (array) and `GET .../service/{name}` (single).
+Returned by `GET .../service` (array) and `GET .../services/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3186,7 +3186,7 @@ Returned by `GET .../service` (array) and `GET .../service/{name}` (single).
 
 #### IPVPNDetail
 
-Returned by `GET .../ipvpn` (array) and `GET .../ipvpn/{name}` (single).
+Returned by `GET .../ipvpn` (array) and `GET .../ipvpns/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3198,7 +3198,7 @@ Returned by `GET .../ipvpn` (array) and `GET .../ipvpn/{name}` (single).
 
 #### MACVPNDetail
 
-Returned by `GET .../macvpn` (array) and `GET .../macvpn/{name}` (single).
+Returned by `GET .../macvpn` (array) and `GET .../macvpns/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3213,7 +3213,7 @@ Returned by `GET .../macvpn` (array) and `GET .../macvpn/{name}` (single).
 
 #### QoSPolicyDetail
 
-Returned by `GET .../qos-policy` (array) and `GET .../qos-policy/{name}` (single).
+Returned by `GET .../qos-policy` (array) and `GET .../qos-policies/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3234,7 +3234,7 @@ Returned by `GET .../qos-policy` (array) and `GET .../qos-policy/{name}` (single
 
 #### FilterDetail
 
-Returned by `GET .../filter` (array) and `GET .../filter/{name}` (single).
+Returned by `GET .../filter` (array) and `GET .../filters/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3262,7 +3262,7 @@ Returned by `GET .../filter` (array) and `GET .../filter/{name}` (single).
 
 #### PlatformDetail
 
-Returned by `GET .../platform` (array) and `GET .../platform/{name}` (single).
+Returned by `GET .../platform` (array) and `GET .../platforms/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3278,7 +3278,7 @@ Returned by `GET .../platform` (array) and `GET .../platform/{name}` (single).
 
 #### DeviceProfileDetail
 
-Returned by `GET .../profile` (array of names) and `GET .../profile/{name}` (single).
+Returned by `GET .../profile` (array of names) and `GET .../profiles/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3295,7 +3295,7 @@ Returned by `GET .../profile` (array of names) and `GET .../profile/{name}` (sin
 
 #### ZoneDetail
 
-Returned by `GET .../zone` (array of names) and `GET .../zone/{name}` (single).
+Returned by `GET .../zone` (array of names) and `GET .../zones/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3315,7 +3315,7 @@ Returned by `POST .../ssh-command`.
 
 #### NetworkInfo
 
-Returned in array by `GET /newtron/v1/network`.
+Returned in array by `GET /newtron/v1/networks`.
 
 | Field | Type | Description |
 |-------|------|-------------|
