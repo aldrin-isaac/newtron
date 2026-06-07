@@ -78,7 +78,7 @@ cmd/newtrun/                  # CLI binary (thin HTTP-client surface)
   cmd_list.go                 # list suites and scenarios via GET /newtrun/v1/suites/...
   cmd_suites.go               # GET /newtrun/v1/suites
   cmd_scenario.go             # scenario CRUD subcommands + suite create/delete
-  cmd_topologies.go           # delegates to newtron: GET/POST /newtron/v1/network
+  cmd_topologies.go           # delegates to newtron: GET/POST /newtron/v1/networks
   cmd_actions.go              # static action vocabulary help
   scenario_e2e_test.go        # CLI→server E2E tests
 
@@ -942,7 +942,7 @@ Honors `step.Expect.SuccessRate` for ping commands: parses the "N% packet loss" 
 
 ### 10.4 provisionExecutor
 
-Action: `topology-reconcile`. Calls `POST /network/{netID}/node/{device}/intent/reconcile?mode=topology` once per device through `Client.Reconcile`. The reconcile is one call — the newtron-server handles ConfigReload, lock, ReplaceAll, and SaveConfig internally — not deploy+reconcile+verify on the client side. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
+Action: `topology-reconcile`. Calls `POST /network/{netID}/nodes/{device}/intent/reconcile?mode=topology` once per device through `Client.Reconcile`. The reconcile is one call — the newtron-server handles ConfigReload, lock, ReplaceAll, and SaveConfig internally — not deploy+reconcile+verify on the client side. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
 
 ### 10.5 Multi-device helpers
 
@@ -1083,8 +1083,8 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 | `suites` | GET /newtrun/v1/suites | Hidden alias of `list`. |
 | `suite create/delete <name>` | POST/DELETE /newtrun/v1/suites | Per [§8](#8-http-server-package-pkgnewtrunapi). |
 | `scenario list/get/put/delete` | /newtrun/v1/suites/{suite}/scenarios* | Per [§8](#8-http-server-package-pkgnewtrunapi). |
-| `topologies` | GET /newtron/v1/network | List newtron-registered networks (delegated). |
-| `topology create <name>` | POST /newtron/v1/network with `scaffold=true` | Scaffold an empty spec layout and register it with newtron in one call. |
+| `topologies` | GET /newtron/v1/networks | List newtron-registered networks (delegated). |
+| `topology create <name>` | POST /newtron/v1/networks with `scaffold=true` | Scaffold an empty spec layout and register it with newtron in one call. |
 | `actions` | static | Help text describing the action vocabulary. |
 | `version` | static | Build info. |
 

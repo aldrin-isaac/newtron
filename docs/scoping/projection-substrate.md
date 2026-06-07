@@ -56,7 +56,7 @@ _Landed on branch `impl/phase-1-newtron-substrate-gaps` (Phase 1 batch)._
 **§46 (load-bearing):** the `Projection` is canonical substrate
 that represents "what newtron believes this device should look
 like" (`§1`). Today it is only exposed via per-resource summary
-views (`/vlan`, `/vrf`, `/interface`) and via device-side CONFIG_DB
+views (`/vlans`, `/vrfs`, `/interfaces`) and via device-side CONFIG_DB
 raw reads (which read the device, not the projection). §46 requires
 the canonical typed form directly. This endpoint adds it.
 
@@ -110,7 +110,7 @@ func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
 `/intent/...` routes:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/node/{device}/intent/projection", s.handleProjection)
+mux.HandleFunc("GET /network/{netID}/nodes/{device}/intent/projection", s.handleProjection)
 ```
 
 **Tests:** `pkg/newtron/api/api_test.go` — assert the endpoint
@@ -245,7 +245,7 @@ the diff. Matches `handleReload` (`handler_node.go:1146`).
 **Route** in `handler.go`:
 
 ```go
-mux.HandleFunc("POST /network/{netID}/node/{device}/intent/projection-diff", s.handleProjectionDiff)
+mux.HandleFunc("POST /network/{netID}/nodes/{device}/intent/projection-diff", s.handleProjectionDiff)
 ```
 
 **Tests:** empty ops list returns `Before == After` with empty
@@ -379,10 +379,10 @@ verify against existing network-level handlers during
 implementation.)
 
 **Route** in `handler.go`, alongside other
-`/network/{netID}/service/...` routes:
+`/network/{netID}/services/...` routes:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/service/{service}/projection", s.handleServiceProjection)
+mux.HandleFunc("GET /network/{netID}/services/{service}/projection", s.handleServiceProjection)
 ```
 
 **Tests:** for each service kind (`routed`, `bridged`,

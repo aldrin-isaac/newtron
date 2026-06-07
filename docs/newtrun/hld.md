@@ -112,7 +112,7 @@ newtron/
 │   │   ├── cmd_list.go           # list suites and scenarios via GET /newtrun/v1/suites/...
 │   │   ├── cmd_suites.go         # GET /newtrun/v1/suites
 │   │   ├── cmd_scenario.go       # scenario CRUD + suite create/delete subcommands
-│   │   ├── cmd_topologies.go     # GET/POST /newtron/v1/network (delegates to newtron)
+│   │   ├── cmd_topologies.go     # GET/POST /newtron/v1/networks (delegates to newtron)
 │   │   ├── cmd_actions.go        # static action vocabulary help
 │   │   └── scenario_e2e_test.go  # CLI→server E2E: scenario lifecycle, bad-YAML rejection
 │   └── newtrun-server/           # Server entry point
@@ -742,8 +742,8 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `newtrun scenario get <suite> <name>` | `GET /newtrun/v1/suites/{suite}/scenarios/{name}` | Prints raw scenario YAML to stdout |
 | `newtrun scenario put <suite> <name>` | `PUT /newtrun/v1/suites/{suite}/scenarios/{name}` | Creates or updates a scenario from `--file` or stdin; validated via ParseScenarioBytes |
 | `newtrun scenario delete <suite> <name>` | `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}` | Deletes a scenario file |
-| `newtrun topologies` | `GET /newtron/v1/network` | Lists networks registered with newtron (delegates) |
-| `newtrun topology create <name>` | `POST /newtron/v1/network` with `scaffold=true` | Scaffolds an empty spec layout and registers it with newtron in one call |
+| `newtrun topologies` | `GET /newtron/v1/networks` | Lists networks registered with newtron (delegates) |
+| `newtrun topology create <name>` | `POST /newtron/v1/networks` with `scaffold=true` | Scaffolds an empty spec layout and registers it with newtron in one call |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |
 

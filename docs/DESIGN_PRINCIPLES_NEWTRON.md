@@ -2008,7 +2008,7 @@ service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 
 **Specs (network.json, topology.json, platforms.json, profiles/\*.json).**
 newtron is the owner — it writes the files and exposes their contents
-through `/newtron/v1/network/...`. Sibling engines (newtlab, newtrun)
+through `/newtron/v1/networks/...`. Sibling engines (newtlab, newtrun)
 and external consumers (newtcon, scripts) reach the data through the
 API. Opening the JSON files from another engine — even when they sit
 on the same filesystem — is the §27 violation.
@@ -2680,7 +2680,7 @@ must parse strings, stitch across endpoints, or work with opaque
 handles, the principle is violated and the response shape changes.
 
 Summary forms — the `Preview` free-text rendering on `WriteResult`,
-table-name-to-count maps on composite responses, the `/topology/node`
+table-name-to-count maps on composite responses, the `/topology/nodes`
 device-names list — are additions alongside the canonical types they
 summarize. Where they currently exist without the canonical form
 alongside, the principle is violated; the violation is closed by

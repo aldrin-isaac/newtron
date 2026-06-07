@@ -192,7 +192,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
 | newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server --spec-dir <path> &` |
-| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/network` | Pass `--spec-dir <path>` when starting newt-server |
+| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Pass `--spec-dir <path>` when starting newt-server |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
@@ -397,7 +397,7 @@ bin/newtrun topologies
 
 # Bootstrap a new empty topology directory (writes topology.json, platforms.json,
 # network.json, and an empty profiles/ subdirectory under newtrun/topologies/<name>/specs/).
-# The next step is to register it as a newtron network via POST /newtron/v1/network
+# The next step is to register it as a newtron network via POST /newtron/v1/networks
 # with the printed spec_dir.
 bin/newtrun topology create demo-1 --description "demo lab"
 ```
@@ -828,15 +828,15 @@ Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (c
 
 #### URL templates
 
-URLs start from the path after the network segment. The `newtron` action calls newtron-server, so the `/newtron/v1/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
+URLs start from the path after the network segment. The `newtron` action calls newtron-server, so the `/newtron/v1/networks/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
 
 ```yaml
-url: /node/{{device}}/health             # → /newtron/v1/network/<id>/node/switch1/health
-url: /node/{{device}}/bgp/check          # → /newtron/v1/network/<id>/node/switch1/bgp/check
-url: /node/{{device}}/create-vlan        # → /newtron/v1/network/<id>/node/switch1/create-vlan
+url: /node/{{device}}/health             # → /newtron/v1/networks/<id>/node/switch1/health
+url: /node/{{device}}/bgp/check          # → /newtron/v1/networks/<id>/node/switch1/bgp/check
+url: /node/{{device}}/create-vlan        # → /newtron/v1/networks/<id>/node/switch1/create-vlan
 ```
 
-newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlan/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
+newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlans/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
 
 If the URL contains `{{device}}`, the call runs in parallel across target devices. If not, it runs once with no device scoping (network-level operations like creating specs).
 
@@ -1221,7 +1221,7 @@ Adapted from the 2node-vs-primitive suite (`newtrun/suites/2node-vs-primitive/10
   url: /node/{{device}}/create-vlan
   params: {id: 100}
 
-# Add members via the interface verb (no /vlan/{id}/member collection endpoint)
+# Add members via the interface verb (no /vlans/{id}/member collection endpoint)
 - name: configure-host1-port
   action: newtron
   devices: [switch1]
@@ -1469,7 +1469,7 @@ A `topology-reconcile` or `setup-device` step on one device returned an error bu
 
 ```bash
 # Is the device reachable through newtron-server?
-curl http://localhost:18080/newtron/v1/network/<id>/node/switch1/health
+curl http://localhost:18080/newtron/v1/networks/<id>/node/switch1/health
 
 # SSH in for a closer look
 bin/newtlab ssh switch1
@@ -1553,7 +1553,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | Command | Purpose |
 |---------|---------|
 | `newtrun topologies` | List topology directories visible to the server. |
-| `newtrun topology create <name> [--description <text>]` | Bootstrap a new topology directory (seeds topology.json, platforms.json, network.json, and an empty profiles/). Prints the spec_dir to pass to `POST /newtron/v1/network`. |
+| `newtrun topology create <name> [--description <text>]` | Bootstrap a new topology directory (seeds topology.json, platforms.json, network.json, and an empty profiles/). Prints the spec_dir to pass to `POST /newtron/v1/networks`. |
 | `newtrun actions` | List the six supported step actions (derived from `pkg/newtrun.StepAction`). `newtrun actions <name>` shows required fields, device semantics, and a YAML example. Mirrors [§11 Step Action Reference](#11-step-action-reference). |
 | `newtrun version` | Print build version. |
 

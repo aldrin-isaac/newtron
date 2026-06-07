@@ -448,7 +448,7 @@ type TopologyLink struct {
 }
 ```
 
-Steps use the same URL format as the HTTP API (e.g., `/setup-device`, `/interface/Ethernet0/apply-service`). `IntentsToSteps` converts the flat NEWTRON_INTENT map back into this format for persistence.
+Steps use the same URL format as the HTTP API (e.g., `/setup-device`, `/interfaces/Ethernet0/apply-service`). `IntentsToSteps` converts the flat NEWTRON_INTENT map back into this format for persistence.
 
 ---
 
@@ -978,7 +978,7 @@ type ConflictError = util.ConflictError
 
 ## 4. HTTP API Reference
 
-All routes follow the pattern `/network/{netID}/...` for spec operations and `/network/{netID}/node/{device}/...` for device operations. The `?mode=topology` query parameter selects topology mode (offline abstract node); default is actuated mode (online device). Write operations use `?execute=true` to apply (default is dry-run preview).
+All routes follow the pattern `/network/{netID}/...` for spec operations and `/network/{netID}/nodes/{device}/...` for device operations. The `?mode=topology` query parameter selects topology mode (offline abstract node); default is actuated mode (online device). Write operations use `?execute=true` to apply (default is dry-run preview).
 
 Middleware chain (outer → inner): `withRecovery` → `withLogger` → `withRequestID` → `withTimeout(5min)` → `withMode` → mux.
 
@@ -997,34 +997,34 @@ List/show pairs for all spec types. Response types from §3.9.
 
 | Method | Path | Response Type |
 |--------|------|---------------|
-| GET | `/network/{netID}/service` | `[]ServiceDetail` |
-| GET | `/network/{netID}/service/{name}` | `ServiceDetail` |
-| GET | `/network/{netID}/service/{name}/projection` | `map[string]RawConfigDB` (per-Node projection slice the service contributes, replay-diff) |
-| GET | `/network/{netID}/ipvpn` | `[]IPVPNDetail` |
-| GET | `/network/{netID}/ipvpn/{name}` | `IPVPNDetail` |
-| GET | `/network/{netID}/macvpn` | `[]MACVPNDetail` |
-| GET | `/network/{netID}/macvpn/{name}` | `MACVPNDetail` |
-| GET | `/network/{netID}/qos-policy` | `[]QoSPolicyDetail` |
-| GET | `/network/{netID}/qos-policy/{name}` | `QoSPolicyDetail` |
-| GET | `/network/{netID}/filter` | `[]FilterDetail` |
-| GET | `/network/{netID}/filter/{name}` | `FilterDetail` |
-| GET | `/network/{netID}/route-policy` | `[]RoutePolicyDetail` |
-| GET | `/network/{netID}/route-policy/{name}` | `RoutePolicyDetail` |
-| GET | `/network/{netID}/prefix-list` | `[]PrefixListDetail` |
-| GET | `/network/{netID}/prefix-list/{name}` | `PrefixListDetail` |
-| GET | `/network/{netID}/platform` | `[]PlatformDetail` |
-| GET | `/network/{netID}/platform/{name}` | `PlatformDetail` |
-| GET | `/network/{netID}/profile` | `[]DeviceProfileDetail` |
-| GET | `/network/{netID}/profile/{name}` | `DeviceProfileDetail` |
-| GET | `/network/{netID}/zone` | `[]ZoneDetail` |
-| GET | `/network/{netID}/zone/{name}` | `ZoneDetail` |
-| GET | `/network/{netID}/host/{name}` | `HostProfile` |
+| GET | `/network/{netID}/services` | `[]ServiceDetail` |
+| GET | `/network/{netID}/services/{name}` | `ServiceDetail` |
+| GET | `/network/{netID}/services/{name}/projection` | `map[string]RawConfigDB` (per-Node projection slice the service contributes, replay-diff) |
+| GET | `/network/{netID}/ipvpns` | `[]IPVPNDetail` |
+| GET | `/network/{netID}/ipvpns/{name}` | `IPVPNDetail` |
+| GET | `/network/{netID}/macvpns` | `[]MACVPNDetail` |
+| GET | `/network/{netID}/macvpns/{name}` | `MACVPNDetail` |
+| GET | `/network/{netID}/qos-policies` | `[]QoSPolicyDetail` |
+| GET | `/network/{netID}/qos-policies/{name}` | `QoSPolicyDetail` |
+| GET | `/network/{netID}/filters` | `[]FilterDetail` |
+| GET | `/network/{netID}/filters/{name}` | `FilterDetail` |
+| GET | `/network/{netID}/route-policies` | `[]RoutePolicyDetail` |
+| GET | `/network/{netID}/route-policies/{name}` | `RoutePolicyDetail` |
+| GET | `/network/{netID}/prefix-lists` | `[]PrefixListDetail` |
+| GET | `/network/{netID}/prefix-lists/{name}` | `PrefixListDetail` |
+| GET | `/network/{netID}/platforms` | `[]PlatformDetail` |
+| GET | `/network/{netID}/platforms/{name}` | `PlatformDetail` |
+| GET | `/network/{netID}/profiles` | `[]DeviceProfileDetail` |
+| GET | `/network/{netID}/profiles/{name}` | `DeviceProfileDetail` |
+| GET | `/network/{netID}/zones` | `[]ZoneDetail` |
+| GET | `/network/{netID}/zones/{name}` | `ZoneDetail` |
+| GET | `/network/{netID}/hosts/{name}` | `HostProfile` |
 | GET | `/network/{netID}/topology` | `TopologySpecFile` (full topology — devices, links, metadata) |
-| GET | `/network/{netID}/topology/node` | `[]string` (device names) |
-| GET | `/network/{netID}/feature` | Feature list |
-| GET | `/network/{netID}/feature/{name}/dependency` | Feature dependencies |
-| GET | `/network/{netID}/feature/{name}/unsupported-due-to` | Transitive unsupported |
-| GET | `/network/{netID}/platform/{name}/supports/{feature}` | `bool` |
+| GET | `/network/{netID}/topology/nodes` | `[]string` (device names) |
+| GET | `/network/{netID}/features` | Feature list |
+| GET | `/network/{netID}/features/{name}/dependency` | Feature dependencies |
+| GET | `/network/{netID}/features/{name}/unsupported-due-to` | Transitive unsupported |
+| GET | `/network/{netID}/platforms/{name}/supports/{feature}` | `bool` |
 
 ### 4.3 Network Spec Writes
 
@@ -1059,10 +1059,10 @@ RPC-style POST endpoints. Each creates or deletes a spec object and persists to 
 | POST | `.../create-zone` | `CreateZoneRequest` |
 | POST | `.../delete-zone` | `{name}` |
 | POST | `.../topology/create-node` | `TopologyNodeCreateRequest` — creates topology device (auto-creates matching profile by filename) |
-| DELETE | `.../topology/node/{name}` | `?force=true` to cascade-delete the matching profile + remove links wired to this device; default refuses if links remain (409) |
-| PUT | `.../topology/node/{name}` | `TopologyDevice` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
+| DELETE | `.../topology/nodes/{name}` | `?force=true` to cascade-delete the matching profile + remove links wired to this device; default refuses if links remain (409) |
+| PUT | `.../topology/nodes/{name}` | `TopologyDevice` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
 | POST | `.../topology/create-link` | `*TopologyLink` body — adds link to topology |
-| DELETE | `.../topology/link/{device}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |
+| DELETE | `.../topology/links/{device}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |
 
 All paths above are prefixed with `/network/{netID}`.
 
@@ -1070,7 +1070,7 @@ All paths above are prefixed with `/network/{netID}`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `.../node/{device}/init-device` | Initialize device (write DEVICE_METADATA, restart bgp, config save) |
+| POST | `.../nodes/{device}/init-device` | Initialize device (write DEVICE_METADATA, restart bgp, config save) |
 
 ### 4.5 Node Reads
 
@@ -1078,30 +1078,30 @@ Response types from §3.2–3.5. These dispatch via `connectAndRead` — the act
 
 | Method | Path | Response Type |
 |--------|------|---------------|
-| GET | `.../node/{device}/info` | `DeviceInfo` |
-| GET | `.../node/{device}/interface` | `[]InterfaceSummary` |
-| GET | `.../node/{device}/interface/{name}` | `InterfaceDetail` |
-| GET | `.../node/{device}/interface/{name}/binding` | `ServiceBindingDetail` |
-| GET | `.../node/{device}/vlan` | `[]VLANStatusEntry` |
-| GET | `.../node/{device}/vlan/{id}` | `VLANStatusEntry` |
-| GET | `.../node/{device}/vrf` | `[]VRFStatusEntry` |
-| GET | `.../node/{device}/vrf/{name}` | `VRFDetail` |
-| GET | `.../node/{device}/acl` | `[]ACLTableSummary` |
-| GET | `.../node/{device}/acl/{name}` | `ACLTableDetail` |
-| GET | `.../node/{device}/bgp/status` | `BGPStatusResult` |
-| GET | `.../node/{device}/bgp/check` | `[]HealthCheckResult` |
-| GET | `.../node/{device}/evpn/status` | `EVPNStatusResult` |
-| GET | `.../node/{device}/health` | `HealthReport` |
-| GET | `.../node/{device}/lag` | `[]LAGStatusEntry` |
-| GET | `.../node/{device}/lag/{name}` | `LAGStatusEntry` |
-| GET | `.../node/{device}/neighbor` | `[]NeighEntry` |
-| GET | `.../node/{device}/route/{vrf}/{prefix...}` | `RouteEntry` |
-| GET | `.../node/{device}/route-asic/{prefix...}` | `RouteEntry` |
-| GET | `.../node/{device}/configdb` | `sonic.RawConfigDB` — single internally-consistent CONFIG_DB snapshot (one round-trip per table). `?owned_only=false` returns every schema-known table (§46) |
-| GET | `.../node/{device}/configdb/{table}` | `[]string` (keys) |
-| GET | `.../node/{device}/configdb/{table}/{key}` | `map[string]string` |
-| GET | `.../node/{device}/configdb/{table}/{key}/exists` | `{exists: bool}` |
-| GET | `.../node/{device}/statedb/{table}/{key}` | `map[string]string` |
+| GET | `.../nodes/{device}/info` | `DeviceInfo` |
+| GET | `.../nodes/{device}/interfaces` | `[]InterfaceSummary` |
+| GET | `.../nodes/{device}/interfaces/{name}` | `InterfaceDetail` |
+| GET | `.../nodes/{device}/interfaces/{name}/binding` | `ServiceBindingDetail` |
+| GET | `.../nodes/{device}/vlans` | `[]VLANStatusEntry` |
+| GET | `.../nodes/{device}/vlans/{id}` | `VLANStatusEntry` |
+| GET | `.../nodes/{device}/vrfs` | `[]VRFStatusEntry` |
+| GET | `.../nodes/{device}/vrfs/{name}` | `VRFDetail` |
+| GET | `.../nodes/{device}/acls` | `[]ACLTableSummary` |
+| GET | `.../nodes/{device}/acls/{name}` | `ACLTableDetail` |
+| GET | `.../nodes/{device}/bgp/status` | `BGPStatusResult` |
+| GET | `.../nodes/{device}/bgp/check` | `[]HealthCheckResult` |
+| GET | `.../nodes/{device}/evpn/status` | `EVPNStatusResult` |
+| GET | `.../nodes/{device}/health` | `HealthReport` |
+| GET | `.../nodes/{device}/lags` | `[]LAGStatusEntry` |
+| GET | `.../nodes/{device}/lags/{name}` | `LAGStatusEntry` |
+| GET | `.../nodes/{device}/neighbors` | `[]NeighEntry` |
+| GET | `.../nodes/{device}/routes/{vrf}/{prefix...}` | `RouteEntry` |
+| GET | `.../nodes/{device}/routes-asic/{prefix...}` | `RouteEntry` |
+| GET | `.../nodes/{device}/configdb` | `sonic.RawConfigDB` — single internally-consistent CONFIG_DB snapshot (one round-trip per table). `?owned_only=false` returns every schema-known table (§46) |
+| GET | `.../nodes/{device}/configdb/{table}` | `[]string` (keys) |
+| GET | `.../nodes/{device}/configdb/{table}/{key}` | `map[string]string` |
+| GET | `.../nodes/{device}/configdb/{table}/{key}/exists` | `{exists: bool}` |
+| GET | `.../nodes/{device}/statedb/{table}/{key}` | `map[string]string` |
 
 All paths prefixed with `/network/{netID}`.
 
@@ -1111,33 +1111,33 @@ Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Ex
 
 | Method | Path | Operation |
 |--------|------|-----------|
-| POST | `.../node/{device}/setup-device` | `SetupDevice` — metadata + loopback + BGP + VTEP |
-| POST | `.../node/{device}/create-vlan` | `CreateVLAN` |
-| POST | `.../node/{device}/delete-vlan` | `DeleteVLAN` |
-| POST | `.../node/{device}/configure-irb` | `ConfigureIRB` |
-| POST | `.../node/{device}/unconfigure-irb` | `UnconfigureIRB` |
-| POST | `.../node/{device}/create-vrf` | `CreateVRF` |
-| POST | `.../node/{device}/delete-vrf` | `DeleteVRF` (cascading destroy) |
-| POST | `.../node/{device}/bind-ipvpn` | `BindIPVPN` |
-| POST | `.../node/{device}/unbind-ipvpn` | `UnbindIPVPN` |
-| POST | `.../node/{device}/add-static-route` | `AddStaticRoute` |
-| POST | `.../node/{device}/remove-static-route` | `RemoveStaticRoute` |
-| POST | `.../node/{device}/create-acl` | `CreateACL` |
-| POST | `.../node/{device}/delete-acl` | `DeleteACL` |
-| POST | `.../node/{device}/add-acl-rule` | `AddACLRule` |
-| POST | `.../node/{device}/remove-acl-rule` | `DeleteACLRule` |
-| POST | `.../node/{device}/create-portchannel` | `CreatePortChannel` |
-| POST | `.../node/{device}/delete-portchannel` | `DeletePortChannel` |
-| POST | `.../node/{device}/add-portchannel-member` | `AddPortChannelMember` |
-| POST | `.../node/{device}/remove-portchannel-member` | `RemovePortChannelMember` |
-| POST | `.../node/{device}/bind-macvpn` | `BindMACVPN` |
-| POST | `.../node/{device}/unbind-macvpn` | `UnbindMACVPN` |
-| POST | `.../node/{device}/add-bgp-evpn-peer` | `AddBGPEVPNPeer` |
-| POST | `.../node/{device}/remove-bgp-evpn-peer` | `RemoveBGPEVPNPeer` |
-| POST | `.../node/{device}/reload-config` | `ConfigReload` (SONiC config reload) |
-| POST | `.../node/{device}/save-config` | `SaveConfig` (SONiC config save) |
-| POST | `.../node/{device}/restart-daemon` | `RestartService` |
-| POST | `.../node/{device}/ssh-command` | SSH command execution |
+| POST | `.../nodes/{device}/setup-device` | `SetupDevice` — metadata + loopback + BGP + VTEP |
+| POST | `.../nodes/{device}/create-vlan` | `CreateVLAN` |
+| POST | `.../nodes/{device}/delete-vlan` | `DeleteVLAN` |
+| POST | `.../nodes/{device}/configure-irb` | `ConfigureIRB` |
+| POST | `.../nodes/{device}/unconfigure-irb` | `UnconfigureIRB` |
+| POST | `.../nodes/{device}/create-vrf` | `CreateVRF` |
+| POST | `.../nodes/{device}/delete-vrf` | `DeleteVRF` (cascading destroy) |
+| POST | `.../nodes/{device}/bind-ipvpn` | `BindIPVPN` |
+| POST | `.../nodes/{device}/unbind-ipvpn` | `UnbindIPVPN` |
+| POST | `.../nodes/{device}/add-static-route` | `AddStaticRoute` |
+| POST | `.../nodes/{device}/remove-static-route` | `RemoveStaticRoute` |
+| POST | `.../nodes/{device}/create-acl` | `CreateACL` |
+| POST | `.../nodes/{device}/delete-acl` | `DeleteACL` |
+| POST | `.../nodes/{device}/add-acl-rule` | `AddACLRule` |
+| POST | `.../nodes/{device}/remove-acl-rule` | `DeleteACLRule` |
+| POST | `.../nodes/{device}/create-portchannel` | `CreatePortChannel` |
+| POST | `.../nodes/{device}/delete-portchannel` | `DeletePortChannel` |
+| POST | `.../nodes/{device}/add-portchannel-member` | `AddPortChannelMember` |
+| POST | `.../nodes/{device}/remove-portchannel-member` | `RemovePortChannelMember` |
+| POST | `.../nodes/{device}/bind-macvpn` | `BindMACVPN` |
+| POST | `.../nodes/{device}/unbind-macvpn` | `UnbindMACVPN` |
+| POST | `.../nodes/{device}/add-bgp-evpn-peer` | `AddBGPEVPNPeer` |
+| POST | `.../nodes/{device}/remove-bgp-evpn-peer` | `RemoveBGPEVPNPeer` |
+| POST | `.../nodes/{device}/reload-config` | `ConfigReload` (SONiC config reload) |
+| POST | `.../nodes/{device}/save-config` | `SaveConfig` (SONiC config save) |
+| POST | `.../nodes/{device}/restart-daemon` | `RestartService` |
+| POST | `.../nodes/{device}/ssh-command` | SSH command execution |
 
 ### 4.7 Intent Operations
 
@@ -1145,14 +1145,14 @@ Operations on the expected state. These operate on the abstract node's intent DB
 
 | Method | Path | Response | Purpose |
 |--------|------|----------|---------|
-| GET | `.../node/{device}/intent/projection` | `sonic.RawConfigDB` | Per-Node projection (from intent replay). The decision substrate for newtron-owned tables |
-| POST | `.../node/{device}/intent/projection-diff` | `{before, after, diff}` | Pre-commit preview: replays a `ProjectionDiffRequest.Operations` set on a snapshot of the projection without touching the device. `diff` is `[]sonic.DriftEntry` (canonical §11 vocab) |
-| GET | `.../node/{device}/intent/tree` | `IntentTreeNode` | Read intent DAG |
-| GET | `.../node/{device}/intent/drift` | `[]DriftEntry` | Compare projection vs device CONFIG_DB; empty array ≡ all newtron writes actualized |
-| POST | `.../node/{device}/intent/reconcile` | `ReconcileResult` | Push projection to device. Query params: `mode=topology` (intent source), `reconcile=full\|delta` (delivery mechanism, default: topology→full, actuated→delta), `dry_run=true`, `no_save=true` |
-| POST | `.../node/{device}/intent/save` | — | Persist intents to topology.json |
-| POST | `.../node/{device}/intent/reload` | — | Reload from topology.json (topology only) |
-| POST | `.../node/{device}/intent/clear` | — | Clear all intents (topology only) |
+| GET | `.../nodes/{device}/intent/projection` | `sonic.RawConfigDB` | Per-Node projection (from intent replay). The decision substrate for newtron-owned tables |
+| POST | `.../nodes/{device}/intent/projection-diff` | `{before, after, diff}` | Pre-commit preview: replays a `ProjectionDiffRequest.Operations` set on a snapshot of the projection without touching the device. `diff` is `[]sonic.DriftEntry` (canonical §11 vocab) |
+| GET | `.../nodes/{device}/intent/tree` | `IntentTreeNode` | Read intent DAG |
+| GET | `.../nodes/{device}/intent/drift` | `[]DriftEntry` | Compare projection vs device CONFIG_DB; empty array ≡ all newtron writes actualized |
+| POST | `.../nodes/{device}/intent/reconcile` | `ReconcileResult` | Push projection to device. Query params: `mode=topology` (intent source), `reconcile=full\|delta` (delivery mechanism, default: topology→full, actuated→delta), `dry_run=true`, `no_save=true` |
+| POST | `.../nodes/{device}/intent/save` | — | Persist intents to topology.json |
+| POST | `.../nodes/{device}/intent/reload` | — | Reload from topology.json (topology only) |
+| POST | `.../nodes/{device}/intent/clear` | — | Clear all intents (topology only) |
 
 ### 4.8 Interface Operations
 
@@ -1160,19 +1160,19 @@ Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `Wri
 
 | Method | Path | Operation |
 |--------|------|-----------|
-| POST | `.../interface/{name}/apply-service` | `ApplyService` |
-| POST | `.../interface/{name}/remove-service` | `RemoveService` |
-| POST | `.../interface/{name}/refresh-service` | `RefreshService` |
-| POST | `.../interface/{name}/configure-interface` | `ConfigureInterface` |
-| POST | `.../interface/{name}/unconfigure-interface` | `UnconfigureInterface` |
-| POST | `.../interface/{name}/set-property` | `SetProperty` |
-| POST | `.../interface/{name}/clear-property` | `ClearProperty` |
-| POST | `.../interface/{name}/bind-acl` | `BindACL` |
-| POST | `.../interface/{name}/unbind-acl` | `UnbindACL` |
-| POST | `.../interface/{name}/add-bgp-peer` | `AddBGPPeer` |
-| POST | `.../interface/{name}/remove-bgp-peer` | `RemoveBGPPeer` |
-| POST | `.../interface/{name}/apply-qos` | `ApplyQoS` |
-| POST | `.../interface/{name}/remove-qos` | `RemoveQoS` |
+| POST | `.../interfaces/{name}/apply-service` | `ApplyService` |
+| POST | `.../interfaces/{name}/remove-service` | `RemoveService` |
+| POST | `.../interfaces/{name}/refresh-service` | `RefreshService` |
+| POST | `.../interfaces/{name}/configure-interface` | `ConfigureInterface` |
+| POST | `.../interfaces/{name}/unconfigure-interface` | `UnconfigureInterface` |
+| POST | `.../interfaces/{name}/set-property` | `SetProperty` |
+| POST | `.../interfaces/{name}/clear-property` | `ClearProperty` |
+| POST | `.../interfaces/{name}/bind-acl` | `BindACL` |
+| POST | `.../interfaces/{name}/unbind-acl` | `UnbindACL` |
+| POST | `.../interfaces/{name}/add-bgp-peer` | `AddBGPPeer` |
+| POST | `.../interfaces/{name}/remove-bgp-peer` | `RemoveBGPPeer` |
+| POST | `.../interfaces/{name}/apply-qos` | `ApplyQoS` |
+| POST | `.../interfaces/{name}/remove-qos` | `RemoveQoS` |
 
 All paths prefixed with `/network/{netID}/node/{device}`.
 
@@ -1407,7 +1407,7 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANOpts) (*Chan
 
 #### Worked Example: CreateVLAN End-to-End
 
-Tracing `POST /newtron/v1/network/default/node/leaf1/create-vlan` with `{"id": 100, "name": "servers"}` and `?execute=true` through every layer:
+Tracing `POST /newtron/v1/networks/default/node/leaf1/create-vlan` with `{"id": 100, "name": "servers"}` and `?execute=true` through every layer:
 
 ```
 1. HTTP layer (handler_node.go)
@@ -1531,12 +1531,12 @@ These two functions are the bridge between intent records and config methods. Th
 | `/configure-irb` | `n.ConfigureIRB(ctx, config)` |
 | `/add-bgp-evpn-peer` | `n.AddBGPEVPNPeer(ctx, peer)` |
 | `/add-static-route` | `n.AddStaticRoute(ctx, vrf, prefix, nexthop)` |
-| `/interface/{name}/apply-service` | `iface.ApplyService(ctx, service, opts)` |
-| `/interface/{name}/configure-interface` | `iface.ConfigureInterface(ctx, config)` |
-| `/interface/{name}/add-bgp-peer` | `iface.AddBGPPeer(ctx, config)` |
-| `/interface/{name}/set-property` | `iface.SetProperty(ctx, prop, value)` |
-| `/interface/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
-| `/interface/{name}/apply-qos` | `iface.ApplyQoS(ctx, policy, spec)` |
+| `/interfaces/{name}/apply-service` | `iface.ApplyService(ctx, service, opts)` |
+| `/interfaces/{name}/configure-interface` | `iface.ConfigureInterface(ctx, config)` |
+| `/interfaces/{name}/add-bgp-peer` | `iface.AddBGPPeer(ctx, config)` |
+| `/interfaces/{name}/set-property` | `iface.SetProperty(ctx, prop, value)` |
+| `/interfaces/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
+| `/interfaces/{name}/apply-qos` | `iface.ApplyQoS(ctx, policy, spec)` |
 
 **`ReconstructExpected(ctx, sp, name, profile, resolved, intents, ports) (*Node, error)`** — Creates an abstract Node, registers ports, calls `IntentsToSteps` + `ReplayStep` in order. Returns the node whose projection IS the expected device state. Used by `Drift` and `RebuildProjection`.
 
