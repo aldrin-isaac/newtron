@@ -69,6 +69,23 @@ func (c *Client) RegisterNetwork(specDir string) error {
 	return nil
 }
 
+// ScaffoldNetwork creates an empty spec layout at specDir (three zero-valued
+// spec files + an empty profiles/ subdirectory) and registers it under the
+// client's network ID. description seeds topology.json.
+//
+// Unlike RegisterNetwork, a 409 here is meaningful — specDir already
+// contains specs — and is returned to the caller so the operator can choose
+// to register the existing layout or pick a different path.
+func (c *Client) ScaffoldNetwork(specDir, description string) error {
+	body := api.RegisterNetworkRequest{
+		ID:          c.networkID,
+		SpecDir:     specDir,
+		Scaffold:    true,
+		Description: description,
+	}
+	return c.doPost("/newtron/v1/network", body, nil)
+}
+
 // UnregisterNetwork removes a registered network from the server.
 // Returns nil if the network is not registered (404/500 treated as success).
 func (c *Client) UnregisterNetwork() error {
