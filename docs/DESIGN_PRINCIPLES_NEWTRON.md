@@ -2015,8 +2015,8 @@ on the same filesystem — is the §27 violation.
 
 **Lab runtime state (LabState, NodeState, LinkState).** newtlab is the
 owner. Allocations (SSH ports, console ports, VM PIDs) and link
-counters are exposed through `/newtlab/v1/topologies/...`. Sibling
-engines reach per-node runtime state through that API; reading
+counters are exposed through `/newtlab/v1/labs/...`. Sibling engines
+reach per-node runtime state through that API; reading
 `~/.newtlab/labs/<name>/state.json` from another engine is the
 violation.
 
