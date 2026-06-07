@@ -625,7 +625,7 @@ func (l *Lab) findPeerInterfaceIP(hostName string) (string, string) {
 	}
 	for _, step := range device.Steps {
 		// Match interface-scoped steps for this interface
-		if !strings.Contains(step.URL, "/interface/"+switchIntf+"/") {
+		if !strings.Contains(step.URL, "/interfaces/"+switchIntf+"/") {
 			continue
 		}
 		// Look for ip_address (apply-service) or ip (configure-interface)

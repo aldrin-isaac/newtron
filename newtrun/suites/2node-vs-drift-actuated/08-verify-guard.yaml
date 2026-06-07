@@ -19,7 +19,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 800}
     expect_failure: true
     expect:
@@ -30,7 +30,7 @@ steps:
   - name: detect-drift-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length > 0 and ([.[] | select(.type == "extra")] | length) >= 1'
 
@@ -38,7 +38,7 @@ steps:
   - name: switch2-not-drifted
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -47,12 +47,12 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 800}
 
   - name: switch2-cleanup
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 800}

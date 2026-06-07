@@ -16,7 +16,7 @@ import (
 // the runtime isn't available, not an error.
 func TestHandleNodeStatus_NoResolverNoCache(t *testing.T) {
 	s := newTestServer(t)
-	w := httpDo(t, s, http.MethodGet, "/newtron/v1/network/default/node/switch1/status")
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/nodes/switch1/status")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -52,7 +52,7 @@ func TestHandleNodeStatus_NoResolverNoCache(t *testing.T) {
 // shared not-registered error envelope (404) when the network ID is unknown.
 func TestHandleNodeStatus_NetworkNotRegistered(t *testing.T) {
 	s := newTestServer(t)
-	w := httpDo(t, s, http.MethodGet, "/newtron/v1/network/missing/node/switch1/status")
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/missing/nodes/switch1/status")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404; body: %s", w.Code, w.Body.String())
 	}
@@ -65,7 +65,7 @@ func TestHandleNodeStatus_NetworkNotRegistered(t *testing.T) {
 func TestHandleTopologyDrift_ErrorsWhenNoTransport(t *testing.T) {
 	s := newTestServer(t)
 	w := httpDo(t, s, http.MethodGet,
-		"/newtron/v1/network/default/node/switch1/intent/topology-drift")
+		"/newtron/v1/networks/default/nodes/switch1/intent/topology-drift")
 	if w.Code == http.StatusOK {
 		t.Errorf("expected non-200 (transport unavailable), got 200; body: %s", w.Body.String())
 	}
@@ -77,7 +77,7 @@ func TestHandleTopologyDrift_ErrorsWhenNoTransport(t *testing.T) {
 func TestHandleTopologyDrift_RouteWired(t *testing.T) {
 	s := newTestServer(t)
 	w := httpDo(t, s, http.MethodGet,
-		"/newtron/v1/network/default/node/switch1/intent/topology-drift")
+		"/newtron/v1/networks/default/nodes/switch1/intent/topology-drift")
 	// The handler ran (it tried to drift and failed on transport), so the
 	// status will be 4xx/5xx — anything but the literal route-not-found 404
 	// from the mux. The previous test asserts non-200; here we explicitly

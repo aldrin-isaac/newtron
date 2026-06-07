@@ -9,7 +9,7 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-reload
     action: wait

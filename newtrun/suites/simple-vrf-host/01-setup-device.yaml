@@ -10,7 +10,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/setup-device
+    url: /nodes/{{device}}/setup-device
     params:
       fields:
         hostname: switch2
@@ -23,6 +23,6 @@ steps:
   - name: verify-device-intent
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/device/exists
     expect:
       jq: '.exists == true'

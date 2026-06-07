@@ -172,7 +172,7 @@ func TestSnapshot(t *testing.T) {
 		stepsByURL[step.URL] = step
 	}
 
-	eth0, ok := stepsByURL["/interface/Ethernet0/apply-service"]
+	eth0, ok := stepsByURL["/interfaces/Ethernet0/apply-service"]
 	if !ok {
 		t.Fatal("expected Ethernet0 apply-service step in snapshot")
 	}
@@ -183,7 +183,7 @@ func TestSnapshot(t *testing.T) {
 		t.Errorf("Ethernet0 ip_address = %q, want 10.1.1.1/30", eth0.Params["ip_address"])
 	}
 
-	eth4, ok := stepsByURL["/interface/Ethernet4/apply-service"]
+	eth4, ok := stepsByURL["/interfaces/Ethernet4/apply-service"]
 	if !ok {
 		t.Fatal("expected Ethernet4 apply-service step in snapshot")
 	}
@@ -197,7 +197,7 @@ func TestSnapshot(t *testing.T) {
 	}
 
 	// Non-actuated Ethernet8 should NOT appear
-	if _, ok := stepsByURL["/interface/Ethernet8/apply-service"]; ok {
+	if _, ok := stepsByURL["/interfaces/Ethernet8/apply-service"]; ok {
 		t.Error("non-actuated Ethernet8 should not appear in snapshot")
 	}
 }
@@ -368,7 +368,7 @@ func TestIntentToStep_InterfaceLevel(t *testing.T) {
 		"ingress_acl": "ACL_IN",
 	})
 
-	if step.URL != "/interface/Ethernet0/apply-service" {
+	if step.URL != "/interfaces/Ethernet0/apply-service" {
 		t.Errorf("URL = %q, want /interface/Ethernet0/apply-service", step.URL)
 	}
 	// apply-service maps service_name → service
@@ -483,7 +483,7 @@ func TestIntentToStep_ConfigureInterface(t *testing.T) {
 		"ip":        "10.1.1.1/30",
 	})
 
-	if step.URL != "/interface/Ethernet0/configure-interface" {
+	if step.URL != "/interfaces/Ethernet0/configure-interface" {
 		t.Errorf("URL = %q, want /interface/Ethernet0/configure-interface", step.URL)
 	}
 	if step.Params["vrf"] != "Vrf_TRANSIT" {
@@ -544,7 +544,7 @@ func TestIntentToStep_SetProperty(t *testing.T) {
 		"value":     "9100",
 	})
 
-	if step.URL != "/interface/Ethernet0/set-property" {
+	if step.URL != "/interfaces/Ethernet0/set-property" {
 		t.Errorf("URL = %q, want /interface/Ethernet0/set-property", step.URL)
 	}
 	if step.Params["property"] != "mtu" {
@@ -616,7 +616,7 @@ func TestIntentToStep_AddBGPPeer(t *testing.T) {
 		"multihop":    "255",
 	})
 
-	if step.URL != "/interface/Ethernet0/add-bgp-peer" {
+	if step.URL != "/interfaces/Ethernet0/add-bgp-peer" {
 		t.Errorf("URL = %q, want /interface/Ethernet0/add-bgp-peer", step.URL)
 	}
 	if step.Params["neighbor_ip"] != "10.1.1.2" {
@@ -642,7 +642,7 @@ func TestIntentToStep_BindACL(t *testing.T) {
 		"direction": "ingress",
 	})
 
-	if step.URL != "/interface/Ethernet0/bind-acl" {
+	if step.URL != "/interfaces/Ethernet0/bind-acl" {
 		t.Errorf("URL = %q, want /interface/Ethernet0/bind-acl", step.URL)
 	}
 	if step.Params["acl_name"] != "PROTECT_RE" {
@@ -1108,7 +1108,7 @@ func TestIntentsToSteps_TopologicalOrder(t *testing.T) {
 
 	posDevice := opAt("/setup-device")
 	posVlan := opAt("/create-vlan")
-	posIface := opAt("/interface/Ethernet0/apply-service")
+	posIface := opAt("/interfaces/Ethernet0/apply-service")
 
 	if posDevice < 0 || posVlan < 0 || posIface < 0 {
 		t.Fatalf("steps = %v; missing one of setup-device/create-vlan/apply-service", steps)

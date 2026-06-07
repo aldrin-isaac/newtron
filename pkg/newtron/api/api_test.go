@@ -347,7 +347,7 @@ func decodeAPIResponse(t *testing.T, w *httptest.ResponseRecorder) httputil.APIR
 func TestHandleTopology_ReturnsSpecFile(t *testing.T) {
 	s := newTestServer(t)
 
-	w := httpDo(t, s, http.MethodGet, "/newtron/v1/network/default/topology")
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/topology")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -381,7 +381,7 @@ func TestHandleProjection_ReturnsRawConfigDB(t *testing.T) {
 	s := newTestServer(t)
 
 	w := httpDo(t, s, http.MethodGet,
-		"/newtron/v1/network/default/node/switch1/intent/projection?mode=topology")
+		"/newtron/v1/networks/default/nodes/switch1/intent/projection?mode=topology")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -413,7 +413,7 @@ func TestHandleProjection_ReturnsRawConfigDB(t *testing.T) {
 func TestHandleConfigDBSnapshot_RouteRegistered(t *testing.T) {
 	s := newTestServer(t)
 
-	w := httpDo(t, s, http.MethodGet, "/newtron/v1/network/default/node/switch1/configdb")
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/nodes/switch1/configdb")
 	if w.Code == http.StatusNotFound || w.Code == http.StatusMethodNotAllowed {
 		t.Fatalf("route not registered: status = %d", w.Code)
 	}

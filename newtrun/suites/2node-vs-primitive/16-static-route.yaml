@@ -9,7 +9,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/add-static-route
+    url: /nodes/{{device}}/add-static-route
     params:
       vrf: Vrf_local
       prefix: "10.99.0.0/24"
@@ -18,7 +18,7 @@ steps:
   - name: verify-static-route-added
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24
     expect:
       jq: '.nexthop == "10.20.1.0"'
 
@@ -26,12 +26,12 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/remove-static-route
+    url: /nodes/{{device}}/remove-static-route
     params: {vrf: Vrf_local, prefix: "10.99.0.0/24"}
 
   - name: verify-static-route-removed
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24/exists
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24/exists
     expect:
       jq: '.exists == false'

@@ -20,20 +20,20 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile
+    url: /nodes/{{device}}/intent/reconcile
 
   - name: restart-bgp
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
 
   - name: wait-bgp-instance
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -44,7 +44,7 @@ steps:
   - name: verify-bgp
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s
@@ -55,7 +55,7 @@ steps:
   - name: verify-rogue-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan999/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan999/exists
     expect:
       jq: '.exists == false'
 
@@ -63,7 +63,7 @@ steps:
   - name: verify-provisioned-intact
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100
     expect:
       jq: '.vlanid == "100"'
 
@@ -71,6 +71,6 @@ steps:
   - name: verify-drift-clean
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

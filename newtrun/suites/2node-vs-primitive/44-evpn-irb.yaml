@@ -11,14 +11,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vrf
+    url: /nodes/{{device}}/create-vrf
     params: {name: Vrf_IRB}
 
   - name: create-vrf-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/create-vrf
+    url: /nodes/{{device}}/create-vrf
     params: {name: Vrf_IRB}
 
   # Bind IP-VPN
@@ -26,49 +26,49 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/bind-ipvpn
+    url: /nodes/{{device}}/bind-ipvpn
     params: {vrf: Vrf_IRB, ipvpn: evpn-irb-vrf}
 
   - name: bind-ipvpn-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/bind-ipvpn
+    url: /nodes/{{device}}/bind-ipvpn
     params: {vrf: Vrf_IRB, ipvpn: evpn-irb-vrf}
 
   # CONFIG_DB verification: VRF with VNI
   - name: verify-vrf-irb-vni
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VRF/Vrf_IRB
+    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB
     expect:
       jq: '.vni == "50002"'
 
   - name: verify-bgp-globals-vrf
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/Vrf_IRB
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/Vrf_IRB
     expect:
       jq: '.local_asn == "65001"'
 
   - name: verify-bgp-af-l2vpn-evpn
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cl2vpn_evpn
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cl2vpn_evpn
     expect:
       jq: '."advertise-ipv4-unicast" == "true"'
 
   - name: verify-evpn-rt
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_IRB%7CL2VPN_EVPN%7C65000:50002/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_IRB%7CL2VPN_EVPN%7C65000:50002/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-route-redistribute
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
+    url: /nodes/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
       jq: '.exists == true'
 
@@ -77,7 +77,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/configure-irb
+    url: /nodes/{{device}}/configure-irb
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -87,7 +87,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/configure-irb
+    url: /nodes/{{device}}/configure-irb
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -96,14 +96,14 @@ steps:
   - name: verify-svi-vrf-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan300
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan300
     expect:
       jq: '.vrf_name == "Vrf_IRB"'
 
   - name: verify-svi-ip-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan300%7C10.3.0.1%2F24/exists
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan300%7C10.3.0.1%2F24/exists
     expect:
       jq: '.exists == true'
 
@@ -116,7 +116,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan300 10.3.0.2"}
     poll:
       timeout: 10s
@@ -128,7 +128,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan300 10.3.0.5"}
     poll:
       timeout: 10s
@@ -175,13 +175,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet12/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet12/configure-interface
     params: {vrf: Vrf_IRB}
 
   - name: verify-eth3-in-vrf
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet12
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet12
     expect:
       jq: '.vrf_name == "Vrf_IRB"'
 
@@ -189,11 +189,11 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet12/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet12/unconfigure-interface
 
   - name: verify-eth3-vrf-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet12
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet12
     expect:
       jq: '(.vrf_name // "") == ""'

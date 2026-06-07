@@ -14,14 +14,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 400}
 
   # Verify the intent exists on the device
   - name: verify-vlan400-intent
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/vlan%7C400/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/vlan%7C400/exists
     expect:
       jq: '.exists == true'
 
@@ -31,7 +31,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/save
+    url: /nodes/{{device}}/intent/save
     expect:
       jq: >-
         .steps | length >= 2
@@ -44,13 +44,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   # Verify the reloaded tree still has the VLAN intent from the save
   - name: verify-reloaded-tree-has-vlan
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: >-
         .steps | any(.[]; .url == "/create-vlan")
@@ -60,14 +60,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 400}
 
   - name: save-after-cleanup
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/save
+    url: /nodes/{{device}}/intent/save
     expect:
       jq: >-
         .steps | all(.[]; .url != "/create-vlan")

@@ -9,7 +9,7 @@ steps:
   - name: verify-no-binding-eth0
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
@@ -17,7 +17,7 @@ steps:
   - name: verify-no-vlan100
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == false'
 
@@ -25,7 +25,7 @@ steps:
   - name: verify-no-vrf-test
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VRF/Vrf_test/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_test/exists
     expect:
       jq: '.exists == false'
 
@@ -33,7 +33,7 @@ steps:
   - name: verify-no-bgp-neighbor
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
       jq: '.exists == false'
 
@@ -42,7 +42,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "ip link show | grep -c 'Vlan100' || echo 0"}
     expect:
       jq: '.output | contains("0")'

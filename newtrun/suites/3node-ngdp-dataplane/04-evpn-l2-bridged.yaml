@@ -15,42 +15,42 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 100}
 
   - name: create-vlan-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 100}
 
   - name: configure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {vlan_id: 100, tagged: false}
 
   - name: configure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/configure-interface
     params: {vlan_id: 100, tagged: false}
 
   - name: bind-macvpn-100-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/bind-macvpn
+    url: /nodes/{{device}}/bind-macvpn
     params: {vlan_id: 100, macvpn: servers-vlan100}
 
   - name: bind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/bind-macvpn
+    url: /nodes/{{device}}/bind-macvpn
     params: {vlan_id: 100, macvpn: servers-vlan100}
 
   # =========================================================================
@@ -60,21 +60,21 @@ steps:
   - name: verify-tunnel-map-leaf1
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100
     expect:
       jq: '.vlan == "Vlan100" and .vni == "10100"'
 
   - name: verify-tunnel-map-leaf2
     action: newtron
     devices: [leaf2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100
     expect:
       jq: '.vlan == "Vlan100" and .vni == "10100"'
 
   - name: verify-arp-suppress-leaf1
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan100/exists
+    url: /nodes/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan100/exists
     expect:
       jq: '.exists == true'
 
@@ -140,38 +140,38 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/unbind-macvpn
+    url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 100}
 
   - name: unbind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/unbind-macvpn
+    url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 100}
 
   - name: unconfigure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: unconfigure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
 
   - name: delete-vlan-100-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 100}
 
   - name: delete-vlan-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 100}

@@ -13,27 +13,27 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/remove-bgp-peer
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-bgp-peer
     params: {ip: "10.1.0.1"}
 
   - name: bgp-remove-neighbor-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/remove-bgp-peer
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-bgp-peer
     params: {ip: "10.1.0.0"}
 
   - name: verify-underlay-neighbor-removed-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-underlay-neighbor-removed-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
     expect:
       jq: '.exists == false'
 
@@ -42,25 +42,25 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet0/unconfigure-interface
 
   - name: unconfigure-eth0-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet0/unconfigure-interface
 
   - name: verify-eth0-ip-removed-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-eth0-ip-removed-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
     expect:
       jq: '.exists == false'
 

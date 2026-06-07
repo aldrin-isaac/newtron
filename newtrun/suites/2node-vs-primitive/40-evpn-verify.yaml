@@ -17,14 +17,14 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
 
   - name: wait-bgp-instance-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -36,7 +36,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -47,35 +47,35 @@ steps:
   - name: verify-vxlan-tunnel-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
       jq: '.src_ip == "10.0.0.1"'
 
   - name: verify-vxlan-tunnel-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
       jq: '.src_ip == "10.0.0.2"'
 
   - name: verify-vxlan-nvo-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
+    url: /nodes/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
     expect:
       jq: '.source_vtep == "vtep1"'
 
   - name: verify-bgp-l2vpn-af
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-bgp-evpn-switch1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s
@@ -85,7 +85,7 @@ steps:
   - name: verify-bgp-evpn-switch2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s

@@ -21,7 +21,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-after-reload
     action: wait
@@ -31,7 +31,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
     poll:
       timeout: 30s
@@ -41,7 +41,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -53,7 +53,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -62,7 +62,7 @@ steps:
   - name: verify-device-intent-exists
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/device/exists
     expect:
       jq: '.exists == true'
 
@@ -70,21 +70,21 @@ steps:
   - name: verify-device-metadata
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/DEVICE_METADATA/localhost
+    url: /nodes/{{device}}/configdb/DEVICE_METADATA/localhost
     expect:
       jq: '.hostname == "switch1" and .type == "LeafRouter"'
 
   - name: verify-bgp-globals
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
     expect:
       jq: '.local_asn == "65001"'
 
   - name: verify-loopback
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+    url: /nodes/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
       jq: '.exists == true'
 
@@ -92,7 +92,7 @@ steps:
   - name: verify-zero-drift-topology
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'
 
@@ -100,6 +100,6 @@ steps:
   - name: verify-zero-drift-actuated
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

@@ -18,7 +18,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan555' vlanid 555"}
 
   # Dry-run reconcile in actuated mode: should return drift entries
@@ -26,7 +26,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile?dry_run=true
+    url: /nodes/{{device}}/intent/reconcile?dry_run=true
     expect:
       jq: >-
         length >= 1
@@ -36,7 +36,7 @@ steps:
   - name: verify-drift-persists-after-dry-run
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan555/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan555/exists
     expect:
       jq: '.exists == true'
 
@@ -45,7 +45,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile?mode=topology&dry_run=true
+    url: /nodes/{{device}}/intent/reconcile?mode=topology&dry_run=true
     expect:
       jq: >-
         length >= 1
@@ -56,13 +56,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile?reconcile=full
+    url: /nodes/{{device}}/intent/reconcile?reconcile=full
 
   - name: reload-config
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-after-reload
     action: wait
@@ -72,7 +72,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
     poll:
       timeout: 30s
@@ -82,7 +82,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -94,7 +94,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -103,6 +103,6 @@ steps:
   - name: verify-clean-after-real-reconcile
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

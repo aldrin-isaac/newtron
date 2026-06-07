@@ -13,13 +13,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/clear?mode=topology
+    url: /nodes/{{device}}/intent/clear?mode=topology
 
   # Verify empty tree (no intents)
   - name: verify-empty-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | length == 0'
 
@@ -28,7 +28,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/setup-device?mode=topology
+    url: /nodes/{{device}}/setup-device?mode=topology
     params:
       fields:
         hostname: switch1
@@ -39,7 +39,7 @@ steps:
   - name: verify-setup-device-in-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'
 
@@ -48,14 +48,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan?mode=topology
+    url: /nodes/{{device}}/create-vlan?mode=topology
     params: {id: 850}
 
   # Verify VLAN in tree
   - name: verify-vlan-in-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: >-
         .steps | any(.[]; .url == "/setup-device")
@@ -66,12 +66,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   # Verify topology.json state restored (setup-device from original topology)
   - name: verify-restored
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'

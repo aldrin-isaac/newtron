@@ -12,7 +12,7 @@ import (
 
 func TestApplyTemplate_URLContext_PathEscape(t *testing.T) {
 	got, err := applyTemplate(
-		"/node/{{target.device}}/x",
+		"/nodes/{{target.device}}/x",
 		map[string]string{"device": "switch1"},
 		nil,
 		ctxURL,
@@ -20,7 +20,7 @@ func TestApplyTemplate_URLContext_PathEscape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got != "/node/switch1/x" {
+	if got != "/nodes/switch1/x" {
 		t.Errorf("got %q, want /node/switch1/x", got)
 	}
 }
@@ -46,21 +46,21 @@ func TestApplyTemplateURL_QueryPositionUsesQueryEscape(t *testing.T) {
 
 func TestApplyTemplateURL_PathPositionStillUsesPathEscape(t *testing.T) {
 	got, err := applyTemplateURL(
-		"/node/{{target.device}}",
+		"/nodes/{{target.device}}",
 		map[string]string{"device": "switch1"},
 		nil,
 	)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got != "/node/switch1" {
+	if got != "/nodes/switch1" {
 		t.Errorf("got %q, want /node/switch1", got)
 	}
 }
 
 func TestApplyTemplateURL_BothPathAndQuery(t *testing.T) {
 	got, err := applyTemplateURL(
-		"/node/{{target.device}}/route?filter={{param.f}}",
+		"/nodes/{{target.device}}/route?filter={{param.f}}",
 		map[string]string{"device": "switch1"},
 		map[string]any{"f": "vrf=red&owner=me"},
 	)
@@ -70,7 +70,7 @@ func TestApplyTemplateURL_BothPathAndQuery(t *testing.T) {
 	// Path: "switch1" passes PathEscape unchanged. Query: '&' and '='
 	// in the filter value get QueryEscape'd so they don't smuggle
 	// extra query parameters.
-	want := "/node/switch1/route?filter=vrf%3Dred%26owner%3Dme"
+	want := "/nodes/switch1/route?filter=vrf%3Dred%26owner%3Dme"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -80,7 +80,7 @@ func TestApplyTemplate_URLContext_EscapesParamWithSlash(t *testing.T) {
 	// A parameter value that contains URL-unsafe characters must be
 	// path-escaped, defending against path traversal injection.
 	got, err := applyTemplate(
-		"/node/{{param.intf}}/x",
+		"/nodes/{{param.intf}}/x",
 		nil,
 		map[string]any{"intf": "Ethernet0/1"},
 		ctxURL,
@@ -88,7 +88,7 @@ func TestApplyTemplate_URLContext_EscapesParamWithSlash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got != "/node/Ethernet0%2F1/x" {
+	if got != "/nodes/Ethernet0%2F1/x" {
 		t.Errorf("got %q, want path-escaped form", got)
 	}
 }
@@ -260,7 +260,7 @@ func TestApplyTemplate_RawContext_NoEscaping(t *testing.T) {
 
 func TestApplyTemplate_UndefinedTargetRefError(t *testing.T) {
 	_, err := applyTemplate(
-		"/node/{{target.missing}}/x",
+		"/nodes/{{target.missing}}/x",
 		map[string]string{},
 		nil,
 		ctxURL,
@@ -294,7 +294,7 @@ func TestApplyTemplate_EmptyStringPassthrough(t *testing.T) {
 
 func TestApplyTemplate_MultipleSubstitutionsSameString(t *testing.T) {
 	got, err := applyTemplate(
-		"/node/{{target.device}}/iface/{{target.interface}}",
+		"/nodes/{{target.device}}/iface/{{target.interface}}",
 		map[string]string{"device": "s1", "interface": "Eth0"},
 		nil,
 		ctxURL,
@@ -302,7 +302,7 @@ func TestApplyTemplate_MultipleSubstitutionsSameString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got != "/node/s1/iface/Eth0" {
+	if got != "/nodes/s1/iface/Eth0" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -391,7 +391,7 @@ func TestExpandMapAny_NonStringScalarsPassThrough(t *testing.T) {
 
 func TestExpandStep_URLAndParamsAndJQ(t *testing.T) {
 	step := Step{
-		URL: "/node/{{target.device}}/interface/{{target.interface}}",
+		URL: "/nodes/{{target.device}}/interfaces/{{target.interface}}",
 		Params: map[string]any{
 			"value": "{{param.admin_status}}",
 		},
@@ -405,7 +405,7 @@ func TestExpandStep_URLAndParamsAndJQ(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if expanded.URL != "/node/s1/interface/Eth0" {
+	if expanded.URL != "/nodes/s1/interfaces/Eth0" {
 		t.Errorf("URL = %q", expanded.URL)
 	}
 	if expanded.Params["value"] != "up" {
@@ -420,7 +420,7 @@ func TestExpandStep_DoesNotMutateOriginal(t *testing.T) {
 	// Repeat correctness: every iteration must expand from the same
 	// pristine source step.
 	step := Step{
-		URL:    "/node/{{target.device}}/x",
+		URL:    "/nodes/{{target.device}}/x",
 		Params: map[string]any{"v": "{{param.x}}"},
 	}
 	origURL := step.URL
@@ -441,8 +441,8 @@ func TestExpandStep_DoesNotMutateOriginal(t *testing.T) {
 func TestExpandStep_ExpandsBatch(t *testing.T) {
 	step := Step{
 		Batch: []BatchCall{
-			{Method: "GET", URL: "/node/{{target.device}}/a"},
-			{Method: "POST", URL: "/node/{{target.device}}/b", Params: map[string]any{"v": "{{param.x}}"}},
+			{Method: "GET", URL: "/nodes/{{target.device}}/a"},
+			{Method: "POST", URL: "/nodes/{{target.device}}/b", Params: map[string]any{"v": "{{param.x}}"}},
 		},
 	}
 	expanded, err := ExpandStep(step,
@@ -451,10 +451,10 @@ func TestExpandStep_ExpandsBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if expanded.Batch[0].URL != "/node/s1/a" {
+	if expanded.Batch[0].URL != "/nodes/s1/a" {
 		t.Errorf("batch[0].URL = %q", expanded.Batch[0].URL)
 	}
-	if expanded.Batch[1].URL != "/node/s1/b" {
+	if expanded.Batch[1].URL != "/nodes/s1/b" {
 		t.Errorf("batch[1].URL = %q", expanded.Batch[1].URL)
 	}
 	if expanded.Batch[1].Params["v"] != "value" {
@@ -478,7 +478,7 @@ func TestExpandStep_ExpandsExpectContains(t *testing.T) {
 }
 
 func TestExpandStep_PropagatesError(t *testing.T) {
-	step := Step{URL: "/node/{{target.missing}}/x"}
+	step := Step{URL: "/nodes/{{target.missing}}/x"}
 	_, err := ExpandStep(step, map[string]string{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "url") {
 		t.Errorf("err = %v, want url-prefixed", err)
@@ -491,7 +491,7 @@ func TestExpandStep_PropagatesError(t *testing.T) {
 
 func TestCollectTemplateReferences_GathersAllSurfaces(t *testing.T) {
 	step := Step{
-		URL:     "/node/{{target.device}}",
+		URL:     "/nodes/{{target.device}}",
 		Command: "echo {{param.a}}",
 		Params: map[string]any{
 			"nested": map[string]any{"k": "{{param.b}}"},
@@ -531,7 +531,7 @@ func TestCollectTemplateReferences_GathersAllSurfaces(t *testing.T) {
 }
 
 func TestCollectTemplateReferences_DetectsDeviceToken(t *testing.T) {
-	step := Step{URL: "/node/{{device}}/x"}
+	step := Step{URL: "/nodes/{{device}}/x"}
 	_, _, hasDevice := CollectTemplateReferences(step)
 	if !hasDevice {
 		t.Errorf("hasDevice = false, want true")

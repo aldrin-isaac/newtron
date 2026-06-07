@@ -25,7 +25,7 @@ func (c *Client) DeviceInfo(device string) (*newtron.DeviceInfo, error) {
 // ListInterfaces returns all interface summaries.
 func (c *Client) ListInterfaces(device string) ([]newtron.InterfaceSummary, error) {
 	var result []newtron.InterfaceSummary
-	if err := c.doGet(c.nodePath(device)+"/interface", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/interfaces", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -34,7 +34,7 @@ func (c *Client) ListInterfaces(device string) ([]newtron.InterfaceSummary, erro
 // ShowInterface returns details of a single interface.
 func (c *Client) ShowInterface(device, name string) (*newtron.InterfaceDetail, error) {
 	var result newtron.InterfaceDetail
-	if err := c.doGet(c.nodePath(device)+"/interface/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/interfaces/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -52,7 +52,7 @@ func (c *Client) ShowServiceBinding(device, iface string) (*newtron.ServiceBindi
 // ListNeighbors returns BGP neighbor health checks (alias for CheckBGPSessions).
 func (c *Client) ListNeighbors(device string) ([]newtron.HealthCheckResult, error) {
 	var result []newtron.HealthCheckResult
-	if err := c.doGet(c.nodePath(device)+"/neighbor", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/neighbors", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -61,7 +61,7 @@ func (c *Client) ListNeighbors(device string) ([]newtron.HealthCheckResult, erro
 // ListVLANs returns VLAN status entries.
 func (c *Client) ListVLANs(device string) ([]newtron.VLANStatusEntry, error) {
 	var result []newtron.VLANStatusEntry
-	if err := c.doGet(c.nodePath(device)+"/vlan", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/vlans", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -70,7 +70,7 @@ func (c *Client) ListVLANs(device string) ([]newtron.VLANStatusEntry, error) {
 // ShowVLAN returns details of a single VLAN.
 func (c *Client) ShowVLAN(device string, id int) (*newtron.VLANStatusEntry, error) {
 	var result newtron.VLANStatusEntry
-	if err := c.doGet(fmt.Sprintf("%s/vlan/%d", c.nodePath(device), id), &result); err != nil {
+	if err := c.doGet(fmt.Sprintf("%s/vlans/%d", c.nodePath(device), id), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -79,7 +79,7 @@ func (c *Client) ShowVLAN(device string, id int) (*newtron.VLANStatusEntry, erro
 // ListVRFs returns VRF status entries.
 func (c *Client) ListVRFs(device string) ([]newtron.VRFStatusEntry, error) {
 	var result []newtron.VRFStatusEntry
-	if err := c.doGet(c.nodePath(device)+"/vrf", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/vrfs", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -88,7 +88,7 @@ func (c *Client) ListVRFs(device string) ([]newtron.VRFStatusEntry, error) {
 // ShowVRF returns details of a single VRF.
 func (c *Client) ShowVRF(device, name string) (*newtron.VRFDetail, error) {
 	var result newtron.VRFDetail
-	if err := c.doGet(c.nodePath(device)+"/vrf/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/vrfs/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -97,7 +97,7 @@ func (c *Client) ShowVRF(device, name string) (*newtron.VRFDetail, error) {
 // ListACLs returns ACL table summaries.
 func (c *Client) ListACLs(device string) ([]newtron.ACLTableSummary, error) {
 	var result []newtron.ACLTableSummary
-	if err := c.doGet(c.nodePath(device)+"/acl", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/acls", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -106,7 +106,7 @@ func (c *Client) ListACLs(device string) ([]newtron.ACLTableSummary, error) {
 // ShowACL returns details of a single ACL.
 func (c *Client) ShowACL(device, name string) (*newtron.ACLTableDetail, error) {
 	var result newtron.ACLTableDetail
-	if err := c.doGet(c.nodePath(device)+"/acl/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/acls/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -165,7 +165,7 @@ func (c *Client) HealthCheck(device string) (*newtron.HealthReport, error) {
 // ListLAGs returns LAG status entries.
 func (c *Client) ListLAGs(device string) ([]newtron.LAGStatusEntry, error) {
 	var result []newtron.LAGStatusEntry
-	if err := c.doGet(c.nodePath(device)+"/lag", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/lags", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -174,7 +174,7 @@ func (c *Client) ListLAGs(device string) ([]newtron.LAGStatusEntry, error) {
 // ShowLAGDetail returns details of a single LAG.
 func (c *Client) ShowLAGDetail(device, name string) (*newtron.LAGStatusEntry, error) {
 	var result newtron.LAGStatusEntry
-	if err := c.doGet(c.nodePath(device)+"/lag/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/lags/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -192,7 +192,7 @@ func (c *Client) CheckBGPSessions(device string) ([]newtron.HealthCheckResult, e
 // GetRoute looks up a route in APP_DB.
 func (c *Client) GetRoute(device, vrf, prefix string) (*newtron.RouteEntry, error) {
 	var result newtron.RouteEntry
-	path := fmt.Sprintf("%s/route/%s/%s", c.nodePath(device), url.PathEscape(vrf), prefix)
+	path := fmt.Sprintf("%s/routes/%s/%s", c.nodePath(device), url.PathEscape(vrf), prefix)
 	if err := c.doGet(path, &result); err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (c *Client) GetRoute(device, vrf, prefix string) (*newtron.RouteEntry, erro
 // GetRouteASIC looks up a route in ASIC_DB.
 func (c *Client) GetRouteASIC(device, prefix string) (*newtron.RouteEntry, error) {
 	var result newtron.RouteEntry
-	path := fmt.Sprintf("%s/route-asic/%s", c.nodePath(device), prefix)
+	path := fmt.Sprintf("%s/routes-asic/%s", c.nodePath(device), prefix)
 	if err := c.doGet(path, &result); err != nil {
 		return nil, err
 	}

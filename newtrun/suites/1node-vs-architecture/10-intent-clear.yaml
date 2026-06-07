@@ -16,13 +16,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/clear?mode=topology
+    url: /nodes/{{device}}/intent/clear?mode=topology
 
   # After clear: tree must have zero steps (no intents)
   - name: verify-empty-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | length == 0'
 
@@ -31,7 +31,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/clear
+    url: /nodes/{{device}}/intent/clear
     expect_failure: true
     expect:
       contains: topology mode
@@ -42,12 +42,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   # Verify setup-device is back after reload
   - name: verify-restored-after-reload
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'

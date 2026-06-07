@@ -15,25 +15,25 @@ steps:
     action: newtron
     devices: [spine]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/remove-service
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-service
 
   - name: remove-transit-spine-eth1
     action: newtron
     devices: [spine]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/remove-service
+    url: /nodes/{{device}}/interfaces/Ethernet1/remove-service
 
   - name: remove-transit-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/remove-service
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-service
 
   - name: remove-transit-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/remove-service
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-service
 
   # Baseline infrastructure (setup-device) has no individual reverse.
   # Reprovisioning (CompositeOverwrite) is the collective reverse.

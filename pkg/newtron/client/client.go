@@ -59,7 +59,7 @@ func (c *Client) RegisterNetwork(specDir string) error {
 		ID:      c.networkID,
 		SpecDir: specDir,
 	}
-	err := c.doPost("/newtron/v1/network", body, nil)
+	err := c.doPost("/newtron/v1/networks", body, nil)
 	if err != nil {
 		if se, ok := err.(*ServerError); ok && se.StatusCode == http.StatusConflict {
 			return nil // already registered — idempotent
@@ -83,7 +83,7 @@ func (c *Client) ScaffoldNetwork(specDir, description string) error {
 		Scaffold:    true,
 		Description: description,
 	}
-	return c.doPost("/newtron/v1/network", body, nil)
+	return c.doPost("/newtron/v1/networks", body, nil)
 }
 
 // UnregisterNetwork removes a registered network from the server.
@@ -110,17 +110,17 @@ func (c *Client) ReloadNetwork() error {
 
 // networkPath returns the base path for network-scoped endpoints.
 func (c *Client) networkPath() string {
-	return "/newtron/v1/network/" + url.PathEscape(c.networkID)
+	return "/newtron/v1/networks/" + url.PathEscape(c.networkID)
 }
 
 // nodePath returns the base path for node-scoped endpoints.
 func (c *Client) nodePath(device string) string {
-	return c.networkPath() + "/node/" + url.PathEscape(device)
+	return c.networkPath() + "/nodes/" + url.PathEscape(device)
 }
 
 // interfacePath returns the base path for interface-scoped endpoints.
 func (c *Client) interfacePath(device, iface string) string {
-	return c.nodePath(device) + "/interface/" + url.PathEscape(iface)
+	return c.nodePath(device) + "/interfaces/" + url.PathEscape(iface)
 }
 
 // execQuery returns URL query params for ExecOpts.

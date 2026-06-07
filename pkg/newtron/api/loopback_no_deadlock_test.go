@@ -27,7 +27,7 @@ func (r *loopbackPortResolver) SSHPort(ctx context.Context, topology, device str
 		// Not yet wired up — test setup orders matters; return a placeholder.
 		return 22, nil
 	}
-	url := r.targetURL + "/newtron/v1/network/default/topology"
+	url := r.targetURL + "/newtron/v1/networks/default/topology"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, err
@@ -79,7 +79,7 @@ func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		url := ts.URL + "/newtron/v1/network/default/host/host1"
+		url := ts.URL + "/newtron/v1/networks/default/hosts/host1"
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
 			done <- err
@@ -93,7 +93,7 @@ func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			done <- fmt.Errorf("/host/host1: status %d", resp.StatusCode)
+			done <- fmt.Errorf("/hosts/host1: status %d", resp.StatusCode)
 			return
 		}
 		done <- nil

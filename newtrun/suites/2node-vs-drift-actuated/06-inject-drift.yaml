@@ -15,7 +15,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"}
     expect:
       jq: '.output | contains("1")'
@@ -24,6 +24,6 @@ steps:
   - name: verify-rogue-vlan-exists
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan999
+    url: /nodes/{{device}}/configdb/VLAN/Vlan999
     expect:
       jq: '.vlanid == "999"'

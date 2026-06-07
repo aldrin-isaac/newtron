@@ -5,11 +5,11 @@
     "switch1": {
       "steps": [
         {"url": "/setup-device", "params": {"fields": {"hostname": "switch1", "bgp_asn": "65001", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "source_ip": "10.0.0.1"}},
-        {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002}},
-        {"url": "/interface/Ethernet4/apply-service", "params": {"service": "local-irb", "ip_address": "10.100.1.1/24"}},
-        {"url": "/interface/Ethernet8/apply-service", "params": {"service": "local-bridge"}},
-        {"url": "/interface/Ethernet12/apply-service", "params": {"service": "l2-extend"}},
-        {"url": "/interface/Ethernet16/apply-service", "params": {"service": "overlay-irb-a"}}
+        {"url": "/interfaces/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65002}},
+        {"url": "/interfaces/Ethernet4/apply-service", "params": {"service": "local-irb", "ip_address": "10.100.1.1/24"}},
+        {"url": "/interfaces/Ethernet8/apply-service", "params": {"service": "local-bridge"}},
+        {"url": "/interfaces/Ethernet12/apply-service", "params": {"service": "l2-extend"}},
+        {"url": "/interfaces/Ethernet16/apply-service", "params": {"service": "overlay-irb-a"}}
       ],
       "ports": {
         "Ethernet0": {"admin_status": "up", "mtu": "9100"},
@@ -23,11 +23,11 @@
     "switch2": {
       "steps": [
         {"url": "/setup-device", "params": {"fields": {"hostname": "switch2", "bgp_asn": "65002", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "source_ip": "10.0.0.2"}},
-        {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.1/31", "peer_as": 65001}},
-        {"url": "/interface/Ethernet4/apply-service", "params": {"service": "local-irb", "ip_address": "10.100.1.1/24"}},
-        {"url": "/interface/Ethernet8/apply-service", "params": {"service": "local-bridge"}},
-        {"url": "/interface/Ethernet12/apply-service", "params": {"service": "l2-extend"}},
-        {"url": "/interface/Ethernet16/apply-service", "params": {"service": "overlay-irb-b"}}
+        {"url": "/interfaces/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.1/31", "peer_as": 65001}},
+        {"url": "/interfaces/Ethernet4/apply-service", "params": {"service": "local-irb", "ip_address": "10.100.1.1/24"}},
+        {"url": "/interfaces/Ethernet8/apply-service", "params": {"service": "local-bridge"}},
+        {"url": "/interfaces/Ethernet12/apply-service", "params": {"service": "l2-extend"}},
+        {"url": "/interfaces/Ethernet16/apply-service", "params": {"service": "overlay-irb-b"}}
       ],
       "ports": {
         "Ethernet0": {"admin_status": "up", "mtu": "9100"},

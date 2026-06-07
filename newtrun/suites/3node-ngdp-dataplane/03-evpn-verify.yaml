@@ -11,28 +11,28 @@ steps:
   - name: verify-vxlan-tunnel-leaf1
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
       jq: '.src_ip == "10.0.0.11"'
 
   - name: verify-vxlan-tunnel-leaf2
     action: newtron
     devices: [leaf2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
       jq: '.src_ip == "10.0.0.12"'
 
   - name: verify-vxlan-nvo
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
+    url: /nodes/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
     expect:
       jq: '.source_vtep == "vtep1"'
 
   - name: verify-bgp-l2vpn-af
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
       jq: '.exists == true'
 
@@ -43,7 +43,7 @@ steps:
   - name: verify-bgp-leaf1
     action: newtron
     devices: [leaf1]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s
@@ -53,7 +53,7 @@ steps:
   - name: verify-bgp-leaf2
     action: newtron
     devices: [leaf2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s

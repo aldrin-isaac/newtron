@@ -13,7 +13,7 @@ steps:
   - name: wait-bgp-established
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll:
       timeout: 120s
       interval: 5s
@@ -30,7 +30,7 @@ steps:
   - name: verify-health-switch1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/health
+    url: /nodes/{{device}}/health
     poll:
       timeout: 60s
       interval: 5s
@@ -40,7 +40,7 @@ steps:
   - name: verify-health-switch2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/health
+    url: /nodes/{{device}}/health
     poll:
       timeout: 60s
       interval: 5s

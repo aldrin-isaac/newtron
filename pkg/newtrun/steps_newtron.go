@@ -15,8 +15,8 @@ import (
 // URLs, optional polling, batch mode, and jq-based response evaluation.
 //
 // URL templates support {{device}} (expanded per-device by executeForDevices/
-// pollForDevices). The network prefix /network/<id> is implicit — URLs start
-// from the path after the network segment (e.g., /node/{{device}}/vlan).
+// pollForDevices). The network prefix /networks/<id> is implicit — URLs start
+// from the path after the network segment (e.g., /nodes/{{device}}/vlans).
 type newtronExecutor struct{}
 
 func (e *newtronExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
@@ -217,14 +217,14 @@ func evalJQ(expr string, data json.RawMessage, method, path string) (string, err
 }
 
 // expandURL substitutes {{device}} in a URL template and prepends the
-// /newtron/v1/network/<networkID> prefix. The api version + network prefix
+// /newtron/v1/networks/<networkID> prefix. The api version + network prefix
 // is always implicit — URLs are relative to the network
-// (e.g., /node/{{device}}/create-vlan).
+// (e.g., /nodes/{{device}}/create-vlan).
 // Both networkID and device are path-escaped for consistency with
 // client.nodePath/interfacePath.
 func expandURL(urlTemplate, networkID, device string) string {
 	path := strings.ReplaceAll(urlTemplate, "{{device}}", url.PathEscape(device))
-	return "/newtron/v1/network/" + url.PathEscape(networkID) + path
+	return "/newtron/v1/networks/" + url.PathEscape(networkID) + path
 }
 
 // hasDeviceTemplate checks if a URL template contains {{device}}.

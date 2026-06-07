@@ -109,7 +109,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/apply-service
+    url: /nodes/{{device}}/interfaces/Ethernet10/apply-service
     params:
       service: test-routed-svc
       ip_address: "10.99.0.0/31"
@@ -122,28 +122,28 @@ steps:
   - name: verify-interface-configured
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet10%7C10.99.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet10%7C10.99.0.0%2F31/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-bgp-neighbor
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.99.0.1
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.99.0.1
     expect:
       jq: '.asn == "65099"'
 
   - name: verify-route-map-created
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ROUTE_MAP
+    url: /nodes/{{device}}/configdb/ROUTE_MAP
     expect:
       jq: 'length >= 1'
 
   - name: verify-prefix-set-created
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PREFIX_SET
+    url: /nodes/{{device}}/configdb/PREFIX_SET
     expect:
       jq: 'length >= 1'
 
@@ -152,7 +152,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet10/remove-service
+    url: /nodes/{{device}}/interfaces/Ethernet10/remove-service
 
   - name: wait-for-remove
     action: wait
@@ -161,35 +161,35 @@ steps:
   - name: verify-interface-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/INTERFACE/Ethernet10%7C10.99.0.0%2F31/exists
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet10%7C10.99.0.0%2F31/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-bgp-neighbor-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.99.0.1/exists
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.99.0.1/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-route-map-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/ROUTE_MAP
+    url: /nodes/{{device}}/configdb/ROUTE_MAP
     expect:
       jq: 'length == 0'
 
   - name: verify-prefix-set-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/PREFIX_SET
+    url: /nodes/{{device}}/configdb/PREFIX_SET
     expect:
       jq: 'length == 0'
 
   - name: verify-peer-group-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_PEER_GROUP/default%7CTEST_ROUTED_SVC/exists
+    url: /nodes/{{device}}/configdb/BGP_PEER_GROUP/default%7CTEST_ROUTED_SVC/exists
     expect:
       jq: '.exists == false'
 

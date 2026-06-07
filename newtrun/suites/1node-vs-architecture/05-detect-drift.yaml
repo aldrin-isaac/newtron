@@ -18,7 +18,7 @@ steps:
   - name: drift-topology-mode
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: >-
         length >= 3
@@ -30,7 +30,7 @@ steps:
   - name: drift-missing-is-loopback
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: >-
         [.[] | select(.type == "missing")]
@@ -40,7 +40,7 @@ steps:
   - name: drift-extra-is-vlan999
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: >-
         [.[] | select(.type == "extra")]
@@ -50,7 +50,7 @@ steps:
   - name: drift-modified-is-bgp
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: >-
         [.[] | select(.type == "modified")]
@@ -61,7 +61,7 @@ steps:
   - name: drift-actuated-mode
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: >-
         length >= 3

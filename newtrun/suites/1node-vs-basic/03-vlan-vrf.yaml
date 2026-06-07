@@ -11,13 +11,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 100}
 
   - name: verify-vlan100
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == true'
 
@@ -26,13 +26,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/configure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet0/configure-interface
     params: {vlan_id: 100, tagged: true}
 
   - name: verify-vlan-member
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet0
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet0
     expect:
       jq: '.tagging_mode == "tagged"'
 
@@ -41,13 +41,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vrf
+    url: /nodes/{{device}}/create-vrf
     params: {name: Vrf_test}
 
   - name: verify-vrf
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VRF/Vrf_test/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_test/exists
     expect:
       jq: '.exists == true'
 
@@ -56,12 +56,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet0/unconfigure-interface
 
   - name: verify-member-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet0/exists
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
@@ -69,13 +69,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 100}
 
   - name: verify-vlan100-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
       jq: '.exists == false'
 
@@ -83,12 +83,12 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vrf
+    url: /nodes/{{device}}/delete-vrf
     params: {name: Vrf_test}
 
   - name: verify-vrf-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VRF/Vrf_test/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_test/exists
     expect:
       jq: '.exists == false'

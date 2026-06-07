@@ -9,7 +9,7 @@ steps:
   - name: verify-zero-drift-before
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -18,7 +18,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reconcile?reconcile=delta
+    url: /nodes/{{device}}/intent/reconcile?reconcile=delta
     expect:
       jq: '.mode == "delta" and .applied == 0'
 
@@ -26,7 +26,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -35,6 +35,6 @@ steps:
   - name: verify-zero-drift-after
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

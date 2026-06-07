@@ -12,7 +12,7 @@ steps:
   - name: pre-drift-check
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'
 
@@ -25,7 +25,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-after-reload-1
     action: wait
@@ -35,7 +35,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
     poll:
       timeout: 30s
@@ -45,7 +45,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -57,7 +57,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -66,7 +66,7 @@ steps:
   - name: drift-after-reconcile-1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'
 
@@ -79,7 +79,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/reload-config
+    url: /nodes/{{device}}/reload-config
 
   - name: wait-after-reload-2
     action: wait
@@ -89,7 +89,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/restart-daemon
+    url: /nodes/{{device}}/restart-daemon
     params: {daemon: bgp}
     poll:
       timeout: 30s
@@ -99,7 +99,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show running-config'"}
     poll:
       timeout: 30s
@@ -111,7 +111,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
     expect:
       jq: '.output | contains("3")'
@@ -120,7 +120,7 @@ steps:
   - name: drift-after-reconcile-2
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift?mode=topology
+    url: /nodes/{{device}}/intent/drift?mode=topology
     expect:
       jq: 'length == 0'
 
@@ -128,6 +128,6 @@ steps:
   - name: drift-actuated-after-reconcile-2
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

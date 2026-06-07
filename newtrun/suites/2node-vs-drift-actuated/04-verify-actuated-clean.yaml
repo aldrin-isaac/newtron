@@ -18,7 +18,7 @@ steps:
   - name: verify-drift-clean-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -28,14 +28,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan
+    url: /nodes/{{device}}/create-vlan
     params: {id: 900}
 
   # Verify the VLAN was created on the device
   - name: verify-vlan900-exists
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan900
+    url: /nodes/{{device}}/configdb/VLAN/Vlan900
     expect:
       jq: '.vlanid == "900"'
 
@@ -43,7 +43,7 @@ steps:
   - name: verify-drift-still-clean
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'
 
@@ -52,13 +52,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-vlan
+    url: /nodes/{{device}}/delete-vlan
     params: {id: 900}
 
   # Verify still clean after delete
   - name: verify-drift-clean-after-delete
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/drift
+    url: /nodes/{{device}}/intent/drift
     expect:
       jq: 'length == 0'

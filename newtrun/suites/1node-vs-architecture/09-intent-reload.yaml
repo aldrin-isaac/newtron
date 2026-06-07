@@ -13,14 +13,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-vlan?mode=topology
+    url: /nodes/{{device}}/create-vlan?mode=topology
     params: {id: 500}
 
   # Verify the unsaved VLAN appears in topology tree
   - name: verify-vlan500-in-tree
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/create-vlan")'
 
@@ -29,13 +29,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload?mode=topology
+    url: /nodes/{{device}}/intent/reload?mode=topology
 
   # After reload: VLAN 500 must be gone (unsaved mutation discarded)
   - name: verify-vlan500-gone-after-reload
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | all(.[]; .url != "/create-vlan")'
 
@@ -43,7 +43,7 @@ steps:
   - name: verify-setup-device-survives
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intent/tree?mode=topology
+    url: /nodes/{{device}}/intent/tree?mode=topology
     expect:
       jq: '.steps | any(.[]; .url == "/setup-device")'
 
@@ -53,7 +53,7 @@ steps:
   - name: verify-vlan500-not-on-device
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan500/exists
+    url: /nodes/{{device}}/configdb/VLAN/Vlan500/exists
     expect:
       jq: '.exists == false'
 
@@ -62,7 +62,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intent/reload
+    url: /nodes/{{device}}/intent/reload
     expect_failure: true
     expect:
       contains: topology mode
