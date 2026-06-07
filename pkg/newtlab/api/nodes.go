@@ -13,7 +13,7 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	node := r.PathValue("node")
 	if name == "" || node == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name and node name required"))
 		return
 	}
 	lab, err := s.openLab(r.Context(), name)
@@ -26,9 +26,9 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{
-		"topology": name,
-		"node":     node,
-		"status":   "started",
+		"lab":    name,
+		"node":   node,
+		"status": "started",
 	})
 }
 
@@ -38,7 +38,7 @@ func (s *Server) handleStopNode(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	node := r.PathValue("node")
 	if name == "" || node == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name and node name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name and node name required"))
 		return
 	}
 	lab, err := s.openLab(r.Context(), name)
@@ -51,8 +51,8 @@ func (s *Server) handleStopNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{
-		"topology": name,
-		"node":     node,
-		"status":   "stopped",
+		"lab":    name,
+		"node":   node,
+		"status": "stopped",
 	})
 }

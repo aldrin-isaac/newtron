@@ -103,7 +103,7 @@ fields on DeviceProfile are **read** by newtlab during resolution. Runtime
 connectivity values (SSH port, console port, MAC) are not written into profile
 files — spec files are newtron's data object (DESIGN_PRINCIPLES §27) and
 newtlab must not write into them. Instead, these values are exposed in `LabState`
-via `GET /newtlab/v1/topologies/{name}/status` (see [newtlab API](api.md)) and
+via `GET /newtlab/v1/labs/{name}/status` (see [newtlab API](api.md)) and
 consumed by newtron via `pkg/newtlab/client/PortResolver`.
 
 ```go
@@ -118,7 +118,7 @@ type DeviceProfile struct {
     VMImage  string `json:"vm_image,omitempty"`
     VMHost   string `json:"vm_host,omitempty"` // server pool target
 
-    // Exposed in LabState via GET /newtlab/v1/topologies/{name}/status;
+    // Exposed in LabState via GET /newtlab/v1/labs/{name}/status;
     // consumed by newtron via pkg/newtlab/client/PortResolver.
     SSHPort     int    `json:"ssh_port,omitempty"`
     ConsolePort int    `json:"console_port,omitempty"`
@@ -1161,7 +1161,7 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 5. **Boot VMs:** `StartNode(switch1, stateDir, "")` → `QEMUCommand.Build()` → `qemu-system-x86_64 -m 8192 -smp 6 -cpu host -enable-kvm -drive file=.../switch1.qcow2,... -serial tcp::12006,server,nowait -netdev user,id=mgmt,hostfwd=tcp::13006-:22 -device e1000,... -netdev socket,id=eth1,connect=127.0.0.1:10000 ...`. Same for switch2 and hostvm-0.
 6. **Bootstrap:** Switches: `BootstrapNetwork(ctx, "127.0.0.1", 12006, "aldrin", "...", "admin", "...", 600s)` — serial login, eth0 DHCP, create admin user. Host VM: `BootstrapHostNetwork(ctx, "127.0.0.1", 12000, ...)` — wait for login prompt only (Alpine auto-starts DHCP+SSH). Then `WaitForSSH()` for all 3 VMs. Inject lab SSH key.
 7. **Patches:** `ResolveBootPatches("ciscovs", "")` → `patches/ciscovs/always/*.json` for switches. `buildPatchVars()` → `{NumPorts: 6, PCIAddrs: [...], PortStride: 1, ...}`. `ApplyBootPatches()` via SSH. Host VMs have no patches (no dataplane set).
-8. **State saved.** `NodeState` for switch1 records `SSHPort: 13006`, `ConsolePort: 12006`. Runtime port values are not written into profile JSON files — newtron retrieves them at connect time via `pkg/newtlab/client/PortResolver` calling `GET /newtlab/v1/topologies/2node-ngdp/status`.
+8. **State saved.** `NodeState` for switch1 records `SSHPort: 13006`, `ConsolePort: 12006`. Runtime port values are not written into profile JSON files — newtron retrieves them at connect time via `pkg/newtlab/client/PortResolver` calling `GET /newtlab/v1/labs/2node-ngdp/status`.
 9. **Host namespaces:** `provisionHostNamespaces()` SSHs into hostvm-0, creates 6 network namespaces (host1..host6), moves data NICs, assigns IPs via auto-derivation (§4.6).
 
 ### Phase 3 — Provision

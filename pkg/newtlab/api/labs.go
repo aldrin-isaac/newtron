@@ -12,30 +12,28 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
-// handleListTopologies returns every lab newtlab knows about — anything
-// with a state directory under ~/.newtlab/labs/. Running and stopped
-// labs are both included; clients call GET /{name}/status for
-// per-node state.
-func (s *Server) handleListTopologies(w http.ResponseWriter, r *http.Request) {
+// handleListLabs returns every lab newtlab knows about — anything with
+// a state directory under ~/.newtlab/labs/. Running and stopped labs
+// are both included; clients call GET /{name}/status for per-node state.
+func (s *Server) handleListLabs(w http.ResponseWriter, r *http.Request) {
 	names, err := newtlab.ListLabs()
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("list labs: %w", err))
 		return
 	}
-	items := make([]TopologyListItem, 0, len(names))
+	items := make([]LabListItem, 0, len(names))
 	for _, n := range names {
-		items = append(items, TopologyListItem{Name: n})
+		items = append(items, LabListItem{Name: n})
 	}
 	httputil.WriteJSON(w, http.StatusOK, items)
 }
 
-// handleGetStatus returns the canonical LabState for a deployed
-// topology. Mirrors `bin/newtlab status <topology>` without the
-// rendering layer.
+// handleGetStatus returns the canonical LabState for a deployed lab.
+// Mirrors `bin/newtlab status <lab>` without the rendering layer.
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name required"))
 		return
 	}
 	lab, err := s.openLab(r.Context(), name)
@@ -53,15 +51,15 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleDeploy starts an async deploy. Returns 202 Accepted immediately
 // with the start timestamp; phase events flow to subscribers of
-// /api/topologies/{name}/events, and terminal state lands in
-// state.json (visible via GET /status).
+// /api/labs/{name}/events, and terminal state lands in state.json
+// (visible via GET /status).
 //
-// Concurrency: one active deploy per topology. The second concurrent
+// Concurrency: one active deploy per lab. The second concurrent
 // request returns 409 Conflict.
 func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name required"))
 		return
 	}
 
@@ -71,8 +69,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Query-string fallback so the simplest form
-	// `POST /api/topologies/{name}/deploy?provision=true` works without
-	// a request body — newtcon hits this from a fetch() without body.
+	// `POST /api/labs/{name}/deploy?provision=true` works without a
+	// request body — newtcon hits this from a fetch() without body.
 	if !req.Provision {
 		if v := r.URL.Query().Get("provision"); v != "" {
 			req.Provision, _ = strconv.ParseBool(v)
@@ -94,7 +92,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		lab.FilterHost(req.Host)
 	}
 
-	// Acquire the per-topology slot. context.Background() because the
+	// Acquire the per-lab slot. context.Background() because the
 	// deploy outlives this HTTP request.
 	deployCtx, release, err := s.registry.Acquire(context.Background(), name)
 	if err != nil {
@@ -145,8 +143,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	httputil.WriteJSON(w, http.StatusAccepted, DeployResponse{
-		Topology: name,
-		Started:  started.Format(time.RFC3339),
+		Lab:     name,
+		Started: started.Format(time.RFC3339),
 	})
 }
 
@@ -156,7 +154,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name required"))
 		return
 	}
 	lab, err := s.openLab(r.Context(), name)
@@ -168,7 +166,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("destroy %s: %w", name, err))
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "destroyed"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"lab": name, "status": "destroyed"})
 }
 
 // handleProvision runs newtlab's post-deploy provisioning pass on an
@@ -177,7 +175,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("topology name required"))
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name required"))
 		return
 	}
 	parallel := 1
@@ -195,19 +193,19 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("provision %s: %w", name, err))
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"topology": name, "status": "provisioned"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"lab": name, "status": "provisioned"})
 }
 
-// openLab resolves a topology name to a *newtlab.Lab. Spec data is
-// consumed from newtron-server via the configured NewtronClient
-// (§27 — newtron owns spec files).
+// openLab resolves a lab name to a *newtlab.Lab. Spec data is consumed
+// from newtron-server via the configured NewtronClient (§27 — newtron
+// owns spec files).
 func (s *Server) openLab(ctx context.Context, name string) (*newtlab.Lab, error) {
 	if s.cfg.NewtronClient == nil {
 		return nil, fmt.Errorf("newtlab-server has no newtron client configured; pass --newtron-server when starting")
 	}
 	lab, err := newtlab.NewLab(ctx, s.cfg.NewtronClient, name)
 	if err != nil {
-		return nil, fmt.Errorf("topology %q: %w", name, err)
+		return nil, fmt.Errorf("lab %q: %w", name, err)
 	}
 	return lab, nil
 }

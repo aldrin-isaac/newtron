@@ -359,7 +359,7 @@ func (net *Network) ProbeOnline(ctx context.Context, device string) (bool, Onlin
 	if err != nil {
 		// Dispatch on the sonic.NotReadyError marker interface so this
 		// package stays decoupled from the resolver impl package (§33,
-		// §34). newtlab/client's *NotInTopologyError implements it; other
+		// §34). newtlab/client's *NotInLabError implements it; other
 		// resolver impls leave it unimplemented and fall through to
 		// "unreachable."
 		var notReady sonic.NotReadyError

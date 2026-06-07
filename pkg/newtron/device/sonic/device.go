@@ -30,7 +30,7 @@ type PortResolver interface {
 // return — because satisfying the interface IS the entire signal. This
 // avoids the trap of a bool method that every impl hardcodes to true.
 //
-// newtlab's resolver implements this on its NotInTopologyError type. Other
+// newtlab's resolver implements this on its NotInLabError type. Other
 // resolvers (real-hardware, tests) leave it unimplemented and the
 // classification falls through to "unreachable."
 type NotReadyError interface {

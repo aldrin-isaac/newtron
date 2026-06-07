@@ -57,7 +57,7 @@ func TestHealthEndpointReturnsOK(t *testing.T) {
 	}
 }
 
-func TestListTopologiesEmptyWhenNoLabsDeployed(t *testing.T) {
+func TestListLabsEmptyWhenNoLabsDeployed(t *testing.T) {
 	// ListLabs reads ~/.newtlab/labs/. Override HOME to a temp dir so
 	// the test doesn't see the developer's real labs.
 	t.Setenv("HOME", t.TempDir())
@@ -66,9 +66,9 @@ func TestListTopologiesEmptyWhenNoLabsDeployed(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Get(ts.URL + "/newtlab/v1/topologies")
+	resp, err := ts.Client().Get(ts.URL + "/newtlab/v1/labs")
 	if err != nil {
-		t.Fatalf("GET /api/topologies: %v", err)
+		t.Fatalf("GET /api/labs: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -88,13 +88,13 @@ func TestListTopologiesEmptyWhenNoLabsDeployed(t *testing.T) {
 	}
 }
 
-func TestStatusMissingTopologyReturns404(t *testing.T) {
+func TestStatusMissingLabReturns404(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	s := newTestServer(t)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Get(ts.URL + "/newtlab/v1/topologies/no-such-topo/status")
+	resp, err := ts.Client().Get(ts.URL + "/newtlab/v1/labs/no-such-lab/status")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestDeployMissingNameReturns404(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Post(ts.URL+"/newtlab/v1/topologies//deploy", "application/json", nil)
+	resp, err := ts.Client().Post(ts.URL+"/newtlab/v1/labs//deploy", "application/json", nil)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
