@@ -110,7 +110,7 @@ func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
 `/intent/...` routes:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/nodes/{device}/intent/projection", s.handleProjection)
+mux.HandleFunc("GET /networks/{netID}/nodes/{device}/intent/projection", s.handleProjection)
 ```
 
 **Tests:** `pkg/newtron/api/api_test.go` — assert the endpoint
@@ -245,7 +245,7 @@ the diff. Matches `handleReload` (`handler_node.go:1146`).
 **Route** in `handler.go`:
 
 ```go
-mux.HandleFunc("POST /network/{netID}/nodes/{device}/intent/projection-diff", s.handleProjectionDiff)
+mux.HandleFunc("POST /networks/{netID}/nodes/{device}/intent/projection-diff", s.handleProjectionDiff)
 ```
 
 **Tests:** empty ops list returns `Before == After` with empty
@@ -379,10 +379,10 @@ verify against existing network-level handlers during
 implementation.)
 
 **Route** in `handler.go`, alongside other
-`/network/{netID}/services/...` routes:
+`/networks/{netID}/services/...` routes:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/services/{service}/projection", s.handleServiceProjection)
+mux.HandleFunc("GET /networks/{netID}/services/{service}/projection", s.handleServiceProjection)
 ```
 
 **Tests:** for each service kind (`routed`, `bridged`,

@@ -219,7 +219,7 @@ steps:
     action: newtron
     devices: all
     method: GET
-    url: /node/{{device}}/bgp/check
+    url: /nodes/{{device}}/bgp/check
     poll: { timeout: 90s, interval: 5s }
     expect: { jq: '.data | all(.status == "established")' }
 ```
@@ -234,14 +234,14 @@ steps:
   - name: set-admin-status
     action: newtron
     method: POST
-    url: /node/{{target.device}}/interface/{{target.interface}}/set-property
+    url: /nodes/{{target.device}}/interfaces/{{target.interface}}/set-property
     params:
       property: admin_status
       value: "{{param.admin_status}}"
   - name: verify-admin-status
     action: newtron
     method: GET
-    url: /node/{{target.device}}/interface/{{target.interface}}
+    url: /nodes/{{target.device}}/interfaces/{{target.interface}}
     expect:
       # No quotes around {{param.admin_status}} — the template engine
       # emits "up" (JSON-quoted) when admin_status is a string.

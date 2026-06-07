@@ -369,7 +369,7 @@ func TestIntentToStep_InterfaceLevel(t *testing.T) {
 	})
 
 	if step.URL != "/interfaces/Ethernet0/apply-service" {
-		t.Errorf("URL = %q, want /interface/Ethernet0/apply-service", step.URL)
+		t.Errorf("URL = %q, want /interfaces/Ethernet0/apply-service", step.URL)
 	}
 	// apply-service maps service_name → service
 	if step.Params["service"] != "transit" {
@@ -484,7 +484,7 @@ func TestIntentToStep_ConfigureInterface(t *testing.T) {
 	})
 
 	if step.URL != "/interfaces/Ethernet0/configure-interface" {
-		t.Errorf("URL = %q, want /interface/Ethernet0/configure-interface", step.URL)
+		t.Errorf("URL = %q, want /interfaces/Ethernet0/configure-interface", step.URL)
 	}
 	if step.Params["vrf"] != "Vrf_TRANSIT" {
 		t.Errorf("Params[vrf] = %v, want Vrf_TRANSIT", step.Params["vrf"])
@@ -545,7 +545,7 @@ func TestIntentToStep_SetProperty(t *testing.T) {
 	})
 
 	if step.URL != "/interfaces/Ethernet0/set-property" {
-		t.Errorf("URL = %q, want /interface/Ethernet0/set-property", step.URL)
+		t.Errorf("URL = %q, want /interfaces/Ethernet0/set-property", step.URL)
 	}
 	if step.Params["property"] != "mtu" {
 		t.Errorf("Params[property] = %v, want mtu", step.Params["property"])
@@ -617,7 +617,7 @@ func TestIntentToStep_AddBGPPeer(t *testing.T) {
 	})
 
 	if step.URL != "/interfaces/Ethernet0/add-bgp-peer" {
-		t.Errorf("URL = %q, want /interface/Ethernet0/add-bgp-peer", step.URL)
+		t.Errorf("URL = %q, want /interfaces/Ethernet0/add-bgp-peer", step.URL)
 	}
 	if step.Params["neighbor_ip"] != "10.1.1.2" {
 		t.Errorf("Params[neighbor_ip] = %v, want 10.1.1.2", step.Params["neighbor_ip"])
@@ -643,7 +643,7 @@ func TestIntentToStep_BindACL(t *testing.T) {
 	})
 
 	if step.URL != "/interfaces/Ethernet0/bind-acl" {
-		t.Errorf("URL = %q, want /interface/Ethernet0/bind-acl", step.URL)
+		t.Errorf("URL = %q, want /interfaces/Ethernet0/bind-acl", step.URL)
 	}
 	if step.Params["acl_name"] != "PROTECT_RE" {
 		t.Errorf("Params[acl_name] = %v, want PROTECT_RE", step.Params["acl_name"])

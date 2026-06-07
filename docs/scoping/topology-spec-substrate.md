@@ -13,7 +13,7 @@ network's structural shape (devices and links). Per
 `DESIGN_PRINCIPLES_NEWTRON.md` §7, topology is a network-scoped
 definition newtron owns.
 
-- [newtron#14](https://github.com/aldrin-isaac/newtron/issues/14) — Full topology read endpoint (`GET /network/{netID}/topology`)
+- [newtron#14](https://github.com/aldrin-isaac/newtron/issues/14) — Full topology read endpoint (`GET /networks/{netID}/topology`)
 - [newtron#15](https://github.com/aldrin-isaac/newtron/issues/15) — Topology node CRUD (`create-node`, `delete-node`, `update-node`)
 - [newtron#16](https://github.com/aldrin-isaac/newtron/issues/16) — Topology link CRUD (`create-link`, `delete-link`)
 
@@ -126,7 +126,7 @@ links, metadata).
 `/topology/nodes` route:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/topology", s.handleTopology)
+mux.HandleFunc("GET /networks/{netID}/topology", s.handleTopology)
 ```
 
 **Tests:** assert round-trip JSON shape matches `TopologySpecFile`;
@@ -212,9 +212,9 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 **Routes** in `pkg/newtron/api/handler.go`:
 
 ```go
-mux.HandleFunc("POST /network/{netID}/topology/create-node", s.handleCreateTopologyNode)
-mux.HandleFunc("DELETE /network/{netID}/topology/nodes/{name}", s.handleDeleteTopologyNode)
-mux.HandleFunc("PUT /network/{netID}/topology/nodes/{name}", s.handleUpdateTopologyNode)
+mux.HandleFunc("POST /networks/{netID}/topology/create-node", s.handleCreateTopologyNode)
+mux.HandleFunc("DELETE /networks/{netID}/topology/nodes/{name}", s.handleDeleteTopologyNode)
+mux.HandleFunc("PUT /networks/{netID}/topology/nodes/{name}", s.handleUpdateTopologyNode)
 ```
 
 **Request types** in `pkg/newtron/api/types.go`:
@@ -292,8 +292,8 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 **Routes:**
 
 ```go
-mux.HandleFunc("POST /network/{netID}/topology/create-link", s.handleCreateTopologyLink)
-mux.HandleFunc("DELETE /network/{netID}/topology/link", s.handleDeleteTopologyLink)
+mux.HandleFunc("POST /networks/{netID}/topology/create-link", s.handleCreateTopologyLink)
+mux.HandleFunc("DELETE /networks/{netID}/topology/link", s.handleDeleteTopologyLink)
 ```
 
 `DELETE` takes the body convention (avoids URL-escaping

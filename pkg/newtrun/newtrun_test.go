@@ -757,14 +757,14 @@ steps:
   - name: apply-service
     action: newtron
     devices: [leaf1]
-    url: /nodes/{{device}}/interface/Ethernet0/service
+    url: /nodes/{{device}}/interfaces/Ethernet0/service
     method: POST
     params:
       service: transit
   - name: remove-service
     action: newtron
     devices: [leaf1]
-    url: /nodes/{{device}}/interface/Ethernet0/service
+    url: /nodes/{{device}}/interfaces/Ethernet0/service
     method: DELETE
 `)
 

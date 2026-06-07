@@ -77,7 +77,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 
 | Method | Path | What it does |
 |--------|------|--------------|
-| POST | `/network/{n}/nodes/{d}/init-device` | Initialize device (clean factory config) |
+| POST | `/networks/{n}/nodes/{d}/init-device` | Initialize device (clean factory config) |
 
 Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/reconcile?mode=topology` (S11).
 
@@ -346,7 +346,7 @@ See [S3 Server Management](#3-server-management).
 ```bash
 # Per-device: clean factory CONFIG_DB, then load topology spec and deliver
 curl -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/init-device
-curl -X POST 'http://localhost:18080/newtron/v1/networks/default/node/switch1/intent/reconcile?mode=topology'
+curl -X POST 'http://localhost:18080/newtron/v1/networks/default/nodes/switch1/intent/reconcile?mode=topology'
 ```
 
 This is the canonical "spec → device" path: init-device clears factory entries,
@@ -370,7 +370,7 @@ See [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Apply a service to an interface
-curl -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/interface/Ethernet0/apply-service \
+curl -X POST http://localhost:18080/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service \
   -H "Content-Type: application/json" \
   -d '{"service": "customer-l3", "ip_address": "10.1.1.1/30"}'
 ```
@@ -384,7 +384,7 @@ See [S12 Interface Operations](#12-interface-operations).
 ```bash
 # Post-facto: confirm projection (intent replay) matches device CONFIG_DB.
 # Empty drift array ≡ every newtron write is actualized on the device.
-curl http://localhost:18080/newtron/v1/networks/default/node/switch1/intent/drift
+curl http://localhost:18080/newtron/v1/networks/default/nodes/switch1/intent/drift
 
 # Check a specific route in the forwarding table
 curl http://localhost:18080/newtron/v1/networks/default/node/switch1/route/default/10.1.1.0/30
@@ -404,10 +404,10 @@ curl -X POST 'http://localhost:18080/newtron/v1/networks/default/node/switch1/cr
   -d '{"id": 200, "description": "New VLAN"}'
 
 # Refresh a service after spec changes
-curl -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/interface/Ethernet0/refresh-service
+curl -X POST http://localhost:18080/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/refresh-service
 
 # Remove a service
-curl -X POST http://localhost:18080/newtron/v1/networks/default/node/switch1/interface/Ethernet0/remove-service
+curl -X POST http://localhost:18080/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/remove-service
 ```
 
 ### Batching multiple operations
@@ -1407,7 +1407,7 @@ provisioning pipeline — provisioning and reconciliation are two sides of the s
 coin (substrate-faithful, §46): the only difference is whether the projection
 starts from topology spec (provisioning) or from the device's existing intents
 (maintenance reconcile). For network-wide provisioning, iterate over
-`/network/{n}/topology/nodes` and call init-device + intent/reconcile per node.
+`/networks/{n}/topology/nodes` and call init-device + intent/reconcile per node.
 
 ### POST /newtron/v1/networks/{netID}/nodes/{device}/init-device
 
@@ -2360,7 +2360,7 @@ before do) at the substrate level.
 **Example:**
 
 ```
-POST /newtron/v1/networks/default/node/switch1/intent/projection-diff
+POST /newtron/v1/networks/default/nodes/switch1/intent/projection-diff
 {
   "operations": [
     { "url": "/create-vlan", "params": { "vlan_id": 100 } }
@@ -2425,8 +2425,8 @@ verb has a reverse already; the operator composes them per task).
 
 Per-device drift detection is exposed via `GET /intent/drift` (under
 the Intent operations group above; documented in §11 Wired intent
-operations). There is no network-wide `/network/{n}/drift` endpoint;
-operators iterate over `/network/{n}/topology/nodes` and call
+operations). There is no network-wide `/networks/{n}/drift` endpoint;
+operators iterate over `/networks/{n}/topology/nodes` and call
 `/intent/drift` per node.
 
 ### Device status — operator badge (issue #75A) {#device-status}
@@ -2532,7 +2532,7 @@ on the service type.
 **Example:**
 
 ```
-POST /newtron/v1/networks/default/node/switch1/interface/Ethernet0/apply-service
+POST /newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service
 {
   "service": "customer-l3",
   "ip_address": "10.1.1.1/30"

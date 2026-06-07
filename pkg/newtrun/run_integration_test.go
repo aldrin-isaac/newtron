@@ -20,7 +20,7 @@ import (
 // fired and each StepResult carries its TargetBinding.
 //
 // The scenario uses `wait` so it runs without a newtron-server
-// dependency. A faux GET /network/<id>/info handler stands in for
+// dependency. A faux GET /networks/<id>/info handler stands in for
 // newtron-server so connectToServer succeeds.
 func TestRun_ParameterizedSuite_EndToEnd(t *testing.T) {
 	scenariosDir := t.TempDir()

@@ -662,7 +662,7 @@ steps:
   - name: set-admin-status
     action: newtron
     method: POST
-    url: /node/{{target.device}}/interface/{{target.interface}}/set-property
+    url: /nodes/{{target.device}}/interfaces/{{target.interface}}/set-property
     params:
       property: admin_status
       value: "{{param.admin_status}}"
@@ -670,7 +670,7 @@ steps:
   - name: verify-admin-status
     action: newtron
     method: GET
-    url: /node/{{target.device}}/interface/{{target.interface}}
+    url: /nodes/{{target.device}}/interfaces/{{target.interface}}
     expect:
       # No quotes around {{param.admin_status}} — the template engine
       # emits "up" (JSON-quoted) when admin_status is a string.
@@ -831,12 +831,12 @@ Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (c
 URLs start from the path after the network segment. The `newtron` action calls newtron-server, so the `/newtron/v1/networks/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
 
 ```yaml
-url: /node/{{device}}/health             # → /newtron/v1/networks/<id>/node/switch1/health
-url: /node/{{device}}/bgp/check          # → /newtron/v1/networks/<id>/node/switch1/bgp/check
-url: /node/{{device}}/create-vlan        # → /newtron/v1/networks/<id>/node/switch1/create-vlan
+url: /nodes/{{device}}/health             # → /newtron/v1/networks/<id>/node/switch1/health
+url: /nodes/{{device}}/bgp/check          # → /newtron/v1/networks/<id>/node/switch1/bgp/check
+url: /nodes/{{device}}/create-vlan        # → /newtron/v1/networks/<id>/node/switch1/create-vlan
 ```
 
-newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlan`, `/vlans/{id}`, `/interface/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
+newtron-server uses RPC-style verb-in-URL routes for mutating calls (`create-vlan`, `delete-vlan`, `apply-service`, `remove-service`, etc.) and resource-style GETs for reads (`/vlans`, `/vlans/{id}`, `/interfaces/{name}`). Check the handler list at `pkg/newtron/api/handler.go` when authoring new scenarios — there is no REST collection endpoint for VLAN, service, or VRF mutations.
 
 If the URL contains `{{device}}`, the call runs in parallel across target devices. If not, it runs once with no device scoping (network-level operations like creating specs).
 
@@ -858,14 +858,14 @@ Default. Makes a single HTTP call per device.
 - name: check-health
   action: newtron
   devices: [switch1]
-  url: /node/{{device}}/health
+  url: /nodes/{{device}}/health
 
 # POST with params (request body)
 - name: create-vlan
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/create-vlan
+  url: /nodes/{{device}}/create-vlan
   params: {id: 100}
 
 # Removal is POST to the remove-* verb, not DELETE on the resource
@@ -873,7 +873,7 @@ Default. Makes a single HTTP call per device.
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/interface/Ethernet12/remove-service
+  url: /nodes/{{device}}/interfaces/Ethernet12/remove-service
 ```
 
 #### Polling mode
@@ -884,7 +884,7 @@ When `poll` is set, the call repeats at the given interval until `expect.jq` ret
 - name: verify-bgp
   action: newtron
   devices: all
-  url: /node/{{device}}/bgp/check
+  url: /nodes/{{device}}/bgp/check
   poll:
     timeout: 120s
     interval: 5s
@@ -904,13 +904,13 @@ During polling, HTTP errors are treated as "not ready yet" — the action keeps 
   devices: [switch1]
   batch:
     - method: POST
-      url: /node/{{device}}/create-vlan
+      url: /nodes/{{device}}/create-vlan
       params: {id: 200}
     - method: POST
-      url: /node/{{device}}/interface/Ethernet4/configure-interface
+      url: /nodes/{{device}}/interfaces/Ethernet4/configure-interface
       params: {vlan_id: 200, tagged: false}
     - method: POST
-      url: /node/{{device}}/interface/Ethernet12/configure-interface
+      url: /nodes/{{device}}/interfaces/Ethernet12/configure-interface
       params: {vlan_id: 200, tagged: false}
 ```
 
@@ -956,7 +956,7 @@ Inverts pass/fail. Use to assert that an operation correctly refuses:
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/create-vlan
+  url: /nodes/{{device}}/create-vlan
   params: {id: 999}
   expect_failure: true
 ```
@@ -1036,7 +1036,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/ssh-command
+  url: /nodes/{{device}}/ssh-command
   params: {command: "vtysh -c 'show ip bgp summary'"}
   expect:
     jq: '.output | contains("Established")'
@@ -1049,7 +1049,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
 - name: check-loopback
   action: newtron
   devices: [switch1]
-  url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+  url: /nodes/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
   expect:
     jq: '.exists == true'
 
@@ -1057,7 +1057,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
 - name: check-bgp-globals
   action: newtron
   devices: [switch1]
-  url: /node/{{device}}/configdb/BGP_GLOBALS/default
+  url: /nodes/{{device}}/configdb/BGP_GLOBALS/default
   expect:
     jq: '.local_asn == "65001" and .router_id == "10.0.0.1"'
 
@@ -1065,7 +1065,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
 - name: check-binding-removed
   action: newtron
   devices: [switch1]
-  url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
+  url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
   expect:
     jq: '.exists == false'
 ```
@@ -1078,7 +1078,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/create-vlan
+  url: /nodes/{{device}}/create-vlan
   params: {id: 100}
 
 # Add an untagged member (members are an interface-side operation,
@@ -1087,7 +1087,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/interface/Ethernet4/configure-interface
+  url: /nodes/{{device}}/interfaces/Ethernet4/configure-interface
   params: {vlan_id: 100, tagged: false}
 
 # Delete
@@ -1095,7 +1095,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/delete-vlan
+  url: /nodes/{{device}}/delete-vlan
   params: {id: 100}
 ```
 
@@ -1106,14 +1106,14 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/create-vrf
+  url: /nodes/{{device}}/create-vrf
   params: {name: Vrf_local}
 
 - name: delete-vrf
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/delete-vrf
+  url: /nodes/{{device}}/delete-vrf
   params: {name: Vrf_local}
 ```
 
@@ -1124,14 +1124,14 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/interface/Ethernet12/apply-service
+  url: /nodes/{{device}}/interfaces/Ethernet12/apply-service
   params: {service: l2-extend}
 
 - name: remove-service
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/interface/Ethernet12/remove-service
+  url: /nodes/{{device}}/interfaces/Ethernet12/remove-service
 ```
 
 **BGP verification (poll while sessions converge):**
@@ -1140,7 +1140,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
 - name: verify-bgp
   action: newtron
   devices: all
-  url: /node/{{device}}/bgp/check
+  url: /nodes/{{device}}/bgp/check
   poll:
     timeout: 120s
     interval: 5s
@@ -1154,7 +1154,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
 - name: verify-health
   action: newtron
   devices: [switch1]
-  url: /node/{{device}}/health
+  url: /nodes/{{device}}/health
   poll:
     timeout: 60s
     interval: 5s
@@ -1168,7 +1168,7 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
 - name: check-drift
   action: newtron
   devices: [switch1]
-  url: /node/{{device}}/intent/drift
+  url: /nodes/{{device}}/intent/drift
   expect:
     jq: '.status == "clean"'
 ```
@@ -1218,7 +1218,7 @@ Adapted from the 2node-vs-primitive suite (`newtrun/suites/2node-vs-primitive/10
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/create-vlan
+  url: /nodes/{{device}}/create-vlan
   params: {id: 100}
 
 # Add members via the interface verb (no /vlans/{id}/member collection endpoint)
@@ -1226,14 +1226,14 @@ Adapted from the 2node-vs-primitive suite (`newtrun/suites/2node-vs-primitive/10
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/interface/Ethernet4/configure-interface
+  url: /nodes/{{device}}/interfaces/Ethernet4/configure-interface
   params: {vlan_id: 100, tagged: false}
 
 - name: configure-host3-port
   action: newtron
   devices: [switch1]
   method: POST
-  url: /node/{{device}}/interface/Ethernet12/configure-interface
+  url: /nodes/{{device}}/interfaces/Ethernet12/configure-interface
   params: {vlan_id: 100, tagged: false}
 
 # Wait for ASIC programming
@@ -1407,7 +1407,7 @@ BGP sessions take time to establish after provisioning. Increase the poll timeou
 - name: verify-bgp
   action: newtron
   devices: all
-  url: /node/{{device}}/bgp/check
+  url: /nodes/{{device}}/bgp/check
   poll:
     timeout: 180s    # was 120s
     interval: 5s

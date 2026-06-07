@@ -978,7 +978,7 @@ type ConflictError = util.ConflictError
 
 ## 4. HTTP API Reference
 
-All routes follow the pattern `/network/{netID}/...` for spec operations and `/network/{netID}/nodes/{device}/...` for device operations. The `?mode=topology` query parameter selects topology mode (offline abstract node); default is actuated mode (online device). Write operations use `?execute=true` to apply (default is dry-run preview).
+All routes follow the pattern `/networks/{netID}/...` for spec operations and `/networks/{netID}/nodes/{device}/...` for device operations. The `?mode=topology` query parameter selects topology mode (offline abstract node); default is actuated mode (online device). Write operations use `?execute=true` to apply (default is dry-run preview).
 
 Middleware chain (outer → inner): `withRecovery` → `withLogger` → `withRequestID` → `withTimeout(5min)` → `withMode` → mux.
 
@@ -988,8 +988,8 @@ Middleware chain (outer → inner): `withRecovery` → `withLogger` → `withReq
 |--------|------|---------|---------|
 | POST | `/network` | `handleRegisterNetwork` | Register a network (loads spec dir) |
 | GET | `/network` | `handleListNetworks` | List registered networks |
-| POST | `/network/{netID}/unregister` | `handleUnregisterNetwork` | Unregister a network |
-| POST | `/network/{netID}/reload` | `handleReloadNetwork` | Reload network specs from disk |
+| POST | `/networks/{netID}/unregister` | `handleUnregisterNetwork` | Unregister a network |
+| POST | `/networks/{netID}/reload` | `handleReloadNetwork` | Reload network specs from disk |
 
 ### 4.2 Network Spec Reads
 
@@ -997,34 +997,34 @@ List/show pairs for all spec types. Response types from §3.9.
 
 | Method | Path | Response Type |
 |--------|------|---------------|
-| GET | `/network/{netID}/services` | `[]ServiceDetail` |
-| GET | `/network/{netID}/services/{name}` | `ServiceDetail` |
-| GET | `/network/{netID}/services/{name}/projection` | `map[string]RawConfigDB` (per-Node projection slice the service contributes, replay-diff) |
-| GET | `/network/{netID}/ipvpns` | `[]IPVPNDetail` |
-| GET | `/network/{netID}/ipvpns/{name}` | `IPVPNDetail` |
-| GET | `/network/{netID}/macvpns` | `[]MACVPNDetail` |
-| GET | `/network/{netID}/macvpns/{name}` | `MACVPNDetail` |
-| GET | `/network/{netID}/qos-policies` | `[]QoSPolicyDetail` |
-| GET | `/network/{netID}/qos-policies/{name}` | `QoSPolicyDetail` |
-| GET | `/network/{netID}/filters` | `[]FilterDetail` |
-| GET | `/network/{netID}/filters/{name}` | `FilterDetail` |
-| GET | `/network/{netID}/route-policies` | `[]RoutePolicyDetail` |
-| GET | `/network/{netID}/route-policies/{name}` | `RoutePolicyDetail` |
-| GET | `/network/{netID}/prefix-lists` | `[]PrefixListDetail` |
-| GET | `/network/{netID}/prefix-lists/{name}` | `PrefixListDetail` |
-| GET | `/network/{netID}/platforms` | `[]PlatformDetail` |
-| GET | `/network/{netID}/platforms/{name}` | `PlatformDetail` |
-| GET | `/network/{netID}/profiles` | `[]DeviceProfileDetail` |
-| GET | `/network/{netID}/profiles/{name}` | `DeviceProfileDetail` |
-| GET | `/network/{netID}/zones` | `[]ZoneDetail` |
-| GET | `/network/{netID}/zones/{name}` | `ZoneDetail` |
-| GET | `/network/{netID}/hosts/{name}` | `HostProfile` |
-| GET | `/network/{netID}/topology` | `TopologySpecFile` (full topology — devices, links, metadata) |
-| GET | `/network/{netID}/topology/nodes` | `[]string` (device names) |
-| GET | `/network/{netID}/features` | Feature list |
-| GET | `/network/{netID}/features/{name}/dependency` | Feature dependencies |
-| GET | `/network/{netID}/features/{name}/unsupported-due-to` | Transitive unsupported |
-| GET | `/network/{netID}/platforms/{name}/supports/{feature}` | `bool` |
+| GET | `/networks/{netID}/services` | `[]ServiceDetail` |
+| GET | `/networks/{netID}/services/{name}` | `ServiceDetail` |
+| GET | `/networks/{netID}/services/{name}/projection` | `map[string]RawConfigDB` (per-Node projection slice the service contributes, replay-diff) |
+| GET | `/networks/{netID}/ipvpns` | `[]IPVPNDetail` |
+| GET | `/networks/{netID}/ipvpns/{name}` | `IPVPNDetail` |
+| GET | `/networks/{netID}/macvpns` | `[]MACVPNDetail` |
+| GET | `/networks/{netID}/macvpns/{name}` | `MACVPNDetail` |
+| GET | `/networks/{netID}/qos-policies` | `[]QoSPolicyDetail` |
+| GET | `/networks/{netID}/qos-policies/{name}` | `QoSPolicyDetail` |
+| GET | `/networks/{netID}/filters` | `[]FilterDetail` |
+| GET | `/networks/{netID}/filters/{name}` | `FilterDetail` |
+| GET | `/networks/{netID}/route-policies` | `[]RoutePolicyDetail` |
+| GET | `/networks/{netID}/route-policies/{name}` | `RoutePolicyDetail` |
+| GET | `/networks/{netID}/prefix-lists` | `[]PrefixListDetail` |
+| GET | `/networks/{netID}/prefix-lists/{name}` | `PrefixListDetail` |
+| GET | `/networks/{netID}/platforms` | `[]PlatformDetail` |
+| GET | `/networks/{netID}/platforms/{name}` | `PlatformDetail` |
+| GET | `/networks/{netID}/profiles` | `[]DeviceProfileDetail` |
+| GET | `/networks/{netID}/profiles/{name}` | `DeviceProfileDetail` |
+| GET | `/networks/{netID}/zones` | `[]ZoneDetail` |
+| GET | `/networks/{netID}/zones/{name}` | `ZoneDetail` |
+| GET | `/networks/{netID}/hosts/{name}` | `HostProfile` |
+| GET | `/networks/{netID}/topology` | `TopologySpecFile` (full topology — devices, links, metadata) |
+| GET | `/networks/{netID}/topology/nodes` | `[]string` (device names) |
+| GET | `/networks/{netID}/features` | Feature list |
+| GET | `/networks/{netID}/features/{name}/dependency` | Feature dependencies |
+| GET | `/networks/{netID}/features/{name}/unsupported-due-to` | Transitive unsupported |
+| GET | `/networks/{netID}/platforms/{name}/supports/{feature}` | `bool` |
 
 ### 4.3 Network Spec Writes
 
@@ -1064,7 +1064,7 @@ RPC-style POST endpoints. Each creates or deletes a spec object and persists to 
 | POST | `.../topology/create-link` | `*TopologyLink` body — adds link to topology |
 | DELETE | `.../topology/links/{device}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |
 
-All paths above are prefixed with `/network/{netID}`.
+All paths above are prefixed with `/networks/{netID}`.
 
 ### 4.4 Device Init
 
@@ -1103,7 +1103,7 @@ Response types from §3.2–3.5. These dispatch via `connectAndRead` — the act
 | GET | `.../nodes/{device}/configdb/{table}/{key}/exists` | `{exists: bool}` |
 | GET | `.../nodes/{device}/statedb/{table}/{key}` | `map[string]string` |
 
-All paths prefixed with `/network/{netID}`.
+All paths prefixed with `/networks/{netID}`.
 
 ### 4.6 Node Writes
 
@@ -1174,7 +1174,7 @@ Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `Wri
 | POST | `.../interfaces/{name}/apply-qos` | `ApplyQoS` |
 | POST | `.../interfaces/{name}/remove-qos` | `RemoveQoS` |
 
-All paths prefixed with `/network/{netID}/node/{device}`.
+All paths prefixed with `/networks/{netID}/node/{device}`.
 
 ---
 
