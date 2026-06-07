@@ -76,8 +76,7 @@ func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
 // Returns 201 on create, 409 if the suite already exists, 400 on
 // invalid name. If the suite manifest write fails after the directory
 // was created, the directory is rolled back so the operator doesn't
-// inherit an orphaned dir — same transactional shape as
-// handleCreateTopology (§23 codebase idiom).
+// inherit an orphaned dir.
 func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 	var req CreateSuiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
