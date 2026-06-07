@@ -64,7 +64,7 @@ steps:
   - name: verify-route-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/route/default/10.20.1.0/31
+    url: /nodes/{{device}}/routes/default/10.20.1.0/31
     poll:
       timeout: 60s
       interval: 5s
@@ -74,7 +74,7 @@ steps:
   - name: verify-route-sw2
     action: newtron
     devices: [switch2]
-    url: /nodes/{{device}}/route/default/10.20.0.0/31
+    url: /nodes/{{device}}/routes/default/10.20.0.0/31
     poll:
       timeout: 60s
       interval: 5s
