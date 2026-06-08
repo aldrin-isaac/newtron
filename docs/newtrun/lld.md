@@ -942,7 +942,7 @@ Honors `step.Expect.SuccessRate` for ping commands: parses the "N% packet loss" 
 
 ### 10.4 provisionExecutor
 
-Action: `topology-reconcile`. Calls `POST /network/{netID}/nodes/{device}/intent/reconcile?mode=topology` once per device through `Client.Reconcile`. The reconcile is one call — the newtron-server handles ConfigReload, lock, ReplaceAll, and SaveConfig internally — not deploy+reconcile+verify on the client side. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
+Action: `topology-reconcile`. Calls `POST /networks/{netID}/nodes/{device}/intent/reconcile?mode=topology` once per device through `Client.Reconcile`. The reconcile is one call — the newtron-server handles ConfigReload, lock, ReplaceAll, and SaveConfig internally — not deploy+reconcile+verify on the client side. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
 
 ### 10.5 Multi-device helpers
 

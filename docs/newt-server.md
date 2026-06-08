@@ -34,7 +34,7 @@ unchanged.
 | `--net-id` | `default` | Network ID for `--spec-dir`. |
 | `--idle-timeout` | `5m` | newtron SSH connection idle timeout. |
 | `--suites-base` | `newtrun/suites` | Forwarded to newtrun. |
-| `--topologies-base` | `newtrun/topologies` | Shared by newtrun and newtlab. |
+| `--topologies-base` | `newtrun/topologies` | Used by newtlab for lab-spec resolution (the on-disk path it walks to find a `topology.json` for a deploy). |
 
 ## newt-server vs standalone binaries
 

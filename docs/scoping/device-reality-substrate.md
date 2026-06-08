@@ -127,7 +127,7 @@ func (s *Server) handleConfigDBSnapshot(w http.ResponseWriter, r *http.Request) 
 `/configdb/...` routes:
 
 ```go
-mux.HandleFunc("GET /network/{netID}/nodes/{device}/configdb", s.handleConfigDBSnapshot)
+mux.HandleFunc("GET /networks/{netID}/nodes/{device}/configdb", s.handleConfigDBSnapshot)
 ```
 
 Path is intentionally the un-suffixed `/configdb` (returning the

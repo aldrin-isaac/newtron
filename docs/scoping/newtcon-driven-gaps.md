@@ -113,7 +113,7 @@ additions.
   resolution and `writeJSON` / `writeError` for response.
 - **Routes** are registered in `pkg/newtron/api/handler.go`
   (`buildMux()`) with HTTP-method-prefixed paths:
-  `"GET /network/{netID}/nodes/{device}/intent/..."`. Intent operations
+  `"GET /networks/{netID}/nodes/{device}/intent/..."`. Intent operations
   live under `/intent/`; CONFIG_DB reads under `/configdb/`; service
   reads under `/services/{service}/`; topology operations under
   `/topology/`.
