@@ -658,6 +658,7 @@ Recognized types: `string`, `int`, `bool`, `enum`, `ipv4`, `cidr`. Each type val
 ```yaml
 name: rollout-admin-status
 description: Set admin_status on every IP-bearing interface and verify.
+requires: [verify-health]
 steps:
   - name: set-admin-status
     action: newtron
@@ -675,17 +676,30 @@ steps:
       # No quotes around {{param.admin_status}} — the template engine
       # emits "up" (JSON-quoted) when admin_status is a string.
       jq: .admin_status == {{param.admin_status}}
+
+  - name: clear-admin-status
+    action: newtron
+    method: POST
+    url: /nodes/{{target.device}}/interfaces/{{target.interface}}/clear-property
+    params:
+      property: admin_status
 ```
 
 The scenario uses `{{target.X}}` and `{{param.X}}` templates instead of step-level `devices:` selectors. The runner iterates the cross-product of suite-level `targets:` (here, 2 devices × 2 interfaces = 4 iterations), running every step once per binding.
+
+Two structural points the template demonstrates beyond the parameterized shape:
+
+- **`requires: [verify-health]`** — `set-property` against an interface requires the device's parent intent to exist, which `provision` (and its dependent `verify-health`) is responsible for setting up. Without the prereq, topological sort can place the rollout before provision and every iteration fails with `writeIntent "interface|...": parent "device" does not exist`. To reach the scenario plus its declared prereqs from the CLI, use the `--target` flag (it walks the dependency chain): `bin/newtrun start 2node-vs-service --target rollout-admin-status`.
+- **`clear-admin-status` reverse step** — per §15 (Operational Symmetry), every forward action gets a reverse in the same scope. `set-property` writes a child intent `interface|Ethernet0|admin_status`; if nothing clears it, the suite's later `deprovision` scenario can't delete the parent interface (`deleteIntent: has children`). The reverse keeps the rollout self-contained.
 
 **Iteration semantics differ from `repeat`.** Parameterized iterations are **continue-on-failure** — one failing binding does not skip the remaining bindings, so a rollout sees every failing target in one run. `repeat` remains fail-fast within each binding.
 
 **Step 3 — invoke with overrides:**
 
 ```bash
-# CLI: run with defaults from suite.yaml.
-bin/newtrun start 2node-vs-service --scenario rollout-admin-status
+# CLI: run the scenario plus its declared prereqs (boot-ssh → provision →
+# verify-health → rollout-admin-status) with defaults from suite.yaml.
+bin/newtrun start 2node-vs-service --target rollout-admin-status
 
 # HTTP: override admin_status to "down" and limit to one interface.
 curl -X POST http://localhost:18080/newtrun/v1/runs \
@@ -697,8 +711,6 @@ curl -X POST http://localhost:18080/newtrun/v1/runs \
     "parameters": { "admin_status": "down" }
   }'
 ```
-
-A production rollout typically declares `requires: [verify-health]` (or similar) on its parameterized scenario so the rollout only runs after device health is confirmed. To invoke a scenario plus its declared prereqs, use the CLI's `--target` flag (which walks the dependency chain): `bin/newtrun start 2node-vs-service --target rollout-admin-status`. The sample omits `requires:` so the standalone `--scenario` invocation above also works.
 
 Per-run overrides replace (not merge with) the suite default for each key — omit a key to inherit the default.
 
