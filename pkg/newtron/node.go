@@ -30,9 +30,6 @@ type Node struct {
 // Lifecycle methods
 // ============================================================================
 
-// Name returns the device name.
-func (n *Node) Name() string { return n.internal.Name() }
-
 // Lock acquires a distributed lock for configuration changes.
 func (n *Node) Lock(ctx context.Context) error { return n.internal.Lock(ctx) }
 
@@ -182,18 +179,6 @@ func (n *Node) Interface(name string) (*Interface, error) {
 	}
 	return &Interface{node: n, internal: intf}, nil
 }
-
-// ListInterfaces returns all interface names on the device.
-func (n *Node) ListInterfaces() []string { return n.internal.ListInterfaces() }
-
-// InterfaceExists checks if an interface exists on the device.
-func (n *Node) InterfaceExists(name string) bool { return n.internal.InterfaceExists(name) }
-
-// LoopbackIP returns the device's loopback IP address.
-func (n *Node) LoopbackIP() string { return n.internal.LoopbackIP() }
-
-// HasConfigDB returns true if the CONFIG_DB has been loaded.
-func (n *Node) HasConfigDB() bool { return n.internal.ConfigDB() != nil }
 
 // QueryConfigDB reads a CONFIG_DB entry by table and key.
 // Returns an empty map (not error) if the entry does not exist.
@@ -675,23 +660,6 @@ func (n *Node) DeviceInfo() (*DeviceInfo, error) {
 	}, nil
 }
 
-// ListVLANs returns all VLAN IDs on the device.
-func (n *Node) ListVLANs() []int { return n.internal.ListVLANs() }
-
-// ListVRFs returns all VRF names on the device.
-func (n *Node) ListVRFs() []string { return n.internal.ListVRFs() }
-
-// ListPortChannels returns all PortChannel names on the device.
-func (n *Node) ListPortChannels() []string { return n.internal.ListPortChannels() }
-
-// ACLTableExists checks if an ACL table exists on the device.
-func (n *Node) ACLTableExists(name string) bool {
-	return n.internal.GetIntent("acl|"+name) != nil
-}
-
-// VTEPExists checks if a VTEP is configured on the device.
-func (n *Node) VTEPExists() bool { return n.internal.GetIntent("evpn") != nil }
-
 // CheckBGPSessions checks that all configured BGP neighbors are Established.
 func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error) {
 	results, err := n.internal.CheckBGPSessions(ctx)
@@ -721,24 +689,6 @@ func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntr
 		return nil, err
 	}
 	return convertRouteEntry(re), nil
-}
-
-// GetNeighbor reads a neighbor (ARP/NDP) entry from STATE_DB.
-// Returns nil (not error) if the entry does not exist.
-func (n *Node) GetNeighbor(ctx context.Context, iface, ip string) (*NeighEntry, error) {
-	ne, err := n.internal.GetNeighbor(ctx, iface, ip)
-	if err != nil {
-		return nil, err
-	}
-	if ne == nil {
-		return nil, nil
-	}
-	return &NeighEntry{
-		IP:        ne.IP,
-		Interface: ne.Interface,
-		MAC:       ne.MAC,
-		Family:    ne.Family,
-	}, nil
 }
 
 // convertRouteEntry converts a *sonic.RouteEntry to a *RouteEntry.
@@ -783,16 +733,6 @@ func (n *Node) ConfigReload(ctx context.Context) error {
 // RestartService restarts a SONiC Docker container by name via SSH.
 func (n *Node) RestartService(ctx context.Context, name string) error {
 	return n.internal.RestartService(ctx, name)
-}
-
-// ============================================================================
-// Abstract mode
-// ============================================================================
-
-// RegisterPort creates a PORT entry in the projection.
-// Only valid in abstract mode — enables Interface() for the port.
-func (n *Node) RegisterPort(name string, fields map[string]string) {
-	n.internal.RegisterPort(name, fields)
 }
 
 // ============================================================================
@@ -1223,15 +1163,6 @@ func (n *Node) ShowACL(name string) (*ACLTableDetail, error) {
 	return detail, nil
 }
 
-// GetServiceBinding returns the service name bound to an interface (empty if none).
-func (n *Node) GetServiceBinding(iface string) (string, error) {
-	intf, err := n.internal.GetInterface(iface)
-	if err != nil {
-		return "", err
-	}
-	return intf.ServiceName(), nil
-}
-
 // GetServiceBindingDetail returns the full service binding: name, IPs, VRF.
 func (n *Node) GetServiceBindingDetail(iface string) (*ServiceBindingDetail, error) {
 	intf, err := n.internal.GetInterface(iface)
@@ -1289,34 +1220,3 @@ func (n *Node) ShowInterfaceDetail(name string) (*InterfaceDetail, error) {
 	}, nil
 }
 
-// GetInterfaceProperty returns a single property of an interface.
-func (n *Node) GetInterfaceProperty(name, property string) (string, error) {
-	iface, err := n.internal.GetInterface(name)
-	if err != nil {
-		return "", err
-	}
-	switch property {
-	case "admin_status", "admin-status":
-		return iface.AdminStatus(), nil
-	case "oper_status", "oper-status":
-		return iface.OperStatus(), nil
-	case "speed":
-		return iface.Speed(), nil
-	case "mtu":
-		mtu := iface.MTU()
-		if mtu == 0 {
-			return "", nil
-		}
-		return fmt.Sprintf("%d", mtu), nil
-	case "description":
-		return iface.Description(), nil
-	case "vrf":
-		return iface.VRF(), nil
-	case "service":
-		return iface.ServiceName(), nil
-	case "ip":
-		return strings.Join(iface.IPAddresses(), ", "), nil
-	default:
-		return "", &ValidationError{Field: "property", Message: "unknown property: " + property}
-	}
-}
