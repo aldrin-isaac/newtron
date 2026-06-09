@@ -2,7 +2,6 @@ package newtron
 
 import (
 	"context"
-	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -14,110 +13,6 @@ import (
 type Interface struct {
 	node     *Node
 	internal *node.Interface
-}
-
-// ============================================================================
-// Read Accessors (1:1 delegation to node.Interface)
-// ============================================================================
-
-// Name returns the interface name (e.g., "Ethernet0", "PortChannel100").
-func (i *Interface) Name() string {
-	return i.internal.Name()
-}
-
-// AdminStatus returns the administrative status (up/down).
-func (i *Interface) AdminStatus() string {
-	return i.internal.AdminStatus()
-}
-
-// OperStatus returns the operational status (up/down).
-func (i *Interface) OperStatus() string {
-	return i.internal.OperStatus()
-}
-
-// Speed returns the interface speed.
-func (i *Interface) Speed() string {
-	return i.internal.Speed()
-}
-
-// MTU returns the interface MTU.
-func (i *Interface) MTU() int {
-	return i.internal.MTU()
-}
-
-// IPAddresses returns the IP addresses configured on this interface.
-func (i *Interface) IPAddresses() []string {
-	return i.internal.IPAddresses()
-}
-
-// VRF returns the VRF this interface is bound to.
-func (i *Interface) VRF() string {
-	return i.internal.VRF()
-}
-
-// ServiceName returns the name of the service bound to this interface.
-func (i *Interface) ServiceName() string {
-	return i.internal.ServiceName()
-}
-
-// HasService returns true if a service is bound to this interface.
-func (i *Interface) HasService() bool {
-	return i.internal.HasService()
-}
-
-// Description returns the interface description.
-func (i *Interface) Description() string {
-	return i.internal.Description()
-}
-
-// IngressACL returns the name of the ingress ACL bound to this interface.
-func (i *Interface) IngressACL() string {
-	return i.internal.IngressACL()
-}
-
-// EgressACL returns the name of the egress ACL bound to this interface.
-func (i *Interface) EgressACL() string {
-	return i.internal.EgressACL()
-}
-
-// IsPortChannelMember returns true if this interface is a PortChannel member.
-func (i *Interface) IsPortChannelMember() bool {
-	return i.internal.IsPortChannelMember()
-}
-
-// PortChannelParent returns the name of the parent PortChannel (if this is a member).
-func (i *Interface) PortChannelParent() string {
-	return i.internal.PortChannelParent()
-}
-
-// PortChannelMembers returns the member interfaces if this is a PortChannel.
-func (i *Interface) PortChannelMembers() []string {
-	return i.internal.PortChannelMembers()
-}
-
-// VLANMembers returns the member interfaces if this is a VLAN interface.
-func (i *Interface) VLANMembers() []string {
-	return i.internal.VLANMembers()
-}
-
-// IsPortChannel returns true if this is a PortChannel interface.
-func (i *Interface) IsPortChannel() bool {
-	return strings.HasPrefix(i.internal.Name(), "PortChannel")
-}
-
-// IsVLAN returns true if this is a VLAN interface.
-func (i *Interface) IsVLAN() bool {
-	return strings.HasPrefix(i.internal.Name(), "Vlan")
-}
-
-// BGPNeighbors returns BGP neighbors configured on this interface.
-func (i *Interface) BGPNeighbors() []string {
-	return i.internal.BGPNeighbors()
-}
-
-// String returns the interface name as a string representation.
-func (i *Interface) String() string {
-	return i.internal.Name()
 }
 
 // ============================================================================
