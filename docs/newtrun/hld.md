@@ -759,7 +759,7 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `--monitor`, `-m` | Render an auto-refreshing dashboard instead of the per-event log |
 | `--junit <path>` | Write a JUnit XML report to the named path |
 | `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`) — passed to the server-side Runner |
-| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`) |
+| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). Empty by default — the server derives the id from `suite.Topology` (#116). |
 
 Global flags: `--newtrun-server <url>` (newtrun-server URL; env: `NEWTRUN_SERVER`), `-v / --verbose` (more terminal output).
 

@@ -377,6 +377,14 @@ type InlineRunRequest struct {
 	// for this run only. Empty = use the server's configured default.
 	NewtronServer string `json:"newtron_server,omitempty"`
 
+	// NetworkID overrides the newtron network identifier this inline run
+	// connects to. Empty = use the server's configured default. Inline
+	// runs are NoDeploy by definition, so the network must already be
+	// registered under whichever id the operator chose at deploy time
+	// (issue #116 — newtlab/newtrun derive ids from the lab/suite topology
+	// when not explicitly overridden).
+	NetworkID string `json:"network_id,omitempty"`
+
 	// TimeoutSeconds overrides the safety policy's wall-time budget for
 	// this run only. 0 = use the policy's default (60 seconds).
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`

@@ -581,7 +581,7 @@ type Runner struct {
 |-------|--------|---------|
 | `ScenariosDir` | `NewRunner(dir)` or `handleStartRun` | Parser to enumerate scenarios. |
 | `ServerURL` | `handleStartRun` from `req.NewtronServer` or server default | `client.Client` constructor + steps_cli passes to subprocess via `--server`. |
-| `NetworkID` | `handleStartRun` from `req.NetworkID` or server default | Network identifier in HTTP calls. |
+| `NetworkID` | `handleStartRun` via `resolveNetworkID` — three-level fallback `req.NetworkID` → `suite.Topology` → `Config.NetworkID` (#116). Inline runs skip the suite step. | Network identifier in HTTP calls. |
 | `Client` | `connectToServer` | Every `newtron` action HTTP call. |
 | `NewtlabClient` | `handleStartRun` from `Config.NewtlabClient` (composed at the entry point from `--newtlab-server`) | `deployTopology` → `Deploy` / `Destroy` / `LabStatus`. Per §27, newtlab owns LabState; newtrun reaches it via HTTP, never in-process via `newtlab.NewLab`. |
 | `HostConns` | `connectDevices` | `host-exec` SSH calls. |
@@ -750,7 +750,7 @@ type Server struct {
 |-------|---------|
 | `SuitesBase` | `newtrun/suites` |
 | `NewtronServer` | `http://127.0.0.1:18080` |
-| `NetworkID` | `default` |
+| `NetworkID` | `default` (final fallback only — file-backed runs default to `suite.Topology` first; see `resolveNetworkID` in [§8 handleStartRun](#8-http-server-package-pkgnewtrunapi)) |
 | `InlineURLPrefix` | empty (no URL restriction enforced by default; see [§8.7](#87-inlinesafetypolicy)) |
 | `Logger` | `log.Default()` |
 

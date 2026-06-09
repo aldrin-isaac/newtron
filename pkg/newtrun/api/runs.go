@@ -144,11 +144,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	if newtronURL == "" {
 		newtronURL = s.cfg.NewtronServer
 	}
-	// Resolve network ID: request body wins, else server default.
-	networkID := req.NetworkID
-	if networkID == "" {
-		networkID = s.cfg.NetworkID
-	}
+	networkID := resolveNetworkID(req.NetworkID, suite.Topology, s.cfg.NetworkID)
 
 	// Set up the reporter chain. HTTPReporter publishes to the broker
 	// (which feeds SSE subscribers); StateReporter persists per-step
@@ -405,7 +401,12 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 
 	runner := newtrun.NewRunner(scenariosDir)
 	runner.ServerURL = newtronURL
-	runner.NetworkID = s.cfg.NetworkID
+	// Inline runs have no suite manifest, so there's no suite.Topology to
+	// derive from. The operator can pin a specific network via the
+	// request body (req.NetworkID); otherwise we fall back to the server
+	// default. Inline is NoDeploy=true, so the network is expected to
+	// already be registered under whatever id the operator chose.
+	runner.NetworkID = resolveNetworkID(req.NetworkID, "", s.cfg.NetworkID)
 	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 
@@ -584,4 +585,30 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteSSEStream(w, r, s.broker, suite, s.logger)
+}
+
+// resolveNetworkID determines which newtron network identifier the runner
+// should connect to. The fallback chain (most specific wins):
+//
+//   1. reqNetworkID — operator explicitly named the network via the
+//      request body.
+//   2. suiteTopology — for file-backed runs, the suite manifest declares
+//      the topology it targets, and that becomes the default network id
+//      so concurrent suites against one newt-server don't compete for a
+//      single "default" registration slot (closes #116).
+//   3. cfgDefault — the server's configured default (Config.NetworkID,
+//      "default" out of the box). Used when the request is empty AND
+//      the suite has no topology, or for inline runs which have no
+//      suite manifest to derive from.
+//
+// The function is package-private but extracted for direct unit testing —
+// the fallback chain is the entire surface area of the change for #116.
+func resolveNetworkID(reqNetworkID, suiteTopology, cfgDefault string) string {
+	if reqNetworkID != "" {
+		return reqNetworkID
+	}
+	if suiteTopology != "" {
+		return suiteTopology
+	}
+	return cfgDefault
 }

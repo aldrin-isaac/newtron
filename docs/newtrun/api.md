@@ -322,6 +322,7 @@ Submits a single scenario as inline YAML — no suite directory, no state-persis
 |-------|------|----------|---------|
 | `scenario_yaml` | string | yes | The full scenario YAML body (same shape as a file under a suite directory). |
 | `newtron_server` | string | no | Override the server's default newtron-server URL for this run only. |
+| `network_id` | string | no | Override the newtron network identifier for this run. Empty = use the server's configured default. Inline runs are `NoDeploy=true`, so the network must already be registered under whichever id the operator chose at deploy time (#116 — newtlab/newtrun derive ids from the lab/suite topology when not explicitly overridden). |
 | `timeout_seconds` | int | no | Override the safety policy's wall-time budget for this run only. `0` keeps the policy default (60s). |
 | `allow_reconcile` | bool | no | Opt in to permitting the `topology-reconcile` action for this scenario. Default `false` is the high-impact gate. |
 
