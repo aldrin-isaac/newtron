@@ -36,6 +36,24 @@ func (e *ServerError) Error() string {
 	return fmt.Sprintf("server error (%d): %s", e.StatusCode, e.Message)
 }
 
+// AlreadyRegisteredError is returned by RegisterNetwork when the network ID
+// is already registered for a different spec_dir. True-idempotent
+// re-registration (same id + same spec_dir) returns nil instead, since the
+// observable state matches what the caller asked for.
+type AlreadyRegisteredError struct {
+	ID               string
+	RequestedSpecDir string
+	ExistingSpecDir  string
+}
+
+func (e *AlreadyRegisteredError) Error() string {
+	return fmt.Sprintf(
+		"network '%s' is already registered with spec_dir '%s'; "+
+			"unregister it first or use a different network ID to register %q alongside",
+		e.ID, e.ExistingSpecDir, e.RequestedSpecDir,
+	)
+}
+
 // New creates a new Client.
 func New(baseURL, networkID string) *Client {
 	return &Client{
@@ -52,21 +70,71 @@ func (c *Client) NetworkID() string {
 	return c.networkID
 }
 
-// RegisterNetwork registers a network with the server. Returns nil if
-// the network is already registered (409 is treated as success).
+// RegisterNetwork registers a network with the server.
+//
+// Returns nil on true-idempotent re-registration (the network is already
+// registered for the same spec_dir — the observable state already matches).
+// Returns *AlreadyRegisteredError when the network is registered for a
+// different spec_dir, so callers can distinguish "you already did this" from
+// "someone else owns this slot." Other server errors come back as
+// *ServerError.
+//
+// The 409 response envelope carries an api.AlreadyRegisteredErrorInfo in
+// Data with the existing spec_dir; this method decodes it to make the
+// comparison.
 func (c *Client) RegisterNetwork(specDir string) error {
 	body := api.RegisterNetworkRequest{
 		ID:      c.networkID,
 		SpecDir: specDir,
 	}
-	err := c.doPost("/newtron/v1/networks", body, nil)
+	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		if se, ok := err.(*ServerError); ok && se.StatusCode == http.StatusConflict {
-			return nil // already registered — idempotent
-		}
-		return err
+		return fmt.Errorf("marshal body: %w", err)
 	}
-	return nil
+	resp, err := c.httpClient.Post(c.baseURL+"/newtron/v1/networks", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("POST /newtron/v1/networks: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 400 {
+		return nil
+	}
+
+	respBody, _ := io.ReadAll(resp.Body)
+	var envelope httputil.APIResponse
+	_ = json.Unmarshal(respBody, &envelope)
+
+	if resp.StatusCode == http.StatusConflict {
+		var info api.AlreadyRegisteredErrorInfo
+		dataParsed := false
+		if envelope.Data != nil {
+			if dataBytes, err := json.Marshal(envelope.Data); err == nil {
+				if err := json.Unmarshal(dataBytes, &info); err == nil {
+					dataParsed = true
+				}
+			}
+		}
+		// True idempotent only when the server actually told us the
+		// existing spec_dir AND it matches what the caller asked for.
+		// Without the dataParsed guard, an empty/unparseable Data
+		// payload would collapse to ExistingSpecDir == "" and could
+		// match a (degenerate) empty specDir — best to fail loud.
+		if dataParsed && info.ExistingSpecDir == specDir {
+			return nil
+		}
+		return &AlreadyRegisteredError{
+			ID:               c.networkID,
+			RequestedSpecDir: specDir,
+			ExistingSpecDir:  info.ExistingSpecDir,
+		}
+	}
+
+	msg := envelope.Error
+	if msg == "" {
+		msg = resp.Status
+	}
+	return &ServerError{StatusCode: resp.StatusCode, Message: msg}
 }
 
 // ScaffoldNetwork creates an empty spec layout at specDir (three zero-valued

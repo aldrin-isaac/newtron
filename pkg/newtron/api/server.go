@@ -96,8 +96,8 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.networks[id]; exists {
-		return &alreadyRegisteredError{id: id}
+	if existing, exists := s.networks[id]; exists {
+		return &alreadyRegisteredError{id: id, existingSpecDir: existing.specDir}
 	}
 
 	net, err := newtron.LoadNetwork(specDir, topologyName(specDir), s.portResolver)

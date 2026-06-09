@@ -169,7 +169,7 @@ export NEWTRON_SERVER=http://10.0.0.1:18080
 export NEWTRON_NETWORK_ID=production
 ```
 
-On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server with its spec directory. This is idempotent — if the network is already registered, the server returns 409 and the CLI continues.
+On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server with its spec directory. This is idempotent on matching state — if the network is already registered with the same spec_dir, the server returns 409 and the CLI continues silently. If the same network ID is registered with a *different* spec_dir, the client returns a typed `*AlreadyRegisteredError` carrying both paths so the operator can unregister or pick a different ID; the CLI surfaces that error.
 
 ### 2.7 Reloading Specs
 

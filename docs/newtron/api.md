@@ -471,7 +471,30 @@ subdirectory) and register it in one call.
 {"data": {"id": "default"}}
 ```
 
-**Status codes:** 201 created, 400 missing fields or invalid JSON, 409 ID already registered or scaffold-into-initialized-dir, 500 spec directory load error
+**Response (409, id already registered):**
+
+The envelope's `data` field carries an `AlreadyRegisteredErrorInfo` with the
+existing `spec_dir`, so clients can distinguish a true-idempotent retry (the
+caller is asking to register the same id+spec_dir again — observable state
+already matches) from a real conflict (the id is taken by a different
+spec_dir):
+
+```json
+{
+  "error": "network 'default' already registered with spec_dir '/etc/newtron/2node-vs/specs'",
+  "data": {
+    "id": "default",
+    "existing_spec_dir": "/etc/newtron/2node-vs/specs"
+  }
+}
+```
+
+The Go client (`pkg/newtron/client/Client.RegisterNetwork`) decodes this
+shape: if `existing_spec_dir == requested spec_dir`, the call returns `nil`
+(true-idempotent); otherwise it returns a typed
+`*client.AlreadyRegisteredError` carrying both paths.
+
+**Status codes:** 201 created, 400 missing fields or invalid JSON, 409 ID already registered (with `existing_spec_dir` in data) or scaffold-into-initialized-dir, 500 spec directory load error
 
 **Examples:**
 
