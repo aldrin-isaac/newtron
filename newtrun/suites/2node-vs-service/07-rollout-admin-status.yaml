@@ -13,10 +13,16 @@ description: |
   would belong in a setup step that synthesizes the targets block —
   out of scope for this suite, in scope for newtrun's roadmap.
 
-  Production rollouts would typically add requires: [verify-health]
-  so the rollout only runs after device health is confirmed; this
-  sample omits the prereq so it stands alone as a demonstration of
-  the parameterized shape.
+  Depends on verify-health: the set-property write fails if the
+  device's interface intent records don't yet exist, so the rollout
+  has to run after provisioning completes.
+
+  Reversed by clear-admin-status at the end of the scenario per §15
+  (Operational Symmetry) — without it the property intent persists
+  as a child of the interface intent and deprovision can't tear the
+  interface down.
+
+requires: [verify-health]
 
 steps:
   - name: set-admin-status
@@ -36,3 +42,10 @@ steps:
       # emits the value as a JQ-safe JSON-quoted form, so the
       # expanded expression reads `.admin_status == "up"`.
       jq: .admin_status == {{param.admin_status}}
+
+  - name: clear-admin-status
+    action: newtron
+    method: POST
+    url: /nodes/{{target.device}}/interfaces/{{target.interface}}/clear-property
+    params:
+      property: admin_status
