@@ -2,9 +2,13 @@ package newtlab
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,10 +19,25 @@ import (
 	"time"
 )
 
-// BridgeConfig is the serialized link configuration read by the bridge process.
+// pushInterval is how often newtlink posts a fresh BridgeStats snapshot
+// to newtlab-server. The CLI's `--monitor` mode refreshes every 2s, so
+// 5s keeps the displayed values within at most one refresh cycle of
+// truth while keeping the request rate proportional to lab size
+// (one POST per worker host per cycle).
+const pushInterval = 5 * time.Second
+
+// BridgeConfig is the serialized link configuration read by the bridge
+// process. newtlink no longer listens on any port — it pushes
+// BridgeStats snapshots to newtlab-server. LabName + WorkerHost
+// identify the (lab, host) slot in the server-side store;
+// OrchestratorURL is the base URL of newtlab-server (or newt-server's
+// composed listener) reachable from this worker.
 type BridgeConfig struct {
-	Links     []BridgeLink `json:"links"`
-	StatsAddr string       `json:"stats_addr,omitempty"` // TCP listen addr for remote stats queries
+	Links []BridgeLink `json:"links"`
+
+	OrchestratorURL string `json:"orchestrator_url"`
+	LabName         string `json:"lab_name"`
+	WorkerHost      string `json:"worker_host"` // "" for the local worker
 }
 
 // BridgeLink holds the bind/port config for one link's bridge worker.
@@ -43,14 +62,23 @@ type LinkStats struct {
 	Connected bool   `json:"connected"`
 }
 
-// BridgeStats is the telemetry snapshot returned over the Unix socket.
+// BridgeStats is the telemetry snapshot newtlink pushes to newtlab-server.
 type BridgeStats struct {
 	Links []LinkStats `json:"links"`
 }
 
+// BridgePushParams names the (lab, host, orchestrator URL) tuple needed
+// for newtlink to deliver its stats. Threaded into the bridge config
+// alongside the link list.
+type BridgePushParams struct {
+	OrchestratorURL string
+	LabName         string
+	WorkerHost      string // "" for the local worker
+}
+
 // WriteBridgeConfig serializes link config to bridge.json in the state dir.
-func WriteBridgeConfig(stateDir string, links []*LinkConfig, statsAddr string) error {
-	cfg := buildBridgeConfig(links, statsAddr)
+func WriteBridgeConfig(stateDir string, links []*LinkConfig, push BridgePushParams) error {
+	cfg := buildBridgeConfig(links, push)
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
 		return fmt.Errorf("newtlab: marshal bridge config: %w", err)
@@ -58,11 +86,13 @@ func WriteBridgeConfig(stateDir string, links []*LinkConfig, statsAddr string) e
 	return os.WriteFile(filepath.Join(stateDir, "bridge.json"), data, 0644)
 }
 
-// buildBridgeConfig creates a BridgeConfig from links and a stats address.
-func buildBridgeConfig(links []*LinkConfig, statsAddr string) BridgeConfig {
+// buildBridgeConfig creates a BridgeConfig from links and push parameters.
+func buildBridgeConfig(links []*LinkConfig, push BridgePushParams) BridgeConfig {
 	cfg := BridgeConfig{
-		Links:     make([]BridgeLink, len(links)),
-		StatsAddr: statsAddr,
+		Links:           make([]BridgeLink, len(links)),
+		OrchestratorURL: push.OrchestratorURL,
+		LabName:         push.LabName,
+		WorkerHost:      push.WorkerHost,
 	}
 	for i, lc := range links {
 		cfg.Links[i] = BridgeLink{
@@ -77,9 +107,15 @@ func buildBridgeConfig(links []*LinkConfig, statsAddr string) BridgeConfig {
 	return cfg
 }
 
-// RunBridgeFromFile reads a bridge config JSON file and runs bridge workers
-// until the process receives SIGTERM/SIGINT. The stateDir for pid/socket files
-// is derived from the config file's directory.
+// RunBridgeFromFile reads a bridge config JSON file, runs bridge workers,
+// and pushes BridgeStats snapshots to newtlab-server every pushInterval
+// until the process receives SIGTERM/SIGINT. The stateDir for the pid
+// file is derived from the config file's directory.
+//
+// One first push is sent synchronously after the workers start so a
+// subsequent CLI status call returns telemetry without waiting a full
+// interval. A final push fires on shutdown so the operator sees a
+// terminal snapshot rather than stale counters.
 func RunBridgeFromFile(configPath string) error {
 	stateDir := filepath.Dir(configPath)
 	data, err := os.ReadFile(configPath)
@@ -91,8 +127,13 @@ func RunBridgeFromFile(configPath string) error {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("newtlab: parse bridge config: %w", err)
 	}
+	if cfg.OrchestratorURL == "" {
+		return fmt.Errorf("newtlab: bridge config missing orchestrator_url")
+	}
+	if cfg.LabName == "" {
+		return fmt.Errorf("newtlab: bridge config missing lab_name")
+	}
 
-	// Convert to LinkConfig for StartBridgeWorkers
 	links := make([]*LinkConfig, len(cfg.Links))
 	for i, bl := range cfg.Links {
 		aDevice, aIface, err := splitLinkEndpoint(bl.A)
@@ -124,117 +165,95 @@ func RunBridgeFromFile(configPath string) error {
 		fmt.Fprintf(os.Stderr, "warning: write bridge pid file: %v\n", err)
 	}
 
-	// Stats query handler: encode stats JSON and close.
-	handleStatsConn := func(conn net.Conn) {
-		json.NewEncoder(conn).Encode(bridge.Stats())
-		conn.Close()
+	// Stats push loop. Each tick posts the current Bridge.Stats()
+	// snapshot to newtlab-server. Push errors log and continue —
+	// they're not fatal because the next tick retries. Inlined as a
+	// minimal HTTP POST rather than using pkg/newtlab/client because
+	// client imports pkg/newtlab (cycle); newtlink doesn't need the
+	// client's envelope-decoding machinery — it just fires-and-forgets.
+	pushURL := pushURLFor(cfg.OrchestratorURL, cfg.LabName, cfg.WorkerHost)
+	pushHTTPClient := &http.Client{Timeout: pushInterval}
+	pushCtx, cancelPush := context.WithCancel(context.Background())
+	defer cancelPush()
+
+	push := func(ctx context.Context) {
+		if err := pushBridgeStats(ctx, pushHTTPClient, pushURL, bridge.Stats()); err != nil {
+			fmt.Fprintf(os.Stderr, "newtlink: push stats to %s: %v\n", pushURL, err)
+		}
 	}
 
-	// Start Unix socket for stats queries (local)
-	sockPath := filepath.Join(stateDir, "bridge.sock")
-	os.Remove(sockPath) // remove stale socket
-	unixLn, err := net.Listen("unix", sockPath)
-	if err != nil {
-		bridge.Stop()
-		return fmt.Errorf("newtlab: stats socket: %w", err)
-	}
+	// First push happens before the loop so a CLI status call right
+	// after deploy doesn't have to wait pushInterval to see data.
+	push(pushCtx)
 
+	pushDone := make(chan struct{})
 	go func() {
+		defer close(pushDone)
+		ticker := time.NewTicker(pushInterval)
+		defer ticker.Stop()
 		for {
-			conn, err := unixLn.Accept()
-			if err != nil {
-				return // listener closed
+			select {
+			case <-pushCtx.Done():
+				return
+			case <-ticker.C:
+				push(pushCtx)
 			}
-			go handleStatsConn(conn)
 		}
 	}()
 
-	// Start TCP listener for stats queries (remote)
-	var tcpLn net.Listener
-	if cfg.StatsAddr != "" {
-		tcpLn, err = net.Listen("tcp", cfg.StatsAddr)
-		if err != nil {
-			unixLn.Close()
-			bridge.Stop()
-			return fmt.Errorf("newtlab: stats tcp listener %s: %w", cfg.StatsAddr, err)
-		}
-		go func() {
-			for {
-				conn, err := tcpLn.Accept()
-				if err != nil {
-					return
-				}
-				go handleStatsConn(conn)
-			}
-		}()
-	}
-
-	// Block until killed
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	<-sigCh
 
-	unixLn.Close()
-	os.Remove(sockPath)
-	if tcpLn != nil {
-		tcpLn.Close()
-	}
+	cancelPush()
+	<-pushDone
+	// Final terminal push so the operator's last status view shows
+	// the bridge's true stopped state rather than the second-to-last
+	// snapshot from the loop.
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), pushInterval)
+	defer finalCancel()
+	push(finalCtx)
+
 	bridge.Stop()
 	return nil
 }
 
-// QueryBridgeStats connects to a running bridge's stats endpoint and returns
-// a snapshot of per-link telemetry counters. The addr is either a Unix socket
-// path (starts with "/") or a TCP address ("host:port").
-func QueryBridgeStats(addr string) (*BridgeStats, error) {
-	network := "tcp"
-	if strings.HasPrefix(addr, "/") {
-		network = "unix"
+// pushURLFor builds the full POST target. workerHost == "" is encoded
+// as the literal "local" path segment (URL paths can't carry empty
+// segments) — handlePushBridgeStats maps "local" back to "" before
+// storing.
+func pushURLFor(baseURL, labName, workerHost string) string {
+	segment := workerHost
+	if segment == "" {
+		segment = "local"
 	}
-	conn, err := net.DialTimeout(network, addr, 5*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("newtlab: connect to bridge stats (%s): %w", addr, err)
-	}
-	defer conn.Close()
-
-	var stats BridgeStats
-	if err := json.NewDecoder(conn).Decode(&stats); err != nil {
-		return nil, fmt.Errorf("newtlab: decode bridge stats: %w", err)
-	}
-	return &stats, nil
+	return strings.TrimRight(baseURL, "/") +
+		"/newtlab/v1/labs/" + url.PathEscape(labName) +
+		"/bridges/" + url.PathEscape(segment) + "/stats"
 }
 
-// QueryAllBridgeStats aggregates stats from all bridge processes in a lab.
-// It queries each bridge via its StatsAddr (TCP for remote, Unix socket for local fallback).
-func QueryAllBridgeStats(labName string) (*BridgeStats, error) {
-	state, err := LoadState(labName)
+// pushBridgeStats POSTs the snapshot to newtlab-server. Reads and
+// discards the body so the underlying connection can be reused.
+func pushBridgeStats(ctx context.Context, c *http.Client, url string, stats BridgeStats) error {
+	body, err := json.Marshal(stats)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("marshal stats: %w", err)
 	}
-
-	merged := &BridgeStats{}
-
-	// New multi-bridge state
-	if len(state.Bridges) > 0 {
-		for host, bs := range state.Bridges {
-			addr := bs.StatsAddr
-			// For local bridge, prefer Unix socket if available
-			if host == "" || bs.HostIP == "" {
-				sockPath := filepath.Join(LabDir(labName), "bridge.sock")
-				if _, err := os.Stat(sockPath); err == nil {
-					addr = sockPath
-				}
-			}
-			stats, err := QueryBridgeStats(addr)
-			if err != nil {
-				return nil, fmt.Errorf("newtlab: query bridge on host %q: %w", host, err)
-			}
-			merged.Links = append(merged.Links, stats.Links...)
-		}
-		return merged, nil
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
 	}
-
-	return nil, fmt.Errorf("no bridge state found for lab %s", labName)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("server returned %s", resp.Status)
+	}
+	return nil
 }
 
 // startBridgeProcess spawns a newtlink bridge process locally.
@@ -277,7 +296,6 @@ func startBridgeProcess(labName, stateDir string) (int, error) {
 // It uploads the newtlink binary if needed, copies the bridge config JSON,
 // then starts newtlink via nohup. Returns the remote PID.
 func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, error) {
-	// Upload newtlink binary (skip if version matches)
 	newtlinkPath, err := uploadNewtlink(hostIP)
 	if err != nil {
 		return 0, fmt.Errorf("newtlab: upload newtlink to %s: %w", hostIP, err)
@@ -287,7 +305,6 @@ func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, e
 	stateDir := shellQuote(rawStateDir)
 	configPath := shellQuote(rawStateDir + "/bridge.json")
 
-	// Create remote state dir and write bridge config
 	mkdirCmd := fmt.Sprintf("mkdir -p %s/logs && cat > %s", stateDir, configPath)
 	cmd := sshCommand(hostIP, mkdirCmd)
 	cmd.Stdin = bytes.NewReader(configJSON)
@@ -295,7 +312,6 @@ func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, e
 		return 0, fmt.Errorf("newtlab: setup remote bridge dir on %s: %w\n%s", hostIP, err, out)
 	}
 
-	// Start newtlink with config file
 	startCmd := fmt.Sprintf("nohup %s %s > %s/logs/bridge.log 2>&1 & echo $!",
 		shellQuote(newtlinkPath), configPath, stateDir)
 	cmd = sshCommand(hostIP, startCmd)

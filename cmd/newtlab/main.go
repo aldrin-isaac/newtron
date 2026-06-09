@@ -34,6 +34,7 @@ var (
 	specDir       string
 	verbose       bool
 	newtronServer string
+	newtlabServer string
 	netID         string
 )
 
@@ -75,6 +76,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory (overrides topology name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
+	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — used as the orchestrator URL newtlink pushes BridgeStats to (#118), and as the read path for `newtlab status` link telemetry. Default: http://127.0.0.1:18080. Env: NEWTLAB_SERVER")
 	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "", "newtron network ID (default: derived from the lab name, so concurrent labs get separate registration slots — issue #116)")
 
 	rootCmd.AddCommand(
@@ -156,7 +158,29 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 			return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
 		}
 	}
-	return newtlab.NewLab(ctx, client, name)
+	lab, err := newtlab.NewLab(ctx, client, name)
+	if err != nil {
+		return nil, err
+	}
+	lab.OrchestratorURL = newtlabURL()
+	return lab, nil
+}
+
+// newtlabURL resolves the newtlab-server URL from --newtlab-server flag,
+// NEWTLAB_SERVER env var, and default (matching cmd/newtrun's helper
+// of the same name). The bridge config sent to newtlink references
+// this URL — local newtlink dials it from 127.0.0.1, remote newtlink
+// must be able to reach it across the network (multi-host operators
+// set the flag to a publicly-reachable URL).
+func newtlabURL() string {
+	url := newtlabServer
+	if url == "" {
+		url = os.Getenv("NEWTLAB_SERVER")
+	}
+	if url == "" {
+		url = "http://127.0.0.1:18080"
+	}
+	return url
 }
 
 // resolveTarget resolves both lab name and spec directory from:

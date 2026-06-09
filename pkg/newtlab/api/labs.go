@@ -88,6 +88,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lab.Force = req.Force
+	lab.OrchestratorURL = s.cfg.OrchestratorURL
 	if req.Host != "" {
 		lab.FilterHost(req.Host)
 	}
@@ -166,6 +167,9 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("destroy %s: %w", name, err))
 		return
 	}
+	// Evict any leftover bridge-stats snapshots so a redeployed lab
+	// doesn't see stale stats from the previous incarnation.
+	s.statsStore.EvictLab(name)
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"lab": name, "status": "destroyed"})
 }
 

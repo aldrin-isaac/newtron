@@ -2,7 +2,7 @@ package newtlab
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -395,8 +395,8 @@ func TestSaveAndLoadState(t *testing.T) {
 			{A: "spine1:Ethernet0", Z: "leaf1:Ethernet0", APort: 20000, ZPort: 20001, WorkerHost: "host-a"},
 		},
 		Bridges: map[string]*BridgeState{
-			"":       {PID: 5678, StatsAddr: "127.0.0.1:19999"},
-			"host-a": {PID: 9012, HostIP: "10.0.0.2", StatsAddr: "10.0.0.2:19998"},
+			"":       {PID: 5678},
+			"host-a": {PID: 9012, HostIP: "10.0.0.2"},
 		},
 	}
 
@@ -436,14 +436,11 @@ func TestSaveAndLoadState(t *testing.T) {
 	if loaded.Bridges[""].PID != 5678 {
 		t.Errorf("Bridges[\"\"].PID = %d, want 5678", loaded.Bridges[""].PID)
 	}
-	if loaded.Bridges[""].StatsAddr != "127.0.0.1:19999" {
-		t.Errorf("Bridges[\"\"].StatsAddr = %q, want 127.0.0.1:19999", loaded.Bridges[""].StatsAddr)
-	}
 	if loaded.Bridges["host-a"].HostIP != "10.0.0.2" {
 		t.Errorf("Bridges[\"host-a\"].HostIP = %q, want 10.0.0.2", loaded.Bridges["host-a"].HostIP)
 	}
-	if loaded.Bridges["host-a"].StatsAddr != "10.0.0.2:19998" {
-		t.Errorf("Bridges[\"host-a\"].StatsAddr = %q, want 10.0.0.2:19998", loaded.Bridges["host-a"].StatsAddr)
+	if loaded.Bridges["host-a"].PID != 9012 {
+		t.Errorf("Bridges[\"host-a\"].PID = %d, want 9012", loaded.Bridges["host-a"].PID)
 	}
 }
 
@@ -890,174 +887,32 @@ func waitForBridgeStats(t *testing.T, bridge *Bridge, wantAtoZ, wantZtoA int64, 
 }
 
 // ============================================================================
-// TCP Stats + QueryAllBridgeStats Tests
+// OrchestratorURL guard
 // ============================================================================
 
-func TestQueryBridgeStats_TCP(t *testing.T) {
-	aPort := getFreePort(t)
-	zPort := getFreePort(t)
-
-	links := []*LinkConfig{
-		{
-			A:     LinkEndpoint{Device: "spine1", Interface: "Ethernet0"},
-			Z:     LinkEndpoint{Device: "leaf1", Interface: "Ethernet0"},
-			APort: aPort,
-			ZPort: zPort,
-			ABind: "127.0.0.1",
-			ZBind: "127.0.0.1",
+// TestSetupBridgesRequiresOrchestratorURL pins the #118 contract that
+// newtlink has no fallback listener — if the caller forgets to thread
+// the URL through, deploy fails loudly rather than spawning workers
+// that push to nowhere.
+func TestSetupBridgesRequiresOrchestratorURL(t *testing.T) {
+	lab := &Lab{
+		Name:  "guard-test",
+		State: &LabState{Name: "guard-test"},
+		Links: []*LinkConfig{
+			{
+				A:     LinkEndpoint{Device: "spine1", Interface: "Ethernet0"},
+				Z:     LinkEndpoint{Device: "leaf1", Interface: "Ethernet0"},
+				APort: 20000, ZPort: 20001,
+			},
 		},
+		// OrchestratorURL deliberately left empty.
 	}
-
-	bridge, err := StartBridgeWorkers(links)
-	if err != nil {
-		t.Fatalf("StartBridgeWorkers error: %v", err)
+	err := lab.setupBridges(context.Background())
+	if err == nil {
+		t.Fatal("expected error when OrchestratorURL is empty, got nil")
 	}
-	defer bridge.Stop()
-
-	// Start a TCP stats listener
-	tcpPort := getFreePort(t)
-	tcpAddr := fmt.Sprintf("127.0.0.1:%d", tcpPort)
-	tcpLn, err := net.Listen("tcp", tcpAddr)
-	if err != nil {
-		t.Fatalf("listen TCP stats: %v", err)
-	}
-	defer tcpLn.Close()
-
-	go func() {
-		for {
-			conn, err := tcpLn.Accept()
-			if err != nil {
-				return
-			}
-			json.NewEncoder(conn).Encode(bridge.Stats())
-			conn.Close()
-		}
-	}()
-
-	stats, err := QueryBridgeStats(tcpAddr)
-	if err != nil {
-		t.Fatalf("QueryBridgeStats(TCP) error: %v", err)
-	}
-	if len(stats.Links) != 1 {
-		t.Fatalf("stats.Links len = %d, want 1", len(stats.Links))
-	}
-	if stats.Links[0].A != "spine1:Ethernet0" {
-		t.Errorf("A = %q, want spine1:Ethernet0", stats.Links[0].A)
-	}
-}
-
-func TestQueryAllBridgeStats_MultiBridge(t *testing.T) {
-	// Simulate two separate bridge instances (e.g., two hosts) each serving
-	// different links, and verify QueryAllBridgeStats merges them.
-
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	resetHomeDir()
-	t.Cleanup(resetHomeDir)
-
-	// Bridge 1: one link
-	aPort1 := getFreePort(t)
-	zPort1 := getFreePort(t)
-	bridge1, err := StartBridgeWorkers([]*LinkConfig{
-		{
-			A: LinkEndpoint{Device: "spine1", Interface: "Ethernet0"},
-			Z: LinkEndpoint{Device: "leaf1", Interface: "Ethernet0"},
-			APort: aPort1, ZPort: zPort1,
-			ABind: "127.0.0.1", ZBind: "127.0.0.1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("StartBridgeWorkers(1) error: %v", err)
-	}
-	defer bridge1.Stop()
-
-	// Bridge 2: another link
-	aPort2 := getFreePort(t)
-	zPort2 := getFreePort(t)
-	bridge2, err := StartBridgeWorkers([]*LinkConfig{
-		{
-			A: LinkEndpoint{Device: "spine1", Interface: "Ethernet4"},
-			Z: LinkEndpoint{Device: "leaf2", Interface: "Ethernet0"},
-			APort: aPort2, ZPort: zPort2,
-			ABind: "127.0.0.1", ZBind: "127.0.0.1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("StartBridgeWorkers(2) error: %v", err)
-	}
-	defer bridge2.Stop()
-
-	// TCP stats listeners for each bridge
-	tcpPort1 := getFreePort(t)
-	tcpAddr1 := fmt.Sprintf("127.0.0.1:%d", tcpPort1)
-	tcpLn1, err := net.Listen("tcp", tcpAddr1)
-	if err != nil {
-		t.Fatalf("listen TCP(1): %v", err)
-	}
-	defer tcpLn1.Close()
-	go func() {
-		for {
-			conn, err := tcpLn1.Accept()
-			if err != nil {
-				return
-			}
-			json.NewEncoder(conn).Encode(bridge1.Stats())
-			conn.Close()
-		}
-	}()
-
-	tcpPort2 := getFreePort(t)
-	tcpAddr2 := fmt.Sprintf("127.0.0.1:%d", tcpPort2)
-	tcpLn2, err := net.Listen("tcp", tcpAddr2)
-	if err != nil {
-		t.Fatalf("listen TCP(2): %v", err)
-	}
-	defer tcpLn2.Close()
-	go func() {
-		for {
-			conn, err := tcpLn2.Accept()
-			if err != nil {
-				return
-			}
-			json.NewEncoder(conn).Encode(bridge2.Stats())
-			conn.Close()
-		}
-	}()
-
-	// Create state.json with two bridge entries
-	labName := "multi-bridge-test"
-	state := &LabState{
-		Name:    labName,
-		SpecDir: "/tmp/specs",
-		Nodes:   map[string]*NodeState{},
-		Bridges: map[string]*BridgeState{
-			"":       {PID: 1, StatsAddr: tcpAddr1},
-			"host-b": {PID: 2, HostIP: "10.0.0.2", StatsAddr: tcpAddr2},
-		},
-	}
-	if err := SaveState(state); err != nil {
-		t.Fatalf("SaveState error: %v", err)
-	}
-
-	// QueryAllBridgeStats should merge results from both
-	merged, err := QueryAllBridgeStats(labName)
-	if err != nil {
-		t.Fatalf("QueryAllBridgeStats error: %v", err)
-	}
-	if len(merged.Links) != 2 {
-		t.Fatalf("merged.Links len = %d, want 2", len(merged.Links))
-	}
-
-	// Verify both links are present (order may vary since map iteration is random)
-	found := map[string]bool{}
-	for _, ls := range merged.Links {
-		found[ls.A] = true
-	}
-	if !found["spine1:Ethernet0"] {
-		t.Error("missing spine1:Ethernet0 in merged stats")
-	}
-	if !found["spine1:Ethernet4"] {
-		t.Error("missing spine1:Ethernet4 in merged stats")
+	if !strings.Contains(err.Error(), "OrchestratorURL not set") {
+		t.Errorf("error should mention OrchestratorURL; got: %v", err)
 	}
 }
 

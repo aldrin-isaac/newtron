@@ -98,6 +98,11 @@ func main() {
 		NewtronClientFor: func(networkID string) newtlab.SpecClient {
 			return newtronclient.New(newtronURL, networkID)
 		},
+		// In the composed newt-server, newtlab-server routes are
+		// mounted on the same listener as newtron — so the
+		// orchestrator URL newtlink pushes BridgeStats to is the same
+		// base as newtronURL (#118).
+		OrchestratorURL: newtronURL,
 	})
 
 	// Compose the route tree. Each engine's Handler() already returns

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 )
 
 var jsonOutput bool
@@ -196,19 +198,12 @@ func showLabDetail(labName string) error {
 	return nil
 }
 
-// showLinkTableWithStats prints a link table enriched with live bridge stats.
+// showLinkTableWithStats prints a link table enriched with live bridge
+// stats. Stats are read from newtlab-server's in-memory store, populated
+// by newtlink push (#118). When the server is unreachable the table
+// still renders — link rows show "—" in place of telemetry.
 func showLinkTableWithStats(labName string, state *newtlab.LabState) {
-	stats, statsErr := newtlab.QueryAllBridgeStats(labName)
-
-	// Build lookup: "A|Z" → LinkStats
-	statsMap := map[string]*newtlab.LinkStats{}
-	if statsErr == nil {
-		for i := range stats.Links {
-			ls := &stats.Links[i]
-			key := ls.A + "|" + ls.Z
-			statsMap[key] = ls
-		}
-	}
+	statsMap := fetchBridgeStats(labName)
 
 	// Include HOST column if any link has a non-local worker host.
 	hasRemoteHost := false
@@ -256,6 +251,29 @@ func showLinkTableWithStats(labName string, state *newtlab.LabState) {
 		}
 	}
 	lt.Flush()
+}
+
+// fetchBridgeStats asks newtlab-server for the latest BridgeStats
+// snapshots and flattens them into the "A|Z" → LinkStats lookup the
+// table renderer uses. Returns an empty map (not nil) on any error so
+// callers can iterate without nil checks.
+func fetchBridgeStats(labName string) map[string]*newtlab.LinkStats {
+	out := map[string]*newtlab.LinkStats{}
+	c := newtlabclient.New(newtlabURL())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	snaps, err := c.LabBridgeStats(ctx, labName)
+	if err != nil {
+		return out
+	}
+	for _, snap := range snaps {
+		for i := range snap.Stats.Links {
+			ls := &snap.Stats.Links[i]
+			key := ls.A + "|" + ls.Z
+			out[key] = ls
+		}
+	}
+	return out
 }
 
 // monitorLab auto-refreshes a single lab's status every 2 seconds.

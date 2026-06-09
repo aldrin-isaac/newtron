@@ -102,6 +102,41 @@ func (c *Client) Deploy(ctx context.Context, lab string, opts api.DeployRequest)
 	return c.waitForTerminalEvent(ctx, lab)
 }
 
+// LabBridgeStats returns the most recent per-host BridgeStats snapshots
+// newtlink pushed for the lab. Calls GET
+// /newtlab/v1/labs/{lab}/bridges/stats. Returns an empty slice when no
+// host has pushed yet — callers distinguish "lab not deployed" (a 404
+// from LabStatus) from "no stats yet" (empty slice here).
+func (c *Client) LabBridgeStats(ctx context.Context, lab string) ([]api.BridgeStatsSnapshot, error) {
+	if lab == "" {
+		return nil, fmt.Errorf("newtlab: lab is required")
+	}
+	path := "/newtlab/v1/labs/" + url.PathEscape(lab) + "/bridges/stats"
+	var snaps []api.BridgeStatsSnapshot
+	if err := c.doGet(ctx, path, &snaps); err != nil {
+		return nil, err
+	}
+	return snaps, nil
+}
+
+// PushBridgeStats sends a BridgeStats snapshot for (lab, host) to
+// newtlab-server. Calls POST /newtlab/v1/labs/{lab}/bridges/{host}/stats.
+// The empty-host "local worker" case is encoded as the literal "local"
+// path segment per the server's wire convention. Used by newtlink, not
+// by external consumers — kept on the canonical client per §33 so the
+// server-bound wire shape has a single owner.
+func (c *Client) PushBridgeStats(ctx context.Context, lab, host string, stats newtlab.BridgeStats) error {
+	if lab == "" {
+		return fmt.Errorf("newtlab: lab is required")
+	}
+	segment := host
+	if segment == "" {
+		segment = "local"
+	}
+	path := "/newtlab/v1/labs/" + url.PathEscape(lab) + "/bridges/" + url.PathEscape(segment) + "/stats"
+	return c.doPost(ctx, path, stats, nil)
+}
+
 // Destroy tears down the named lab synchronously. Calls
 // POST /newtlab/v1/labs/{name}/destroy.
 func (c *Client) Destroy(ctx context.Context, lab string) error {

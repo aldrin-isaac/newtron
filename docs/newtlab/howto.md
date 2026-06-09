@@ -436,10 +436,10 @@ newtron (equivalent to running `newtlab provision` separately).
 
 **What can go wrong:**
 
-- **Port conflict**: newtlab probes all allocated ports (SSH, console, link,
-  bridge stats) before starting any VMs. If another process occupies a port,
-  deploy fails with a clear error identifying the conflicting port. Fix: stop
-  the conflicting process or change port bases in `topology.json`.
+- **Port conflict**: newtlab probes all allocated ports (SSH, console, link
+  A/Z) before starting any VMs. If another process occupies a port, deploy
+  fails with a clear error identifying the conflicting port. Fix: stop the
+  conflicting process or change port bases in `topology.json`.
 
 - **Image not found**: check `vm_image` in `platforms.json`. Tilde (`~`) is
   expanded.
@@ -1099,9 +1099,10 @@ or from the `name` field if present.
 ### Port Conflict Detection
 
 `ProbeAllPorts` runs automatically during deploy and checks all allocated
-ports (SSH, console, link, bridge stats) on every host. If another process
-occupies a port, deploy fails with a clear error message identifying the
-conflicting port and host.
+ports (SSH, console, link A/Z) on every host. If another process occupies a
+port, deploy fails with a clear error message identifying the conflicting
+port and host. Bridge stats no longer reserves a port — newtlink pushes to
+newtlab-server (#118), so there is no listening port to conflict with.
 
 ### Shared newtlink Binary
 
@@ -1189,13 +1190,12 @@ Common causes:
 - **KVM not available** — check `ls /dev/kvm`. Without KVM, QEMU uses TCG
   (much slower). The VM may time out during boot.
 - **Port already in use** — newtlab probes every allocated port before deploy
-  (SSH, console, link A/Z, bridge stats). When the holder is another
-  newtlab-managed lab, the error names it directly so the operator can stop
-  it:
+  (SSH, console, link A/Z). When the holder is another newtlab-managed lab,
+  the error names it directly so the operator can stop it:
 
   ```
   newtlab: port conflicts:
-    bridge stats (local): port 19999 held by lab "2node-vs-service" (bridge stats, PID 3948672); run 'newtlab destroy 2node-vs-service' first
+    link spine1:Ethernet0 A-side: port 20000 held by lab "2node-vs-service" (link bridge, PID 3948672); run 'newtlab destroy 2node-vs-service' first
   ```
 
   When the holder is a process outside newtlab's purview (a stray QEMU, a

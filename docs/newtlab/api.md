@@ -9,8 +9,9 @@
 3. [Server Management](#3-server-management)
 4. [Lab Lifecycle](#4-lab-lifecycle)
 5. [Node Control](#5-node-control)
-6. [Events (SSE)](#6-events-sse)
-7. [Types Reference](#7-types-reference)
+6. [Bridge Stats](#6-bridge-stats)
+7. [Events (SSE)](#7-events-sse)
+8. [Types Reference](#8-types-reference)
 
 ---
 
@@ -120,6 +121,8 @@ Returns server status. No authentication, no side effects.
 | `POST` | `/newtlab/v1/labs/{name}/destroy` | 200 / 404 | Tear down VMs (synchronous) |
 | `POST` | `/newtlab/v1/labs/{name}/provision` | 200 / 404 | Run the post-deploy provisioning pass |
 | `GET` | `/newtlab/v1/labs/{name}/events` | 200 (SSE) | Subscribe to deploy phase events |
+| `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | 204 / 400 | newtlink pushes `BridgeStats` here every 5s |
+| `GET` | `/newtlab/v1/labs/{lab}/bridges/stats` | 200 | Aggregate per-host bridge telemetry |
 
 ### `GET /newtlab/v1/labs` — list deployed labs
 
@@ -229,7 +232,69 @@ Sends SIGTERM to a running node's QEMU process. Synchronous.
 
 ---
 
-## 6. Events (SSE)
+## 6. Bridge Stats
+
+`newtlink` (the standalone bridge process newtlab spawns per worker host) **pushes** its per-link telemetry to newtlab-server every 5 seconds — there is no listening socket on the worker for status queries.
+
+The server keeps the most recent snapshot per `(lab, worker host)` in memory; snapshots evict when the lab is destroyed. A server restart drops the in-memory cache, but every running newtlink re-pushes within one push interval (≤5s).
+
+### `POST /newtlab/v1/labs/{lab}/bridges/{host}/stats`
+
+newtlink → newtlab-server. Body is the canonical `newtlab.BridgeStats`:
+
+```json
+{
+  "links": [
+    {
+      "a": "spine1:Ethernet0",
+      "z": "leaf1:Ethernet0",
+      "a_port": 20000,
+      "z_port": 20001,
+      "a_to_z_bytes": 12345,
+      "z_to_a_bytes": 67890,
+      "sessions": 1,
+      "connected": true
+    }
+  ]
+}
+```
+
+Empty body host segment is encoded as the literal `local` (URL paths can't carry empty segments). The server stores it as `""` internally to match `BridgeState.Bridges[""]` elsewhere in newtlab.
+
+**Response:** 204 No Content on success; 400 on malformed body or empty lab/host segment.
+
+### `GET /newtlab/v1/labs/{lab}/bridges/stats`
+
+Aggregate read of every host's latest snapshot for the lab. Returns an empty array when no worker has pushed yet — callers distinguish "lab not deployed" (404 from `/status`) from "lab deployed but bridges not yet up" (empty array here).
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "host": "",
+      "updated_at": "2026-06-09T15:30:21.123456789Z",
+      "age_seconds": 1.23,
+      "stats": {
+        "links": [ ... ]
+      }
+    },
+    {
+      "host": "host-b",
+      "updated_at": "2026-06-09T15:30:22.987654321Z",
+      "age_seconds": 0.42,
+      "stats": { "links": [ ... ] }
+    }
+  ]
+}
+```
+
+`age_seconds` is computed at GET time, so it is always current relative to the read. `bin/newtlab status` uses this endpoint to render the link table's `A→Z` / `Z→A` / `SESSIONS` columns.
+
+---
+
+## 7. Events (SSE)
 
 ### `GET /newtlab/v1/labs/{name}/events`
 
@@ -267,7 +332,7 @@ If a slow subscriber's buffer (64 events) fills up, additional events are droppe
 
 ---
 
-## 7. Types Reference
+## 8. Types Reference
 
 ### `PhasePayload`
 
