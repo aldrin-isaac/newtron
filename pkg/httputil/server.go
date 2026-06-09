@@ -65,12 +65,6 @@ func ServerLabel(s string) ServerOption {
 	return func(c *serverConfig) { c.label = s }
 }
 
-// ReadTimeout overrides the *http.Server ReadTimeout. Default 30s,
-// matching the existing newtron/newtrun/newtlab settings.
-func ReadTimeout(d time.Duration) ServerOption {
-	return func(c *serverConfig) { c.readTimeout = d }
-}
-
 // WriteTimeout overrides the *http.Server WriteTimeout. Default 0
 // (no per-request write deadline) so SSE handlers can hold long-lived
 // connections without the server-wide timeout killing them. Engines
@@ -78,11 +72,6 @@ func ReadTimeout(d time.Duration) ServerOption {
 // it explicitly.
 func WriteTimeout(d time.Duration) ServerOption {
 	return func(c *serverConfig) { c.writeTimeout = d }
-}
-
-// IdleTimeout overrides the *http.Server IdleTimeout. Default 120s.
-func IdleTimeout(d time.Duration) ServerOption {
-	return func(c *serverConfig) { c.idleTimeout = d }
 }
 
 // OnShutdown registers a function to run before the HTTP listener

@@ -309,25 +309,6 @@ func (l *Loader) validateQoSPolicies(v *util.ValidationBuilder) {
 	}
 }
 
-// isHostDevice returns true if the named device uses a host platform.
-func (l *Loader) isHostDevice(deviceName string) bool {
-	profile, ok := l.profiles[deviceName]
-	if !ok {
-		// Try loading — may not be cached yet during topology validation
-		profilePath := filepath.Join(l.specDir, "profiles", deviceName+".json")
-		data, err := os.ReadFile(profilePath)
-		if err != nil {
-			return false
-		}
-		var p DeviceProfile
-		if err := json.Unmarshal(data, &p); err != nil {
-			return false
-		}
-		profile = &p
-	}
-	return l.isHostPlatform(profile.Platform)
-}
-
 // isHostPlatform returns true if the given platform name refers to a host device type.
 func (l *Loader) isHostPlatform(platformName string) bool {
 	if l.platforms == nil || platformName == "" {

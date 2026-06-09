@@ -185,9 +185,10 @@ func newtlabURL() string {
 
 // resolveTarget resolves both lab name and spec directory from:
 // -S flag > positional topology name > auto-detect from deployed labs.
-// This is the shared resolution logic used by resolveSpecDir and resolveLabName.
-// The spec directory is no longer used for file reads (§27 — newtron owns
-// spec files); it is the path newtron is asked to register and serve.
+// This is the shared resolution logic used by resolveLabName and
+// prepareLab. The spec directory is no longer used for file reads
+// (§27 — newtron owns spec files); it is the path newtron is asked
+// to register and serve.
 func resolveTarget(args []string) (labName string, dir string, err error) {
 	// Explicit -S flag takes priority
 	if specDir != "" {
@@ -243,12 +244,6 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 		return labs[0], state.SpecDir, nil
 	}
 	return "", "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
-}
-
-// resolveSpecDir resolves the spec directory from: -S flag > positional topology name > auto-detect.
-func resolveSpecDir(args []string) (string, error) {
-	_, dir, err := resolveTarget(args)
-	return dir, err
 }
 
 // resolveLabName resolves a lab name from: -S flag > positional name > auto-detect.

@@ -58,12 +58,6 @@ func deleteVniMapConfig(vni int, target string) []sonic.Entry {
 	return []sonic.Entry{{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(vni, target)}}
 }
 
-// deleteVniMapByKeyConfig returns the delete entry for a VXLAN_TUNNEL_MAP given a raw key.
-// Used by cleanup paths that iterate configDB and already have the key.
-func deleteVniMapByKeyConfig(key string) []sonic.Entry {
-	return []sonic.Entry{{Table: "VXLAN_TUNNEL_MAP", Key: key}}
-}
-
 // deleteBgpEvpnVNIConfig returns the delete entry for a BGP_EVPN_VNI entry.
 func deleteBgpEvpnVNIConfig(vrfName string, vni int) []sonic.Entry {
 	return []sonic.Entry{{Table: "BGP_EVPN_VNI", Key: BGPEVPNVNIKey(vrfName, vni)}}
