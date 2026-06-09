@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,16 +139,14 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	}
 	client := newtronclient.New(newtronServer, netID)
 	// Ensure the network is registered on newtron-server so it can
-	// serve specs for this topology. If newtron is already serving a
-	// different spec dir under the same netID, surface that error.
+	// serve specs for this topology. RegisterNetwork is true-idempotent on
+	// matching spec_dir (returns nil); on a real conflict (same network
+	// id, different spec_dir) it returns *AlreadyRegisteredError, which we
+	// surface unwrapped — the operator needs to see exactly which spec_dir
+	// is squatting in the "default" slot.
 	if dir != "" {
 		if regErr := client.RegisterNetwork(dir); regErr != nil {
-			// 409 conflict means already registered — treat as success
-			// (RegisterNetwork already swallows 409 per pkg/newtron/client/client.go).
-			// Other errors are real.
-			if se, ok := regErr.(*newtronclient.ServerError); !ok || se.StatusCode != http.StatusConflict {
-				return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
-			}
+			return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
 		}
 	}
 	return newtlab.NewLab(ctx, client, name)

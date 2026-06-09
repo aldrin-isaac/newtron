@@ -260,13 +260,30 @@ func (e *notRegisteredError) Error() string {
 	return "network '" + e.id + "' not registered"
 }
 
+// AlreadyRegisteredErrorInfo is the data payload of the 409 envelope on
+// POST /networks when the id is already registered. It carries the existing
+// spec_dir so clients can distinguish true-idempotent re-registration (same
+// id, same spec_dir → return nil) from a real conflict (same id, different
+// spec_dir → surface a typed error). §46 (HTTP API Boundary) on the failure
+// path: the substrate the server already knows is propagated through
+// envelope.Data, the same shape VerificationFailedError uses for its
+// VerificationResult.
+type AlreadyRegisteredErrorInfo struct {
+	ID              string `json:"id"`
+	ExistingSpecDir string `json:"existing_spec_dir"`
+}
+
 // alreadyRegisteredError is returned when a network ID is already registered.
 type alreadyRegisteredError struct {
-	id string
+	id              string
+	existingSpecDir string
 }
 
 func (e *alreadyRegisteredError) Error() string {
-	return "network '" + e.id + "' already registered"
+	if e.existingSpecDir == "" {
+		return "network '" + e.id + "' already registered"
+	}
+	return "network '" + e.id + "' already registered with spec_dir '" + e.existingSpecDir + "'"
 }
 
 // httpStatusFromError maps Go error types to HTTP status codes.

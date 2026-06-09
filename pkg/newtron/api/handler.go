@@ -205,10 +205,15 @@ func (s *Server) buildMux() http.Handler {
 
 // writeError writes a JSON error response.
 //
-// For VerificationFailedError, the typed WriteResult (Verification, DeviceOps,
-// Changes) is propagated as the Data field of the envelope so consumers see
-// the full substrate that newtron computed — §46 (HTTP API Boundary) on the
-// failure path. Other error kinds emit Error only.
+// For typed errors that carry actionable substrate, the typed payload is
+// propagated as the Data field of the envelope so consumers see what newtron
+// computed — §46 (HTTP API Boundary) on the failure path. Today two error
+// kinds carry typed Data:
+//
+//   - VerificationFailedError → WriteResult (Verification, DeviceOps, Changes)
+//   - alreadyRegisteredError → AlreadyRegisteredErrorInfo (existing spec_dir)
+//
+// Other error kinds emit Error only.
 func writeError(w http.ResponseWriter, err error) {
 	status := httpStatusFromError(err)
 	w.Header().Set("Content-Type", "application/json")
@@ -217,6 +222,13 @@ func writeError(w http.ResponseWriter, err error) {
 	var verFailed *newtron.VerificationFailedError
 	if errors.As(err, &verFailed) && verFailed.Result != nil {
 		envelope.Data = verFailed.Result
+	}
+	var alreadyReg *alreadyRegisteredError
+	if errors.As(err, &alreadyReg) {
+		envelope.Data = AlreadyRegisteredErrorInfo{
+			ID:              alreadyReg.id,
+			ExistingSpecDir: alreadyReg.existingSpecDir,
+		}
 	}
 	json.NewEncoder(w).Encode(envelope)
 }
