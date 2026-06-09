@@ -251,33 +251,9 @@ run_cmd make build
 
 pause
 
-# ─── Step 3: Deploy the lab ───────────────────────────────────────────────────
+# ─── Step 3: Start newt-server ────────────────────────────────────────────────
 
-header 3 "Deploy the lab"
-
-echo -e "  ${BLUE_BOLD}newtlab${RESET} boots a QEMU VM running SONiC and wires it to the host."
-echo ""
-echo "  Inside the VM, the full SONiC stack starts up:"
-echo -e "    ${GRAY}${H}${RESET} Redis (database container) -- CONFIG_DB, APP_DB, ASIC_DB, STATE_DB"
-echo -e "    ${GRAY}${H}${RESET} FRR via frrcfgd (bgp container) -- watches CONFIG_DB for BGP config"
-echo -e "    ${GRAY}${H}${RESET} intfmgrd, vrfmgrd (swss container) -- configure kernel interfaces"
-echo -e "    ${GRAY}${H}${RESET} orchagent (swss container) -- programs the virtual ASIC"
-echo ""
-echo "  This is identical to what runs on a physical switch. The only"
-echo "  difference is the ASIC is simulated."
-echo ""
-echo -e "  The ${BOLD}--monitor${RESET} flag shows live status during deployment."
-echo -e "  ${GRAY}Boot takes 2-5 minutes depending on your machine.${RESET}"
-
-pause
-
-run_cmd bin/newtlab deploy 1node-vs --monitor --force
-
-pause
-
-# ─── Step 4: Start newt-server ────────────────────────────────────────────────
-
-header 4 "Start ${BLUE_BOLD}newt-server${RESET}"
+header 3 "Start ${BLUE_BOLD}newt-server${RESET}"
 
 echo "  The architecture is:"
 echo ""
@@ -293,6 +269,11 @@ echo "  newt-server runs newtron, newtrun, and newtlab in one process on"
 echo "  port 18080. Routes are dispatched by URL prefix: /newtron/v1/...,"
 echo "  /newtrun/v1/..., /newtlab/v1/.... See docs/newt-server.md for the"
 echo "  composition rationale."
+echo ""
+echo "  We start it before the lab so the next step's deploy monitor can"
+echo "  read live link telemetry: newtlink (the bridge agent) pushes"
+echo "  per-link byte counters to newt-server every 5 seconds, and"
+echo -e "  ${BOLD}newtlab status${RESET} reads them via HTTP to populate the link table."
 
 # Kill any leftover newt-server from a previous run
 existing_pid=$(pgrep -f "newt-server.*-spec-dir" || true)
@@ -325,6 +306,32 @@ if ! kill -0 "$SERVER_PID" 2>/dev/null; then
 fi
 
 echo -e "  ${GREEN}Server started${RESET} (PID $SERVER_PID)"
+
+pause
+
+# ─── Step 4: Deploy the lab ───────────────────────────────────────────────────
+
+header 4 "Deploy the lab"
+
+echo -e "  ${BLUE_BOLD}newtlab${RESET} boots a QEMU VM running SONiC and wires it to the host."
+echo ""
+echo "  Inside the VM, the full SONiC stack starts up:"
+echo -e "    ${GRAY}${H}${RESET} Redis (database container) -- CONFIG_DB, APP_DB, ASIC_DB, STATE_DB"
+echo -e "    ${GRAY}${H}${RESET} FRR via frrcfgd (bgp container) -- watches CONFIG_DB for BGP config"
+echo -e "    ${GRAY}${H}${RESET} intfmgrd, vrfmgrd (swss container) -- configure kernel interfaces"
+echo -e "    ${GRAY}${H}${RESET} orchagent (swss container) -- programs the virtual ASIC"
+echo ""
+echo "  This is identical to what runs on a physical switch. The only"
+echo "  difference is the ASIC is simulated."
+echo ""
+echo -e "  The ${BOLD}--monitor${RESET} flag shows live status during deployment."
+echo "  Since newt-server is already up, the link table populates with"
+echo "  byte counters and session state as soon as bridges come online."
+echo -e "  ${GRAY}Boot takes 2-5 minutes depending on your machine.${RESET}"
+
+pause
+
+run_cmd bin/newtlab deploy 1node-vs --monitor --force
 
 pause
 
