@@ -212,7 +212,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
 	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (default: http://127.0.0.1:18080, env: NEWTRON_SERVER)")
-	cmd.Flags().StringVar(&networkID, "network-id", "", "newtron network identifier (env: NEWTRON_NETWORK_ID)")
+	cmd.Flags().StringVar(&networkID, "network-id", "", "newtron network identifier (env: NEWTRON_NETWORK_ID). Empty by default — newtrun-server derives the id from suite.Topology so concurrent suites don't compete for one 'default' slot (#116).")
 	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
 	cmd.Flags().BoolVar(&noDeploy, "no-deploy", false, "skip topology deployment (for loopback/offline mode)")
 	return cmd

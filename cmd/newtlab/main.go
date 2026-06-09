@@ -75,7 +75,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory (overrides topology name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
-	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "default", "newtron network ID")
+	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "", "newtron network ID (default: derived from the lab name, so concurrent labs get separate registration slots — issue #116)")
 
 	rootCmd.AddCommand(
 		newListCmd(),
@@ -137,13 +137,20 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := newtronclient.New(newtronServer, netID)
+	// Default the network ID to the lab name so concurrent labs get
+	// separate registration slots on newtron (issue #116). Operators can
+	// still pin a different name via --net-id.
+	effectiveNetID := netID
+	if effectiveNetID == "" {
+		effectiveNetID = name
+	}
+	client := newtronclient.New(newtronServer, effectiveNetID)
 	// Ensure the network is registered on newtron-server so it can
 	// serve specs for this topology. RegisterNetwork is true-idempotent on
 	// matching spec_dir (returns nil); on a real conflict (same network
 	// id, different spec_dir) it returns *AlreadyRegisteredError, which we
 	// surface unwrapped — the operator needs to see exactly which spec_dir
-	// is squatting in the "default" slot.
+	// is squatting in the slot.
 	if dir != "" {
 		if regErr := client.RegisterNetwork(dir); regErr != nil {
 			return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
@@ -177,7 +184,15 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 				if loadErr != nil {
 					return "", "", loadErr
 				}
-				return l, state.SpecDir, nil
+				// state.SpecDir is empty for older labs whose state.json
+				// was written before SpecDir was persisted; fall back to
+				// the canonical spec dir for the topology name so the
+				// caller can still register the network with newtron.
+				dir := state.SpecDir
+				if dir == "" {
+					dir = resolveTopologyDir(l)
+				}
+				return l, dir, nil
 			}
 		}
 		// Try as topology name

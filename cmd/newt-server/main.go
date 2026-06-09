@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
@@ -87,12 +88,16 @@ func main() {
 	})
 	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
 	// owns spec files). In the composed binary this is an in-process
-	// loopback call to the newtron handler mounted on the same mux.
-	newtronAPIClient := newtronclient.New("http://"+*listen, *netID)
+	// loopback call to the newtron handler mounted on the same mux. Each
+	// lab gets its own newtron client configured for its own network ID
+	// (#116 — the network ID equals the lab name).
+	newtronURL := "http://" + *listen
 	newtlabSrv := newtlabapi.NewServer(newtlabapi.Config{
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
-		NewtronClient:  newtronAPIClient,
+		NewtronClientFor: func(networkID string) newtlab.SpecClient {
+			return newtronclient.New(newtronURL, networkID)
+		},
 	})
 
 	// Compose the route tree. Each engine's Handler() already returns

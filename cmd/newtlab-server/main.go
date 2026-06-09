@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
@@ -35,7 +36,6 @@ func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories")
 	newtronServer := flag.String("newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
-	netID := flag.String("net-id", "default", "newtron network ID")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtlab-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -44,13 +44,17 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
-	// newtlab consumes spec data via newtron's HTTP API (§27).
-	newtronAPIClient := newtronclient.New(*newtronServer, *netID)
+	// newtlab consumes spec data via newtron's HTTP API (§27). Each lab
+	// gets its own newtron client configured for its own network ID
+	// (#116 — the network ID equals the lab name).
+	newtronURL := *newtronServer
 
 	srv := api.NewServer(api.Config{
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
-		NewtronClient:  newtronAPIClient,
+		NewtronClientFor: func(networkID string) newtlab.SpecClient {
+			return newtronclient.New(newtronURL, networkID)
+		},
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

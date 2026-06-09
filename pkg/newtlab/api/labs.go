@@ -197,13 +197,15 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 }
 
 // openLab resolves a lab name to a *newtlab.Lab. Spec data is consumed
-// from newtron-server via the configured NewtronClient (§27 — newtron
-// owns spec files).
+// from newtron-server via a per-lab newtron client (§27 — newtron owns
+// spec files; #116 — each lab has its own network registration slot
+// under its name).
 func (s *Server) openLab(ctx context.Context, name string) (*newtlab.Lab, error) {
-	if s.cfg.NewtronClient == nil {
+	if s.cfg.NewtronClientFor == nil {
 		return nil, fmt.Errorf("newtlab-server has no newtron client configured; pass --newtron-server when starting")
 	}
-	lab, err := newtlab.NewLab(ctx, s.cfg.NewtronClient, name)
+	client := s.cfg.NewtronClientFor(name)
+	lab, err := newtlab.NewLab(ctx, client, name)
 	if err != nil {
 		return nil, fmt.Errorf("lab %q: %w", name, err)
 	}

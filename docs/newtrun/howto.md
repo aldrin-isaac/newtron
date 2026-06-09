@@ -184,7 +184,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | `--platform <name>` | Override the platform declared in `suite.yaml`. |
 | `--junit <path>` | Write a JUnit XML report at `<path>` after the run finishes. |
 | `--monitor` / `-m` | Replace the per-event terminal output with an auto-refreshing dashboard backed by `state.json`. |
-| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
+| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). Empty by default — the server derives the id from `suite.Topology` so two suites against one newt-server don't compete for the `default` slot (#116). |
 | `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`). Passed to every server-side scenario step. |
 
 ### 4.5 Preconditions
@@ -1581,7 +1581,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | `--monitor`, `-m` | Auto-refreshing dashboard instead of per-event log. |
 | `--junit <path>` | JUnit XML report path. |
 | `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`; default: `http://localhost:18080`). |
-| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
+| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). Empty by default — the server derives the id from `suite.Topology` so two suites against one newt-server don't compete for the `default` slot (#116). |
 
 `-v` / `--verbose` is a global flag (see §15.6) — it affects `start` (per-step output during a run) and `status` (more detail in the dashboard).
 

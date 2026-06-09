@@ -21,12 +21,17 @@ type Config struct {
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
 
-	// NewtronClient is the HTTP client newtlab uses to consume specs
-	// from newtron-server. Required for topology lifecycle operations
-	// (deploy / status / start / stop) — newtlab no longer reads spec
-	// JSON files directly per §27. Composed in by cmd/newtlab-server
-	// or cmd/newt-server.
-	NewtronClient newtlab.SpecClient
+	// NewtronClientFor returns a newtron SpecClient configured for the
+	// named network ID. newtlab uses one client per lab — by the #116
+	// convention, the network ID equals the lab name, so each lab has
+	// its own newtron registration slot. Composed in by cmd/newtlab-
+	// server or cmd/newt-server, typically wrapping
+	// newtronclient.New(baseURL, networkID).
+	//
+	// Required for topology lifecycle operations (deploy / status /
+	// start / stop) — newtlab no longer reads spec JSON files directly
+	// per §27.
+	NewtronClientFor func(networkID string) newtlab.SpecClient
 }
 
 // Server is the newtlab HTTP server. The HTTP listener lifecycle
