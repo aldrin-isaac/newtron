@@ -26,6 +26,9 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /newtlab/v1/labs/{name}/nodes/{node}/start", s.handleStartNode)
 	mux.HandleFunc("POST /newtlab/v1/labs/{name}/nodes/{node}/stop", s.handleStopNode)
 
+	mux.HandleFunc("POST /newtlab/v1/labs/{lab}/bridges/{host}/stats", s.handlePushBridgeStats)
+	mux.HandleFunc("GET /newtlab/v1/labs/{lab}/bridges/stats", s.handleGetBridgeStats)
+
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.RequestID(handler)

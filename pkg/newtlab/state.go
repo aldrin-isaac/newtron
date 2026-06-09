@@ -36,11 +36,13 @@ type NodeState struct {
 	Namespace      string `json:"namespace,omitempty"` // virtual hosts: netns name
 }
 
-// BridgeState tracks a per-host bridge process.
+// BridgeState tracks a per-host bridge process. As of #118 newtlink no
+// longer listens on a stats port — it pushes BridgeStats to
+// newtlab-server every pushInterval — so there is no stats address to
+// record here.
 type BridgeState struct {
-	PID       int    `json:"pid"`
-	HostIP    string `json:"host_ip,omitempty"` // "" for local
-	StatsAddr string `json:"stats_addr"`        // "host:port" for TCP stats
+	PID    int    `json:"pid"`
+	HostIP string `json:"host_ip,omitempty"` // "" for local
 }
 
 // LinkState tracks per-link allocation.

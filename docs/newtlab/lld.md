@@ -19,7 +19,7 @@ is implemented by looking at the file name.
 | `newtlab.go` | Lab orchestrator — NewLab, Deploy, Destroy, Status, Stop, Start, Provision | `Lab`, `HostVMGroup` |
 | `node.go` | Node config resolution, MAC generation | `NodeConfig`, `NICConfig`, `ResolveNodeConfig`, `GenerateMAC` |
 | `link.go` | Link allocation, NIC assignment, worker placement, bridge workers | `VMLabConfig`, `LinkConfig`, `LinkEndpoint`, `HostMapping`, `AllocateLinks`, `PlaceWorkers`, `Bridge`, `BridgeWorker` |
-| `bridge.go` | Bridge config serialization, process management, stats | `BridgeConfig`, `BridgeLink`, `BridgeStats`, `LinkStats`, `WriteBridgeConfig`, `RunBridgeFromFile`, `QueryBridgeStats` |
+| `bridge.go` | Bridge config serialization, process management, stats push loop | `BridgeConfig`, `BridgeLink`, `BridgeStats`, `LinkStats`, `BridgePushParams`, `WriteBridgeConfig`, `RunBridgeFromFile` |
 | `iface_map.go` | Interface name → QEMU NIC index resolution | `ResolveNICIndex` |
 | `qemu.go` | QEMU command builder, node start/stop/running checks | `QEMUCommand`, `StartNode`, `StopNode`, `IsRunning` |
 | `boot.go` | Serial console bootstrap, SSH key generation, SSH readiness | `BootstrapNetwork`, `BootstrapHostNetwork`, `WaitForSSH`, `GenerateLabSSHKey` |
@@ -596,12 +596,15 @@ hosts.
 ### 5.5 Bridge Config and Process
 
 Bridge workers run as separate `newtlink` processes. Each process reads a
-`bridge.json` config and opens TCP listeners for all assigned links.
+`bridge.json` config, opens TCP listeners for all assigned links, and pushes
+telemetry to newtlab-server.
 
 ```go
 type BridgeConfig struct {
-    Links     []BridgeLink `json:"links"`
-    StatsAddr string       `json:"stats_addr,omitempty"`
+    Links           []BridgeLink `json:"links"`
+    OrchestratorURL string       `json:"orchestrator_url"`
+    LabName         string       `json:"lab_name"`
+    WorkerHost      string       `json:"worker_host"` // "" for the local worker
 }
 
 type BridgeLink struct {
@@ -617,7 +620,7 @@ type BridgeLink struct {
 Process lifecycle:
 - **Local:** `WriteBridgeConfig()` serializes config → `startBridgeProcess()` spawns `newtlink <configPath>` (detached process group).
 - **Remote:** `buildBridgeConfig()` → upload config JSON + `newtlink` binary via SSH → `startBridgeProcessRemote()` starts via `nohup`.
-- `RunBridgeFromFile()` is the newtlink entry point: reads config, starts workers, writes PID file, opens Unix + TCP stats listeners, blocks on SIGTERM/SIGINT.
+- `RunBridgeFromFile()` is the newtlink entry point: reads config, starts workers, writes PID file, fires an initial `BridgeStats` push, then loops pushing every 5s until SIGTERM/SIGINT — and fires one final push on shutdown so the operator's last status view shows the terminal counters.
 
 ### 5.6 BridgeWorker Runtime and Stats
 
@@ -640,10 +643,10 @@ bidirectional `io.Copy` using `countingWriter` for byte counting. When either
 side disconnects, the loop re-accepts (survives VM restart). The `Bridge`
 struct holds all workers and provides `Stop()` and `Stats()`.
 
-Stats queries:
-- `QueryBridgeStats(addr)` connects to Unix socket or TCP and decodes `BridgeStats`.
-- `QueryAllBridgeStats(labName)` aggregates stats from all bridge processes in a lab (one per unique worker host).
-- Legacy fallback: if state has no `Bridges` map but has `BridgePID`, queries the local Unix socket.
+Stats flow:
+- newtlink calls `Bridge.Stats()` every 5s and POSTs the result to `POST /newtlab/v1/labs/{lab}/bridges/{host}/stats` (#118).
+- newtlab-server holds the latest snapshot per `(lab, host)` in memory (`BridgeStatsStore` in `pkg/newtlab/api/`) and serves the aggregate to `GET /newtlab/v1/labs/{lab}/bridges/stats`.
+- `bin/newtlab status` fetches the aggregate via `newtlab/client.LabBridgeStats(ctx, lab)`.
 
 ```go
 type BridgeStats struct {
@@ -955,9 +958,8 @@ type NodeState struct {
 }
 
 type BridgeState struct {
-    PID       int
-    HostIP    string
-    StatsAddr string // "host:port" for TCP stats
+    PID    int
+    HostIP string
 }
 
 type LinkState struct {
@@ -978,7 +980,6 @@ type LinkState struct {
         ├── lab.key             # Ed25519 private key
         ├── bridge.json         # BridgeConfig (local bridge)
         ├── bridge.pid          # newtlink PID
-        ├── bridge.sock         # Unix socket for stats queries
         ├── disks/
         │   ├── spine1.qcow2   # overlay disks
         │   └── leaf1.qcow2
@@ -1099,9 +1100,11 @@ Adds `HOST` column when any node is on a remote host.
 - `host-vm` — coalesced host VM.
 - `vhost:<vmName>/<namespace>` — virtual host within a coalesced VM.
 
-Link table: calls `QueryAllBridgeStats()` to enrich links with live stats
-(connected status, byte counts, session counts). Includes `HOST` column when
-any link has a non-local worker.
+Link table: calls `newtlab/client.LabBridgeStats(ctx, lab)` against
+newtlab-server to enrich links with live stats (connected status, byte
+counts, session counts) populated by newtlink push. Includes `HOST` column
+when any link has a non-local worker. When newtlab-server is unreachable,
+the table still renders with `—` placeholders.
 
 ### 12.5 SSH and Console
 
@@ -1154,10 +1157,10 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 
 `Lab.Deploy(ctx)`:
 
-1. **Pre-checks:** `CollectAllPorts()` → 25 allocations (3 SSH + 3 console + 18 link + 1 bridge stats). `ProbeAllPorts()` checks all free.
+1. **Pre-checks:** `CollectAllPorts()` → 24 allocations (3 SSH + 3 console + 18 link). `ProbeAllPorts()` checks all free. Bridge stats no longer allocates a port — newtlink pushes to newtlab-server (#118).
 2. **State init:** `LabState{Name: "2node-ngdp", SpecDir: ..., Nodes: {}}`, 9 link state entries. `SaveState()`.
 3. **Overlay disks:** `CreateOverlay(platform.VMImage, ~/.newtlab/labs/2node-ngdp/disks/switch1.qcow2)` for switch1, switch2, and hostvm-0 (3 VMs).
-4. **Bridges:** `WriteBridgeConfig()` → `bridge.json` with 9 links, stats addr `127.0.0.1:9999`. `startBridgeProcess()` → `newtlink ~/.newtlab/labs/2node-ngdp/bridge.json`. Wait for ports 10000–10017.
+4. **Bridges:** `WriteBridgeConfig()` → `bridge.json` with 9 links + `orchestrator_url` / `lab_name` / `worker_host` for newtlink push. `startBridgeProcess()` → `newtlink ~/.newtlab/labs/2node-ngdp/bridge.json`. Wait for ports 10000–10017. newtlink fires its first push to `/newtlab/v1/labs/2node-ngdp/bridges/local/stats` once workers are up.
 5. **Boot VMs:** `StartNode(switch1, stateDir, "")` → `QEMUCommand.Build()` → `qemu-system-x86_64 -m 8192 -smp 6 -cpu host -enable-kvm -drive file=.../switch1.qcow2,... -serial tcp::12006,server,nowait -netdev user,id=mgmt,hostfwd=tcp::13006-:22 -device e1000,... -netdev socket,id=eth1,connect=127.0.0.1:10000 ...`. Same for switch2 and hostvm-0.
 6. **Bootstrap:** Switches: `BootstrapNetwork(ctx, "127.0.0.1", 12006, "aldrin", "...", "admin", "...", 600s)` — serial login, eth0 DHCP, create admin user. Host VM: `BootstrapHostNetwork(ctx, "127.0.0.1", 12000, ...)` — wait for login prompt only (Alpine auto-starts DHCP+SSH). Then `WaitForSSH()` for all 3 VMs. Inject lab SSH key.
 7. **Patches:** `ResolveBootPatches("ciscovs", "")` → `patches/ciscovs/always/*.json` for switches. `buildPatchVars()` → `{NumPorts: 6, PCIAddrs: [...], PortStride: 1, ...}`. `ApplyBootPatches()` via SSH. Host VMs have no patches (no dataplane set).
@@ -1193,7 +1196,7 @@ test file `newtlab_test.go` covers the core types and algorithms; additional
 | FilterHost | Remote node removal. Local host clearing. Link pruning. Unhosted node retention. |
 | Worker placement | Same-host → shared. Cross-host → balanced with alphabetical tie-breaking. |
 | Bridge workers | Bidirectional data forwarding. Byte counting. Session tracking. Listen failure. |
-| Bridge stats | Local stats (in-memory). TCP stats (remote simulation). Multi-bridge aggregation. Legacy Unix socket fallback. |
+| Bridge stats | Local stats (in-memory). `BridgeStatsStore` Set/Get/EvictLab semantics + age computation. POST/GET round-trip via the HTTP endpoints. |
 | Disk helpers | `expandHome` / `unexpandHome` round-trip. |
 | QEMU | KVM flag inclusion. Relative path handling for remote. |
 

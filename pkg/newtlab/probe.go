@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -14,14 +13,15 @@ import (
 //
 //   LinkPortBase (default 20000):
 //     Link A/Z ports:    LinkPortBase + i*2, LinkPortBase + i*2 + 1
-//     Bridge stats:      LinkPortBase - 1, LinkPortBase - 2, ... (one per worker host)
 //   ConsolePortBase (default 30000):
 //     Serial console:    ConsolePortBase + nodeIndex
 //   SSHPortBase (default 40000):
 //     SSH forwarding:    SSHPortBase + nodeIndex
 //
-// Ranges are non-overlapping: links grow upward from 20000, bridge stats
-// grow downward from 19999, consoles start at 30000, SSH starts at 40000.
+// Ranges are non-overlapping: links grow upward from 20000, consoles
+// start at 30000, SSH starts at 40000. (Bridge workers do not listen
+// on any TCP port as of #118 — newtlink pushes stats to newtlab-server
+// instead — so no allocation is reserved for bridge stats.)
 
 // PortAllocation describes a single TCP port allocation in the lab.
 type PortAllocation struct {
@@ -71,54 +71,7 @@ func CollectAllPorts(lab *Lab) []PortAllocation {
 		})
 	}
 
-	// Bridge stats ports (one per unique worker host)
-	statsPorts := allocateBridgeStatsPorts(lab)
-	for host, port := range statsPorts {
-		hostIP := resolveHostIP(host, lab.Config)
-		allocs = append(allocs, PortAllocation{
-			Host:    host,
-			HostIP:  hostIP,
-			Port:    port,
-			Purpose: fmt.Sprintf("bridge stats (%s)", hostDisplayName(host)),
-		})
-	}
-
 	return allocs
-}
-
-// allocateBridgeStatsPorts returns the stats port for each bridge worker host.
-// Mirrors the allocation logic in Deploy(): counting down from LinkPortBase - 1.
-func allocateBridgeStatsPorts(lab *Lab) map[string]int {
-	if len(lab.Links) == 0 {
-		return nil
-	}
-
-	// Collect unique worker hosts in sorted order
-	hostSet := map[string]bool{}
-	for _, lc := range lab.Links {
-		hostSet[lc.WorkerHost] = true
-	}
-	hosts := make([]string, 0, len(hostSet))
-	for h := range hostSet {
-		hosts = append(hosts, h)
-	}
-	sort.Strings(hosts)
-
-	result := make(map[string]int, len(hosts))
-	nextPort := lab.Config.LinkPortBase - 1
-	for _, host := range hosts {
-		result[host] = nextPort
-		nextPort--
-	}
-	return result
-}
-
-// hostDisplayName returns a display name for a host ("local" for empty string).
-func hostDisplayName(host string) string {
-	if host == "" {
-		return "local"
-	}
-	return host
 }
 
 // portOwner describes which lab (and which process within that lab) holds a
@@ -171,11 +124,6 @@ func attributePortOwners(excludeLab string) map[int]portOwner {
 		bridgePIDByHost := map[string]int{}
 		for host, br := range state.Bridges {
 			bridgePIDByHost[host] = br.PID
-			if _, portStr, splitErr := net.SplitHostPort(br.StatsAddr); splitErr == nil {
-				if port, atoiErr := strconv.Atoi(portStr); atoiErr == nil && port > 0 {
-					owners[port] = portOwner{Lab: state.Name, PID: br.PID, Purpose: "bridge stats"}
-				}
-			}
 		}
 		for _, link := range state.Links {
 			pid := bridgePIDByHost[link.WorkerHost]

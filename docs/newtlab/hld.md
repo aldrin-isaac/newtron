@@ -407,12 +407,14 @@ Every bridge worker maintains per-link counters: bytes A→Z, bytes Z→A,
 session count, and connection state — because every Ethernet frame passes
 through the worker's copy loop.
 
-Each bridge process exposes a stats endpoint. The local bridge listens on
-both a Unix socket (fast path for `newtlab status` on the same host) and a
-TCP port; remote bridges listen on TCP only. `newtlab status` queries all
-bridge processes across all hosts and merges their counters into a single
-table — giving a topology-wide view of traffic flow and link health without
-any central collector.
+Each newtlink process **pushes** a `BridgeStats` snapshot to newtlab-server
+every 5 seconds — the worker does not listen on any port for stats queries.
+newtlab-server keeps the latest snapshot per `(lab, worker host)` in memory
+and serves the aggregate to `newtlab status` via
+`GET /newtlab/v1/labs/{lab}/bridges/stats`. The push direction is the same
+for local and remote workers; the only deployment concern is that the
+orchestrator URL embedded in each worker's `bridge.json` is reachable from
+where the worker runs.
 
 ---
 
@@ -743,7 +745,7 @@ Tracks the complete runtime state of the lab:
       "a_port": 20000, "z_port": 20001, "worker_host": "" }
   ],
   "bridges": {
-    "": { "pid": 54321, "stats_addr": "127.0.0.1:19999" }
+    "": { "pid": 54321 }
   }
 }
 ```
@@ -870,6 +872,8 @@ Default bind: `127.0.0.1:19082` — loopback-only. The standard production stack
 | `POST` | `/newtlab/v1/labs/{name}/nodes/{node}/start` | `Lab.Start(node)` |
 | `POST` | `/newtlab/v1/labs/{name}/nodes/{node}/stop` | `Lab.Stop(node)` |
 | `GET` | `/newtlab/v1/labs/{name}/events` (SSE) | `Lab.OnProgress` phase callbacks |
+| `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | newtlink push of `BridgeStats` (5s cadence) |
+| `GET` | `/newtlab/v1/labs/{lab}/bridges/stats` | Aggregate of every host's latest snapshot |
 
 Concurrency: one async deploy per lab at a time (second concurrent request returns 409). Destroy / start / stop / provision are synchronous. See [`api.md`](api.md) for endpoint-level reference.
 

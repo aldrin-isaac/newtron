@@ -49,12 +49,18 @@ func main() {
 	// (#116 — the network ID equals the lab name).
 	newtronURL := *newtronServer
 
+	// OrchestratorURL is the publicly-reachable URL of THIS
+	// newtlab-server — newtlink processes spawned by Deploy push
+	// BridgeStats back to it (#118). For loopback listens we use
+	// http://<listen>; for non-loopback listens we trust the operator
+	// to have configured a reachable address.
 	srv := api.NewServer(api.Config{
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
 		NewtronClientFor: func(networkID string) newtlab.SpecClient {
 			return newtronclient.New(newtronURL, networkID)
 		},
+		OrchestratorURL: "http://" + *listen,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

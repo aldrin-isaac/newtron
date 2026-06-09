@@ -56,6 +56,17 @@ type Lab struct {
 	Force        bool
 	DeviceFilter []string // if non-empty, only provision these devices
 
+	// OrchestratorURL is the base URL of newtlab-server (or the
+	// composed newt-server). newtlink processes started by setupBridges
+	// push their BridgeStats here every pushInterval — see #118 and
+	// pkg/newtlab/bridge.go. Set by the caller before Deploy (CLI:
+	// resolved from --newtlab-server flag / NEWTLAB_SERVER env var;
+	// HTTP path: set by handleDeploy from server config). Empty causes
+	// setupBridges to fail rather than spawn workers that push to
+	// nowhere — the bridge-stats push is mandatory once newtlink no
+	// longer offers a fallback listener.
+	OrchestratorURL string
+
 	// specClient is the newtron HTTP client used to reload spec data
 	// when internal operations need a fresh view (e.g., Start() re-
 	// resolving a stopped node's config). Set by NewLab; not mutable
@@ -698,37 +709,37 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 		return nil
 	}
 
+	if l.OrchestratorURL == "" {
+		return fmt.Errorf("newtlab: OrchestratorURL not set; newtlink pushes BridgeStats to newtlab-server and has no fallback listener (#118)")
+	}
+
 	hostLinks := map[string][]*LinkConfig{}
 	for _, lc := range l.Links {
 		hostLinks[lc.WorkerHost] = append(hostLinks[lc.WorkerHost], lc)
 	}
 
 	l.State.Bridges = make(map[string]*BridgeState)
-	statsPorts := allocateBridgeStatsPorts(l)
 
 	for _, host := range sortedHosts(hostLinks) {
-		statsPort := statsPorts[host]
 		links := hostLinks[host]
-
-		bindAddr := "127.0.0.1"
 		hostIP := resolveHostIP(host, l.Config)
-		if host != "" {
-			bindAddr = "0.0.0.0"
+		push := BridgePushParams{
+			OrchestratorURL: l.OrchestratorURL,
+			LabName:         l.Name,
+			WorkerHost:      host,
 		}
-		statsBindAddr := fmt.Sprintf("%s:%d", bindAddr, statsPort)
 
 		if host == "" {
-			if err := WriteBridgeConfig(l.StateDir, links, statsBindAddr); err != nil {
+			if err := WriteBridgeConfig(l.StateDir, links, push); err != nil {
 				return err
 			}
 			pid, err := startBridgeProcess(l.Name, l.StateDir)
 			if err != nil {
 				return fmt.Errorf("newtlab: start bridge: %w", err)
 			}
-			reachAddr := fmt.Sprintf("127.0.0.1:%d", statsPort)
-			l.State.Bridges[""] = &BridgeState{PID: pid, StatsAddr: reachAddr}
+			l.State.Bridges[""] = &BridgeState{PID: pid}
 		} else {
-			cfg := buildBridgeConfig(links, statsBindAddr)
+			cfg := buildBridgeConfig(links, push)
 			configJSON, err := json.MarshalIndent(cfg, "", "    ")
 			if err != nil {
 				return fmt.Errorf("newtlab: marshal remote bridge config: %w", err)
@@ -737,8 +748,7 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("newtlab: start remote bridge on %s: %w", hostIP, err)
 			}
-			reachAddr := fmt.Sprintf("%s:%d", hostIP, statsPort)
-			l.State.Bridges[host] = &BridgeState{PID: pid, HostIP: hostIP, StatsAddr: reachAddr}
+			l.State.Bridges[host] = &BridgeState{PID: pid, HostIP: hostIP}
 		}
 
 		for _, lc := range links {

@@ -32,6 +32,17 @@ type Config struct {
 	// start / stop) — newtlab no longer reads spec JSON files directly
 	// per §27.
 	NewtronClientFor func(networkID string) newtlab.SpecClient
+
+	// OrchestratorURL is the publicly-reachable base URL of this
+	// newtlab-server (or the composed newt-server). It is written into
+	// the bridge config sent to each newtlink worker so the worker
+	// can push BridgeStats back here (#118). Composed in by cmd/newt-
+	// server or cmd/newtlab-server from its own listen address (with
+	// a publicly-reachable host substitution when the listener is
+	// bound to 0.0.0.0). Required for Deploy — empty causes the
+	// setupBridges path inside newtlab.Lab.Deploy to fail rather than
+	// spawn workers that push to nowhere.
+	OrchestratorURL string
 }
 
 // Server is the newtlab HTTP server. The HTTP listener lifecycle
@@ -39,10 +50,11 @@ type Config struct {
 // holds only newtlab-specific state.
 type Server struct {
 	*httputil.Server
-	cfg      Config
-	logger   *log.Logger
-	broker   *httputil.Broker[Event]
-	registry *DeployRegistry
+	cfg        Config
+	logger     *log.Logger
+	broker     *httputil.Broker[Event]
+	registry   *DeployRegistry
+	statsStore *BridgeStatsStore
 }
 
 // NewServer constructs a server with the given config. The HTTP
@@ -55,10 +67,11 @@ func NewServer(cfg Config) *Server {
 		cfg.TopologiesBase = "newtrun/topologies"
 	}
 	s := &Server{
-		cfg:      cfg,
-		logger:   cfg.Logger,
-		broker:   httputil.NewBroker[Event](),
-		registry: NewDeployRegistry(),
+		cfg:        cfg,
+		logger:     cfg.Logger,
+		broker:     httputil.NewBroker[Event](),
+		registry:   NewDeployRegistry(),
+		statsStore: NewBridgeStatsStore(),
 	}
 	s.Server = httputil.NewServer(s.buildHandler(), cfg.Logger,
 		httputil.ServerLabel("newtlab-server"),

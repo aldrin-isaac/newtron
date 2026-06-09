@@ -1,7 +1,6 @@
 package newtlab
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -35,7 +34,9 @@ func TestCollectAllPorts(t *testing.T) {
 
 	allocs := CollectAllPorts(lab)
 
-	// Should have: 2 SSH + 2 console + 2 link + 1 stats = 7
+	// Should have: 2 SSH + 2 console + 2 link = 6 (bridge stats no
+	// longer allocates a port — #118 pushes stats to newtlab-server
+	// instead of listening for queries).
 	purposeSet := map[string]bool{}
 	for _, a := range allocs {
 		purposeSet[a.Purpose] = true
@@ -48,7 +49,6 @@ func TestCollectAllPorts(t *testing.T) {
 		"leaf1 console",
 		"link spine1:Ethernet0 A-side",
 		"link leaf1:Ethernet0 Z-side",
-		"bridge stats (local)",
 	}
 	for _, e := range expected {
 		if !purposeSet[e] {
@@ -156,7 +156,7 @@ func TestProbePortLocal(t *testing.T) {
 // find it. Callers must `t.Setenv("HOME", tmpDir)` and `resetHomeCache(t)`
 // before seeding. Returns the SSH/console/link/stats ports it allocated so
 // tests can probe them.
-func seedLabState(t *testing.T, name string, sshPID, bridgePID int, sshPort, consolePort, linkA, linkZ, statsPort int) {
+func seedLabState(t *testing.T, name string, sshPID, bridgePID int, sshPort, consolePort, linkA, linkZ int) {
 	t.Helper()
 	state := &LabState{
 		Name: name,
@@ -171,7 +171,7 @@ func seedLabState(t *testing.T, name string, sshPID, bridgePID int, sshPort, con
 			{A: "node1:Eth0", Z: "node2:Eth0", APort: linkA, ZPort: linkZ, WorkerHost: ""},
 		},
 		Bridges: map[string]*BridgeState{
-			"": {PID: bridgePID, StatsAddr: fmt.Sprintf("127.0.0.1:%d", statsPort)},
+			"": {PID: bridgePID},
 		},
 	}
 	if err := SaveState(state); err != nil {
@@ -203,7 +203,7 @@ func TestProbeAllPorts_AttributesSSHPort(t *testing.T) {
 	sshPort := ln.Addr().(*net.TCPAddr).Port
 
 	// Seed the peer lab's state.json claiming the same port as its SSH.
-	seedLabState(t, "peer-lab", 42424, 0, sshPort, 30001, 20002, 20003, 19999)
+	seedLabState(t, "peer-lab", 42424, 0, sshPort, 30001, 20002, 20003)
 
 	allocs := []PortAllocation{{Port: sshPort, Purpose: "switch1 SSH"}}
 	err = ProbeAllPorts(allocs, "self-lab")
@@ -212,35 +212,6 @@ func TestProbeAllPorts_AttributesSSHPort(t *testing.T) {
 	}
 	msg := err.Error()
 	for _, want := range []string{"peer-lab", "PID 42424", "SSH", "newtlab destroy peer-lab"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error missing %q; got: %s", want, msg)
-		}
-	}
-}
-
-// TestProbeAllPorts_AttributesBridgeStatsPort verifies the bridge-stats port
-// is attributed via the BridgeState.StatsAddr parsing path.
-func TestProbeAllPorts_AttributesBridgeStatsPort(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	resetHomeCache(t)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer ln.Close()
-	statsPort := ln.Addr().(*net.TCPAddr).Port
-
-	seedLabState(t, "peer-lab", 100, 200, 40000, 30000, 20000, 20001, statsPort)
-
-	allocs := []PortAllocation{{Port: statsPort, Purpose: "bridge stats (local)"}}
-	err = ProbeAllPorts(allocs, "self-lab")
-	if err == nil {
-		t.Fatal("expected conflict error, got nil")
-	}
-	msg := err.Error()
-	for _, want := range []string{"peer-lab", "PID 200", "bridge stats", "newtlab destroy peer-lab"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error missing %q; got: %s", want, msg)
 		}
@@ -292,7 +263,7 @@ func TestProbeAllPorts_ExcludesSelfLab(t *testing.T) {
 	defer ln.Close()
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	seedLabState(t, "self-lab", 999, 0, port, 30001, 20002, 20003, 19999)
+	seedLabState(t, "self-lab", 999, 0, port, 30001, 20002, 20003)
 
 	allocs := []PortAllocation{{Port: port, Purpose: "switch1 SSH"}}
 	err = ProbeAllPorts(allocs, "self-lab")
@@ -323,7 +294,7 @@ func TestProbeAllPorts_AttributesLinkBridgePort(t *testing.T) {
 
 	// SSH ports are unused here; the conflict is on linkA (the bridge
 	// worker's listen port). bridgePID 7777 is the worker's PID.
-	seedLabState(t, "peer-lab", 0, 7777, 40000, 30000, linkPort, 20001, 19999)
+	seedLabState(t, "peer-lab", 0, 7777, 40000, 30000, linkPort, 20001)
 
 	allocs := []PortAllocation{{Port: linkPort, Purpose: "link switch1:Ethernet0 A-side"}}
 	err = ProbeAllPorts(allocs, "self-lab")
@@ -355,7 +326,7 @@ func TestProbeAllPorts_OmitsPIDWhenZero(t *testing.T) {
 	sshPort := ln.Addr().(*net.TCPAddr).Port
 
 	// PID=0 on the SSH-owning node simulates the post-crash state.json.
-	seedLabState(t, "peer-lab", 0, 0, sshPort, 30001, 20002, 20003, 19999)
+	seedLabState(t, "peer-lab", 0, 0, sshPort, 30001, 20002, 20003)
 
 	allocs := []PortAllocation{{Port: sshPort, Purpose: "switch1 SSH"}}
 	err = ProbeAllPorts(allocs, "self-lab")
@@ -379,7 +350,7 @@ func TestAttributePortOwners_CorruptStateSkipped(t *testing.T) {
 	resetHomeCache(t)
 
 	// Healthy peer lab.
-	seedLabState(t, "good-lab", 111, 0, 40000, 30000, 20000, 20001, 19999)
+	seedLabState(t, "good-lab", 111, 0, 40000, 30000, 20000, 20001)
 
 	// Corrupt peer lab — invalid JSON in state.json.
 	badDir := filepath.Join(tmp, ".newtlab", "labs", "bad-lab")

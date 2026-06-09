@@ -120,3 +120,17 @@ type PhasePayload struct {
 type ErrorPayload struct {
 	Message string `json:"message"`
 }
+
+// BridgeStatsSnapshot is one entry in the GET
+// /newtlab/v1/labs/{lab}/bridges/stats response — the per-host stats
+// newtlink pushed to the server. UpdatedAt is the time the push was
+// received; AgeSeconds is derived at serve time so consumers don't
+// have to clock-skew between server and client. Stats embeds the
+// canonical newtlab.BridgeStats verbatim (§46 — Wire Shape Mirrors
+// Canonical Types). Empty Host represents the local worker.
+type BridgeStatsSnapshot struct {
+	Host       string             `json:"host"`
+	UpdatedAt  string             `json:"updated_at"`  // RFC3339Nano UTC
+	AgeSeconds float64            `json:"age_seconds"` // computed at GET time
+	Stats      newtlab.BridgeStats `json:"stats"`
+}
