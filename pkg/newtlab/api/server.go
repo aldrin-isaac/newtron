@@ -86,17 +86,6 @@ func NewServer(cfg Config) *Server {
 	return s
 }
 
-// Broker exposes the server's event broker. Tests use this to assert
-// that deploy goroutines publish events as expected.
-func (s *Server) Broker() *httputil.Broker[Event] {
-	return s.broker
-}
-
-// Registry exposes the deploy registry.
-func (s *Server) Registry() *DeployRegistry {
-	return s.registry
-}
-
 // Handler returns the fully-wired http.Handler. Tests mount this into
 // httptest.Server without needing to bind a real port.
 func (s *Server) Handler() http.Handler {

@@ -708,31 +708,6 @@ func (r *Runner) resolveDevices(step *Step) []string {
 	return step.Devices.Resolve(r.allDeviceNames())
 }
 
-// hasDataplane checks if the scenario platform supports dataplane forwarding.
-func (r *Runner) hasDataplane() bool {
-	platformName := r.resolvePlatform()
-	if platformName == "" {
-		return false
-	}
-	p, err := r.Client.ShowPlatform(platformName)
-	if err != nil {
-		return false
-	}
-	return p.Dataplane != ""
-}
-
-// resolvePlatform returns the platform name from CLI override, suite
-// declaration, or device discovery (in that priority order).
-func (r *Runner) resolvePlatform() string {
-	if r.opts.Platform != "" {
-		return r.opts.Platform
-	}
-	if r.suite != nil && r.suite.Platform != "" {
-		return r.suite.Platform
-	}
-	return r.discoveredPlatform
-}
-
 // computeOverallStatus computes overall scenario status from step results.
 func computeOverallStatus(steps []StepResult) StepStatus {
 	hasError := false

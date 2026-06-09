@@ -955,15 +955,6 @@ func StartByName(ctx context.Context, labName, nodeName string) error {
 	return lab.Start(ctx, nodeName)
 }
 
-// DestroyByName destroys a lab identified only by name. Used by callers
-// (e.g., newtrun's stop command) that tear down a deployment without
-// needing to re-fetch spec data from newtron — Destroy() operates on
-// newtlab's own persisted state (state.json), not on specs.
-func DestroyByName(ctx context.Context, labName string) error {
-	lab := &Lab{Name: labName}
-	return lab.Destroy(ctx)
-}
-
 // Destroy kills QEMU processes, removes overlays, cleans state,
 // and restores profiles. The context allows cancellation of the
 // teardown sequence.
