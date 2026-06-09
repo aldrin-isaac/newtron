@@ -569,7 +569,9 @@ The asymmetry between `networkEntity` (not an actor) and `NodeActor` (actually a
 
 Redis on SONiC has no authentication and listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile. In integration tests, a standalone Redis container is used without SSH.
 
-Permission types are defined covering service operations, resource CRUD, spec authoring, and device cleanup. Read/view operations have no permission requirement. **Current status:** permission types exist in code but are not enforced at the HTTP layer. The server has no authentication middleware — it is designed for trusted-network deployment (localhost or VPN).
+**Authorization.** newtron has no built-in transport authentication or TLS — it relies on the operator's network (loopback, VPN, mTLS proxy, etc.) to authenticate the caller. Once the caller is identified, newtron enforces per-user authorization against the spec-declared permission map. Permission types are defined in `pkg/newtron/auth/` covering spec authoring, resource CRUD, and (under design) device operation. Read/view operations have no permission requirement.
+
+**Current enforcement status:** the auth code is wired into ~25 mutation paths in `spec_ops.go` and `profile_ops.go`, but `Network.SetAuth` is not yet called at server startup, so every check short-circuits to "allowed." The exploration is documented and the path to enabling it is sketched in [`auth-design.md`](auth-design.md). Until that work lands, treat the server as unauthenticated and deploy behind a trusted-network boundary.
 
 ## 10. Testing
 
