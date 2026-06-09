@@ -569,9 +569,11 @@ The asymmetry between `networkEntity` (not an actor) and `NodeActor` (actually a
 
 Redis on SONiC has no authentication and listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile. In integration tests, a standalone Redis container is used without SSH.
 
-**Authorization.** newtron has no built-in transport authentication or TLS — it relies on the operator's network (loopback, VPN, mTLS proxy, etc.) to authenticate the caller. Once the caller is identified, newtron enforces per-user authorization against the spec-declared permission map. Permission types are defined in `pkg/newtron/auth/` covering spec authoring, resource CRUD, and (under design) device operation. Read/view operations have no permission requirement.
+**Authorization.** The auth subsystem in `pkg/newtron/auth/` embodies an entitlement pattern: permissions declared in `network.json`, group-based grants with literal-user fallback, service-level overrides of global grants, superuser bypass. Read/view operations are not gated.
 
-**Current enforcement status:** the auth code is wired into ~25 mutation paths in `spec_ops.go` and `profile_ops.go`, but `Network.SetAuth` is not yet called at server startup, so every check short-circuits to "allowed." The exploration is documented and the path to enabling it is sketched in [`auth-design.md`](auth-design.md). Until that work lands, treat the server as unauthenticated and deploy behind a trusted-network boundary.
+**Current enforcement status:** the entitlement pattern is wired into 26 mutation paths in `spec_ops.go` and `profile_ops.go`, but `Network.SetAuth` is never called at server startup — so `net.auth` is always nil, and every check short-circuits to "allowed." There is no HTTP authentication middleware. Treat the server as unauthenticated and deploy behind a trusted-network boundary until the work below lands.
+
+**Layered path to production-grade.** The design destination is the existing entitlement pattern, extended to meet audit requirements. The path is seven layers; each layer ships as one PR and closes a defined security gap independently. [`auth-design.md`](auth-design.md) is the L0 deliverable: it articulates the threat model (in-scope and out-of-scope), the goal-state criteria a security review must be able to verify, and L1–L6 with their dependencies. L1 wires up the audit log so accountability is answerable today; L2 adds mTLS + Unix peer creds so identities become verified; L3 turns the entitlement checks live; L4 closes coverage to Node operations; L5 adds fine-grained per-device grants; L6 closes operational gaps (revocation, secret hygiene, log integrity).
 
 ## 10. Testing
 

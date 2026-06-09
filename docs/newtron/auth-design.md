@@ -1,347 +1,391 @@
-# Auth Design — Open Exploration
+# Auth Design — Layered Path to Production-Grade
 
 ## 1. Purpose
 
-newtron's authorization subsystem is **partially built and intentionally
-inert at runtime**. This document exists because the gap between the code's
-appearance and its behavior is itself an architectural problem — anyone
-reading `spec_ops.go` will see ~25 `checkPermission` calls and reasonably
-conclude that authorization is being enforced. It isn't, and the reasons
-why deserve to be written down rather than discovered through grep.
+newtron's existing authorization code commits to an **entitlement pattern**
+(spec-declared permissions, group-based grants, service-level overrides,
+superuser bypass) but the runtime is inert: `SetAuth` is never called, so
+every `checkPermission` short-circuits to "allowed." This doc charts the
+path from that starting point to a production-grade auth subsystem where
+the entitlement pattern is the design destination, **not** the design
+starting point.
 
-This doc is for two audiences:
+The path is **seven layers**. Each layer:
 
-1. **A future contributor** trying to understand why the auth code exists
-   and what to do with it.
-2. **A future security reviewer** asking "what's the authorization model?"
-   so they can answer "what's enforced" without reverse-engineering
-   the call graph.
+- Closes a specific gap that would otherwise fail a security audit.
+- Ships as one PR. Each PR is independently reviewable.
+- Has audit-criteria-met-when-this-layer-lands. The auditor signs off on
+  the layer's scope without future layers existing.
+- Builds on (but never breaks) the previous layer's contract.
 
-This is a *design exploration* doc, not a reference. The reference for
-what's enforced today is short: nothing is. Everything else here is open.
-
----
-
-## 2. Current Enforcement Status
-
-**The auth subsystem is wired into the code but never activated at runtime.**
-
-- `Network.auth` field exists. `Network.SetAuth(checker)` is the only way
-  to populate it. **`SetAuth` has zero callers across the codebase** — not
-  in any `main()`, not in any test that exercises the server end-to-end.
-- `Network.checkPermission(perm, ctx)` returns `nil` when `net.auth` is
-  nil. Since `SetAuth` is never called, every check is an unconditional
-  no-op.
-- ~25 invocations of `net.checkPermission(auth.PermSpecAuthor, ...)`
-  exist in `spec_ops.go` and `profile_ops.go`. Every one of them
-  short-circuits to "allowed" at runtime.
-
-The HLD has been honest about this since the auth code was introduced
-(see `docs/newtron/hld.md` §11 on Security: "permission types exist in
-code but are not enforced at the HTTP layer. The server has no
-authentication middleware — it is designed for trusted-network deployment
-(localhost or VPN)"). This document is what that one sentence expands into.
+This doc is the **L0** deliverable — the threat model and the layered plan.
+The remaining six layers reference back here.
 
 ---
 
-## 3. What the Code Already Asserts
+## 2. Threat Model
 
-Even unwired, the existing code commits to five design positions. Read as
-exploration rather than as half-built feature, these are the answers the
-project has *already* given to authorization questions:
+The auth subsystem defends against the threats listed in §2.1. Threats in
+§2.2 are explicitly out of scope; an operator deploying newtron must
+address them through other means (the network, the host, organizational
+controls).
 
-### 3.1 Permissions Live in the Spec, Not in Code
+### 2.1 In Scope
 
-`network.json` carries the authorization configuration:
+| Threat | Layer that addresses it |
+|---|---|
+| **Insider misuse — accidental.** A teammate runs the wrong CLI against the wrong network and changes config they shouldn't have. | L1 (audit log catches), L3 (authorization gates) |
+| **Insider misuse — deliberate.** A current team member with shell access tries to modify resources outside their role. | L3 + L5 (per-resource grants) |
+| **Forensic accountability.** "Who deleted that VLAN at 03:42?" is answerable from the system itself. | L1 |
+| **Caller impersonation across the wire.** Someone on the network sends requests claiming to be alice. | L2 (mTLS or Unix peer creds) |
+| **Stale grants.** Former team member's permissions linger after they leave. | L6 (revocation) |
+| **Coverage holes.** A new mutation method ships without a `checkPermission` call and bypasses authorization silently. | L4 (coverage closure test) |
+| **Secret leakage from spec.** Device profile passwords sit in plain JSON on disk and in version control. | L6 (encryption at rest) |
+| **Authorization decisions without trace.** A "deny" happened but nobody can prove it. | L1 + L3 (audit emits allow + deny) |
+
+### 2.2 Out of Scope
+
+| Out-of-scope threat | Why | Operator mitigation |
+|---|---|---|
+| **Compromised CA / cert issuance pipeline.** | L2 trusts the operator's CA. Compromising the CA bypasses everything. | Operator runs the CA. Standard CA hygiene. |
+| **Hostile actor with shell access on the newtron-server host.** | Auth runs in the server process; root on the host bypasses auth. | Standard host hardening. |
+| **Hostile actor with read access to `network.json`.** | Permission grants and group memberships are visible to anyone who reads the spec. | File-system permissions on spec dir; private git repo. |
+| **Denial of service.** Rate limits, request size limits, expensive-query throttling. | Auth doesn't address availability. | Reverse proxy or kernel limits. |
+| **Side channels (timing, etc.).** | Constant-time comparison of permissions is overkill for this threat model. | Network isolation; not a multi-tenant SaaS. |
+| **Supply chain.** | Go module pinning and reproducible builds are infrastructure concerns. | Standard SBOM + module pinning. |
+
+### 2.3 Assumptions
+
+Each layer assumes the previous layers are in place. Specifically:
+
+- L3 (authorization) assumes L2 (verified identity). Without verified
+  identity, authorization decides on a self-attested name — same security
+  posture as no authorization.
+- L5 (fine-grained grants) assumes L4 (universal coverage). Per-resource
+  grants on some operations and no grants on others creates an exploitable
+  asymmetry.
+- L6 (revocation) assumes L3 (something to revoke). Spec reload without
+  enforcement does nothing.
+
+This ordering is **mandatory**, not aesthetic. The audit criteria for each
+layer fail if its dependencies are skipped.
+
+---
+
+## 3. Goal State
+
+Production-grade auth in newtron means **every authenticated caller can do
+only what the spec explicitly grants them, and every decision is on the
+record**. Concretely, the goal state has these properties — these are the
+criteria a security review must be able to verify:
+
+1. **Verified identity.** Every request carries a caller identity that the
+   server verified at the transport layer (not self-attested in a header).
+2. **Closed coverage.** Every mutation method in `pkg/newtron/` checks
+   permission before acting. Reads stay ungated.
+3. **Per-resource granularity.** Permissions can be scoped to device,
+   service, and interface dimensions — not just to verbs.
+4. **Spec-declared grants.** Permissions live in `network.json`, version-
+   controlled with the rest of the topology. No runtime registry.
+5. **Two-tier evaluation.** Service-level grants override global grants;
+   superusers bypass both. Already in the Checker; preserved.
+6. **Forensic completeness.** Every authorization decision (allow and
+   deny) and every spec mutation appears in the audit log with caller,
+   action, target, decision, timestamp.
+7. **Revocable.** A spec change that removes a grant takes effect within
+   a bounded interval, without server restart.
+8. **Secret hygiene.** Device profile passwords are encrypted at rest;
+   plaintext exists only in process memory while in use.
+
+The current entitlement pattern (Checker, Permission, Context,
+`network.json` permissions map, groups, superusers) **is the destination
+shape**. The layered path extends that pattern; it does not replace it.
+
+---
+
+## 4. The Current Entitlement Pattern (What Stays)
+
+These elements are the design destination. They land in production-grade
+form unchanged, with the listed additions:
+
+| Element | Current shape | Production-grade additions |
+|---|---|---|
+| `pkg/newtron/auth/Permission` (verb constants) | 20 constants, 5 referenced | L4 adds `device.write` family; L5 adds dimension-bearing variants if needed |
+| `pkg/newtron/auth/Context` (resource context) | 4 dimensions, only `Resource` populated | L3 adds `Caller`; L5 populates `Device`/`Service`/`Interface` |
+| `pkg/newtron/auth/Checker` (decision engine) | Two-tier eval, group fallback, superuser bypass | L5 extends to evaluate dimension constraints |
+| `network.json` `permissions` map | `action → [groups]` global + per-service override | L5 extends entry value to support `{ groups, where: {...} }` |
+| `network.json` `super_users` | List of usernames who bypass | Unchanged |
+| `network.json` `user_groups` | Group name → user list | Unchanged |
+| Service-level `ServiceSpec.Permissions` | Same shape as global, overrides global | Unchanged |
+| `Network.checkPermission` call sites | 26 sites in `spec_ops`/`profile_ops` | L4 expands coverage to Node ops |
+
+What goes away (during L1–L3):
+
+- The misleading "Permission-based access control" claim in `cmd/newtron/main.go` package comment.
+- The `Network.SetAuth` method being callable but never called (L3 wires it).
+- The `WithDevice` / `WithService` / `WithInterface` setters being unused (L5 populates them).
+- The 15 Permission constants that no proposed coverage uses (L4 prunes them when they're confirmed unused under the new coverage rules).
+
+---
+
+## 5. Layered Path
+
+### L0 — Threat Model & Layered Plan (this doc)
+
+**Goal.** Articulate threat model, goal state, layered path. Establish the
+contract subsequent layers respect.
+
+**Audit criterion met when this layer lands.** A reviewer can name the
+threats the system defends against and the threats out of scope, and
+trace each in-scope threat to a layer that addresses it.
+
+**Dependencies.** None.
+
+**Scope of changes.** This doc plus HLD §9 cross-reference.
+
+### L1 — Tamper-Evident Operation Audit Log
+
+**Goal.** Every spec/profile/device mutation produces an audit record with
+caller (self-attested in this layer, marked as such), operation, target,
+timestamp, and outcome. Records are written to the existing
+`pkg/newtron/audit/` log with no enforcement decisions made — the system
+behaves identically except that "who did what" is now answerable.
+
+**Audit criterion met when this layer lands.** "Who deleted VLAN 100 on
+switch1 at 03:42?" has a definitive answer from the log. The log is
+append-only and tamper-evident at the file-system level. Caller identity
+is honestly labeled as "self-attested via header" in the log entry — a
+reviewer can tell which entries are based on verified identity (none yet)
+versus the operator's self-claim (all, for now).
+
+**Dependencies.** L0.
+
+**Scope of changes.** Caller-identity header parsing middleware in
+`pkg/newtron/api/` (no decision, just propagation). Audit-emit calls at
+every existing `checkPermission` site and at every Node-level mutation
+entry point. `pkg/newtron/audit/` integration to receive the events.
+`network.json` gains optional `audit_log_path` and `audit_caller_header`
+fields.
+
+**Independent value.** Catches insider misuse after the fact. Operators
+can answer accountability questions today, even before authentication
+exists.
+
+### L2 — Transport Authentication (mTLS + Unix Socket Peer Creds)
+
+**Goal.** Server only accepts connections where the caller's identity is
+verified at the transport. Two mechanisms cover all deployment topologies:
+
+- **mTLS** (for remote callers): server config points to a CA cert; client
+  must present a valid cert; identity = the CN.
+- **Unix socket peer credentials** (for local callers): server can bind to
+  a Unix socket in addition to TCP; identity = the OS user that owns the
+  connecting process, verified via `SO_PEERCRED`.
+
+The header-based identity from L1 remains supported but is **demoted**
+when L2 is configured: the audit log now records "verified-identity from
+cert CN" or "verified-identity from peer creds" alongside any
+self-attested header value. Mismatches are logged.
+
+**Audit criterion met when this layer lands.** "Are caller identities
+verified?" → yes. A reviewer can verify by looking at the audit log:
+verified-identity entries have a verification source field (`cert_cn`,
+`peer_uid`); self-attested entries are clearly distinguished.
+
+**Dependencies.** L0, L1.
+
+**Scope of changes.** TLS listener configuration in
+`cmd/newtron-server` and `cmd/newt-server`. Unix socket listener
+support in `pkg/httputil/server.go`. Identity extraction middleware in
+`pkg/newtron/api/`. Audit log fields gain `verification_source`.
+Documentation in `docs/newtron/hld.md` and a new operational HOWTO
+section.
+
+**Independent value.** Blocks impersonation on the wire. Audit log
+records become trustworthy. Even without authorization enforcement
+(L3), real identity is logged.
+
+### L3 — Authorization Enforcement (Wire Up the Existing Checker)
+
+**Goal.** `SetAuth` is called at server bootstrap. Verified identity from
+L2 flows through `auth.Context.Caller` (new field) into the existing
+`Checker.Check`. The 26 existing `checkPermission` call sites become
+live gates. Denied operations return HTTP 403 with a structured error.
+Every decision (allow or deny) is appended to the audit log from L1
+with the verification source from L2.
+
+**Audit criterion met when this layer lands.** "Are the permission
+grants in `network.json` enforced at runtime?" → yes, for the operations
+already gated (`spec.author`, `qos.create`, `filter.create` and their
+delete counterparts). A test (`TestAuthorizationActuallyEnforces`) flips
+SetAuth on, asserts a non-permitted caller gets 403 on each gated
+endpoint, asserts a permitted caller succeeds.
+
+**Dependencies.** L0, L1, L2.
+
+**Scope of changes.** `auth.Context.Caller` field. Middleware that
+populates `Context` from L2's verified identity. `Network.SetAuth` is
+invoked from `pkg/newtron/api/Server` construction. `Checker.Check`
+reads `ctx.Caller` instead of `c.currentUser`. New typed error
+`*newtron.AuthorizationError` translated to 403 at the wire. New test
+file `pkg/newtron/api/authorization_test.go`.
+
+**Independent value.** Spec-authoring grants are real. The existing
+26 call sites stop lying. Node-level operations remain ungated for
+now — that's L4's job — but the existing coverage is honest.
+
+### L4 — Coverage Closure (Every Mutation Gated)
+
+**Goal.** Every mutation method on `Network`, `Node`, and `Interface`
+has a `checkPermission` call before any state change. The
+`TestAPICompleteness` test from PR #127 grows a new dimension:
+"every mutation method must appear in `authorizedMethods` with a
+named permission, OR in `unauthorizedExcept` with a documented reason
+(e.g., `RestartService` is operational, not authorization-gated)."
+
+Node-level write operations get a new permission family:
+`device.write` (broad, catches everything new by default) plus
+finer-grained constants for operations where reviewers want
+distinction (e.g., `device.write.dataplane`, `device.write.runtime`).
+The 15 unused Permission constants get pruned where they don't fit
+the new coverage rules; replacements get added where they do.
+
+**Audit criterion met when this layer lands.** "Can any unauthorized
+caller mutate any state?" → no. A reviewer can answer by reading the
+`TestAPICompleteness` rules and trusting the test that enforces them.
+The reviewer doesn't have to audit every method individually.
+
+**Dependencies.** L0, L1, L2, L3.
+
+**Scope of changes.** New Permission constants in
+`pkg/newtron/auth/permission.go`. `checkPermission` added to every
+Node mutation method. `TestAPICompleteness` grows the new dimension.
+HLD §9 updated.
+
+**Independent value.** Closes the largest current gap (zero gates on
+device operations). After this layer, all mutations are gated at the
+verb level, even if granularity is still all-or-nothing.
+
+### L5 — Fine-Grained Per-Resource Grants
+
+**Goal.** `network.json permissions` map values become richer:
 
 ```json
 {
-  "super_users": ["aldrin"],
-  "user_groups": {
-    "operators": ["alice", "bob"],
-    "spec-authors": ["alice", "charlie"]
-  },
   "permissions": {
-    "all": ["super_users"],
-    "service.apply": ["operators"],
-    "spec.author": ["spec-authors"]
+    "device.write": [
+      { "groups": ["edge-operators"], "where": { "device": "edge-*" } },
+      { "groups": ["spine-operators"], "where": { "device": "spine-*" } }
+    ],
+    "service.apply": [
+      { "groups": ["operators"], "where": { "service": "transit-*" } }
+    ]
   }
 }
 ```
 
-Authorization is **declarative, version-controlled, code-reviewable**. There
-is no runtime registry, no separate IAM system, no LDAP integration. The same
-git workflow that gates spec changes gates permission changes.
+The handler middleware populates `Context.Device`, `Context.Service`,
+`Context.Interface` from the URL path. `Checker.Check` evaluates the
+`where` clauses against the populated context. Globs supported on
+specific dimensions; explicit lists for others.
 
-### 3.2 Two-Tier Evaluation: Service-Specific Overrides Global
+The old shorthand syntax (`"action": ["groups"]`) continues to work —
+it's syntactic sugar for `[{ "groups": [...], "where": {} }]` — so
+existing specs keep working. This is the only place a "compat shim"
+exists in the auth subsystem; it's load-bearing because the shorthand
+is the obviously-right form for "no constraints needed."
 
-`ServiceSpec.Permissions` can override `NetworkSpec.Permissions` for a
-specific service. A user might have global `service.apply` but the
-`transit-peering` service grants `service.apply` to a narrower group. The
-Checker tries service-specific first, then falls through to global.
+**Audit criterion met when this layer lands.** "Can alice modify
+VLANs only on edge switches?" → yes, expressible in `network.json`,
+enforced at runtime, audited on every decision.
 
-The implicit position: *authorization is contextual to what you're operating
-on, not just what you're doing*.
+**Dependencies.** L0–L4.
 
-### 3.3 Wildcard "all" + Specific Keys
+**Scope of changes.** Spec type for permission entries (struct or
+union for old/new form). Loader migration handling. Checker evaluation
+of `where` clauses. Handler-side population of Context dimensions
+(handlers know device from URL path). Audit log records the populated
+context dimensions in every decision entry.
 
-`permissions: { "all": [...], "specific.action": [...] }` — the `"all"`
-key grants every permission to its members. Used for admin-class groups
-without enumerating every permission constant.
+**Independent value.** Real role separation. Least-privilege is
+expressible without forking spec files per role.
 
-### 3.4 Groups with Literal-User Fallback
+### L6 — Operational Hardening (Revocation, Rotation, Secret Hygiene)
 
-`checkPermissionMap` checks if the username appears directly in the allowed
-list OR as a member of a named group in that list. No separate "user
-resource" — group membership is just a list of usernames, and a permission
-grant is just a list of group-or-user names.
+**Goal.** Three operational properties that production deployments
+require but development doesn't:
 
-### 3.5 Superusers Bypass Everything
+1. **Revocation.** Removing a grant from `network.json` takes effect
+   within a bounded interval without server restart. The existing
+   `ReloadNetwork` HTTP endpoint already supports this — L6 adds a
+   spec-file watcher that triggers reload automatically on file
+   change, plus a documented operational pattern for "revoke alice."
+2. **Secret rotation.** Device profile passwords currently live in
+   `profiles/*.json` in plaintext. L6 introduces an encrypted-secrets
+   path: passwords reference a key in a separate secret store
+   (file-based KMS, age-encrypted, or operator-supplied), decrypted
+   on demand in process memory only. Rotation is changing the secret
+   store entry; specs don't need to change.
+3. **Audit log integrity.** L1's audit log is append-only at the
+   application level but a determined attacker with file write access
+   could rewrite it. L6 adds optional hash-chain log integrity: each
+   record carries a hash of the previous, so tampering is detectable
+   after-the-fact even if the file is mutable.
 
-`isSuperUser` is checked before any permission evaluation. Superusers are
-defined in `network.json:super_users` and never traverse the permission map.
+**Audit criterion met when this layer lands.** "How do I revoke
+alice's access?" → documented procedure with a bounded time-to-effect.
+"Where are device passwords stored?" → not in version-controlled spec.
+"Can audit log entries be tampered with undetectably?" → no, with
+integrity enabled.
 
-This is explicit, not implicit — there's no special "root" permission, no
-backdoor wildcard role. Superuser bypass is a single named check at the top
-of `Checker.checkUser`.
+**Dependencies.** L0–L5.
 
----
+**Scope of changes.** Spec file watcher in `pkg/newtron/network/`.
+Secret store interface in a new `pkg/newtron/secret/` package with
+file-based default backend. Hash chain in `pkg/newtron/audit/`. New
+HOWTO section on operational procedures.
 
-## 4. Open Questions
-
-These are the questions the current code does *not* answer. Each is genuine
-architectural work; each has a proposed direction, presented as something to
-push back on, not as a settled decision.
-
-### 4.1 Q: Who is the caller?
-
-**Current state.** `Checker.currentUser` is set once at `NewChecker` time
-from `os/user.Current()`. That's the *server process's* OS user. In a
-multi-user HTTP deployment, every request is attributed to the server's
-account regardless of who actually made the request.
-
-**Why it matters.** Without a per-request caller identity, the whole
-permission model collapses. There's no point in checking "does X have
-permission Y" if X is always "the server."
-
-**Options:**
-
-| Option | Wire format | Tradeoffs |
-|---|---|---|
-| Reverse-proxy header | `X-Newtron-Caller: alice` from a trusted upstream (nginx + OAuth, oauth2-proxy, etc.) | Zero in-process crypto. Operator chooses auth mechanism. Trust depends on listener binding to loopback or a private interface. Matches "trusted-network deployment" framing. |
-| HTTP Basic Auth | `Authorization: Basic ...` decoded by middleware | Self-contained. Requires the server to hold credentials (or PAM/SSSD lookup). Adds password management to project scope. |
-| mTLS client certs | TLS client cert verified, identity from cert CN | Strongest. Requires CA infrastructure on top of newtron, which is a large operator burden. |
-| Bearer token | `Authorization: Bearer ...` with a token registry | Requires an issuer. Adds token lifecycle to project scope. |
-| Unix socket peer creds | `SO_PEERCRED` on a Unix listener | Local-only. Doesn't generalize to remote operators. |
-
-**Proposed direction.** Reverse-proxy header (`X-Newtron-Caller`) as the
-default; fall back to `$USER` (or `os/user.Current()`) when no header is
-present. This matches the HLD's "trusted-network deployment" framing: the
-operator's network already has auth infrastructure (whatever it is); newtron
-trusts a header from it. For the standalone-loopback dev/single-user case,
-the env fallback gives a real identity without any setup. The header name
-is configurable via a server flag (`--caller-header`); empty disables
-header-based auth.
-
-This puts the operator in charge of the *authentication* mechanism (which
-varies across deployments) while letting newtron own the *authorization*
-mechanism (which is what we're exploring).
-
-### 4.2 Q: How does identity flow from HTTP to checkPermission?
-
-**Current state.** The handler signature `func(n *newtron.Node) (any, error)`
-doesn't carry caller identity. There's no plumbing between "the HTTP middleware
-knows who's calling" and "checkPermission deep in spec_ops needs to know."
-
-**Options:**
-
-| Option | Cost | Drawback |
-|---|---|---|
-| Thread `Caller` param through every Network/Node method | High (many signatures change) | Visible everywhere; can't be forgotten. |
-| `context.Context` value (request-scoped) | Low | Caller can forget to propagate context; loose typing. |
-| Extend `auth.Context` to carry `Caller` | Low | Existing type with the right name; just add a field. |
-| Mutable `Network.currentCaller` field | Zero | Wrong — a server handles concurrent requests. |
-
-**Proposed direction.** Extend `auth.Context` to carry an explicit `Caller`
-field. The handler middleware sets it once at request entry; all
-`checkPermission(perm, ctx)` calls already take an `*auth.Context`, so the
-plumbing reaches every check site without signature changes. The Checker
-reads `ctx.Caller` instead of `c.currentUser`.
-
-This positions `auth.Context` as the request-scoped authorization envelope —
-caller identity + resource context together — rather than just a resource
-descriptor.
-
-### 4.3 Q: What populates Context.Device/Service/Interface?
-
-**Current state.** `auth.Context` has four dimensions: `Device`, `Service`,
-`Interface`, `Resource`. All 25 callsites use `WithResource(name)` only. The
-Device/Service/Interface setters exist (`WithDevice`, `WithService`,
-`WithInterface`) but have zero callers tree-wide.
-
-**Why it matters.** The dimensions encode an architectural claim:
-authorization is contextual to multiple axes (device, service type, interface),
-not just to the name of the thing. If the claim is true, the dimensions are
-required for fine-grained grants like "alice can modify VLANs on switch1
-only." If the claim is false, the three unused setters are aspirational
-surface and should go.
-
-**Two coherent stances:**
-
-- **Stance A — Decision context.** The dimensions exist *because authorization
-  decisions need them*. A grant like "operators may apply transit-service on
-  edge devices only" requires the check to know which device and which
-  service. Populating the dimensions is mandatory; the Checker uses them in
-  the allow/deny logic.
-
-- **Stance B — Audit context.** The dimensions exist *for the audit log*, not
-  for the decision. The allow/deny logic considers only `Caller` and
-  `Permission`. The `Device`/`Service`/`Interface` get logged when a decision
-  is made, so the audit trail records "alice applied transit-service to
-  switch1:Ethernet0" rather than just "alice did service.apply." Populating
-  them is recommended but not required for the check itself.
-
-**Proposed direction.** Stance B, for now. Per-resource permission grants
-(stance A) are a real feature, and shipping them requires the spec to grow
-syntax — `permissions: { "service.apply": { "groups": ["operators"],
-"devices": ["edge-*"], "services": ["transit-*"] } }` or similar. That's a
-substantial spec change with its own design considerations (glob matching?
-explicit lists? deny lists?). Better to commit to stance A only when there's
-a concrete use case driving it. Until then: the dimensions are audit
-metadata, and the spec stays simple.
-
-Concretely: keep `WithDevice`/`WithService`/`WithInterface` as setters;
-add a contract comment that they're for audit context only; have callers
-populate them where the data is cheaply available (handler knows the device
-from URL path).
-
-### 4.4 Q: Why do spec_ops/profile_ops have checks but Node ops don't?
-
-**Current state.** ~25 checks in spec/profile authoring. Zero checks in
-Node-level write operations: `CreateVLAN`, `CreateVRF`, `BindIPVPN`,
-`ConfigureIRB`, `AddBGPEVPNPeer`, `BindACL`, `ApplyService`, and ~30 others
-all execute with no authorization gate.
-
-The existing split — "authoring is checked, operation isn't" — is a
-historical accident (the checks were added when spec authoring was the
-feature under consideration), not a considered design.
-
-**The architectural question.** Is "spec authoring" stricter than "device
-operation," and if so, why?
-
-**Three positions:**
-
-- **Position A — Yes, asymmetric.** Spec authoring modifies the
-  version-controlled source of truth; it's like committing code. Device
-  operation applies an already-approved spec; it's like a deploy. Different
-  populations naturally have different scopes — the team that approves
-  changes is smaller than the team that operates the network. Authoring
-  gates make sense; operation gates are noise.
-
-- **Position B — No, symmetric.** Both authoring and operation are mutating
-  actions against shared state. Both deserve authorization. The "deploy
-  vs. commit" analogy breaks down because deploying a bad service on the
-  wrong device causes the same outage as authoring the bad service in the
-  first place. Both should be gated.
-
-- **Position C — Differentiated.** Authoring is gated as today. Operation
-  is gated by *device*, not by operation type — a single `device.write`
-  permission per device. So "alice can operate on edge switches, bob can't
-  touch the spine cluster" is expressible without 30 separate operation
-  permissions.
-
-**Proposed direction.** Position C. The authoring/operation distinction is
-real (positions A's intuition is correct), but a wide-open operation surface
-is wrong (position B's intuition is also correct). The synthesis:
-
-- Spec authoring keeps fine-grained per-resource permissions (`spec.author`,
-  `qos.create`, `filter.create`, etc.) — already there, stays.
-- Device operation gets a single `device.write` permission, checked uniformly
-  at the start of every Node-level write method. Either you can operate on a
-  device or you can't.
-- Per-device differentiation comes from spec, not from code: `network.json`
-  grants `device.write` to specific groups; service-level overrides further
-  refine.
-
-Read operations stay ungated (already the case; documented design).
-
-### 4.5 Q: What does authorization mean in a "trusted-network" model?
-
-**Current state.** HLD says "trusted-network deployment." Code carries
-permission constants for device-write operations. These statements look
-contradictory.
-
-**The reconciliation:** "Trusted network" addresses the *threat model*,
-not the *authorization model*. They're orthogonal axes:
-
-- *Threat model*: who can reach the endpoint? Trusted-network means "we
-  trust the transport: no MITM, no unauthenticated impersonation at the
-  network layer." Operator handles this with VPN/loopback/private
-  interfaces. newtron doesn't ship TLS or token issuance because the
-  operator already has those.
-- *Authorization model*: among the people who *can* reach the endpoint,
-  who's allowed to do what? Even in a small trusted org, the network
-  operator and the spec author are usually different people with
-  different scopes.
-
-"Trusted network = trusted for transport, not trusted for authorization."
-
-**Proposed direction.** Adopt that framing explicitly. Update HLD §11 to
-say: "newtron has no built-in transport authentication or TLS — it relies
-on the operator's network (loopback, VPN, mTLS proxy, etc.) to authenticate
-the caller. Once the caller is identified, newtron enforces per-user
-authorization against the spec-declared permission map." Then this auth
-exploration is no longer contradictory with the HLD — it's the layer above
-trust-the-network.
+**Independent value.** The system can be operated by a real team
+day-to-day without "wait for the next deploy window to revoke that
+person."
 
 ---
 
-## 5. Path Forward
+## 6. Current State (What's Actually There Today)
 
-The exploration moves forward through a small arc of PRs. Each one closes
-some of the open questions above; the doc gets edited (not appended to) as
-positions settle.
+Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
 
-1. **PR 1 (this doc).** Articulate the positions and the questions.
-2. **PR 2 — Truth-up the surface to the design.** Resolve §4.3 (drop the
-   misleading Context setters or commit to populating them) and §4.4
-   (commit to position C — add `device.write`). Delete the 15 unused
-   `Permission` constants that no proposed direction needs (the
-   per-resource VLAN/VRF/ACL/LAG/EVPN/Interface modify permissions get
-   subsumed under `device.write`; `service.apply` and `service.remove`
-   become the same). Delete the misleading "Permission-based access
-   control" doc claim in `cmd/newtron/main.go`. After this PR the code's
-   surface matches the design positions, even though enforcement is
-   still inert.
-3. **PR 3 — Wire identity through.** Implement §4.1 (reverse-proxy header
-   + `$USER` fallback) and §4.2 (extend `auth.Context` with `Caller`).
-   Server bootstrap calls `SetAuth`. Now `checkPermission` actually
-   runs. The 25 existing call sites become live gates.
-4. **PR 4 — Close coverage.** Add `checkPermission(auth.PermDeviceWrite,
-   ...)` to every Node-level write method per §4.4 position C. Verify via
-   the existing `TestAPICompleteness` pattern that no write op is missed.
-5. **PR 5+ — Iterate as the design questions surface.** Per-resource
-   grants (stance A from §4.3) gets implemented only if a concrete use
-   case requires it.
+- The auth code in `pkg/newtron/auth/` and the 26 `checkPermission`
+  call sites exist and pass tests, but **enforcement is inert** —
+  `Network.SetAuth` is never called from any `main()`, so `net.auth`
+  is always nil, so every `checkPermission` returns nil.
+- No HTTP authentication middleware exists. The server accepts any
+  request from any caller.
+- The audit log package `pkg/newtron/audit/` exists but is not wired
+  into authorization decisions.
+- Every shipped `network.json` has `super_users: null`,
+  `user_groups: null`, `permissions: null`. No operator has authored
+  permission grants because there is nothing to grant.
+- Out of 20 Permission constants, 5 are referenced (in spec/profile
+  authoring); 15 are declared but never used.
+- All three URL-derivable Context dimensions (`Device`, `Service`,
+  `Interface`) have unused setters; only `Resource` is ever populated.
 
-Each PR is small and reversible. None of them require deleting the
-exploration — they advance it.
+This document is L0. The layers L1–L6 are proposed; none has shipped.
 
 ---
 
-## 6. What This Document Doesn't Cover
+## 7. Cross-References
 
-- **The audit log.** Authorization decisions deserve to be recorded
-  somewhere; that's a separate design question (where? what fields?
-  what retention?). The audit log exists today as `pkg/newtron/audit/`
-  but isn't tied to authorization. Reconciling them is its own doc.
-- **Spec field schema for per-resource grants.** Stance A from §4.3
-  needs a spec design — glob matching vs explicit lists, deny rules,
-  precedence with global grants. Not in scope until a use case appears.
-- **Token-based deployment.** §4.1 explicitly rules out bearer tokens
-  for the default path. If newtron ever ships a hosted multi-tenant
-  story (currently not on the roadmap), tokens come back in scope.
-- **Roles and RBAC.** The current model is permission-based (verbs).
-  A role-based model (nouns: "operator," "auditor," "admin") is a
-  different design. Could be layered on top of permissions in spec
-  syntax later; not required to make permissions work.
+- HLD §9 (Security) is the operator-facing summary; it points here
+  for the open work and the layered plan.
+- `pkg/newtron/auth/permission.go`, `checker.go` — the code that
+  embodies the entitlement pattern this doc keeps as the goal.
+- `network.json` schema in `pkg/newtron/spec/types.go`:
+  `NetworkSpecFile.{SuperUsers,UserGroups,Permissions}` and
+  `ServiceSpec.Permissions` — the fields that drive the Checker.
+- `pkg/newtron/audit/` — the audit log target L1 wires up.
+- DESIGN_PRINCIPLES_NEWTRON §33 (Public API Boundary) — the layered
+  changes keep `pkg/newtron/auth/` as a public package; internal
+  types live in `pkg/newtron/network/node/` and don't cross into
+  auth decisions.
