@@ -39,6 +39,21 @@ type Server struct {
 	// which engine provides the implementation — newtlab today).
 	// Nil disables resolver consultation (tests, real-hardware).
 	portResolver PortResolver
+
+	// scaffoldRoot is the on-disk root under which derived-spec_dir
+	// scaffolds land (#122). Set via the --scaffold-root flag on
+	// newtron-server / newt-server. Empty means "this server doesn't
+	// derive paths" — POST /newtron/v1/networks with scaffold=true and
+	// no spec_dir returns 400 in that mode. The derived layout is
+	// filepath.Join(scaffoldRoot, id); collision handling matches the
+	// explicit-path case (existing spec.ErrAlreadyInitialized → 409).
+	//
+	// Operator-language alignment (§33): a UI client should not have
+	// to know newtron's on-disk layout to scaffold a topology. When
+	// the server is configured with this root, the client's intent
+	// "create topology named X" suffices — newtron picks the path and
+	// returns it in the response.
+	scaffoldRoot string
 }
 
 
@@ -51,7 +66,13 @@ type Server struct {
 // newtlab-backed implementation is constructed in cmd/ and injected here;
 // the api package itself does not know about newtlab (DESIGN_PRINCIPLES
 // §33, §34).
-func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortResolver) *Server {
+//
+// scaffoldRoot enables the derived-spec_dir mode of POST
+// /newtron/v1/networks (issue #122). When set, requests with
+// scaffold:true and no spec_dir scaffold into filepath.Join(scaffoldRoot,
+// id). Pass "" to keep the explicit-path-only behavior — the derived
+// mode then returns 400 rather than guessing a default.
+func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortResolver, scaffoldRoot string) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -63,6 +84,7 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortR
 		idleTimeout:  idleTimeout,
 		logger:       logger,
 		portResolver: portResolver,
+		scaffoldRoot: scaffoldRoot,
 	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),
@@ -182,15 +204,38 @@ func (s *Server) listNetworks() []NetworkInfo {
 	defer s.mu.RUnlock()
 	result := make([]NetworkInfo, 0, len(s.networks))
 	for id, entity := range s.networks {
-		result = append(result, NetworkInfo{
-			ID:          id,
-			SpecDir:     entity.specDir,
-			HasTopology: entity.net.HasTopology(),
-			Topology:    topologyName(entity.specDir),
-			Nodes:       entity.net.ListNodes(),
-		})
+		result = append(result, networkInfoFor(id, entity))
 	}
 	return result
+}
+
+// getNetworkInfo returns NetworkInfo for the registered id, or nil
+// when no network is registered under that id. Used by the
+// register-network handler to return the canonical NetworkInfo on 201
+// (§46) so the client learns the resolved spec_dir even when the
+// server picked it (#122).
+func (s *Server) getNetworkInfo(id string) *NetworkInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entity, ok := s.networks[id]
+	if !ok {
+		return nil
+	}
+	info := networkInfoFor(id, entity)
+	return &info
+}
+
+// networkInfoFor projects a single registered networkEntity into the
+// canonical wire shape. Single source of truth for the projection so
+// the list path and the per-id path never diverge.
+func networkInfoFor(id string, entity *networkEntity) NetworkInfo {
+	return NetworkInfo{
+		ID:          id,
+		SpecDir:     entity.specDir,
+		HasTopology: entity.net.HasTopology(),
+		Topology:    topologyName(entity.specDir),
+		Nodes:       entity.net.ListNodes(),
+	}
 }
 
 // topologyName derives the topology name from a spec directory path.

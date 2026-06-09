@@ -35,6 +35,7 @@ unchanged.
 | `--idle-timeout` | `5m` | newtron SSH connection idle timeout. |
 | `--suites-base` | `newtrun/suites` | Forwarded to newtrun. |
 | `--topologies-base` | `newtrun/topologies` | Used by newtlab for lab-spec resolution (the on-disk path it walks to find a `topology.json` for a deploy). |
+| `--scaffold-root` | `""` | Forwarded to newtron. When set, `POST /newtron/v1/networks` accepts `scaffold:true` requests without `spec_dir` and lays them out under `<root>/<id>`. Empty disables this mode — UI clients fall back to passing `spec_dir` explicitly. |
 
 ## newt-server vs standalone binaries
 

@@ -137,21 +137,37 @@ func (c *Client) RegisterNetwork(specDir string) error {
 	return &ServerError{StatusCode: resp.StatusCode, Message: msg}
 }
 
-// ScaffoldNetwork creates an empty spec layout at specDir (three zero-valued
-// spec files + an empty profiles/ subdirectory) and registers it under the
+// ScaffoldNetwork creates an empty spec layout (three zero-valued spec
+// files + an empty profiles/ subdirectory) and registers it under the
 // client's network ID. description seeds topology.json.
 //
-// Unlike RegisterNetwork, a 409 here is meaningful — specDir already
-// contains specs — and is returned to the caller so the operator can choose
-// to register the existing layout or pick a different path.
-func (c *Client) ScaffoldNetwork(specDir, description string) error {
+// specDir may be "" to ask the server to derive the path from its
+// configured scaffold root as <root>/<id> (#122). UI clients that don't
+// want to know newtron's on-disk layout pass "" here; CLI consumers
+// that follow their own filesystem convention (e.g. newtrun's
+// `newtrun/topologies/<name>/specs`) keep passing an explicit path.
+// Either way the returned NetworkInfo carries the resolved spec_dir,
+// so callers can display "created at <path>" without re-fetching.
+//
+// Unlike RegisterNetwork, a 409 here is meaningful — the spec_dir
+// (operator-supplied or derived) already contains specs — and is
+// returned to the caller so the operator can choose to register the
+// existing layout or pick a different path. A 400 from the server
+// signals the derived-path mode is requested but the server has no
+// scaffold root configured (operator must add --scaffold-root or
+// supply spec_dir explicitly).
+func (c *Client) ScaffoldNetwork(specDir, description string) (*api.NetworkInfo, error) {
 	body := api.RegisterNetworkRequest{
 		ID:          c.networkID,
 		SpecDir:     specDir,
 		Scaffold:    true,
 		Description: description,
 	}
-	return c.doPost("/newtron/v1/networks", body, nil)
+	var info api.NetworkInfo
+	if err := c.doPost("/newtron/v1/networks", body, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
 }
 
 // UnregisterNetwork removes a registered network from the server.

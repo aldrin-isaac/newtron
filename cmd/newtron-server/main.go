@@ -31,6 +31,7 @@ func main() {
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout (default 5m, negative to disable caching)")
 	newtlabServer := flag.String("newtlab-server", "http://127.0.0.1:18080", "newtlab-server base URL; empty disables newtlab consultation (real-hardware deployments)")
+	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -48,7 +49,7 @@ func main() {
 		portResolver = newtlabclient.NewPortResolver(newtlabclient.New(*newtlabServer))
 	}
 
-	srv := api.NewServer(logger, *idleTimeout, portResolver)
+	srv := api.NewServer(logger, *idleTimeout, portResolver, *scaffoldRoot)
 
 	if *specDir != "" {
 		if err := srv.RegisterNetwork(*netID, *specDir); err != nil {

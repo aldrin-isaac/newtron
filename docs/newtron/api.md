@@ -442,42 +442,52 @@ memory.
 
 ### POST /newtron/v1/networks
 
-Register a network. By default the endpoint registers an *existing* spec
-directory. Pass `scaffold: true` to have the server create an empty spec
-layout at `spec_dir` (three zero-valued spec files plus an empty `profiles/`
-subdirectory) and register it in one call.
+Register a network. Two consumer styles:
+
+- **Register an *existing* spec directory** (CLI / automation): pass `id` and `spec_dir`. The server loads the spec files at `spec_dir` and registers them under `id`.
+- **Scaffold a *new* topology** (UI / operator-language): pass `id` and `scaffold: true`. The server creates an empty spec layout (three zero-valued spec files plus an empty `profiles/` subdirectory) and registers it in one call. `spec_dir` is optional in this mode — when omitted, the server picks `<scaffold-root>/<id>` from its `--scaffold-root` config. The resolved path is always returned in the response so the client never has to know newtron's on-disk layout.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | yes | Unique network identifier (e.g., `"default"`) |
-| `spec_dir` | string | yes | Absolute path to the spec directory |
-| `scaffold` | bool | no | Create the empty spec layout at `spec_dir` before registering. Default `false`. |
+| `id` | string | yes | Unique network identifier (e.g., `"default"`). |
+| `spec_dir` | string | conditional | Absolute path to the spec directory. Required when `scaffold` is false. Optional when `scaffold` is true — the server derives `<scaffold-root>/<id>` if omitted. |
+| `scaffold` | bool | no | Create the empty spec layout before registering. Default `false`. |
 | `description` | string | no | Free-text description seeded into `topology.json` (only used when `scaffold=true`). |
 
 **Behavior matrix:**
 
-| `scaffold` | `spec_dir` state | Outcome |
-|------------|------------------|---------|
-| `false` (default) | exists with valid specs | 201, register |
-| `false` | missing or invalid | 500 spec load error |
-| `true` | missing or empty | scaffold + register, 201 |
-| `true` | already initialized | 409 |
+| `scaffold` | `spec_dir` | Server state | Outcome |
+|------------|------------|--------------|---------|
+| `false` (default) | supplied; exists with valid specs | — | 201, register |
+| `false` | supplied; missing or invalid | — | 500 spec load error |
+| `false` | omitted | — | 400 `spec_dir is required unless scaffold=true` |
+| `true` | supplied; missing or empty | — | scaffold + register, 201 |
+| `true` | supplied; already initialized | — | 409 |
+| `true` | omitted | `--scaffold-root` set | derive `<root>/<id>`, scaffold + register, 201 |
+| `true` | omitted | `--scaffold-root` empty | 400 `spec_dir omitted but this server has no --scaffold-root configured` |
+| `true` | omitted | `<root>/<id>` already initialized | 409 |
 
 **Response (201):**
 
+The body is the canonical `NetworkInfo` — the same shape `GET /networks` returns, carrying the resolved `spec_dir` so the caller learns the path even when the server picked it.
+
 ```json
-{"data": {"id": "default"}}
+{
+  "data": {
+    "id": "default",
+    "spec_dir": "/etc/newtron/default",
+    "has_topology": true,
+    "topology": "default",
+    "nodes": []
+  }
+}
 ```
 
 **Response (409, id already registered):**
 
-The envelope's `data` field carries an `AlreadyRegisteredErrorInfo` with the
-existing `spec_dir`, so clients can distinguish a true-idempotent retry (the
-caller is asking to register the same id+spec_dir again — observable state
-already matches) from a real conflict (the id is taken by a different
-spec_dir):
+The envelope's `data` field carries an `AlreadyRegisteredErrorInfo` with the existing `spec_dir`, so clients can distinguish a true-idempotent retry (the caller is asking to register the same id+spec_dir again — observable state already matches) from a real conflict (the id is taken by a different spec_dir):
 
 ```json
 {
@@ -489,27 +499,42 @@ spec_dir):
 }
 ```
 
-The Go client (`pkg/newtron/client/Client.RegisterNetwork`) decodes this
-shape: if `existing_spec_dir == requested spec_dir`, the call returns `nil`
-(true-idempotent); otherwise it returns a typed
-`*client.AlreadyRegisteredError` carrying both paths.
+The Go client (`pkg/newtron/client/Client.RegisterNetwork`) decodes this shape: if `existing_spec_dir == requested spec_dir`, the call returns `nil` (true-idempotent); otherwise it returns a typed `*client.AlreadyRegisteredError` carrying both paths.
 
-**Status codes:** 201 created, 400 missing fields or invalid JSON, 409 ID already registered (with `existing_spec_dir` in data) or scaffold-into-initialized-dir, 500 spec directory load error
+**Status codes:** 201 created, 400 missing `id` or missing `spec_dir` without `scaffold=true` or derived mode without `--scaffold-root`, 409 ID already registered (with `existing_spec_dir` in data) or scaffold-into-initialized-dir, 500 spec directory load error
 
 **Examples:**
 
-Register an existing spec directory:
+Register an existing spec directory (CLI/automation):
 
 ```
 POST /newtron/v1/networks
 {"id": "lab", "spec_dir": "/etc/newtron/lab"}
 ```
 
-Scaffold a new empty network in one call:
+Scaffold a new empty network with an operator-supplied path (CLI with filesystem convention, e.g., `bin/newtrun create-topology`):
 
 ```
 POST /newtron/v1/networks
 {"id": "demo-1", "spec_dir": "/var/topologies/demo-1/specs", "scaffold": true, "description": "Demo network"}
+```
+
+Scaffold a new empty network using the server's derived path (UI / operator-language workflow — newtcon "New topology" modal):
+
+```
+POST /newtron/v1/networks
+{"id": "demo-1", "scaffold": true, "description": "Demo network"}
+
+→ 201
+{
+  "data": {
+    "id": "demo-1",
+    "spec_dir": "/etc/newtron/demo-1",
+    "has_topology": true,
+    "topology": "demo-1",
+    "nodes": []
+  }
+}
 ```
 
 ### GET /newtron/v1/networks

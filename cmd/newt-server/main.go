@@ -51,6 +51,7 @@ func main() {
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories (newtrun)")
 	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories (newtlab lab-spec resolution)")
+	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -70,7 +71,7 @@ func main() {
 	// sees newtlab; newtlab's client never sees newtron.
 	newtlabClient := newtlabclient.New("http://" + *listen)
 	newtronPortResolver := newtlabclient.NewPortResolver(newtlabClient)
-	newtronSrv := newtronapi.NewServer(logger, *idleTimeout, newtronPortResolver)
+	newtronSrv := newtronapi.NewServer(logger, *idleTimeout, newtronPortResolver, *scaffoldRoot)
 	if *specDir != "" {
 		if err := newtronSrv.RegisterNetwork(*netID, *specDir); err != nil {
 			logger.Fatalf("failed to register network '%s' from %s: %v", *netID, *specDir, err)
