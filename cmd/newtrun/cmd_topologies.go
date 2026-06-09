@@ -81,10 +81,20 @@ func createTopology(_ context.Context, name, description, topologiesBase string)
 		return fmt.Errorf("resolve spec_dir: %w", err)
 	}
 	c := newNewtronClient(name)
-	if err := c.ScaffoldNetwork(specDir, description); err != nil {
+	// CLI workflow: the caller picks the path explicitly so the
+	// scaffold lands inside the newtrun/topologies convention. The
+	// server-derived mode (#122) is for UI clients that don't track
+	// newtron's on-disk layout — newtrun's CLI does.
+	info, err := c.ScaffoldNetwork(specDir, description)
+	if err != nil {
 		return fmt.Errorf("scaffold network %q: %w", name, err)
 	}
-	fmt.Fprintf(os.Stderr, "created topology %s at %s\n", name, specDir)
+	// Print the server-resolved spec_dir rather than the value the
+	// CLI passed in. They are the same here, but reading it from the
+	// response keeps the "server owns the layout" contract honest —
+	// any future evolution where the server normalizes paths (resolves
+	// symlinks, expands env vars) doesn't drift the printed value.
+	fmt.Fprintf(os.Stderr, "created topology %s at %s\n", name, info.SpecDir)
 	return nil
 }
 

@@ -143,3 +143,70 @@ func TestRegisterNetwork_500ReturnsServerError(t *testing.T) {
 		t.Errorf("StatusCode = %d, want 500", se.StatusCode)
 	}
 }
+
+// TestScaffoldNetwork_DerivedPath_ReturnsResolvedSpecDir pins the #122
+// contract: the client passes an empty specDir, the server picks the
+// path under its scaffold root, and the response carries that resolved
+// path back as NetworkInfo so the caller can display "created at <path>"
+// without re-fetching.
+func TestScaffoldNetwork_DerivedPath_ReturnsResolvedSpecDir(t *testing.T) {
+	const resolvedPath = "/srv/newtron/topologies/demo-derived"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mirror what the real handler returns on 201 — NetworkInfo
+		// wrapped in the standard envelope.
+		w.WriteHeader(http.StatusCreated)
+		env := httputil.APIResponse{
+			Data: api.NetworkInfo{
+				ID:      "demo-derived",
+				SpecDir: resolvedPath,
+				Nodes:   []string{},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(env)
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "demo-derived")
+	info, err := c.ScaffoldNetwork("", "test description")
+	if err != nil {
+		t.Fatalf("ScaffoldNetwork: %v", err)
+	}
+	if info == nil {
+		t.Fatal("info should not be nil on success")
+	}
+	if info.SpecDir != resolvedPath {
+		t.Errorf("info.SpecDir = %q, want %q", info.SpecDir, resolvedPath)
+	}
+	if info.ID != "demo-derived" {
+		t.Errorf("info.ID = %q, want demo-derived", info.ID)
+	}
+}
+
+// TestScaffoldNetwork_ExplicitPath_StillReturnsInfo pins that the
+// uniform-response shape holds for the existing CLI workflow too — the
+// client passes a path it picked, and gets the same NetworkInfo back
+// (the server echoes the operator-supplied path under .SpecDir).
+func TestScaffoldNetwork_ExplicitPath_StillReturnsInfo(t *testing.T) {
+	const explicitPath = "/my/chosen/path"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		env := httputil.APIResponse{
+			Data: api.NetworkInfo{
+				ID:      "demo-explicit",
+				SpecDir: explicitPath,
+				Nodes:   []string{},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(env)
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "demo-explicit")
+	info, err := c.ScaffoldNetwork(explicitPath, "")
+	if err != nil {
+		t.Fatalf("ScaffoldNetwork: %v", err)
+	}
+	if info.SpecDir != explicitPath {
+		t.Errorf("info.SpecDir = %q, want %q", info.SpecDir, explicitPath)
+	}
+}

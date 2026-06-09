@@ -25,9 +25,17 @@ import (
 // Scaffold + register-existing as one wire operation avoids a two-call
 // dance (scaffold-then-register) and keeps newtron the sole owner of the
 // spec-directory layout (§27 Single Owner).
+//
+// SpecDir is required for the register-existing case (scaffold=false). For
+// the scaffold case it is optional: when omitted with scaffold=true, the
+// server derives the path from its --scaffold-root config as
+// filepath.Join(scaffoldRoot, id), so UI clients don't have to know
+// newtron's on-disk layout (§33; #122). The resolved spec_dir is always
+// returned in the 201 response (NetworkInfo) so the caller can display
+// "created at <path>" without re-fetching.
 type RegisterNetworkRequest struct {
 	ID          string `json:"id"`
-	SpecDir     string `json:"spec_dir"`
+	SpecDir     string `json:"spec_dir,omitempty"`
 	Scaffold    bool   `json:"scaffold,omitempty"`
 	Description string `json:"description,omitempty"`
 }

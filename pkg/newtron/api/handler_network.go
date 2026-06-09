@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
@@ -22,9 +23,27 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	if req.ID == "" || req.SpecDir == "" {
-		writeError(w, &newtron.ValidationError{Message: "id and spec_dir are required"})
+	if req.ID == "" {
+		writeError(w, &newtron.ValidationError{Message: "id is required"})
 		return
+	}
+	// SpecDir is required for the register-existing case (the operator
+	// is naming an existing on-disk layout). For the scaffold case it
+	// is optional: the server can derive <scaffoldRoot>/<id> when its
+	// scaffold root is configured. The operator-language framing
+	// (§33; #122) says the UI client's intent is "create topology X" —
+	// the path is implementation. The server still owns the on-disk
+	// layout regardless of who picks the path.
+	if req.SpecDir == "" {
+		if !req.Scaffold {
+			writeError(w, &newtron.ValidationError{Message: "spec_dir is required unless scaffold=true"})
+			return
+		}
+		if s.scaffoldRoot == "" {
+			writeError(w, &newtron.ValidationError{Message: "spec_dir omitted but this server has no --scaffold-root configured; supply spec_dir explicitly or start newtron-server with --scaffold-root"})
+			return
+		}
+		req.SpecDir = filepath.Join(s.scaffoldRoot, req.ID)
 	}
 	if req.Scaffold {
 		if err := s.ScaffoldAndRegister(req.ID, req.SpecDir, req.Description); err != nil {
@@ -41,7 +60,18 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"id": req.ID})
+	// Return the canonical NetworkInfo (§46) — the caller learns the
+	// resolved spec_dir even when the server picked it, and gets the
+	// same shape the GET /networks list returns.
+	info := s.getNetworkInfo(req.ID)
+	if info == nil {
+		// Registration succeeded but the entity vanished between Lock
+		// release and the getNetworkInfo RLock — concurrent
+		// unregister. Surface as 500; the caller can retry.
+		writeError(w, fmt.Errorf("network %q registered but no longer present (concurrent unregister?)", req.ID))
+		return
+	}
+	httputil.WriteJSON(w, http.StatusCreated, info)
 }
 
 func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
