@@ -2,12 +2,13 @@
 
 ## 1. Purpose
 
-newtron's existing authorization code commits to an **entitlement pattern**
+newtron's authorization code commits to an **entitlement pattern**
 (spec-declared permissions, group-based grants, service-level overrides,
-superuser bypass) but the runtime is inert: `SetAuth` is never called, so
-every `checkPermission` short-circuits to "allowed." This doc charts the
-path from that starting point to a production-grade auth subsystem where
-the entitlement pattern is the design destination, **not** the design
+superuser bypass). Before this doc shipped, the runtime was inert —
+no `main()` ever wired the Checker, so every `checkPermission`
+short-circuited to "allowed." This doc charts the path from that
+starting point to a production-grade auth subsystem where the
+entitlement pattern is the design destination, **not** the design
 starting point.
 
 The path is **seven layers**. Each layer:
@@ -108,7 +109,8 @@ Deployments adopt layers at their own pace. Specifically:
   absent means TCP listener doesn't authenticate via PAM (caller
   identity stays self-attested via header per L1).
 - **L3 authorization enforcement:** `--enforce-authorization=true`
-  enables `SetAuth`; default `false` means `checkPermission` stays a
+  invokes `Network.EnableAuthorization` at every `RegisterNetwork` /
+  `ReloadNetwork`; default `false` means `checkPermission` stays a
   no-op even though identity from L1/L2 is populated.
 - **L4 coverage checks:** controlled by the same
   `--enforce-authorization` toggle as L3 — once L4 lands, every
@@ -198,12 +200,12 @@ form unchanged, with the listed additions:
 | Service-level `ServiceSpec.Permissions` | Same shape as global, overrides global | Unchanged |
 | `Network.checkPermission` call sites | 26 sites in `spec_ops`/`profile_ops` | L4 expands coverage to Node ops |
 
-What goes away (during L1–L3):
+What went away during L1–L3 (and what remains for L4–L5):
 
-- The misleading "Permission-based access control" claim in `cmd/newtron/main.go` package comment.
-- The `Network.SetAuth` method being callable but never called (L3 wires it).
-- The `WithDevice` / `WithService` / `WithInterface` setters being unused (L5 populates them).
-- The 15 Permission constants that no proposed coverage uses (L4 prunes them when they're confirmed unused under the new coverage rules).
+- The misleading "Permission-based access control" claim in `cmd/newtron/main.go` package comment — addressed alongside L3.
+- The `Network.SetAuth` method being callable but never called — replaced in L3 by `Network.EnableAuthorization`, which is invoked from `api.Server` when `--enforce-authorization` is set. The standalone `SetAuth` was removed (§40).
+- The `WithDevice` / `WithService` / `WithInterface` setters being unused — L5 populates them.
+- The 15 Permission constants that no proposed coverage uses — L4 prunes them when they're confirmed unused under the new coverage rules.
 
 ---
 
@@ -395,14 +397,18 @@ requires it"; explicitly out of scope per §2.2.
 
 ### L3 — Authorization Enforcement (Wire Up the Existing Checker)
 
-**Goal.** `SetAuth` is called at server bootstrap. The verified identity
-established by the previous layers — Unix username (from L1 Unix
-socket or L2b PAM) or service cert CN (from L2a) — flows through
-`auth.Context.Caller` (new field) into the existing `Checker.Check`.
-The 26 existing `checkPermission` call sites become live gates. Denied
-operations return HTTP 403 with a structured error. Every decision
-(allow or deny) is appended to the audit log from L1 with the
-verification source from L1/L2.
+**Goal.** `Network.EnableAuthorization` is invoked at every
+`RegisterNetwork` / `ReloadNetwork` when `--enforce-authorization`
+is set. The verified identity established by the previous layers —
+Unix username (from L1 Unix socket or L2b PAM) or service cert CN
+(from L2a) — flows through `auth.Context.Caller` (new field) into
+the existing `Checker.Check`. The 26 existing `checkPermission`
+call sites become live gates. Denied operations return HTTP 403
+with a `*newtron.AuthorizationError` carrying typed
+`caller`/`permission`/`resource` on the response `data` field
+(§46). Every decision (allow or deny) is appended to the audit log
+via `audit.LogDecision` with the verification source from L1/L2 and
+Operation prefixed `authcheck:`.
 
 Service-to-service identities (cert CNs) and user identities (Unix
 usernames) share the same `Context.Caller` field but typically map to
@@ -413,20 +419,30 @@ specific permission grants. This is a spec convention, not a code
 distinction — the Checker treats both identically.
 
 **Audit criterion met when this layer lands.** "Are the permission
-grants in `network.json` enforced at runtime?" → yes, for the operations
-already gated (`spec.author`, `qos.create`, `filter.create` and their
-delete counterparts). A test (`TestAuthorizationActuallyEnforces`) flips
-SetAuth on, asserts a non-permitted caller gets 403 on each gated
-endpoint, asserts a permitted caller succeeds.
+grants in `network.json` enforced at runtime?" → yes, for the
+operations already gated (`spec.author`, `qos.create`,
+`filter.create` and their delete counterparts). The test
+`TestAuthorizationActuallyEnforces` in
+`pkg/newtron/api/authorization_test.go` enables enforcement and
+asserts a non-permitted caller gets 403 on each gated endpoint, plus
+that a permitted caller succeeds.
 
 **Dependencies.** L0, L1, L2.
 
-**Scope of changes.** `auth.Context.Caller` field. Middleware that
-populates `Context` from L2's verified identity. `Network.SetAuth` is
-invoked from `pkg/newtron/api/Server` construction. `Checker.Check`
-reads `ctx.Caller` instead of `c.currentUser`. New typed error
-`*newtron.AuthorizationError` translated to 403 at the wire. New test
-file `pkg/newtron/api/authorization_test.go`.
+**Scope of changes.** `auth.Context.Caller` field. Public method
+`Network.EnableAuthorization` that constructs an `auth.Checker`
+bound to the live `NetworkSpecFile`. `api.Config.EnforceAuthorization`
++ `--enforce-authorization` flag on `cmd/newtron-server` and
+`cmd/newt-server`. `Checker.Check` reads `ctx.Caller` (the
+`currentUser` field was removed entirely per §40). `ctx
+context.Context` plumbed through the 25 public `Network`
+spec/profile mutation methods so the verified caller travels from
+`audit.CallerFromContext(ctx)` into the auth check. New typed error
+`*newtron.AuthorizationError` translated to 403 at the wire by
+`httpStatusFromError` and surfaced as `Data` by `writeError`. New
+`audit.LogDecision` helper. New test file
+`pkg/newtron/api/authorization_test.go`. New operational HOWTO
+`docs/newtron/authorization-howto.md`.
 
 **Independent value.** Spec-authoring grants are real. The existing
 26 call sites stop lying. Node-level operations remain ungated for

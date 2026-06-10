@@ -188,7 +188,11 @@ can always tell which path provided the identity by the
 **Not addressed in L2b**:
 
 - *Authorization.* L2b verifies who the user is, not what they're
-  allowed to do. L3 enforces the entitlement pattern.
+  allowed to do. L3 enforces the entitlement pattern when
+  `--enforce-authorization` is set — the PAM-verified username flows
+  through `auth.Context.Caller` and the spec-declared grants in
+  `network.json` decide what the user may do. See
+  [`authorization-howto.md`](authorization-howto.md).
 - *Brute-force protection.* PAM modules like `pam_faillock` /
   `pam_tally2` provide rate-limiting; newtron does not add an HTTP-
   layer rate limiter. Operators configure that at the PAM level or
@@ -206,6 +210,8 @@ can always tell which path provided the identity by the
 ## 7. Cross-references
 
 - [`auth-design.md`](auth-design.md) — L2b in the layered auth plan
+- [`authorization-howto.md`](authorization-howto.md) — L3
+  authorization enforcement (the next layer in the arc)
 - [`hld.md`](hld.md) §9 — operator-facing security framing
 - [`mtls-howto.md`](mtls-howto.md) — L2a inter-service mTLS (pair
   L2a + L2b for the full transport-authentication picture)

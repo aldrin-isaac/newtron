@@ -67,10 +67,10 @@ func NewContext() *Context {
 }
 
 // WithCaller sets the username the check is being made for. Required
-// for any Check call once SetAuth is wired (auth-design.md L3) —
-// otherwise the check denies. The HTTP boundary populates this from
-// audit.CallerFromContext via Network.checkPermission; direct in-
-// process callers set it themselves.
+// for any Check call once Network.EnableAuthorization has been called
+// (auth-design.md L3) — otherwise the check denies. The HTTP boundary
+// populates this from audit.CallerFromContext via
+// Network.checkPermission; direct in-process callers set it themselves.
 func (c *Context) WithCaller(caller string) *Context {
 	c.Caller = caller
 	return c

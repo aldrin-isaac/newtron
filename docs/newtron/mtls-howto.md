@@ -179,10 +179,12 @@ with:
 **Not addressed in L2a**:
 
 - *Authorization.* L2a verifies who the caller is, not what they're
-  allowed to do. L3 enforces the entitlement pattern; until L3
-  lands, every verified peer can call every endpoint. (Practically,
-  the engines only call each other; a rogue CA-issued cert would
-  still be limited to the engine API surface.)
+  allowed to do. L3 enforces the entitlement pattern when
+  `--enforce-authorization` is set — the verified cert CN flows
+  through `auth.Context.Caller` and the spec-declared grants in
+  `network.json` decide what the peer may do. Without
+  `--enforce-authorization`, every verified peer can call every
+  endpoint. (See [`authorization-howto.md`](authorization-howto.md).)
 - *Cert revocation / rotation.* The shipped pattern reloads on
   server restart. Per-cert rotation requires restarting the engine
   holding that cert. CRL / OCSP support is not implemented;
@@ -196,6 +198,8 @@ with:
 ## 7. Cross-references
 
 - [`auth-design.md`](auth-design.md) — L2a in the layered auth plan
+- [`authorization-howto.md`](authorization-howto.md) — L3
+  authorization enforcement (the next layer in the arc)
 - [`hld.md`](hld.md) §9 — operator-facing security framing
 - [`secret-store.md`](secret-store.md) — L0 secret store (cert and
   key paths are filesystem references, not secret-store keys —

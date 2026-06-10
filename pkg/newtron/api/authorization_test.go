@@ -159,6 +159,52 @@ func TestAuthorizationActuallyEnforces(t *testing.T) {
 	}
 }
 
+// TestAuthorization_DenyWireShape pins the JSON key set on the 403
+// response Data field — `caller`, `permission`, `resource` lowercase
+// snake_case, matching the AuthorizationError struct tags and the
+// authorization-howto.md mockup. Without this assertion the
+// AuthorizationError struct tags could drift back to Go field-case
+// or get renamed silently; the HOWTO mockup would lie and operators
+// would see different keys than documented.
+func TestAuthorization_DenyWireShape(t *testing.T) {
+	specDir := scaffoldWithPermissions(t)
+	s := newAuthzServer(t, specDir)
+
+	w := postAs(t, s, "mallory", "/newtron/v1/networks/default/create-service",
+		map[string]any{"name": "svc-wire", "type": "routed"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	// Decode raw to keep the literal key strings.
+	var raw struct {
+		Data  map[string]any `json:"data"`
+		Error string         `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal envelope: %v; body=%s", err, w.Body.String())
+	}
+	if raw.Error == "" {
+		t.Error(`envelope "error" field is empty`)
+	}
+	if raw.Data == nil {
+		t.Fatalf(`envelope "data" field missing — got %s`, w.Body.String())
+	}
+	for _, key := range []string{"caller", "permission", "resource"} {
+		if _, ok := raw.Data[key]; !ok {
+			t.Errorf("data.%s missing; got keys %v — does AuthorizationError still have the right json tags?", key, mapKeys(raw.Data))
+		}
+	}
+	if raw.Data["caller"] != "mallory" {
+		t.Errorf("data.caller = %v, want mallory", raw.Data["caller"])
+	}
+	if raw.Data["permission"] != "spec.author" {
+		t.Errorf("data.permission = %v, want spec.author", raw.Data["permission"])
+	}
+	if raw.Data["resource"] != "svc-wire" {
+		t.Errorf("data.resource = %v, want svc-wire", raw.Data["resource"])
+	}
+}
+
 // TestAuthorization_EmptyCallerDenied pins the fail-closed contract
 // at the HTTP layer: when L1/L2 surface no identity (no header set,
 // no Unix peer creds, no mTLS cert), an enforced check denies. This
