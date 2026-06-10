@@ -59,6 +59,17 @@ type Config struct {
 	// server from a --auth-pam-service=NAME flag wrapping a
 	// pamauth.PAMAuthenticator.
 	Authenticator httputil.Authenticator
+
+	// NewtronClientTLS is the TLS config the runner uses on its
+	// outbound calls to newtron-server during a run
+	// (auth-design.md L2a). The companion to TLSConfig above —
+	// TLSConfig serves the inbound listener; NewtronClientTLS
+	// authenticates outbound newtron HTTP calls so an mTLS-enforced
+	// newtron-server sees the runner's cert CN as the caller
+	// identity. nil keeps the runner's newtron client on plain
+	// HTTP — the L2a disabled state on that direction. Composed in
+	// by cmd/newtrun-server alongside NewtlabClient.
+	NewtronClientTLS *tls.Config
 }
 
 // Server is the newtrun HTTP server. The HTTP listener lifecycle

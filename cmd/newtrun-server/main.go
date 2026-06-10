@@ -70,10 +70,11 @@ func main() {
 	// Empty --newtlab-server leaves the client nil; Runner.Run rejects
 	// deploy in that case with a clear error.
 	cfg := api.Config{
-		SuitesBase:    *suitesBase,
-		Logger:        logger,
-		TLSConfig:     serverTLS,
-		Authenticator: pamAuth,
+		SuitesBase:       *suitesBase,
+		Logger:           logger,
+		TLSConfig:        serverTLS,
+		Authenticator:    pamAuth,
+		NewtronClientTLS: clientTLS,
 	}
 	if *newtlabServer != "" {
 		cfg.NewtlabClient = newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS))

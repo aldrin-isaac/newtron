@@ -162,6 +162,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	runner.SuitesBase = s.cfg.SuitesBase
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
+	runner.NewtronClientTLS = s.cfg.NewtronClientTLS
 	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 
