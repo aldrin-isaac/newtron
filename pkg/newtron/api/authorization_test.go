@@ -324,3 +324,194 @@ func TestAuthorization_DecisionAuditEmitted(t *testing.T) {
 		t.Errorf("alice decision Success=false, want true (allow)")
 	}
 }
+
+// authzServerWithTopology constructs an enforcement-on server backed
+// by the 1node-vs topology fixture (so node-level routes have a
+// device to dispatch to), with network.json's grant table overwritten
+// to grant device.write / vlan.create / spec.author / etc. to the
+// "device-team" group. Used by the L4 node/interface enforcement
+// tests below — those tests assert 403 on the gate, so device
+// reachability doesn't matter; the gate fires before any transport
+// would be opened.
+func authzServerWithTopology(t *testing.T) *Server {
+	t.Helper()
+	specDir := copyTestSpecDir(t)
+	netJSON := `{
+  "version": "1.0",
+  "super_users": ["root"],
+  "user_groups": {"device-team": ["alice"]},
+  "permissions": {
+    "spec.author":       ["device-team"],
+    "device.write":      ["device-team"],
+    "vlan.create":       ["device-team"],
+    "vlan.delete":       ["device-team"],
+    "vlan.modify":       ["device-team"],
+    "vrf.create":        ["device-team"],
+    "vrf.delete":        ["device-team"],
+    "vrf.modify":        ["device-team"],
+    "acl.create":        ["device-team"],
+    "acl.delete":        ["device-team"],
+    "acl.modify":        ["device-team"],
+    "lag.create":        ["device-team"],
+    "lag.delete":        ["device-team"],
+    "lag.modify":        ["device-team"],
+    "evpn.modify":       ["device-team"],
+    "service.apply":     ["device-team"],
+    "service.remove":    ["device-team"],
+    "interface.modify": ["device-team"],
+    "qos.modify":        ["device-team"]
+  },
+  "zones": {"amer": {}}
+}`
+	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	return s
+}
+
+// TestAuthorizationL4_NodeMutationsGated walks one representative
+// endpoint per permission family in the Node mutation surface and
+// asserts a non-permitted caller gets 403. Authorized callers' 200
+// paths aren't asserted here — they require a live device transport
+// the test fixture doesn't have.
+//
+// Each URL uses `?mode=topology` to drive ensureTopologyIntent (no
+// transport) instead of ensureActuatedIntent (would open SSH). The
+// gate fires inside the Node method after the projection rebuild;
+// in topology mode the rebuild is in-memory only, so the gate
+// reaches its denial without any device interaction.
+//
+// Pre-L4 every one of these would return 200 from the (now-gated)
+// no-op checkPermission path, then proceed silently. The L4 contract:
+// unauthorized callers are stopped at the gate.
+func TestAuthorizationL4_NodeMutationsGated(t *testing.T) {
+	s := authzServerWithTopology(t)
+
+	cases := []struct {
+		name string
+		path string
+		body any
+	}{
+		{
+			name: "create-vlan (vlan.create)",
+			path: "/newtron/v1/networks/default/nodes/switch1/create-vlan?mode=topology",
+			body: map[string]any{"vlan_id": 100},
+		},
+		{
+			name: "create-vrf (vrf.create)",
+			path: "/newtron/v1/networks/default/nodes/switch1/create-vrf?mode=topology",
+			body: map[string]any{"name": "vrf-a"},
+		},
+		{
+			name: "create-acl (acl.create)",
+			path: "/newtron/v1/networks/default/nodes/switch1/create-acl?mode=topology",
+			body: map[string]any{"name": "acl-a", "type": "ip"},
+		},
+		{
+			name: "create-portchannel (lag.create)",
+			path: "/newtron/v1/networks/default/nodes/switch1/create-portchannel?mode=topology",
+			body: map[string]any{"name": "PortChannel1"},
+		},
+		{
+			name: "add-bgp-evpn-peer (evpn.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/add-bgp-evpn-peer?mode=topology",
+			body: map[string]any{"neighbor_ip": "10.0.0.2", "remote_as": 65002},
+		},
+		{
+			name: "setup-device (device.write)",
+			path: "/newtron/v1/networks/default/nodes/switch1/setup-device?mode=topology",
+			body: map[string]any{},
+		},
+		{
+			name: "init-device (device.write)",
+			path: "/newtron/v1/networks/default/nodes/switch1/init-device",
+			body: map[string]any{},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+" denies unprivileged caller", func(t *testing.T) {
+			w := postAs(t, s, "mallory", tc.path, tc.body)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+			}
+			var env httputil.APIResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+				t.Fatalf("unmarshal envelope: %v", err)
+			}
+			if !strings.Contains(env.Error, "authorization denied") {
+				t.Errorf("Error = %q, want it to mention authorization denied", env.Error)
+			}
+		})
+	}
+}
+
+// TestAuthorizationL4_InterfaceMutationsGated walks one representative
+// endpoint per permission family in the Interface mutation surface and
+// asserts a non-permitted caller gets 403. Same scope rationale as
+// the Node-mutation test: 403 path only, `?mode=topology` to skip
+// transport.
+func TestAuthorizationL4_InterfaceMutationsGated(t *testing.T) {
+	s := authzServerWithTopology(t)
+
+	cases := []struct {
+		name string
+		path string
+		body any
+	}{
+		{
+			name: "apply-service (service.apply)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology",
+			body: map[string]any{"service": "TRANSIT"},
+		},
+		{
+			name: "bind-acl (acl.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/bind-acl?mode=topology",
+			body: map[string]any{"acl": "acl-a", "direction": "ingress"},
+		},
+		{
+			name: "add-bgp-peer (vrf.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/add-bgp-peer?mode=topology",
+			body: map[string]any{"neighbor_ip": "10.0.0.2", "remote_as": 65002},
+		},
+		{
+			name: "set-property (interface.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/set-property?mode=topology",
+			body: map[string]any{"property": "mtu", "value": "9100"},
+		},
+		{
+			name: "configure-interface (interface.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/configure-interface?mode=topology",
+			body: map[string]any{"vrf": "default", "ip": "10.0.0.1/30"},
+		},
+		{
+			name: "apply-qos (qos.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-qos?mode=topology",
+			body: map[string]any{"policy": "qos-a"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+" denies unprivileged caller", func(t *testing.T) {
+			w := postAs(t, s, "mallory", tc.path, tc.body)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+			}
+			var env httputil.APIResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+				t.Fatalf("unmarshal envelope: %v", err)
+			}
+			if !strings.Contains(env.Error, "authorization denied") {
+				t.Errorf("Error = %q, want it to mention authorization denied", env.Error)
+			}
+		})
+	}
+}

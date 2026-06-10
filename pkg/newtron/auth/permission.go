@@ -25,9 +25,21 @@ const (
 	PermVLANModify Permission = "vlan.modify"
 	PermVLANDelete Permission = "vlan.delete"
 
+	PermACLCreate Permission = "acl.create"
 	PermACLModify Permission = "acl.modify"
+	PermACLDelete Permission = "acl.delete"
 
 	PermEVPNModify Permission = "evpn.modify"
+
+	// PermDeviceWrite is the catch-all for operational Node-level
+	// mutations whose verb is not a create/modify/delete on a
+	// specific domain noun: SetupDevice, ConfigReload, RestartService,
+	// ExecCommand, SaveConfig, Reconcile. Operators who want to
+	// restrict these specifically grant `device.write`; the verb-
+	// specific permissions don't apply because the action is a
+	// device-state operation rather than a config-table mutation.
+	// (auth-design.md L4)
+	PermDeviceWrite Permission = "device.write"
 
 	PermQoSCreate Permission = "qos.create"
 	PermQoSModify Permission = "qos.modify"

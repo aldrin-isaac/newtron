@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
@@ -37,7 +38,12 @@ func (n *Node) Lock(ctx context.Context) error { return n.internal.Lock(ctx) }
 func (n *Node) Unlock() error { return n.internal.Unlock() }
 
 // Save persists the device's running CONFIG_DB to disk.
-func (n *Node) Save(ctx context.Context) error { return n.internal.SaveConfig(ctx) }
+func (n *Node) Save(ctx context.Context) error {
+	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
+		return err
+	}
+	return n.internal.SaveConfig(ctx)
+}
 
 // Close disconnects from the device.
 func (n *Node) Close() error {
@@ -158,6 +164,9 @@ func (n *Node) Drift(ctx context.Context) ([]DriftEntry, error) {
 //
 // Two modes: "full" (config reload + ReplaceAll) and "delta" (patch only drifted entries).
 func (n *Node) Reconcile(ctx context.Context, opts ReconcileOpts) (*ReconcileResult, error) {
+	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
+		return nil, err
+	}
 	result, err := n.internal.Reconcile(ctx, node.ReconcileOpts{Mode: opts.Mode})
 	if err != nil {
 		return nil, err
@@ -232,6 +241,19 @@ func (n *Node) appendPending(cs *node.ChangeSet) {
 	if cs != nil {
 		n.pending = append(n.pending, cs)
 	}
+}
+
+// gate consults the parent Network's permission checker (auth-design.md
+// L4) before a Node mutation acts. It populates auth.Context.Device
+// from the node's name and Resource from the per-method resource
+// string (vlan id, vrf name, etc.) so the audit log decision event
+// records what was being acted on. When authorization is disabled
+// at the Network level (net.auth == nil), checkPermission returns
+// nil and the mutation proceeds.
+func (n *Node) gate(ctx context.Context, perm auth.Permission, resource string) error {
+	return n.net.checkPermission(ctx, perm, auth.NewContext().
+		WithDevice(n.internal.Name()).
+		WithResource(resource))
 }
 
 // PendingPreview returns a formatted preview of all pending changes.
@@ -386,6 +408,9 @@ func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.C
 
 // CreateVLAN creates a VLAN on the device.
 func (n *Node) CreateVLAN(ctx context.Context, id int, config VLANConfig) error {
+	if err := n.gate(ctx, auth.PermVLANCreate, fmt.Sprintf("VLAN%d", id)); err != nil {
+		return err
+	}
 	cs, err := n.internal.CreateVLAN(ctx, id, node.VLANConfig{Description: config.Description, L2VNI: config.L2VNI})
 	n.appendPending(cs)
 	return err
@@ -393,6 +418,9 @@ func (n *Node) CreateVLAN(ctx context.Context, id int, config VLANConfig) error 
 
 // DeleteVLAN deletes a VLAN from the device.
 func (n *Node) DeleteVLAN(ctx context.Context, id int) error {
+	if err := n.gate(ctx, auth.PermVLANDelete, fmt.Sprintf("VLAN%d", id)); err != nil {
+		return err
+	}
 	cs, err := n.internal.DeleteVLAN(ctx, id)
 	n.appendPending(cs)
 	return err
@@ -400,6 +428,9 @@ func (n *Node) DeleteVLAN(ctx context.Context, id int) error {
 
 // ConfigureIRB configures the IRB (Integrated Routing and Bridging) interface for a VLAN.
 func (n *Node) ConfigureIRB(ctx context.Context, id int, config IRBConfig) error {
+	if err := n.gate(ctx, auth.PermVLANModify, fmt.Sprintf("VLAN%d", id)); err != nil {
+		return err
+	}
 	cs, err := n.internal.ConfigureIRB(ctx, id, node.IRBConfig{
 		VRF:        config.VRF,
 		IPAddress:  config.IPAddress,
@@ -411,6 +442,9 @@ func (n *Node) ConfigureIRB(ctx context.Context, id int, config IRBConfig) error
 
 // UnconfigureIRB removes the IRB configuration from a VLAN.
 func (n *Node) UnconfigureIRB(ctx context.Context, id int) error {
+	if err := n.gate(ctx, auth.PermVLANModify, fmt.Sprintf("VLAN%d", id)); err != nil {
+		return err
+	}
 	cs, err := n.internal.UnconfigureIRB(ctx, id)
 	n.appendPending(cs)
 	return err
@@ -422,6 +456,9 @@ func (n *Node) UnconfigureIRB(ctx context.Context, id int) error {
 
 // CreateVRF creates a VRF on the device.
 func (n *Node) CreateVRF(ctx context.Context, name string, config VRFConfig) error {
+	if err := n.gate(ctx, auth.PermVRFCreate, name); err != nil {
+		return err
+	}
 	cs, err := n.internal.CreateVRF(ctx, name, node.VRFConfig{})
 	n.appendPending(cs)
 	return err
@@ -429,6 +466,9 @@ func (n *Node) CreateVRF(ctx context.Context, name string, config VRFConfig) err
 
 // DeleteVRF deletes a VRF from the device.
 func (n *Node) DeleteVRF(ctx context.Context, name string) error {
+	if err := n.gate(ctx, auth.PermVRFDelete, name); err != nil {
+		return err
+	}
 	cs, err := n.internal.DeleteVRF(ctx, name)
 	n.appendPending(cs)
 	return err
@@ -441,6 +481,9 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) error {
 // BindIPVPN binds a VRF to an IP-VPN definition.
 // Resolves the IPVPN spec by name from the node's SpecProvider.
 func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
+	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+		return err
+	}
 	cs, err := n.internal.BindIPVPN(ctx, vrf, util.NormalizeName(ipvpnName))
 	n.appendPending(cs)
 	return err
@@ -448,6 +491,9 @@ func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
 
 // UnbindIPVPN unbinds the IP-VPN from a VRF.
 func (n *Node) UnbindIPVPN(ctx context.Context, vrf string) error {
+	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+		return err
+	}
 	cs, err := n.internal.UnbindIPVPN(ctx, vrf)
 	n.appendPending(cs)
 	return err
@@ -459,6 +505,9 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrf string) error {
 
 // AddBGPEVPNPeer adds a loopback BGP neighbor (indirect, multi-hop eBGP).
 func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) error {
+	if err := n.gate(ctx, auth.PermEVPNModify, config.NeighborIP); err != nil {
+		return err
+	}
 	cs, err := n.internal.AddBGPEVPNPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
 	n.appendPending(cs)
 	return err
@@ -466,6 +515,9 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) err
 
 // RemoveBGPEVPNPeer removes an EVPN BGP peer by IP.
 func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, ip string) error {
+	if err := n.gate(ctx, auth.PermEVPNModify, ip); err != nil {
+		return err
+	}
 	cs, err := n.internal.RemoveBGPEVPNPeer(ctx, ip)
 	n.appendPending(cs)
 	return err
@@ -477,6 +529,9 @@ func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, ip string) error {
 
 // AddStaticRoute adds a static route to a VRF.
 func (n *Node) AddStaticRoute(ctx context.Context, vrf, prefix, nexthop string, metric int) error {
+	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+		return err
+	}
 	cs, err := n.internal.AddStaticRoute(ctx, vrf, prefix, nexthop, metric)
 	n.appendPending(cs)
 	return err
@@ -484,6 +539,9 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrf, prefix, nexthop string, 
 
 // RemoveStaticRoute removes a static route from a VRF.
 func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error {
+	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+		return err
+	}
 	cs, err := n.internal.RemoveStaticRoute(ctx, vrf, prefix)
 	n.appendPending(cs)
 	return err
@@ -495,6 +553,9 @@ func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error 
 
 // BindMACVPN maps a VLAN to an L2VNI for EVPN.
 func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) error {
+	if err := n.gate(ctx, auth.PermEVPNModify, fmt.Sprintf("VLAN%d", vlanID)); err != nil {
+		return err
+	}
 	macvpnName = util.NormalizeName(macvpnName)
 	cs, err := n.internal.BindMACVPN(ctx, vlanID, macvpnName)
 	n.appendPending(cs)
@@ -503,6 +564,9 @@ func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) er
 
 // UnbindMACVPN removes the MAC-VPN binding for a VLAN.
 func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) error {
+	if err := n.gate(ctx, auth.PermEVPNModify, fmt.Sprintf("VLAN%d", vlanID)); err != nil {
+		return err
+	}
 	cs, err := n.internal.UnbindMACVPN(ctx, vlanID)
 	n.appendPending(cs)
 	return err
@@ -514,6 +578,9 @@ func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) error {
 
 // CreateACL creates a new ACL table on the device.
 func (n *Node) CreateACL(ctx context.Context, name string, config ACLConfig) error {
+	if err := n.gate(ctx, auth.PermACLCreate, name); err != nil {
+		return err
+	}
 	cs, err := n.internal.CreateACL(ctx, name, node.ACLConfig{
 		Type:        config.Type,
 		Stage:       config.Stage,
@@ -526,6 +593,9 @@ func (n *Node) CreateACL(ctx context.Context, name string, config ACLConfig) err
 
 // DeleteACL deletes an ACL table and its rules from the device.
 func (n *Node) DeleteACL(ctx context.Context, name string) error {
+	if err := n.gate(ctx, auth.PermACLDelete, name); err != nil {
+		return err
+	}
 	cs, err := n.internal.DeleteACL(ctx, name)
 	n.appendPending(cs)
 	return err
@@ -533,6 +603,9 @@ func (n *Node) DeleteACL(ctx context.Context, name string) error {
 
 // AddACLRule adds a rule to an ACL table.
 func (n *Node) AddACLRule(ctx context.Context, acl, ruleName string, config ACLRuleConfig) error {
+	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
+		return err
+	}
 	cs, err := n.internal.AddACLRule(ctx, acl, ruleName, node.ACLRuleConfig{
 		Priority: config.Priority,
 		Action:   config.Action,
@@ -548,6 +621,9 @@ func (n *Node) AddACLRule(ctx context.Context, acl, ruleName string, config ACLR
 
 // RemoveACLRule removes a rule from an ACL table.
 func (n *Node) RemoveACLRule(ctx context.Context, acl, ruleName string) error {
+	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
+		return err
+	}
 	cs, err := n.internal.DeleteACLRule(ctx, acl, ruleName)
 	n.appendPending(cs)
 	return err
@@ -559,6 +635,9 @@ func (n *Node) RemoveACLRule(ctx context.Context, acl, ruleName string) error {
 
 // CreatePortChannel creates a new PortChannel on the device.
 func (n *Node) CreatePortChannel(ctx context.Context, name string, config PortChannelConfig) error {
+	if err := n.gate(ctx, auth.PermLAGCreate, name); err != nil {
+		return err
+	}
 	cs, err := n.internal.CreatePortChannel(ctx, name, node.PortChannelConfig{
 		Members:  config.Members,
 		MinLinks: config.MinLinks,
@@ -572,6 +651,9 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, config PortCh
 
 // DeletePortChannel deletes a PortChannel from the device.
 func (n *Node) DeletePortChannel(ctx context.Context, name string) error {
+	if err := n.gate(ctx, auth.PermLAGDelete, name); err != nil {
+		return err
+	}
 	cs, err := n.internal.DeletePortChannel(ctx, name)
 	n.appendPending(cs)
 	return err
@@ -579,6 +661,9 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) error {
 
 // AddPortChannelMember adds a member interface to a PortChannel.
 func (n *Node) AddPortChannelMember(ctx context.Context, pc, member string) error {
+	if err := n.gate(ctx, auth.PermLAGModify, pc); err != nil {
+		return err
+	}
 	cs, err := n.internal.AddPortChannelMember(ctx, pc, member)
 	n.appendPending(cs)
 	return err
@@ -586,6 +671,9 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pc, member string) erro
 
 // RemovePortChannelMember removes a member interface from a PortChannel.
 func (n *Node) RemovePortChannelMember(ctx context.Context, pc, member string) error {
+	if err := n.gate(ctx, auth.PermLAGModify, pc); err != nil {
+		return err
+	}
 	cs, err := n.internal.RemovePortChannelMember(ctx, pc, member)
 	n.appendPending(cs)
 	return err
@@ -616,6 +704,9 @@ func convertRROpts(opts RouteReflectorOpts) node.RouteReflectorOpts {
 // BGP, VTEP (optional), and route reflector (optional). Writes a single
 // NEWTRON_INTENT record for the entire setup.
 func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) error {
+	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
+		return err
+	}
 	internalOpts := node.SetupDeviceOpts{
 		Fields:   opts.Fields,
 		SourceIP: opts.SourceIP,
@@ -718,6 +809,9 @@ func convertRouteEntry(re *sonic.RouteEntry) *RouteEntry {
 // ExecCommand executes a command on the device via SSH.
 // Returns an error if no SSH tunnel is configured.
 func (n *Node) ExecCommand(ctx context.Context, cmd string) (string, error) {
+	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
+		return "", err
+	}
 	tunnel := n.internal.Tunnel()
 	if tunnel == nil {
 		return "", fmt.Errorf("no SSH tunnel configured for device %s", n.internal.Name())
@@ -727,11 +821,17 @@ func (n *Node) ExecCommand(ctx context.Context, cmd string) (string, error) {
 
 // ConfigReload runs 'config reload -y' on the device via SSH.
 func (n *Node) ConfigReload(ctx context.Context) error {
+	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
+		return err
+	}
 	return n.internal.ConfigReload(ctx)
 }
 
 // RestartService restarts a SONiC Docker container by name via SSH.
 func (n *Node) RestartService(ctx context.Context, name string) error {
+	if err := n.gate(ctx, auth.PermDeviceWrite, name); err != nil {
+		return err
+	}
 	return n.internal.RestartService(ctx, name)
 }
 

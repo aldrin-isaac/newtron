@@ -14,6 +14,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
@@ -252,9 +253,171 @@ func TestAPICompleteness(t *testing.T) {
 		{"Interface", reflect.TypeOf((*newtron.Interface)(nil))},
 	}
 
+	// authorizedMethods (auth-design.md L4) maps every HTTP-exposed
+	// MUTATION method to the auth.Permission constant its checkPermission
+	// call uses. Every method in coveredMethods must appear here OR in
+	// readOnlyMethods below — the test refuses to compile a new mutation
+	// surface without an explicit gate decision.
+	authorizedMethods := map[string]map[string]auth.Permission{
+		"Network": {
+			"CreateService":         auth.PermSpecAuthor,
+			"DeleteService":         auth.PermSpecAuthor,
+			"CreateIPVPN":           auth.PermSpecAuthor,
+			"DeleteIPVPN":           auth.PermSpecAuthor,
+			"CreateMACVPN":          auth.PermSpecAuthor,
+			"DeleteMACVPN":          auth.PermSpecAuthor,
+			"CreateQoSPolicy":       auth.PermQoSCreate,
+			"DeleteQoSPolicy":       auth.PermQoSDelete,
+			"AddQoSQueue":           auth.PermSpecAuthor,
+			"RemoveQoSQueue":        auth.PermSpecAuthor,
+			"CreateFilter":          auth.PermFilterCreate,
+			"DeleteFilter":          auth.PermFilterDelete,
+			"AddFilterRule":         auth.PermSpecAuthor,
+			"RemoveFilterRule":      auth.PermSpecAuthor,
+			"CreatePrefixList":      auth.PermSpecAuthor,
+			"DeletePrefixList":      auth.PermSpecAuthor,
+			"AddPrefixListEntry":    auth.PermSpecAuthor,
+			"RemovePrefixListEntry": auth.PermSpecAuthor,
+			"CreateRoutePolicy":     auth.PermSpecAuthor,
+			"DeleteRoutePolicy":     auth.PermSpecAuthor,
+			"AddRoutePolicyRule":    auth.PermSpecAuthor,
+			"RemoveRoutePolicyRule": auth.PermSpecAuthor,
+			"CreateProfile":         auth.PermSpecAuthor,
+			"DeleteProfile":         auth.PermSpecAuthor,
+			"CreateZone":            auth.PermSpecAuthor,
+			"DeleteZone":            auth.PermSpecAuthor,
+			"AddTopologyDevice":     auth.PermSpecAuthor,
+			"DeleteTopologyDevice":  auth.PermSpecAuthor,
+			"UpdateTopologyDevice":  auth.PermSpecAuthor,
+			"AddTopologyLink":       auth.PermSpecAuthor,
+			"DeleteTopologyLink":    auth.PermSpecAuthor,
+			"InitDevice":            auth.PermDeviceWrite,
+		},
+		"Node": {
+			"AddBGPEVPNPeer":          auth.PermEVPNModify,
+			"RemoveBGPEVPNPeer":       auth.PermEVPNModify,
+			"BindMACVPN":              auth.PermEVPNModify,
+			"UnbindMACVPN":            auth.PermEVPNModify,
+			"SetupDevice":             auth.PermDeviceWrite,
+			"CreateVLAN":              auth.PermVLANCreate,
+			"DeleteVLAN":              auth.PermVLANDelete,
+			"ConfigureIRB":            auth.PermVLANModify,
+			"UnconfigureIRB":          auth.PermVLANModify,
+			"CreateVRF":               auth.PermVRFCreate,
+			"DeleteVRF":               auth.PermVRFDelete,
+			"BindIPVPN":               auth.PermVRFModify,
+			"UnbindIPVPN":             auth.PermVRFModify,
+			"AddStaticRoute":          auth.PermVRFModify,
+			"RemoveStaticRoute":       auth.PermVRFModify,
+			"CreateACL":               auth.PermACLCreate,
+			"DeleteACL":               auth.PermACLDelete,
+			"AddACLRule":              auth.PermACLModify,
+			"RemoveACLRule":           auth.PermACLModify,
+			"CreatePortChannel":       auth.PermLAGCreate,
+			"DeletePortChannel":       auth.PermLAGDelete,
+			"AddPortChannelMember":    auth.PermLAGModify,
+			"RemovePortChannelMember": auth.PermLAGModify,
+			"ConfigReload":            auth.PermDeviceWrite,
+			"RestartService":          auth.PermDeviceWrite,
+			"ExecCommand":             auth.PermDeviceWrite,
+			"Save":                    auth.PermDeviceWrite,
+			"Reconcile":               auth.PermDeviceWrite,
+		},
+		"Interface": {
+			"ApplyService":         auth.PermServiceApply,
+			"RemoveService":        auth.PermServiceRemove,
+			"RefreshService":       auth.PermServiceApply,
+			"BindACL":              auth.PermACLModify,
+			"UnbindACL":            auth.PermACLModify,
+			"AddBGPPeer":           auth.PermVRFModify,
+			"RemoveBGPPeer":        auth.PermVRFModify,
+			"SetProperty":          auth.PermInterfaceModify,
+			"ClearProperty":        auth.PermInterfaceModify,
+			"ConfigureInterface":   auth.PermInterfaceModify,
+			"UnconfigureInterface": auth.PermInterfaceModify,
+			"ApplyQoS":             auth.PermQoSModify,
+			"RemoveQoS":            auth.PermQoSModify,
+		},
+	}
+
+	// readOnlyMethods (auth-design.md §3) names every HTTP-exposed
+	// covered method that does NOT mutate state. Each value is a short
+	// reason — usually "spec read", "device read", or a note about why
+	// the operation is read-equivalent (Execute is the orchestration
+	// wrapper; gates fire inside the fn it invokes).
+	readOnlyMethods := map[string]map[string]string{
+		"Network": {
+			"ListServices":            "spec read",
+			"ShowService":             "spec read",
+			"ListIPVPNs":              "spec read",
+			"ShowIPVPN":               "spec read",
+			"ListMACVPNs":             "spec read",
+			"ShowMACVPN":              "spec read",
+			"ListQoSPolicies":         "spec read",
+			"ShowQoSPolicy":           "spec read",
+			"ListFilters":             "spec read",
+			"ShowFilter":              "spec read",
+			"ListPlatforms":           "spec read",
+			"ShowPlatform":            "spec read",
+			"ListRoutePolicies":       "spec read",
+			"ListPrefixLists":         "spec read",
+			"ShowPrefixList":          "spec read",
+			"ShowRoutePolicy":         "spec read",
+			"GetAllFeatures":          "spec read",
+			"GetFeatureDependencies":  "spec read",
+			"GetUnsupportedDueTo":     "spec read",
+			"PlatformSupportsFeature": "spec read",
+			"ListProfiles":            "spec read",
+			"ShowProfile":             "spec read",
+			"ListZones":               "spec read",
+			"ShowZone":                "spec read",
+			"HasTopology":             "spec read",
+			"GetTopology":             "spec read",
+			"TopologyDeviceNames":     "spec read",
+			"IsHostDevice":            "spec read",
+			"GetHostProfile":          "spec read",
+			"ListNodes":               "spec read",
+			"ProbeOnline":             "device read (TCP probe + newtlab port resolve)",
+			"TopologyDrift":           "device read (diff topology against device CONFIG_DB)",
+		},
+		"Node": {
+			"DeviceInfo":              "device read",
+			"ListInterfaceDetails":    "device read",
+			"ShowInterfaceDetail":     "device read",
+			"GetServiceBindingDetail": "device read",
+			"VLANStatus":              "device read",
+			"ShowVLAN":                "device read",
+			"VRFStatus":               "device read",
+			"ShowVRF":                 "device read",
+			"ListACLs":                "device read",
+			"ShowACL":                 "device read",
+			"BGPStatus":               "device read",
+			"EVPNStatus":              "device read",
+			"LAGStatus":               "device read",
+			"ShowLAGDetail":           "device read",
+			"HealthCheck":             "device read",
+			"CheckBGPSessions":        "device read",
+			"GetRoute":                "device read",
+			"GetRouteASIC":            "device read",
+			"QueryConfigDB":           "device read",
+			"ConfigDBTableKeys":       "device read",
+			"ConfigDBEntryExists":     "device read",
+			"ConfigDBSnapshot":        "device read",
+			"QueryStateDB":            "device read",
+			"Projection":              "intent read",
+			"ProjectionDiff":          "intent dry-run preview (no device writes)",
+			"Tree":                    "intent read",
+			"Drift":                   "intent + device read",
+			"Execute":                 "orchestration wrapper — gates fire on each mutation inside fn",
+		},
+		"Interface": {},
+	}
+
 	for _, tt := range types {
 		covered := coveredMethods[tt.name]
 		excluded := excludedMethods[tt.name]
+		authorized := authorizedMethods[tt.name]
+		readOnly := readOnlyMethods[tt.name]
 
 		for i := 0; i < tt.typ.NumMethod(); i++ {
 			method := tt.typ.Method(i)
@@ -268,6 +431,21 @@ func TestAPICompleteness(t *testing.T) {
 			}
 			if inCovered && inExcluded {
 				t.Errorf("%s.%s: listed in both coveredMethods and excludedMethods — remove from one", tt.name, name)
+			}
+
+			// L4 dimension: every covered method must be classified as
+			// authorized (with a permission constant) OR read-only
+			// (with a documented reason). Excluded methods (not HTTP-
+			// exposed) skip this check — they have no caller to gate.
+			if inCovered {
+				_, inAuthorized := authorized[name]
+				_, inReadOnly := readOnly[name]
+				if !inAuthorized && !inReadOnly {
+					t.Errorf("%s.%s: covered HTTP method missing L4 classification — add to authorizedMethods with a Permission or to readOnlyMethods with a reason (auth-design.md L4)", tt.name, name)
+				}
+				if inAuthorized && inReadOnly {
+					t.Errorf("%s.%s: listed in both authorizedMethods and readOnlyMethods — remove from one", tt.name, name)
+				}
 			}
 		}
 
@@ -284,6 +462,22 @@ func TestAPICompleteness(t *testing.T) {
 		for name := range excluded {
 			if !methodSet[name] {
 				t.Errorf("%s.%s: listed in excludedMethods but method does not exist", tt.name, name)
+			}
+		}
+		for name := range authorized {
+			if !methodSet[name] {
+				t.Errorf("%s.%s: listed in authorizedMethods but method does not exist", tt.name, name)
+			}
+			if !covered[name] {
+				t.Errorf("%s.%s: listed in authorizedMethods but not in coveredMethods — only HTTP-exposed methods need authorization classification", tt.name, name)
+			}
+		}
+		for name := range readOnly {
+			if !methodSet[name] {
+				t.Errorf("%s.%s: listed in readOnlyMethods but method does not exist", tt.name, name)
+			}
+			if !covered[name] {
+				t.Errorf("%s.%s: listed in readOnlyMethods but not in coveredMethods", tt.name, name)
 			}
 		}
 	}
@@ -666,7 +860,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 			"Ethernet0": {"admin_status": "up", "mtu": "9100"},
 		},
 	}
-	if err := net.AddTopologyDevice("switch2", dev); err != nil {
+	if err := net.AddTopologyDevice(context.Background(), "switch2", dev); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
 	topo := net.GetTopology()
@@ -674,7 +868,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 		t.Fatal("switch2 missing from topology after Add")
 	}
 
-	if err := net.DeleteTopologyDevice("switch2", false); err != nil {
+	if err := net.DeleteTopologyDevice(context.Background(), "switch2", false); err != nil {
 		t.Fatalf("DeleteTopologyDevice: %v", err)
 	}
 	topo = net.GetTopology()
@@ -705,17 +899,17 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 			"Ethernet0": {"admin_status": "up"},
 		},
 	}
-	if err := net.AddTopologyDevice("switch2", dev); err != nil {
+	if err := net.AddTopologyDevice(context.Background(), "switch2", dev); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
-	if err := net.AddTopologyLink(&spec.TopologyLink{
+	if err := net.AddTopologyLink(context.Background(), &spec.TopologyLink{
 		A: "switch1:Ethernet0",
 		Z: "switch2:Ethernet0",
 	}); err != nil {
 		t.Fatalf("AddTopologyLink: %v", err)
 	}
 
-	err = net.DeleteTopologyDevice("switch2", false)
+	err = net.DeleteTopologyDevice(context.Background(), "switch2", false)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -728,7 +922,7 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 	}
 
 	// force=true cascades.
-	if err := net.DeleteTopologyDevice("switch2", true); err != nil {
+	if err := net.DeleteTopologyDevice(context.Background(), "switch2", true); err != nil {
 		t.Fatalf("force-delete: %v", err)
 	}
 	topo := net.GetTopology()
@@ -756,7 +950,7 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	if err := net.AddTopologyDevice("switch2", &spec.TopologyDevice{
+	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
 		Ports: map[string]map[string]string{
 			"Ethernet0": {"admin_status": "up"},
 			"Ethernet4": {"admin_status": "up"},
@@ -764,14 +958,14 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
-	if err := net.AddTopologyLink(&spec.TopologyLink{
+	if err := net.AddTopologyLink(context.Background(), &spec.TopologyLink{
 		A: "switch1:Ethernet0",
 		Z: "switch2:Ethernet0",
 	}); err != nil {
 		t.Fatalf("AddTopologyLink: %v", err)
 	}
 	// Same endpoint reused — must refuse.
-	err = net.AddTopologyLink(&spec.TopologyLink{
+	err = net.AddTopologyLink(context.Background(), &spec.TopologyLink{
 		A: "switch2:Ethernet0",
 		Z: "switch1:Ethernet4",
 	})
@@ -800,19 +994,19 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	if err := net.AddTopologyDevice("switch2", &spec.TopologyDevice{
+	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
 		Ports: map[string]map[string]string{"Ethernet0": {"admin_status": "up"}},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
-	if err := net.AddTopologyLink(&spec.TopologyLink{
+	if err := net.AddTopologyLink(context.Background(), &spec.TopologyLink{
 		A: "switch1:Ethernet0",
 		Z: "switch2:Ethernet0",
 	}); err != nil {
 		t.Fatalf("AddTopologyLink: %v", err)
 	}
 	// Pass only the A endpoint; the link should be found and removed.
-	if err := net.DeleteTopologyLink("switch1:Ethernet0"); err != nil {
+	if err := net.DeleteTopologyLink(context.Background(), "switch1:Ethernet0"); err != nil {
 		t.Fatalf("DeleteTopologyLink by single endpoint: %v", err)
 	}
 	if len(net.GetTopology().Links) != 0 {
@@ -820,7 +1014,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 	}
 
 	// Same call now returns NotFoundError.
-	err = net.DeleteTopologyLink("switch1:Ethernet0")
+	err = net.DeleteTopologyLink(context.Background(), "switch1:Ethernet0")
 	var nf *newtron.NotFoundError
 	if !errors.As(err, &nf) {
 		t.Errorf("expected *NotFoundError after second delete, got %T: %v", err, err)
@@ -842,7 +1036,7 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 			"Ethernet64": {"admin_status": "down"},
 		},
 	}
-	if err := net.UpdateTopologyDevice("switch1", replacement); err != nil {
+	if err := net.UpdateTopologyDevice(context.Background(), "switch1", replacement); err != nil {
 		t.Fatalf("UpdateTopologyDevice: %v", err)
 	}
 	topo := net.GetTopology()
@@ -871,7 +1065,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	if err := net.AddTopologyDevice("switch2", &spec.TopologyDevice{
+	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
 		Ports: map[string]map[string]string{"Ethernet0": {"admin_status": "up"}},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
