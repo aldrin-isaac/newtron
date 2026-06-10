@@ -294,20 +294,92 @@ above.
 
 ## 8. Revoking access
 
-Today the authorization enforcer reads the grant table when
-`EnableAuthorization` is called. To revoke a grant after startup:
+The authorization enforcer reads the grant table when
+`EnableAuthorization` is called. Two flows revoke access after
+startup:
+
+**Manual revoke (no watcher).** When the server runs without
+`--spec-watch`:
 
 1. Edit `network.json` on disk (remove the user from the group, or
    the group from the permission entry).
-2. Call `POST /newtron/v1/networks/<id>/reload` — the server reloads
-   the spec from disk and rebuilds the network. The fresh
-   `EnableAuthorization` call binds the new grant table.
+2. Call `POST /newtron/v1/networks/<id>/reload`. The server reloads
+   the spec and rebinds the auth checker to the new grant table.
 
-The window between the file edit and the reload is the revocation
-SLA; a future layer (auth-design.md L6) adds an automatic file
-watcher to shrink it.
+**Automatic revoke (`--spec-watch=true`).** When the server runs
+with `--spec-watch`, the file edit alone is enough:
 
-## 9. Failure modes
+1. Edit `network.json` on disk.
+2. Wait ~1 second. The watcher detects the change, debounces rapid
+   editor saves, and calls `ReloadNetwork` automatically. The
+   server logs `spec-watcher: reloaded network 'id' after change at <path>`.
+
+Subsequent requests from the revoked caller return HTTP 403.
+
+The 1-second debounce absorbs editor save sequences (write + rename
++ write is typical) so a single grant edit produces one reload, not
+one per fsnotify event. For deployments that need a tighter SLA,
+construct `network.SpecWatcher` with a smaller debounce — the API
+isn't exposed through a flag because most deployments prefer the
+default.
+
+The watcher also fires on changes to the `profiles/` subdirectory,
+catching device-profile JSON rotations as part of the same revoke
+flow.
+
+## 9. Audit log integrity
+
+With `--audit-log` set, every mutation and every authorization
+decision appends to a JSON-lines file. With `--audit-log-integrity`
+ALSO set, each entry carries a hash chain:
+
+- `Event.PrevHash` — the previous entry's `ID`
+- `Event.ID` — `SHA256(prev_hash || canonical_json_of_event_with_zero_id)`
+
+Tampering with any past entry — modifying a field, deleting an
+entry, reordering — breaks the chain at the tampered position and
+every subsequent link.
+
+**Verify periodically:**
+
+```sh
+bin/newtron audit verify /var/log/newtron-audit.jsonl
+# verified 18342 entries; chain head = 7c0a2bf9d3e1c5a8...
+
+# After a tamper:
+bin/newtron audit verify /var/log/newtron-audit.jsonl
+# audit chain broken at line 1428: id hash mismatch (entry content modified)
+# (exits 1)
+```
+
+The exact reason depends on the tamper shape: modifying any field of
+an existing entry produces `id hash mismatch (entry content
+modified)`; deleting or inserting an entry produces `prev_hash
+mismatch (got "<hash>", expected "<hash>")`.
+
+The verifier returns:
+
+| Exit | Meaning |
+|------|---------|
+| `0` | chain clean (or file missing — nothing to tamper) |
+| `1` | tamper detected; line number + reason printed to stderr |
+| `2` | I/O or argument error |
+
+Run on a daily cron, after a suspected intrusion, or before exporting
+logs for a security review.
+
+**Chain across restarts.** The FileLogger recovers the chain head
+from the file's last well-formed entry on startup, so the chain
+continues across server restarts. A multi-lifecycle log verifies as
+one chain end to end.
+
+**Pre-integrity entries.** A log that pre-dates the
+`--audit-log-integrity` upgrade carries empty `ID` and `PrevHash`
+fields. The verifier skips those entries and resumes the chain
+expectation once it sees a non-empty `ID`. Operators can switch on
+integrity mid-stream without invalidating the historical log.
+
+## 10. Failure modes
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -316,6 +388,9 @@ watcher to shrink it.
 | A new service's grants don't take effect | The authorization enforcer binds the Checker to the live spec at `EnableAuthorization` time. In-process spec mutations are observed through the same pointer, so this should not happen — but `Reload` is the safe path if grants don't engage. | `POST /newtron/v1/networks/<id>/reload`. |
 | Decision audit entries are missing | `--audit-log` not set. | Add `--audit-log=/path/to/file.jsonl`. |
 | 403 with empty `Caller` in the response data | No identity surface configured: no Unix socket, no mTLS, no PAM, no `--audit-caller-header`. | Engage at least one identity source per the audit log / mTLS / PAM HOWTOs. |
+| `network.json` edits aren't auto-reloaded | `--spec-watch` not set; the operator must `POST /reload`. | Add `--spec-watch=true`, or POST `/newtron/v1/networks/<id>/reload` explicitly. |
+| `audit verify` reports a broken chain | Either a real tamper, or pre-integrity entries before `--audit-log-integrity` was engaged. | Inspect the entry at the reported line. Pre-integrity entries have empty `id`; they're skipped by the verifier. A non-empty `id` whose hash doesn't reproduce means the entry was modified on disk. |
+| `--audit-log-integrity` does nothing | `--audit-log` is empty. Integrity has nothing to hash without a log target. | Add `--audit-log=/path/to/file.jsonl`. The server logs a warning at startup when only one of the two is set. |
 
 ## Related
 

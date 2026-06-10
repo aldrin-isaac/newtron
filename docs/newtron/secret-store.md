@@ -147,9 +147,10 @@ values until they're individually reloaded (or the server restarts).
   future Store implementation (age-encrypted, KMS-backed) plugs into
   the same interface; operators choose at deployment time.
 - *Server-side key rotation tracking*. The secret store ships the
-  manual rotate-and-reload flow above. A future layer (auth-design.md
-  L6) will add automatic spec-file watching so rotations propagate
-  without explicit reload.
+  manual rotate-and-reload flow above. With `--spec-watch=true`
+  (auth-design.md L6) the watcher fires on spec edits, so rotations
+  propagate automatically within the ~1s debounce window — no
+  explicit `/reload` call needed.
 - *Per-secret authorization*. Anyone with access to the secret store
   file or the operator's CLI can read every secret. Per-secret
   grants (`alice can read switch1-ssh but not switch2-ssh`) are out
@@ -159,6 +160,9 @@ values until they're individually reloaded (or the server restarts).
 ## 7. Cross-references
 
 - [`auth-design.md`](auth-design.md) — L0 in the layered auth plan
+- [`authorization-howto.md`](authorization-howto.md) §8 — the
+  `--spec-watch` flow that picks up secret-store rotations
+  automatically (auth-design.md L6)
 - [`hld.md`](hld.md) §9 — operator-facing security framing
 - `pkg/newtron/secret/` — the Store interface and FileStore
   implementation

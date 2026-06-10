@@ -45,6 +45,8 @@ func main() {
 	tlsCA := flag.String("tls-ca", "", "PEM-encoded CA bundle used both to verify incoming peer client certs (mTLS on the listener) AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS); inter-service trust is undefined. (auth-design.md L2a)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds and mTLS cert CN still work where configured. (auth-design.md L2b)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime: every spec/profile mutation checks the verified caller against the spec's grant table; denials return HTTP 403 with a typed AuthorizationError payload. Off (default) preserves pre-enforcement behavior — checks are no-ops; verified identity is still recorded in the audit log when configured. (auth-design.md L3)")
+	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior — operators POST /networks/<id>/reload to make changes observable. (auth-design.md L6)")
+	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain (Event.ID = SHA256(prev_hash || canonical_json), Event.PrevHash = previous entry's ID) so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty — pre-integrity behavior. Requires --audit-log to be set. (auth-design.md L6)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -81,12 +83,23 @@ func main() {
 	// auth-design.md L1: install the audit logger when --audit-log
 	// is set. The audit middleware in pkg/newtron/api/ reads via
 	// audit.Log; an unset logger makes Log a silent no-op.
+	// auth-design.md L6: when --audit-log-integrity is set, the
+	// FileLogger hash-chains every entry so tampering is detectable
+	// via `bin/newtron audit verify`.
 	if *auditLog != "" {
-		al, err := audit.NewFileLogger(*auditLog, audit.RotationConfig{})
+		var al *audit.FileLogger
+		var err error
+		if *auditIntegrity {
+			al, err = audit.NewFileLoggerWithIntegrity(*auditLog, audit.RotationConfig{})
+		} else {
+			al, err = audit.NewFileLogger(*auditLog, audit.RotationConfig{})
+		}
 		if err != nil {
 			logger.Fatalf("failed to open audit log %s: %v", *auditLog, err)
 		}
 		audit.SetDefaultLogger(al)
+	} else if *auditIntegrity {
+		logger.Println("WARNING: --audit-log-integrity has no effect without --audit-log")
 	}
 
 	// auth-design.md L0: open the secret store when --secret-store
@@ -120,6 +133,7 @@ func main() {
 		TLSConfig:            serverTLS,
 		Authenticator:        pamAuth,
 		EnforceAuthorization: *enforceAuthz,
+		SpecWatch:            *specWatch,
 	})
 
 	if *specDir != "" {
