@@ -74,7 +74,7 @@ func stepURLCount(steps []any, url string) int {
 func newPersistTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	specDir := copyTestSpecDir(t)
-	s := NewServer(nil, 0, nil, "")
+	s := NewServer(Config{})
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)
 	}

@@ -36,7 +36,7 @@ func repoRoot(t *testing.T) string {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
-	s := NewServer(nil, 0, nil, "")
+	s := NewServer(Config{})
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)
 	}

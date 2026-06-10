@@ -20,6 +20,7 @@ import (
 
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
 // defaultListen — loopback-only; newt-server fronts external traffic on :18080.
@@ -32,6 +33,9 @@ func main() {
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout (default 5m, negative to disable caching)")
 	newtlabServer := flag.String("newtlab-server", "http://127.0.0.1:18080", "newtlab-server base URL; empty disables newtlab consultation (real-hardware deployments)")
 	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
+	auditLog := flag.String("audit-log", "", "auth-design.md L1: file path for the mutation audit log; empty disables audit emission entirely (default)")
+	auditCallerHeader := flag.String("audit-caller-header", "", "auth-design.md L1: HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set)")
+	unixSocket := flag.String("unix-socket", "", "auth-design.md L1: Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -49,7 +53,25 @@ func main() {
 		portResolver = newtlabclient.NewPortResolver(newtlabclient.New(*newtlabServer))
 	}
 
-	srv := api.NewServer(logger, *idleTimeout, portResolver, *scaffoldRoot)
+	// auth-design.md L1: install the audit logger when --audit-log
+	// is set. The audit middleware in pkg/newtron/api/ reads via
+	// audit.Log; an unset logger makes Log a silent no-op.
+	if *auditLog != "" {
+		al, err := audit.NewFileLogger(*auditLog, audit.RotationConfig{})
+		if err != nil {
+			logger.Fatalf("failed to open audit log %s: %v", *auditLog, err)
+		}
+		audit.SetDefaultLogger(al)
+	}
+
+	srv := api.NewServer(api.Config{
+		Logger:            logger,
+		IdleTimeout:       *idleTimeout,
+		PortResolver:      portResolver,
+		ScaffoldRoot:      *scaffoldRoot,
+		AuditCallerHeader: *auditCallerHeader,
+		UnixSocketPath:    *unixSocket,
+	})
 
 	if *specDir != "" {
 		if err := srv.RegisterNetwork(*netID, *specDir); err != nil {

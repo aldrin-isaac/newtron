@@ -187,11 +187,21 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos", s.handleApplyInterfaceQoS)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 
-	// Apply middleware chain: recovery → logger → requestID → timeout → persist → mode → mux
+	// Apply middleware chain (outermost → innermost):
+	//   recovery → logger → requestID → caller → audit → timeout → persist → mode → mux
+	//
+	// caller (auth-design.md L1) populates audit.Caller on the
+	// request context before audit reads it. Both are always
+	// installed; their runtime effect is gated by configuration
+	// per the "every layer enable/disable-able" contract — when
+	// no audit logger is set and no caller-identity sources are
+	// configured, they're transparent no-ops.
 	var handler http.Handler = mux
 	handler = withMode(handler)
 	handler = withPersist(handler)
 	handler = httputil.Timeout(5 * time.Minute)(handler)
+	handler = auditMiddleware(handler)
+	handler = callerMiddleware(s.auditCallerHeader)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.Recovery(s.logger)(handler)

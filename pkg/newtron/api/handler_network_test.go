@@ -15,7 +15,7 @@ import (
 // specs and the network was registered.
 func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
 	specDir := filepath.Join(t.TempDir(), "specs")
-	srv := NewServer(nil, 0, nil, "")
+	srv := NewServer(Config{})
 
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:          "demo-1",
@@ -54,7 +54,7 @@ func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	srv := NewServer(nil, 0, nil, "")
+	srv := NewServer(Config{})
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:       "demo-2",
 		SpecDir:  specDir,
@@ -78,7 +78,7 @@ func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
 func TestRegisterNetwork_NoScaffold_MissingSpecDir(t *testing.T) {
 	specDir := filepath.Join(t.TempDir(), "specs")
 
-	srv := NewServer(nil, 0, nil, "")
+	srv := NewServer(Config{})
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:      "demo-3",
 		SpecDir: specDir,
@@ -102,7 +102,7 @@ func TestRegisterNetwork_NoScaffold_MissingSpecDir(t *testing.T) {
 // the resolved spec_dir in the canonical NetworkInfo shape (#122).
 func TestRegisterNetwork_Scaffold_DerivedSpecDir_HappyPath(t *testing.T) {
 	root := t.TempDir()
-	srv := NewServer(nil, 0, nil, root)
+	srv := NewServer(Config{ScaffoldRoot: root})
 
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:          "demo-derived",
@@ -146,7 +146,7 @@ func TestRegisterNetwork_Scaffold_DerivedSpecDir_HappyPath(t *testing.T) {
 // must opt in by setting --scaffold-root rather than the server picking
 // a default that might be wrong for the deployment (#122).
 func TestRegisterNetwork_Scaffold_DerivedSpecDir_NoRoot(t *testing.T) {
-	srv := NewServer(nil, 0, nil, "") // no scaffold root
+	srv := NewServer(Config{}) // no scaffold root
 
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:       "demo-no-root",
@@ -182,7 +182,7 @@ func TestRegisterNetwork_Scaffold_DerivedSpecDir_Conflict(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	srv := NewServer(nil, 0, nil, root)
+	srv := NewServer(Config{ScaffoldRoot: root})
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:       "demo-collide",
 		Scaffold: true,
@@ -205,7 +205,7 @@ func TestRegisterNetwork_Scaffold_DerivedSpecDir_Conflict(t *testing.T) {
 // clients don't have to branch on input style.
 func TestRegisterNetwork_201ResponseCarriesNetworkInfo(t *testing.T) {
 	specDir := filepath.Join(t.TempDir(), "specs")
-	srv := NewServer(nil, 0, nil, "")
+	srv := NewServer(Config{})
 
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:       "demo-info",
@@ -246,7 +246,7 @@ func TestRegisterNetwork_AlreadyRegistered_409EnvelopeCarriesExistingSpecDir(t *
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	srv := NewServer(nil, 0, nil, "")
+	srv := NewServer(Config{})
 	body, _ := json.Marshal(RegisterNetworkRequest{
 		ID:       "demo-4",
 		SpecDir:  specDir,

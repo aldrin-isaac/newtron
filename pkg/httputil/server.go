@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 )
 
@@ -45,17 +48,40 @@ type Server struct {
 	logger     *log.Logger
 	label      string // log-prefix label, e.g. "newtrun-server"
 	onShutdown []func()
+
+	// unixSocketPath is the optional Unix-domain socket listener
+	// path (auth-design.md L1). When set, Start binds both a TCP
+	// listener on its addr argument AND a Unix socket listener on
+	// this path; the request's identity-extraction middleware
+	// uses the listener type to decide between SO_PEERCRED (Unix)
+	// and a self-attested header (TCP).
+	//
+	// Empty disables the Unix socket listener — TCP only.
+	unixSocketPath string
+
+	// unixListener is the active Unix socket listener when
+	// unixSocketPath is set. Held so Stop can close it during
+	// graceful shutdown without leaking the socket file.
+	unixListener net.Listener
+
+	// unixServeErr captures the Unix listener's serve error so
+	// Start can return it after TCP shutdown completes. Mutexed
+	// because two goroutines (TCP serve and Unix serve) write
+	// completion state concurrently.
+	unixServeErr   error
+	unixServeErrMu sync.Mutex
 }
 
 // ServerOption tunes the base server at construction time.
 type ServerOption func(*serverConfig)
 
 type serverConfig struct {
-	label         string
-	readTimeout   time.Duration
-	writeTimeout  time.Duration
-	idleTimeout   time.Duration
-	onShutdown    []func()
+	label          string
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
+	idleTimeout    time.Duration
+	onShutdown     []func()
+	unixSocketPath string
 }
 
 // ServerLabel sets the prefix used in the startup log line. Default is
@@ -83,6 +109,20 @@ func OnShutdown(fn func()) ServerOption {
 	return func(c *serverConfig) { c.onShutdown = append(c.onShutdown, fn) }
 }
 
+// UnixSocketPath enables a Unix-domain socket listener alongside the
+// TCP listener (auth-design.md L1). Empty disables the Unix listener
+// — TCP only. The path is created at Start and removed at Stop;
+// existing files at the path are removed first so a stale socket
+// from a previous run doesn't block startup.
+//
+// When set, both listeners serve the same http.Handler; the
+// identity-extraction middleware in pkg/newtron/api/ distinguishes
+// requests by listener type (LocalAddr().Network() returns "unix"
+// for Unix-socket connections, "tcp" for TCP).
+func UnixSocketPath(path string) ServerOption {
+	return func(c *serverConfig) { c.unixSocketPath = path }
+}
+
 // NewServer constructs a base server. handler is the
 // already-middleware-wrapped http.Handler the engine wants to serve.
 // logger may be nil; if so, log.Default() is used.
@@ -99,10 +139,11 @@ func NewServer(handler http.Handler, logger *log.Logger, opts ...ServerOption) *
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &Server{
-		logger:     logger,
-		label:      cfg.label,
-		onShutdown: cfg.onShutdown,
+	s := &Server{
+		logger:         logger,
+		label:          cfg.label,
+		onShutdown:     cfg.onShutdown,
+		unixSocketPath: cfg.unixSocketPath,
 		httpServer: &http.Server{
 			Handler:      handler,
 			ReadTimeout:  cfg.readTimeout,
@@ -110,29 +151,88 @@ func NewServer(handler http.Handler, logger *log.Logger, opts ...ServerOption) *
 			IdleTimeout:  cfg.idleTimeout,
 		},
 	}
+	// When a Unix socket is configured, install the connContext
+	// hook so requests arriving on the Unix listener carry
+	// verified peer credentials in their context. TCP requests
+	// pass through unchanged; the downstream identity middleware
+	// distinguishes them by the presence (or absence) of
+	// PeerCredFromContext.
+	if cfg.unixSocketPath != "" {
+		s.httpServer.ConnContext = connContext
+	}
+	return s
 }
 
-// Start begins listening on addr. Blocks until the server stops.
-// Returns nil on graceful shutdown (http.ErrServerClosed), or the
-// underlying listener error otherwise.
+// Start begins listening on addr (TCP). When the Server was
+// configured with a non-empty UnixSocketPath, Start also binds a
+// Unix-domain socket listener at that path; both listeners serve the
+// same handler. Blocks until the server stops.
+//
+// Returns nil on graceful shutdown (http.ErrServerClosed from both
+// listeners); the first non-shutdown error from either listener
+// otherwise.
 func (s *Server) Start(addr string) error {
 	s.httpServer.Addr = addr
+
+	if s.unixSocketPath != "" {
+		// Remove a stale socket file from a previous run so the
+		// bind succeeds. If the path exists and is not a socket
+		// (e.g., a regular file the operator created by mistake),
+		// the Listen call below surfaces the EADDRINUSE-like
+		// error with the path in it — better diagnostics than
+		// silently succeeding.
+		_ = os.Remove(s.unixSocketPath)
+		ln, err := net.Listen("unix", s.unixSocketPath)
+		if err != nil {
+			return err
+		}
+		s.unixListener = ln
+		s.logger.Printf("%s listening on %s (unix)", s.label, s.unixSocketPath)
+		go func() {
+			serveErr := s.httpServer.Serve(ln)
+			if !errors.Is(serveErr, http.ErrServerClosed) {
+				s.unixServeErrMu.Lock()
+				s.unixServeErr = serveErr
+				s.unixServeErrMu.Unlock()
+			}
+		}()
+	}
+
 	s.logger.Printf("%s listening on %s", s.label, addr)
 	err := s.httpServer.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
-		return nil
+		err = nil
+	}
+	// Prefer the TCP error if any; otherwise surface the Unix
+	// listener's error captured by its goroutine.
+	if err == nil {
+		s.unixServeErrMu.Lock()
+		err = s.unixServeErr
+		s.unixServeErrMu.Unlock()
 	}
 	return err
 }
 
 // Stop runs every OnShutdown hook in registration order, then
-// gracefully shuts down the HTTP listener with the given context as
-// the drain deadline.
+// gracefully shuts down both listeners (TCP and, if configured, the
+// Unix socket) with the given context as the drain deadline. The
+// Unix socket file is removed after the listener closes so the next
+// Start doesn't have to rely on the stale-file cleanup at the head
+// of its bind sequence.
 func (s *Server) Stop(ctx context.Context) error {
 	for _, fn := range s.onShutdown {
 		fn()
 	}
-	return s.httpServer.Shutdown(ctx)
+	err := s.httpServer.Shutdown(ctx)
+	if s.unixListener != nil {
+		// Closing the listener unblocks its Serve goroutine; the
+		// http.Server.Shutdown above already drained any
+		// in-flight Unix-socket requests because both listeners
+		// share the same *http.Server.
+		_ = s.unixListener.Close()
+		_ = os.Remove(s.unixSocketPath)
+	}
+	return err
 }
 
 // HTTPServer exposes the underlying *http.Server. Tests use it to read
