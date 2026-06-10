@@ -2,35 +2,35 @@ package auth
 
 import (
 	"fmt"
-	"os/user"
 	"slices"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
-// Checker validates user permissions
+// Checker decides whether a caller is granted a permission against a
+// loaded NetworkSpecFile. Caller identity is supplied per-call via
+// Context.Caller — the Checker holds no ambient "current user."
 type Checker struct {
-	network     *spec.NetworkSpecFile
-	currentUser string
+	network *spec.NetworkSpecFile
 }
 
-// NewChecker creates a permission checker
+// NewChecker builds a Checker bound to network. The returned Checker
+// is stateless w.r.t. caller identity — every Check reads the username
+// from its Context argument.
 func NewChecker(network *spec.NetworkSpecFile) *Checker {
-	username := "unknown"
-	if u, err := user.Current(); err == nil {
-		username = u.Username
-	}
-
-	return &Checker{
-		network:     network,
-		currentUser: username,
-	}
+	return &Checker{network: network}
 }
 
-// Check verifies if the current user has a permission
+// Check decides whether ctx.Caller has permission. A nil or empty-
+// Caller Context is denied: at the L3 boundary, the absence of a
+// caller is the absence of a verified identity, which fails closed.
 func (c *Checker) Check(permission Permission, ctx *Context) error {
-	return c.checkUser(c.currentUser, permission, ctx)
+	username := ""
+	if ctx != nil {
+		username = ctx.Caller
+	}
+	return c.checkUser(username, permission, ctx)
 }
 
 // checkUser verifies if a specific user has a permission

@@ -7,6 +7,7 @@ import (
 	stdnet "net"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
@@ -43,6 +44,27 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 // SetAuth installs a permission checker. If nil, all permission checks are skipped.
 func (net *Network) SetAuth(checker *auth.Checker) {
 	net.auth = checker
+}
+
+// EnableAuthorization wires permission enforcement for this Network
+// (auth-design.md L3). After it returns, every spec/profile
+// mutation method's checkPermission call consults the network's
+// permissions map — denials surface as auth.PermissionError, which
+// pkg/newtron/api maps to HTTP 403.
+//
+// Disabled state (no call to EnableAuthorization) preserves pre-L3
+// behavior: every checkPermission returns nil. This is the L3
+// half of the §2.4 enable/disable contract — operators opt in via
+// the --enforce-authorization flag.
+//
+// EnableAuthorization binds the checker to the spec snapshot live at
+// call time. ReloadNetwork replaces the whole Network and so a fresh
+// EnableAuthorization is required to re-bind the checker against the
+// new spec. In-process spec mutations after EnableAuthorization
+// (CreateService, DeleteProfile, …) are observed through the same
+// spec pointer — no re-call needed for grant changes to take effect.
+func (net *Network) EnableAuthorization() {
+	net.auth = auth.NewChecker(net.internal.Spec())
 }
 
 // InitDevice prepares a device for newtron management. This is a one-time
@@ -405,9 +427,47 @@ func (net *Network) TopologyDrift(ctx context.Context, device string) ([]DriftEn
 	return node.Drift(ctx)
 }
 
-func (net *Network) checkPermission(perm auth.Permission, authCtx *auth.Context) error {
-	if net.auth != nil {
-		return net.auth.Check(perm, authCtx)
+// checkPermission is the single gate every spec/profile mutation
+// passes through (auth-design.md L3). Disabled state (auth == nil)
+// preserves pre-L3 behavior — every check returns nil. Enabled state
+// populates authCtx.Caller from the verified identity attached to
+// ctx by the HTTP boundary (audit.CallerFromContext) and delegates
+// to the Checker. The audit emission is per-decision (allow and
+// deny) so reviewers can see every gate's verdict alongside the
+// L1 request-level event.
+func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, authCtx *auth.Context) error {
+	if net.auth == nil {
+		return nil
 	}
-	return nil
+	caller := audit.CallerFromContext(ctx)
+	if caller != nil {
+		authCtx.Caller = caller.Username
+	}
+	err := net.auth.Check(perm, authCtx)
+	audit.LogDecision(ctx, string(perm), authCtx.Caller, callerSource(caller), authCtx.Resource, err)
+	if err == nil {
+		return nil
+	}
+	// Surface as the public-API typed error so the HTTP boundary
+	// can map to 403 and so a client receives Caller/Permission/
+	// Resource on the wire (§46). The original *auth.PermissionError
+	// remains in the chain via Unwrap, preserving existing
+	// errors.Is(util.ErrPermissionDenied) compatibility.
+	return &AuthorizationError{
+		Caller:     authCtx.Caller,
+		Permission: string(perm),
+		Resource:   authCtx.Resource,
+		inner:      err,
+	}
+}
+
+// callerSource returns the verification source string for the caller,
+// or VerificationUnknown when no caller is attached. Used by
+// checkPermission's audit emission so a reviewer sees how the
+// authorizing identity was verified.
+func callerSource(c *audit.Caller) audit.VerificationSource {
+	if c == nil {
+		return audit.VerificationUnknown
+	}
+	return c.Source
 }

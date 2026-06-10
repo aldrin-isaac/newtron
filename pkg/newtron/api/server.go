@@ -72,6 +72,11 @@ type Server struct {
 	// requests (auth-design.md L2b). Installed in the handler chain
 	// via PAMMiddleware. nil → L2b disabled.
 	authenticator httputil.Authenticator
+
+	// enforceAuthorization (auth-design.md L3) drives
+	// EnableAuthorization on every RegisterNetwork / ReloadNetwork
+	// path. false → checkPermission stays inert; pre-L3 behavior.
+	enforceAuthorization bool
 }
 
 
@@ -148,6 +153,16 @@ type Config struct {
 	// pamauth.PAMAuthenticator. nil disables — the L2b disabled
 	// state; pre-L2b behavior preserved.
 	Authenticator httputil.Authenticator
+
+	// EnforceAuthorization turns the 26 inert checkPermission calls
+	// into live gates (auth-design.md L3). When true, every
+	// registered network has EnableAuthorization called after
+	// load, and denials surface as auth.PermissionError → HTTP 403.
+	// When false (default), checkPermission remains a no-op —
+	// pre-L3 behavior preserved per the §2.4 enable/disable
+	// contract. Composed in from --enforce-authorization on
+	// cmd/newtron-server.
+	EnforceAuthorization bool
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -163,14 +178,15 @@ func NewServer(cfg Config) *Server {
 		idleTimeout = DefaultIdleTimeout
 	}
 	s := &Server{
-		networks:          make(map[string]*networkEntity),
-		idleTimeout:       idleTimeout,
-		logger:            logger,
-		portResolver:      cfg.PortResolver,
-		scaffoldRoot:      cfg.ScaffoldRoot,
-		auditCallerHeader: cfg.AuditCallerHeader,
-		secretStore:       cfg.SecretStore,
-		authenticator:     cfg.Authenticator,
+		networks:             make(map[string]*networkEntity),
+		idleTimeout:          idleTimeout,
+		logger:               logger,
+		portResolver:         cfg.PortResolver,
+		scaffoldRoot:         cfg.ScaffoldRoot,
+		auditCallerHeader:    cfg.AuditCallerHeader,
+		secretStore:          cfg.SecretStore,
+		authenticator:        cfg.Authenticator,
+		enforceAuthorization: cfg.EnforceAuthorization,
 	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),
@@ -213,6 +229,9 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	net, err := newtron.LoadNetwork(specDir, topologyName(specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
+	}
+	if s.enforceAuthorization {
+		net.EnableAuthorization()
 	}
 
 	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout)
@@ -271,6 +290,9 @@ func (s *Server) ReloadNetwork(id string) error {
 	net, err := newtron.LoadNetwork(entity.specDir, topologyName(entity.specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
+	}
+	if s.enforceAuthorization {
+		net.EnableAuthorization()
 	}
 
 	// Replace with new entity

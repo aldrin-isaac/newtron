@@ -58,6 +58,7 @@ func main() {
 	auditCallerHeader := flag.String("audit-caller-header", "", "auth-design.md L1: HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set)")
 	unixSocket := flag.String("unix-socket", "", "auth-design.md L1: Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only)")
 	secretStore := flag.String("secret-store", "", "auth-design.md L0: file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution.")
+	enforceAuthz := flag.Bool("enforce-authorization", false, "auth-design.md L3: enforce the network.json permissions map at runtime for the newtron engine. Denials surface as HTTP 403. Off (default) preserves pre-L3 behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -101,13 +102,14 @@ func main() {
 	}
 
 	newtronSrv := newtronapi.NewServer(newtronapi.Config{
-		Logger:            logger,
-		IdleTimeout:       *idleTimeout,
-		PortResolver:      newtronPortResolver,
-		ScaffoldRoot:      *scaffoldRoot,
-		AuditCallerHeader: *auditCallerHeader,
-		UnixSocketPath:    *unixSocket,
-		SecretStore:       store,
+		Logger:               logger,
+		IdleTimeout:          *idleTimeout,
+		PortResolver:         newtronPortResolver,
+		ScaffoldRoot:         *scaffoldRoot,
+		AuditCallerHeader:    *auditCallerHeader,
+		UnixSocketPath:       *unixSocket,
+		SecretStore:          store,
+		EnforceAuthorization: *enforceAuthz,
 	})
 	if *specDir != "" {
 		if err := newtronSrv.RegisterNetwork(*netID, *specDir); err != nil {

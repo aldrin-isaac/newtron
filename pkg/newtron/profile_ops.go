@@ -1,6 +1,7 @@
 package newtron
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
@@ -24,7 +25,7 @@ func (net *Network) ShowProfile(name string) (*spec.DeviceProfile, error) {
 }
 
 // CreateProfile creates a new device profile.
-func (net *Network) CreateProfile(req CreateDeviceProfileRequest, opts ExecOpts) error {
+func (net *Network) CreateProfile(ctx context.Context, req CreateDeviceProfileRequest, opts ExecOpts) error {
 	if req.MgmtIP == "" {
 		return &ValidationError{Field: "mgmt_ip", Message: "required"}
 	}
@@ -35,7 +36,7 @@ func (net *Network) CreateProfile(req CreateDeviceProfileRequest, opts ExecOpts)
 		return fmt.Errorf("profile '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -66,12 +67,12 @@ func (net *Network) CreateProfile(req CreateDeviceProfileRequest, opts ExecOpts)
 // topology device that references this profile (which itself cascade-deletes
 // any links wired to that device). Without force, the call returns a
 // *ConflictError listing the referring topology devices.
-func (net *Network) DeleteProfile(name string, opts ExecOpts, force bool) error {
+func (net *Network) DeleteProfile(ctx context.Context, name string, opts ExecOpts, force bool) error {
 	if _, err := net.internal.GetProfile(name); err != nil {
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -100,7 +101,7 @@ func (net *Network) ShowZone(name string) (*ZoneDetail, error) {
 }
 
 // CreateZone creates a new zone.
-func (net *Network) CreateZone(req CreateZoneRequest, opts ExecOpts) error {
+func (net *Network) CreateZone(ctx context.Context, req CreateZoneRequest, opts ExecOpts) error {
 	if req.Name == "" {
 		return &ValidationError{Field: "name", Message: "required"}
 	}
@@ -108,7 +109,7 @@ func (net *Network) CreateZone(req CreateZoneRequest, opts ExecOpts) error {
 		return fmt.Errorf("zone '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -120,12 +121,12 @@ func (net *Network) CreateZone(req CreateZoneRequest, opts ExecOpts) error {
 }
 
 // DeleteZone removes a zone.
-func (net *Network) DeleteZone(name string, opts ExecOpts) error {
+func (net *Network) DeleteZone(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetZone(name); err != nil {
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}

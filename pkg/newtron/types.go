@@ -143,6 +143,37 @@ func (e *VerificationFailedError) Error() string {
 	return fmt.Sprintf("verification failed on %s: %d/%d entries did not persist", e.Device, e.Failed, e.Total)
 }
 
+// AuthorizationError is the public-API error returned when a
+// permission check denies an operation (auth-design.md L3). The
+// pkg/newtron/api layer maps this to HTTP 403; the typed payload on
+// the response Data field carries the same Caller/Permission/Resource
+// fields so a client can render a precise message without parsing
+// Error.
+//
+// Caller is the username the check ran against (the verified identity
+// from L1/L2). Permission is the action that was denied
+// (e.g. "spec.author"). Resource scopes the denial (e.g. the service
+// name being created); empty when the action has no specific
+// resource. The original *auth.PermissionError remains in the
+// errors chain via Unwrap, so existing util.ErrPermissionDenied
+// errors.Is() checks still match.
+type AuthorizationError struct {
+	Caller     string
+	Permission string
+	Resource   string
+	inner      error
+}
+
+func (e *AuthorizationError) Error() string {
+	msg := fmt.Sprintf("authorization denied: %s lacks %s", e.Caller, e.Permission)
+	if e.Resource != "" {
+		msg += " on " + e.Resource
+	}
+	return msg
+}
+
+func (e *AuthorizationError) Unwrap() error { return e.inner }
+
 // ============================================================================
 // Config Types for Write Operations
 // ============================================================================

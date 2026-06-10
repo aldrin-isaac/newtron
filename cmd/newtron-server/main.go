@@ -44,6 +44,7 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
 	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs (mTLS on the listener) AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS); inter-service trust is undefined.")
 	authPAMService := flag.String("auth-pam-service", "", "auth-design.md L2b: PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM enforcement — TCP requests are not user-authenticated; Unix socket peer creds and mTLS cert CN still work where configured.")
+	enforceAuthz := flag.Bool("enforce-authorization", false, "auth-design.md L3: enforce the network.json permissions map at runtime. Denials surface as HTTP 403. Off (default) preserves pre-L3 behavior — the 26 checkPermission call sites are no-ops; identity is recorded by L1/L2 but no decisions are made.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -109,15 +110,16 @@ func main() {
 	}
 
 	srv := api.NewServer(api.Config{
-		Logger:            logger,
-		IdleTimeout:       *idleTimeout,
-		PortResolver:      portResolver,
-		ScaffoldRoot:      *scaffoldRoot,
-		AuditCallerHeader: *auditCallerHeader,
-		UnixSocketPath:    *unixSocket,
-		SecretStore:       store,
-		TLSConfig:         serverTLS,
-		Authenticator:     pamAuth,
+		Logger:               logger,
+		IdleTimeout:          *idleTimeout,
+		PortResolver:         portResolver,
+		ScaffoldRoot:         *scaffoldRoot,
+		AuditCallerHeader:    *auditCallerHeader,
+		UnixSocketPath:       *unixSocket,
+		SecretStore:          store,
+		TLSConfig:            serverTLS,
+		Authenticator:        pamAuth,
+		EnforceAuthorization: *enforceAuthz,
 	})
 
 	if *specDir != "" {

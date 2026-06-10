@@ -330,6 +330,16 @@ func httpStatusFromError(err error) int {
 		return http.StatusConflict
 	}
 
+	// auth-design.md L3: permission denials become 403. The
+	// AuthorizationError type wraps the internal auth.PermissionError
+	// so the wire response carries the typed Caller/Permission/
+	// Resource shape (§46) and the original errors.Is chain to
+	// util.ErrPermissionDenied is preserved.
+	var authz *newtron.AuthorizationError
+	if errors.As(err, &authz) {
+		return http.StatusForbidden
+	}
+
 	if errors.Is(err, context.DeadlineExceeded) {
 		return http.StatusGatewayTimeout
 	}
