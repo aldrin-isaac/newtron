@@ -54,37 +54,83 @@ type Server struct {
 	// "create topology named X" suffices — newtron picks the path and
 	// returns it in the response.
 	scaffoldRoot string
+
+	// auditCallerHeader is the TCP-fallback HTTP header name for
+	// self-attested caller identity (auth-design.md L1). Read by
+	// callerMiddleware. Empty disables header-based identity.
+	auditCallerHeader string
 }
 
 
-// NewServer creates a new API server. idleTimeout controls how long SSH
-// connections to devices are cached between requests. Use 0 for the default
-// (5 minutes). Use a negative value to disable caching (connect per request).
+// Config carries every knob NewServer accepts. Uses a struct rather
+// than positional params so the auth-design.md layered work (L1
+// audit log + Unix socket + header; L2a mTLS; L2b PAM; L3 enforce)
+// can grow the surface without each layer's PR resignaturing
+// NewServer. Mirrors the existing newtlab/api.Config pattern.
 //
-// portResolver supplies per-device SSH port allocations at Device.Connect
-// time. Pass nil to disable (real-hardware deployments, tests). The
-// newtlab-backed implementation is constructed in cmd/ and injected here;
-// the api package itself does not know about newtlab (DESIGN_PRINCIPLES
-// §33, §34).
-//
-// scaffoldRoot enables the derived-spec_dir mode of POST
-// /newtron/v1/networks (issue #122). When set, requests with
-// scaffold:true and no spec_dir scaffold into filepath.Join(scaffoldRoot,
-// id). Pass "" to keep the explicit-path-only behavior — the derived
-// mode then returns 400 rather than guessing a default.
-func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortResolver, scaffoldRoot string) *Server {
+// All fields are optional. Zero values give the pre-L1 behavior:
+// no audit log, no Unix socket, TCP-only, no auth enforcement.
+type Config struct {
+	// Logger is the server's structured logger. nil → log.Default().
+	Logger *log.Logger
+
+	// IdleTimeout controls how long SSH connections to devices
+	// are cached between requests. 0 → DefaultIdleTimeout (5m).
+	// Negative → disable caching (connect per request).
+	IdleTimeout time.Duration
+
+	// PortResolver supplies per-device SSH port allocations at
+	// Device.Connect time. nil disables resolver consultation
+	// (real-hardware deployments, tests). The newtlab-backed
+	// implementation is constructed in cmd/ and injected here;
+	// the api package itself does not know about newtlab
+	// (DESIGN_PRINCIPLES §33, §34).
+	PortResolver PortResolver
+
+	// ScaffoldRoot enables the derived-spec_dir mode of POST
+	// /newtron/v1/networks (issue #122). When set, requests with
+	// scaffold:true and no spec_dir scaffold into
+	// filepath.Join(ScaffoldRoot, id). Empty keeps the explicit-
+	// path-only behavior — the derived mode then returns 400
+	// rather than guessing a default.
+	ScaffoldRoot string
+
+	// AuditCallerHeader is the HTTP header name read by
+	// callerMiddleware on TCP listeners to extract the
+	// self-attested caller identity (auth-design.md L1). Empty
+	// disables header-based identity — Unix socket peer creds
+	// still work if UnixSocketPath is configured. Recommended
+	// value when enabled: "X-Newtron-Caller".
+	AuditCallerHeader string
+
+	// UnixSocketPath enables a Unix-domain socket listener
+	// alongside the TCP one (auth-design.md L1). When set,
+	// requests on the Unix listener carry verified peer
+	// credentials extracted via SO_PEERCRED; the
+	// caller-extraction middleware tags them with
+	// VerificationUnixPeerCreds. Empty disables the Unix listener.
+	UnixSocketPath string
+}
+
+// NewServer creates a new API server with the given Config. Zero-
+// valued Config preserves the pre-L1 behavior (TCP-only, no audit
+// log, no enforcement).
+func NewServer(cfg Config) *Server {
+	logger := cfg.Logger
 	if logger == nil {
 		logger = log.Default()
 	}
+	idleTimeout := cfg.IdleTimeout
 	if idleTimeout == 0 {
 		idleTimeout = DefaultIdleTimeout
 	}
 	s := &Server{
-		networks:     make(map[string]*networkEntity),
-		idleTimeout:  idleTimeout,
-		logger:       logger,
-		portResolver: portResolver,
-		scaffoldRoot: scaffoldRoot,
+		networks:          make(map[string]*networkEntity),
+		idleTimeout:       idleTimeout,
+		logger:            logger,
+		portResolver:      cfg.PortResolver,
+		scaffoldRoot:      cfg.ScaffoldRoot,
+		auditCallerHeader: cfg.AuditCallerHeader,
 	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),
@@ -92,6 +138,7 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration, portResolver PortR
 		// finite write timeout caps them. Different from newtrun /
 		// newtlab which keep WriteTimeout=0 for SSE.
 		httputil.WriteTimeout(5*time.Minute),
+		httputil.UnixSocketPath(cfg.UnixSocketPath),
 		httputil.OnShutdown(func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()

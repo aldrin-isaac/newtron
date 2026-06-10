@@ -47,7 +47,7 @@ against, but the verification mechanism differs.
 | **Service impersonation.** A rogue process pretends to be newtlab-server (or another newtron component) and serves bogus responses, or accepts requests from one engine claiming to be another. | Inter-service | L2a (mTLS) |
 | **Stale grants.** Former team member's permissions linger after they leave. | User-to-service | L6 (revocation) |
 | **Coverage holes.** A new mutation method ships without a `checkPermission` call and bypasses authorization silently. | Both | L4 (coverage closure test) |
-| **Secret leakage from spec.** Device profile passwords sit in plain JSON on disk and in version control. | n/a | L6 (encryption at rest) |
+| **Secret leakage from spec.** Device profile passwords sit in plain JSON on disk and in version control. | Foundational | L0 (encryption at rest) |
 | **Authorization decisions without trace.** A "deny" happened but nobody can prove it. | Both | L1 + L3 (audit emits allow + deny) |
 
 ### 2.2 Out of Scope
@@ -86,6 +86,55 @@ dependency lists, but in scheduling terms it splits in half.
 This ordering is **mandatory**, not aesthetic. The audit criteria for each
 layer fail if its dependencies are skipped.
 
+### 2.4 Every Layer Is Enable/Disable-able
+
+Every layer ships with its behavior gated by an explicit configuration
+toggle, and the default value is "off / preserve current behavior."
+Deployments adopt layers at their own pace. Specifically:
+
+- **L0 encryption-at-rest:** `--secret-store=PATH` enables; absent
+  means secrets stay plaintext (current behavior).
+- **L1 audit log:** `--audit-log=PATH` enables a file logger; absent
+  means events route to a no-op logger and nothing is written.
+- **L1 Unix socket listener:** `--unix-socket=PATH` enables the
+  listener alongside the TCP one; absent means TCP only.
+- **L1 caller header:** `--audit-caller-header=NAME` configures the
+  TCP fallback header name; empty disables header-based caller
+  identity (Unix socket peer creds still work if that listener is
+  configured).
+- **L2a inter-service mTLS:** `--tls-cert/--tls-key/--client-ca`
+  enable; absent means plaintext HTTP between engines.
+- **L2b user-to-service PAM:** `--auth-pam-service=NAME` enables;
+  absent means TCP listener doesn't authenticate via PAM (caller
+  identity stays self-attested via header per L1).
+- **L3 authorization enforcement:** `--enforce-authorization=true`
+  enables `SetAuth`; default `false` means `checkPermission` stays a
+  no-op even though identity from L1/L2 is populated.
+- **L4 coverage checks:** controlled by the same
+  `--enforce-authorization` toggle as L3 — once L4 lands, every
+  mutation has a check, but checks are bypassed uniformly when
+  enforcement is off.
+- **L5 fine-grained grants:** dictated by spec format. Old
+  shorthand keeps working (it's syntactic sugar for the richer
+  form); operators opt into per-resource grants by writing them.
+- **L6 revocation + log integrity:** `--watch-spec=true` enables
+  the file watcher; `--audit-log-integrity=true` enables the hash
+  chain. Default `false`.
+
+Two properties this contract guarantees:
+
+1. **A fresh deployment behaves identically to today.** No flag, no
+   change. This protects existing operators (and the project's
+   integration tests) from being broken by the layered rollout.
+2. **Layers can be adopted independently.** An operator who only
+   needs the audit log (L1) can ship it without identity
+   verification (L2) or enforcement (L3). An operator on a small
+   trusted team can pick the audit log + Unix socket and skip the
+   rest indefinitely.
+
+The flags are reviewed during each layer's PR for shape and naming
+consistency.
+
 ---
 
 ## 3. Goal State
@@ -113,8 +162,10 @@ criteria a security review must be able to verify:
    action, target, decision, timestamp.
 7. **Revocable.** A spec change that removes a grant takes effect within
    a bounded interval, without server restart.
-8. **Secret hygiene.** Device profile passwords are encrypted at rest;
-   plaintext exists only in process memory while in use.
+8. **Secret hygiene.** Device profile passwords are encrypted at rest
+   (L0 foundation); plaintext exists only in process memory while in
+   use. Without this, an attacker who reads the spec directory has
+   device-admin access regardless of any later layer's enforcement.
 
 The current entitlement pattern (Checker, Permission, Context,
 `network.json` permissions map, groups, superusers) **is the destination
@@ -149,18 +200,41 @@ What goes away (during L1–L3):
 
 ## 5. Layered Path
 
-### L0 — Threat Model & Layered Plan (this doc)
+### L0 — Foundation: Threat Model, Plan, and Secret Hygiene
 
-**Goal.** Articulate threat model, goal state, layered path. Establish the
-contract subsequent layers respect.
+L0 is the foundation every later layer depends on. It has two
+deliverables: the threat model and layered plan (the doc), and
+encryption-at-rest of secrets in the spec directory. Without the second
+piece, every later layer's enforcement is undermined — an attacker who
+reads `profiles/*.json` has the device-admin password, so authorization
+checks at the HTTP layer don't matter.
 
-**Audit criterion met when this layer lands.** A reviewer can name the
-threats the system defends against and the threats out of scope, and
-trace each in-scope threat to a layer that addresses it.
+**Goal.** (1) Articulate the threat model, goal state, and layered
+path; establish the contract subsequent layers respect. (2) Move device
+profile passwords out of plaintext in the spec directory. Secrets are
+referenced from `profiles/*.json` by a key name; resolved at process
+load time from an operator-configured secret store (file-based KMS,
+age-encrypted file, or an interface the operator implements).
+
+**Audit criterion met when this layer lands.** (1) A reviewer can name
+the threats the system defends against and the threats out of scope,
+and trace each in-scope threat to a layer that addresses it. (2) "Where
+are device passwords stored?" → not in `profiles/*.json`. A `grep -r
+password newtrun/topologies/` returns only key-references, not
+plaintext.
 
 **Dependencies.** None.
 
-**Scope of changes.** This doc plus HLD §9 cross-reference.
+**Scope of changes.** The design doc and HLD cross-reference are
+shipped. The encryption work is a separate PR that introduces
+`pkg/newtron/secret/` with a `Store` interface, a file-based default
+backend, and `--secret-store=PATH` config in
+`cmd/newtron-server`/`cmd/newt-server`. Migration tooling for existing
+plaintext profiles ships alongside.
+
+**Status.** The doc is in. The encryption implementation is L0's
+work-remaining; L1 (audit log) does not depend on it and can be shipped
+in parallel.
 
 ### L1 — Tamper-Evident Operation Audit Log
 
@@ -416,40 +490,37 @@ context dimensions in every decision entry.
 **Independent value.** Real role separation. Least-privilege is
 expressible without forking spec files per role.
 
-### L6 — Operational Hardening (Revocation, Rotation, Secret Hygiene)
+### L6 — Operational Hardening (Revocation + Audit Log Integrity)
 
-**Goal.** Three operational properties that production deployments
-require but development doesn't:
+**Goal.** Two operational properties that production deployments
+require but development doesn't. (Secret hygiene moved to L0 — it's
+foundational, not operational.)
 
 1. **Revocation.** Removing a grant from `network.json` takes effect
    within a bounded interval without server restart. The existing
    `ReloadNetwork` HTTP endpoint already supports this — L6 adds a
    spec-file watcher that triggers reload automatically on file
    change, plus a documented operational pattern for "revoke alice."
-2. **Secret rotation.** Device profile passwords currently live in
-   `profiles/*.json` in plaintext. L6 introduces an encrypted-secrets
-   path: passwords reference a key in a separate secret store
-   (file-based KMS, age-encrypted, or operator-supplied), decrypted
-   on demand in process memory only. Rotation is changing the secret
-   store entry; specs don't need to change.
-3. **Audit log integrity.** L1's audit log is append-only at the
+2. **Audit log integrity.** L1's audit log is append-only at the
    application level but a determined attacker with file write access
    could rewrite it. L6 adds optional hash-chain log integrity: each
    record carries a hash of the previous, so tampering is detectable
    after-the-fact even if the file is mutable.
 
+Secret rotation falls out for free once L0 encryption ships: rotating a
+device password becomes "change the secret store entry"; specs don't
+need to change.
+
 **Audit criterion met when this layer lands.** "How do I revoke
 alice's access?" → documented procedure with a bounded time-to-effect.
-"Where are device passwords stored?" → not in version-controlled spec.
 "Can audit log entries be tampered with undetectably?" → no, with
 integrity enabled.
 
 **Dependencies.** L0–L5.
 
 **Scope of changes.** Spec file watcher in `pkg/newtron/network/`.
-Secret store interface in a new `pkg/newtron/secret/` package with
-file-based default backend. Hash chain in `pkg/newtron/audit/`. New
-HOWTO section on operational procedures.
+Hash chain in `pkg/newtron/audit/`. New HOWTO section on operational
+procedures.
 
 **Independent value.** The system can be operated by a real team
 day-to-day without "wait for the next deploy window to revoke that
@@ -465,10 +536,21 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   call sites exist and pass tests, but **enforcement is inert** —
   `Network.SetAuth` is never called from any `main()`, so `net.auth`
   is always nil, so every `checkPermission` returns nil.
-- No HTTP authentication middleware exists. The server accepts any
-  request from any caller.
-- The audit log package `pkg/newtron/audit/` exists but is not wired
-  into authorization decisions.
+- **L1 audit log is shipping in parallel with this doc state.** The
+  identity-extraction and audit-emission middlewares
+  (`pkg/newtron/api/caller_middleware.go`,
+  `pkg/newtron/api/audit_middleware.go`) are in the chain on
+  `newtron-server` and `newt-server`. Behavior is toggled by
+  `--audit-log`, `--audit-caller-header`, and `--unix-socket` flags
+  per §2.4; default values (all empty) preserve the pre-L1 behavior.
+  With `--audit-log` set, every POST/PUT/DELETE produces one Event
+  with caller (Unix peer-creds-verified, header-self-attested, or
+  no-caller-attached), method+URL as Operation, success/error from
+  response status, and a duration. Per-`checkPermission` granular
+  decision audit is **not yet emitted** — it has no information
+  content until L3 wires authorization (every check returns nil
+  today), so the design-doc bullet about emitting at every
+  `checkPermission` site is deferred to L3.
 - Every shipped `network.json` has `super_users: null`,
   `user_groups: null`, `permissions: null`. No operator has authored
   permission grants because there is nothing to grant.
@@ -477,7 +559,15 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
 - All three URL-derivable Context dimensions (`Device`, `Service`,
   `Interface`) have unused setters; only `Resource` is ever populated.
 
-This document is L0. The layers L1–L6 are proposed; none has shipped.
+L0's doc deliverable is shipped (this file). L0's encryption-at-rest
+deliverable is work-remaining — no PR has landed for it yet. L1
+(audit log) is the second layer to ship and is included here. L2 and
+later do depend on L0 encryption: L2b's PAM service needs a directory
+of users whose passwords aren't in the spec dir, and the trust model
+for L3+ collapses if device admin passwords are leaking from
+`profiles/*.json` to anyone with read access to the topology repo.
+
+L2–L6 remain proposed; none has shipped.
 
 ---
 

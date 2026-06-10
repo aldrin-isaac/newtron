@@ -266,3 +266,15 @@ func Query(filter Filter) ([]*Event, error) {
 	}
 	return l.Query(filter)
 }
+
+// Log writes event to the default logger. Silent no-op when no
+// default logger is configured (auth-design.md L1 disabled state).
+// This is the load-bearing emission path used by the api package's
+// audit middleware and by Network.checkPermission decision logging.
+func Log(event *Event) error {
+	l := getDefaultLogger()
+	if l == nil {
+		return nil
+	}
+	return l.Log(event)
+}

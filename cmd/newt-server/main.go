@@ -37,6 +37,7 @@ import (
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	newtrunapi "github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 	"github.com/aldrin-isaac/newtron/pkg/version"
@@ -52,6 +53,9 @@ func main() {
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories (newtrun)")
 	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories (newtlab lab-spec resolution)")
 	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
+	auditLog := flag.String("audit-log", "", "auth-design.md L1: file path for the mutation audit log; empty disables audit emission entirely (default)")
+	auditCallerHeader := flag.String("audit-caller-header", "", "auth-design.md L1: HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set)")
+	unixSocket := flag.String("unix-socket", "", "auth-design.md L1: Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -71,7 +75,26 @@ func main() {
 	// sees newtlab; newtlab's client never sees newtron.
 	newtlabClient := newtlabclient.New("http://" + *listen)
 	newtronPortResolver := newtlabclient.NewPortResolver(newtlabClient)
-	newtronSrv := newtronapi.NewServer(logger, *idleTimeout, newtronPortResolver, *scaffoldRoot)
+
+	// auth-design.md L1: install the audit logger when --audit-log
+	// is set. The audit middleware in pkg/newtron/api/ reads via
+	// audit.Log; an unset logger makes Log a silent no-op.
+	if *auditLog != "" {
+		al, err := audit.NewFileLogger(*auditLog, audit.RotationConfig{})
+		if err != nil {
+			logger.Fatalf("failed to open audit log %s: %v", *auditLog, err)
+		}
+		audit.SetDefaultLogger(al)
+	}
+
+	newtronSrv := newtronapi.NewServer(newtronapi.Config{
+		Logger:            logger,
+		IdleTimeout:       *idleTimeout,
+		PortResolver:      newtronPortResolver,
+		ScaffoldRoot:      *scaffoldRoot,
+		AuditCallerHeader: *auditCallerHeader,
+		UnixSocketPath:    *unixSocket,
+	})
 	if *specDir != "" {
 		if err := newtronSrv.RegisterNetwork(*netID, *specDir); err != nil {
 			logger.Fatalf("failed to register network '%s' from %s: %v", *netID, *specDir, err)
