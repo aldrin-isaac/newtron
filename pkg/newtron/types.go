@@ -158,9 +158,9 @@ func (e *VerificationFailedError) Error() string {
 // errors chain via Unwrap, so existing util.ErrPermissionDenied
 // errors.Is() checks still match.
 type AuthorizationError struct {
-	Caller     string
-	Permission string
-	Resource   string
+	Caller     string `json:"caller"`
+	Permission string `json:"permission"`
+	Resource   string `json:"resource,omitempty"`
 	inner      error
 }
 

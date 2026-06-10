@@ -216,7 +216,6 @@ func TestAPICompleteness(t *testing.T) {
 	// excludedMethods lists methods intentionally NOT exposed via HTTP.
 	excludedMethods := map[string]map[string]string{
 		"Network": {
-			"SetAuth":               "server-internal initialization — composed in via EnableAuthorization at RegisterNetwork/ReloadNetwork (auth-design.md L3)",
 			"EnableAuthorization":   "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
 			"BuildEmptyTopologyNode": "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"BuildTopologyNode":      "intent save/reload helpers — invoked via intent/save and intent/reload handlers",

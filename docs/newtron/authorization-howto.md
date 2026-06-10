@@ -104,8 +104,8 @@ curl -X POST http://127.0.0.1:18080/newtron/v1/networks/default/create-service \
   -H "Content-Type: application/json" \
   -d '{"name":"svc-b","type":"routed"}'
 # → 403 Forbidden
-# {"error":"authorization denied: mallory lacks spec.author on svc-b",
-#  "data":{"caller":"mallory","permission":"spec.author","resource":"svc-b"}}
+# {"data":{"caller":"mallory","permission":"spec.author","resource":"svc-b"},
+#  "error":"authorization denied: mallory lacks spec.author on svc-b"}
 ```
 
 A no-identity request (the L1/L2 fallthrough case):
@@ -124,15 +124,26 @@ permission check writes one JSON-line event:
 
 ```json
 {
-  "id": "9c1a3d8b1c7e4f02",
+  "id": "",
   "timestamp": "2026-06-10T14:21:08.412Z",
   "user": "alice",
   "verification_source": "self_attested_header",
+  "device": "",
   "operation": "authcheck:spec.author",
   "service": "svc-a",
-  "success": true
+  "changes": null,
+  "success": true,
+  "execute_mode": false,
+  "dry_run": false,
+  "duration": 0
 }
 ```
+
+(The `id` field is currently empty for every audit event — L1 has
+not yet wired ID generation. The other zero-valued fields —
+`device`, `changes`, `execute_mode`, `dry_run`, `duration` — are
+shared shape with L1 request-level events; decision events leave
+them at their zero values.)
 
 To filter for just decisions:
 

@@ -41,11 +41,6 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 	return &Network{internal: net}, nil
 }
 
-// SetAuth installs a permission checker. If nil, all permission checks are skipped.
-func (net *Network) SetAuth(checker *auth.Checker) {
-	net.auth = checker
-}
-
 // EnableAuthorization wires permission enforcement for this Network
 // (auth-design.md L3). After it returns, every spec/profile
 // mutation method's checkPermission call consults the network's
@@ -439,12 +434,13 @@ func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, a
 	if net.auth == nil {
 		return nil
 	}
-	caller := audit.CallerFromContext(ctx)
-	if caller != nil {
+	source := audit.VerificationUnknown
+	if caller := audit.CallerFromContext(ctx); caller != nil {
 		authCtx.Caller = caller.Username
+		source = caller.Source
 	}
 	err := net.auth.Check(perm, authCtx)
-	audit.LogDecision(ctx, string(perm), authCtx.Caller, callerSource(caller), authCtx.Resource, err)
+	audit.LogDecision(string(perm), authCtx.Caller, source, authCtx.Resource, err)
 	if err == nil {
 		return nil
 	}
@@ -459,15 +455,4 @@ func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, a
 		Resource:   authCtx.Resource,
 		inner:      err,
 	}
-}
-
-// callerSource returns the verification source string for the caller,
-// or VerificationUnknown when no caller is attached. Used by
-// checkPermission's audit emission so a reviewer sees how the
-// authorizing identity was verified.
-func callerSource(c *audit.Caller) audit.VerificationSource {
-	if c == nil {
-		return audit.VerificationUnknown
-	}
-	return c.Source
 }
