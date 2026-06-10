@@ -200,7 +200,99 @@ the human-readable reason. The pre-decision request-level audit event
 for the same request (`Operation: "POST /newtron/v1/networks/.../create-service"`)
 appears in the same log file — match them by timestamp + user.
 
-## 6. Revoking access
+## 6. Fine-grained per-resource grants
+
+The legacy `"permission": ["group"]` shorthand grants the listed
+groups everywhere — every device, every service, every interface.
+Real deployments need to scope: "edge-team can write to edge-*
+devices only; spine-team can write to spine-* only." The typed
+grant form expresses that:
+
+```json
+{
+  "permissions": {
+    "device.write": [
+      { "groups": ["edge-team"],  "where": { "device": "edge-*" } },
+      { "groups": ["spine-team"], "where": { "device": "spine-*" } }
+    ],
+    "service.apply": [
+      { "groups": ["transit-team"], "where": { "service": "transit-*" } }
+    ]
+  }
+}
+```
+
+Each entry is `{groups, where}`. The where clause restricts when
+the grant applies — every named dimension must match (AND across
+dimensions). An empty or absent `where` matches every context (the
+legacy behavior — useful for "all-rooms" grants that don't need
+scoping).
+
+The two forms can mix freely. A permission can list legacy entries
+alongside typed ones, the unmarshaller handles both. Round-trip
+preserves the form: a permission with no scoping emits as a flat
+list; a scoped one emits as objects.
+
+**Pattern syntax — one matcher across all dimensions:**
+
+| Pattern | Matches |
+|---|---|
+| `"edge-1"` | exact |
+| `"edge-*"` | glob (suffix wildcard; `*` allowed only at end) |
+| `"edge-1,edge-2"` | comma list — value matches any item (OR) |
+| `"!permissions"` | exclusion (bang prefix) — value must NOT match this |
+| `"!permissions,!user_groups"` | exclusion list — value must NOT match any item (AND none of these) |
+| `"edge-*,!edge-broken"` | mixed — value matches `edge-*` AND not `edge-broken` |
+
+When the pattern consists only of excludes, it reads as "anything
+except these" — the shape the meta-authorization scenario below uses.
+
+**Dimensions you can scope on:**
+
+| Dimension | What populates it |
+|---|---|
+| `device` | The device being acted on (URL `/nodes/{device}/*`, or the device name passed to topology mutations) |
+| `service` | The service being applied or mutated (URL `/services/{name}`, or `service` field in interface apply-service body) |
+| `interface` | The interface being mutated (URL `/interfaces/{name}/*`) |
+| `resource` | The generic identifier of the thing being acted on — populated alongside the more specific dimension when applicable |
+| `field` | The top-level spec area the mutation touches: `services`, `profiles`, `topology`, `permissions`, `user_groups`, `super_users`, `qos_policies`, `filters`, `prefix_lists`, `route_policies`, `ipvpns`, `macvpns`, `zones`. Used for meta-authorization (below). |
+
+Unknown dimensions in a `where` clause **fail closed** — a typo
+like `"devic": "edge-*"` denies the request rather than silently
+matching everything. This keeps the grant table honest.
+
+## 7. Meta-authorization — separating who can grant access
+
+`spec.author` gates every spec mutation, including changes to the
+`permissions`, `user_groups`, and `super_users` fields. Without
+scoping, the role "can author services" collapses with "can grant
+access to others." Real deployments separate them via the `field`
+dimension:
+
+```json
+{
+  "permissions": {
+    "spec.author": [
+      { "groups": ["service-architects"],
+        "where": { "field": "!permissions,!user_groups,!super_users" } },
+      { "groups": ["iam-team"],
+        "where": { "field": "permissions,user_groups,super_users" } }
+    ]
+  }
+}
+```
+
+A service architect (carol) can author services, profiles, topology,
+QoS policies, filters, route policies — everything except the grant
+table itself. An IAM operator (dave) can manage groups, super_users,
+and the permissions map but cannot mutate service specs.
+
+`super_users` continue to bypass every check — they're the bootstrap
+and recovery role. Treat the `super_users` list itself as a
+field-scoped resource that only the IAM team can edit via the example
+above.
+
+## 8. Revoking access
 
 Today the authorization enforcer reads the grant table when
 `EnableAuthorization` is called. To revoke a grant after startup:
@@ -215,7 +307,7 @@ The window between the file edit and the reload is the revocation
 SLA; a future layer (auth-design.md L6) adds an automatic file
 watcher to shrink it.
 
-## 7. Failure modes
+## 9. Failure modes
 
 | Symptom | Cause | Fix |
 |---|---|---|

@@ -181,7 +181,7 @@ func (net *Network) GetTopology() *spec.TopologySpecFile {
 // *ConflictError when a device with this name already exists. The matching
 // profile file must already exist. Persists atomically. §7 + §15 + §27 + §46.
 func (net *Network) AddTopologyDevice(ctx context.Context, name string, device *spec.TopologyDevice) error {
-	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithDevice(name).WithResource(name)); err != nil {
 		return err
 	}
 	return translateInternalError(net.internal.AddTopologyDevice(name, device))
@@ -192,7 +192,7 @@ func (net *Network) AddTopologyDevice(ctx context.Context, name string, device *
 // With force=true, cascade-deletes the referring links before removing the
 // device. Persists atomically. §15 (cascade is explicit).
 func (net *Network) DeleteTopologyDevice(ctx context.Context, name string, force bool) error {
-	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithDevice(name).WithResource(name)); err != nil {
 		return err
 	}
 	return translateInternalError(net.internal.DeleteTopologyDevice(name, force))
@@ -202,7 +202,7 @@ func (net *Network) DeleteTopologyDevice(ctx context.Context, name string, force
 // TopologyDevice (full-replacement semantics; no partial patch). Returns
 // *NotFoundError when name doesn't exist.
 func (net *Network) UpdateTopologyDevice(ctx context.Context, name string, device *spec.TopologyDevice) error {
-	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithDevice(name).WithResource(name)); err != nil {
 		return err
 	}
 	return translateInternalError(net.internal.UpdateTopologyDevice(name, device))
@@ -213,7 +213,7 @@ func (net *Network) UpdateTopologyDevice(ctx context.Context, name string, devic
 // at most one link). Validates that both endpoint devices exist in topology
 // AND that each interface is declared on its device's Ports map.
 func (net *Network) AddTopologyLink(ctx context.Context, link *spec.TopologyLink) error {
-	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext()); err != nil {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology")); err != nil {
 		return err
 	}
 	return translateInternalError(net.internal.AddTopologyLink(link))
@@ -225,7 +225,7 @@ func (net *Network) AddTopologyLink(ctx context.Context, link *spec.TopologyLink
 // identifies the link. Returns *NotFoundError when no link contains the
 // endpoint.
 func (net *Network) DeleteTopologyLink(ctx context.Context, endpoint string) error {
-	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(endpoint)); err != nil {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithResource(endpoint)); err != nil {
 		return err
 	}
 	return translateInternalError(net.internal.DeleteTopologyLink(endpoint))
@@ -458,7 +458,17 @@ func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, a
 		source = caller.Source
 	}
 	err := net.auth.Check(perm, authCtx)
-	audit.LogDecision(string(perm), authCtx.Caller, source, authCtx.Resource, err)
+	audit.LogDecision(audit.Decision{
+		Permission: string(perm),
+		Caller:     authCtx.Caller,
+		Source:     source,
+		Device:     authCtx.Device,
+		Service:    authCtx.Service,
+		Interface:  authCtx.Interface,
+		Resource:   authCtx.Resource,
+		Field:      authCtx.Field,
+		Error:      err,
+	})
 	if err == nil {
 		return nil
 	}

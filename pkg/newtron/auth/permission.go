@@ -63,14 +63,19 @@ const (
 // username. CLI in-process callers populate it directly when they
 // engage the checker.
 //
-// Device, Service, Interface, Resource are scoping dimensions the
-// Checker reads against per-service grants and (in L5) where clauses.
+// Device, Service, Interface, Resource, Field are scoping dimensions
+// the Checker reads against per-service grants and L5 where clauses.
+// Field carries the top-level network.json field name the mutation
+// touches — the meta-authorization dimension that lets spec.author
+// scope away from the permissions/user_groups/super_users fields
+// (auth-design.md §3 criterion 9).
 type Context struct {
 	Caller    string
 	Device    string
 	Service   string
 	Interface string
 	Resource  string
+	Field     string
 }
 
 // NewContext creates a new permission context
@@ -109,5 +114,16 @@ func (c *Context) WithInterface(iface string) *Context {
 // WithResource sets a generic resource context
 func (c *Context) WithResource(resource string) *Context {
 	c.Resource = resource
+	return c
+}
+
+// WithField sets the meta-authorization dimension (auth-design.md L5
+// "Meta-Authorization: Who Can Grant Access"). The field is the
+// top-level network.json field name the mutation touches — services,
+// permissions, user_groups, super_users, profiles, topology. A where
+// clause like {"field": "!permissions,!user_groups,!super_users"}
+// scopes spec.author to "services and topology, but not grants."
+func (c *Context) WithField(field string) *Context {
+	c.Field = field
 	return c
 }
