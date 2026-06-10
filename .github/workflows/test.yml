@@ -25,6 +25,15 @@ jobs:
           # cost.
           cache: true
 
+      # auth-design.md L2b: pkg/httputil/pamauth links against libpam
+      # via cgo for the PAM-backed user-to-service authentication path.
+      # Install libpam0g-dev so the cgo bindings can find pam_appl.h
+      # at build time. Operators not using PAM still get the binding
+      # compiled in; the runtime --auth-pam-service flag controls
+      # whether it's invoked.
+      - name: Install PAM development headers
+        run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
+
       - name: go build ./...
         run: go build ./...
 

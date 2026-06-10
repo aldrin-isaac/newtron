@@ -188,20 +188,25 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 
 	// Apply middleware chain (outermost → innermost):
-	//   recovery → logger → requestID → caller → audit → timeout → persist → mode → mux
+	//   recovery → logger → requestID → pam → caller → audit → timeout → persist → mode → mux
 	//
-	// caller (auth-design.md L1) populates audit.Caller on the
-	// request context before audit reads it. Both are always
-	// installed; their runtime effect is gated by configuration
-	// per the "every layer enable/disable-able" contract — when
-	// no audit logger is set and no caller-identity sources are
-	// configured, they're transparent no-ops.
+	// pam (auth-design.md L2b) sits between requestID and caller so
+	// the verified PAM username is on the context for callerMiddleware
+	// to pick up. PAMMiddleware is always installed; when no
+	// Authenticator is configured (L2b disabled), it is a transparent
+	// passthrough that doesn't touch the request.
+	//
+	// caller (auth-design.md L1+L2a+L2b) populates audit.Caller on the
+	// request context before audit reads it. Always installed; effect
+	// gated by which identity sources are configured per the
+	// "every layer enable/disable-able" contract.
 	var handler http.Handler = mux
 	handler = withMode(handler)
 	handler = withPersist(handler)
 	handler = httputil.Timeout(5 * time.Minute)(handler)
 	handler = auditMiddleware(handler)
 	handler = callerMiddleware(s.auditCallerHeader)(handler)
+	handler = httputil.PAMMiddleware(s.authenticator)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.Recovery(s.logger)(handler)

@@ -62,7 +62,13 @@ func callerMiddleware(headerName string) func(http.Handler) http.Handler {
 //     source because it covers both transport and identity.
 //  2. **Unix peer creds** (auth-design.md L1) — kernel-attested UID
 //     from SO_PEERCRED on the Unix socket listener.
-//  3. **Self-attested header** (auth-design.md L1) — TCP fallback,
+//  3. **PAM username** (auth-design.md L2b) — verified by the host's
+//     PAM stack via pam_authenticate. The httputil.PAMMiddleware
+//     either passes a verified username through on context, or
+//     rejects the request with 401 before this middleware runs —
+//     so when a value is present here, it has already been verified
+//     by the operator's identity backend (pam_unix, pam_sss, etc.).
+//  4. **Self-attested header** (auth-design.md L1) — TCP fallback,
 //     trustworthy only when the operator's deployment confirms no
 //     untrusted client can reach the listener.
 //
@@ -93,6 +99,12 @@ func resolveCaller(r *http.Request, headerName string) *audit.Caller {
 		return &audit.Caller{
 			Username: username,
 			Source:   audit.VerificationUnixPeerCreds,
+		}
+	}
+	if u := httputil.PAMUsernameFromContext(r.Context()); u != "" {
+		return &audit.Caller{
+			Username: u,
+			Source:   audit.VerificationPAM,
 		}
 	}
 	if headerName == "" {
