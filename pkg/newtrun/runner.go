@@ -2,6 +2,7 @@ package newtrun
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"os/signal"
@@ -19,6 +20,15 @@ type Runner struct {
 	SuitesBase   string         // directory under which sibling suite dirs live; required for run-suite step composition (issue #27)
 	ServerURL    string         // newtron-server HTTP address
 	NetworkID    string         // network identifier for server operations
+	// NewtronClientTLS is the TLS config the runner uses when
+	// constructing its outbound newtron HTTP client at connectToServer
+	// time (auth-design.md L2a). nil keeps the client on plain HTTP —
+	// the L2a disabled state. Populated by cmd/newtrun-server from its
+	// own --tls-cert/--tls-key/--tls-ca flags; an mTLS-enforced
+	// newtron-server then sees the runner's cert CN as the caller
+	// identity (typically configured as a super_user in network.json
+	// so the runner has the broad authority test scenarios need).
+	NewtronClientTLS *tls.Config
 	Client       *client.Client // HTTP client for all SONiC operations
 	NewtlabURL   string         // newtlab-server HTTP address (deploy/destroy/status via HTTP, not in-process)
 	NewtlabClient LabClient    // newtlab HTTP client (satisfied by *pkg/newtlab/client.Client); injected for tests
@@ -402,8 +412,13 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 
 // connectToServer queries the server for the registered network's info.
 // Populates r.Topology, r.SpecDir, and creates the HTTP client.
+//
+// The HTTP client honors r.NewtronClientTLS so the runner can
+// authenticate against an mTLS-enforced newtron-server via its peer
+// cert CN (auth-design.md L2a). When NewtronClientTLS is nil, the
+// client falls back to plain HTTP — the L2a disabled state.
 func (r *Runner) connectToServer() error {
-	r.Client = client.New(r.ServerURL, r.NetworkID)
+	r.Client = client.New(r.ServerURL, r.NetworkID, client.WithTLS(r.NewtronClientTLS))
 
 	info, err := r.Client.GetNetworkInfo()
 	if err != nil {
