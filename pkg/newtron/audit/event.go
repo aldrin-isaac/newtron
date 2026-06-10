@@ -53,6 +53,14 @@ type Event struct {
 	Operation          string             `json:"operation"`
 	Service            string             `json:"service,omitempty"`
 	Interface          string             `json:"interface,omitempty"`
+	// Resource and Field are populated on authcheck:* decision events
+	// (auth-design.md L3+L5). Resource is the specific entity acted on
+	// (vlan id, vrf name, …); Field is the meta-authorization dimension
+	// — the top-level spec area being mutated (services, permissions,
+	// user_groups, …). Reviewers reconstruct the full L5 where-clause
+	// evaluation context from these plus Device/Service/Interface.
+	Resource string `json:"resource,omitempty"`
+	Field    string `json:"field,omitempty"`
 	Changes            []node.Change      `json:"changes"`
 	Success            bool               `json:"success"`
 	Error              string             `json:"error,omitempty"`

@@ -43,14 +43,14 @@ func (c *Checker) checkUser(username string, permission Permission, ctx *Context
 	// Check service-specific permissions first
 	if ctx != nil && ctx.Service != "" {
 		if svc, ok := c.network.Services[ctx.Service]; ok {
-			if allowed := c.checkServicePermission(username, permission, svc); allowed {
+			if allowed := c.checkServicePermission(username, permission, svc, ctx); allowed {
 				return nil
 			}
 		}
 	}
 
 	// Check global permissions
-	if c.checkGlobalPermission(username, permission) {
+	if c.checkGlobalPermission(username, permission, ctx) {
 		return nil
 	}
 
@@ -65,34 +65,36 @@ func (c *Checker) isSuperUser(username string) bool {
 	return slices.Contains(c.network.SuperUsers, username)
 }
 
-func (c *Checker) checkServicePermission(username string, permission Permission, svc *spec.ServiceSpec) bool {
+func (c *Checker) checkServicePermission(username string, permission Permission, svc *spec.ServiceSpec, ctx *Context) bool {
 	if svc.Permissions == nil {
 		return false
 	}
-	return c.checkPermissionMap(username, permission, svc.Permissions)
+	return c.checkPermissionMap(username, permission, svc.Permissions, ctx)
 }
 
-func (c *Checker) checkGlobalPermission(username string, permission Permission) bool {
-	return c.checkPermissionMap(username, permission, c.network.Permissions)
+func (c *Checker) checkGlobalPermission(username string, permission Permission, ctx *Context) bool {
+	return c.checkPermissionMap(username, permission, c.network.Permissions, ctx)
 }
 
-// checkPermissionMap checks whether username has the given permission in permMap.
-// It first checks the "all" wildcard key, then the specific permission key.
-func (c *Checker) checkPermissionMap(username string, permission Permission, permMap map[string][]string) bool {
-	// Check for "all" permission first
-	if groups, ok := permMap["all"]; ok {
-		if c.userInGroups(username, groups) {
+// checkPermissionMap walks the permission's grant list, evaluating
+// each grant's group membership AND where clause against the caller
+// + context (auth-design.md L5). The "all" wildcard is checked first;
+// when present, its grants apply to every permission.
+//
+// First-match wins — declaration order in network.json determines
+// evaluation order. Grants with an empty Where clause behave
+// identically to the pre-L5 flat group list (matches every Context).
+func (c *Checker) checkPermissionMap(username string, permission Permission, permMap map[string]spec.PermissionGrants, ctx *Context) bool {
+	if grants, ok := permMap["all"]; ok {
+		if c.grantsMatch(username, grants, ctx) {
 			return true
 		}
 	}
-
-	// Check specific permission
-	groups, ok := permMap[string(permission)]
+	grants, ok := permMap[string(permission)]
 	if !ok {
 		return false
 	}
-
-	return c.userInGroups(username, groups)
+	return c.grantsMatch(username, grants, ctx)
 }
 
 func (c *Checker) userInGroups(username string, allowedGroups []string) bool {

@@ -554,11 +554,13 @@ clause. The bootstrap path remains "edit `network.json` on disk and
 restart"; once running, only configured grantees can change the
 grant table.
 
-If meta-authority separation is needed before L5 ships, the smallest
-intermediate is splitting `spec.author` into `spec.author.permissions`
-and `spec.author.everything-else` — two new constants and one
-refactor pass on the spec-mutation handlers. The full L5 dimension
-model is strictly more expressive.
+The L5 implementation ships these dimensions in `auth.Context`:
+`Device`, `Service`, `Interface`, `Resource`, and `Field` (the
+meta-authorization dimension). Spec/profile/topology mutation
+methods populate `Field` with the top-level area being mutated
+(`"services"`, `"profiles"`, `"topology"`, etc.). Node and
+Interface mutation gates populate `Device` and `Interface` from
+the URL path.
 
 **Audit criterion met when this layer lands.** "Can alice modify
 VLANs only on edge switches?" → yes, expressible in `network.json`,
@@ -664,9 +666,11 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   operational mutations that don't fit a create/modify/delete verb on
   a domain noun.
 - The URL-derivable Context dimensions (`Device`, `Interface`) are
-  populated as of L4 via the `gate` helpers on Node and Interface;
-  L5 will read them in `where` clauses. `Service` is populated by
-  Interface.ApplyService / RemoveService.
+  populated by the `gate` helpers on Node and Interface and read by
+  L5's `where` clauses. `Service` is populated by
+  Interface.ApplyService / RemoveService. `Field` (added in L5)
+  is populated by spec/profile/topology mutation methods with the
+  top-level area being mutated.
 
 Both L0 deliverables are shipped (this doc + the secret store).
 L1 audit log is shipped. L2a inter-service mTLS is shipped. L2b
@@ -723,7 +727,39 @@ newtrun/topologies/` still returns plaintexts; the L0 audit
 criterion ("no plaintext in spec dir") is met for any *operator-
 configured* deployment but not for the in-tree test fixtures.
 
-L5–L6 remain proposed; neither has shipped.
+**L5 fine-grained per-resource grants is shipped.** The
+`network.json permissions` map values accept both the legacy flat
+shorthand (`["group1", "group2"]`) and the new typed form
+(`[{"groups": [...], "where": {...}}]`) on the wire — a custom
+`spec.PermissionGrants` `UnmarshalJSON` discriminates by peeking
+at the first array element. The shorthand collapses to a single
+`PermissionGrant` with an empty `Where`, which `Checker` then
+treats as "match every Context" (the legacy behavior preserved as
+syntactic sugar).
+
+`Checker.Check` walks the grants in declaration order; first match
+wins. A grant matches when (1) the caller is in one of `grant.Groups`
+and (2) the `grant.Where` clause is satisfied by the populated
+`auth.Context`. `where` dimensions are `device`, `service`,
+`interface`, `resource`, `field` — unknown dimensions fail closed.
+
+The pattern matcher (`pkg/newtron/auth/where_match.go`) handles
+exact, glob (`edge-*`), comma-OR (`edge-1,edge-2`), bang-prefix
+exclusion (`!permissions`), and combinations. Audit decision
+events grow `Resource` and `Field` fields recording the full
+context dimensions a reviewer needs to reconstruct each match.
+
+Meta-authorization separation is now expressible. The §3 criterion 9
+"can bob manage who has access without also editing service
+specs" test scenario lives in
+`TestAuthorizationL5_MetaAuthorizationField`. The §3 criterion 3
+"can alice modify devices only in her rack" scenario lives in
+`TestAuthorizationL5_PerDeviceScoping`. Tests:
+`pkg/newtron/spec/permission_grant_test.go`,
+`pkg/newtron/auth/where_match_test.go`,
+`pkg/newtron/api/authorization_test.go` (`TestAuthorizationL5_*`).
+
+L6 remains proposed — revocation watcher + audit log integrity.
 
 ---
 

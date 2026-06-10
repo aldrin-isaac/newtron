@@ -454,6 +454,191 @@ func TestAuthorizationL4_NodeMutationsGated(t *testing.T) {
 	}
 }
 
+// scaffoldWithGrants writes a minimal spec directory whose
+// network.json carries the operator-provided permissions JSON
+// fragment, plus the standard super_users + user_groups L5 tests
+// share. Used by the L5 per-device and meta-authorization tests
+// below.
+func scaffoldWithGrants(t *testing.T, permissionsJSON string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := spec.Scaffold(dir, "L5 fixture"); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	netJSON := `{
+  "version": "1.0",
+  "super_users": ["root"],
+  "user_groups": {
+    "edge-team": ["alice"],
+    "spine-team": ["bob"],
+    "architects": ["carol"],
+    "iam": ["dave"]
+  },
+  "permissions": ` + permissionsJSON + `,
+  "zones": {"amer": {}},
+  "services": {}
+}`
+	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	return dir
+}
+
+// TestAuthorizationL5_PerDeviceScoping pins the L5 contract: a
+// where-clause on the device dimension restricts a permission to
+// matching device names. alice (edge-team) can author specs that
+// reference edge-* devices; bob (spine-team) can do the same for
+// spine-*. The grants table is the typed [{groups, where}] form.
+//
+// The test exercises the topology-mutation surface because it
+// gates with spec.author and accepts a device-named resource via
+// the create-node body; the Context.Resource gets the device name,
+// which the where-clause matches.
+func TestAuthorizationL5_PerDeviceScoping(t *testing.T) {
+	grants := `{
+    "spec.author": [
+      { "groups": ["edge-team"],  "where": { "device": "edge-*" } },
+      { "groups": ["spine-team"], "where": { "device": "spine-*" } }
+    ]
+  }`
+	specDir := scaffoldWithGrants(t, grants)
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	// alice (edge-team) creates edge-1 — should pass.
+	w := postAs(t, s, "alice",
+		"/newtron/v1/networks/default/topology/create-node",
+		map[string]any{"name": "edge-1", "device": map[string]any{}})
+	if w.Code == http.StatusForbidden {
+		t.Errorf("alice creating edge-1 was denied: %s", w.Body.String())
+	}
+
+	// alice creating a spine-* should be denied — her where clause
+	// scopes her to edge-*.
+	w = postAs(t, s, "alice",
+		"/newtron/v1/networks/default/topology/create-node",
+		map[string]any{"name": "spine-1", "device": map[string]any{}})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("alice creating spine-1 should be 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// bob (spine-team) creating spine-1 — should pass.
+	w = postAs(t, s, "bob",
+		"/newtron/v1/networks/default/topology/create-node",
+		map[string]any{"name": "spine-1", "device": map[string]any{}})
+	if w.Code == http.StatusForbidden {
+		t.Errorf("bob creating spine-1 was denied: %s", w.Body.String())
+	}
+
+	// bob creating an edge-* should be denied.
+	w = postAs(t, s, "bob",
+		"/newtron/v1/networks/default/topology/create-node",
+		map[string]any{"name": "edge-2", "device": map[string]any{}})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("bob creating edge-2 should be 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAuthorizationL5_MetaAuthorizationField pins the §3 criterion 9
+// meta-authorization scenario. Two roles share the spec.author
+// permission but with disjoint field scopes:
+//
+//   - architects: spec.author on everything EXCEPT permissions /
+//     user_groups / super_users.
+//   - iam: spec.author on permissions / user_groups / super_users.
+//
+// carol (architects) can create services but cannot. dave (iam)
+// can do the inverse. Today the test asserts the service-creation
+// half — carol can, dave can't — because carol's where matches
+// field=services and dave's doesn't.
+//
+// Editing permissions/user_groups/super_users isn't a separate
+// HTTP endpoint today (no api surface for it); the field=permissions
+// scenario is covered implicitly by carol being denied when she
+// tries those if such handlers existed. The L5 test below verifies
+// what's testable now: the field dimension actually constrains the
+// matcher.
+func TestAuthorizationL5_MetaAuthorizationField(t *testing.T) {
+	grants := `{
+    "spec.author": [
+      { "groups": ["architects"], "where": { "field": "!permissions,!user_groups,!super_users" } },
+      { "groups": ["iam"],        "where": { "field": "permissions,user_groups,super_users" } }
+    ]
+  }`
+	specDir := scaffoldWithGrants(t, grants)
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	// carol (architects) creating a service — Context.Field is
+	// "services", carol's where says !permissions,!user_groups,
+	// !super_users, so "services" is allowed.
+	w := postAs(t, s, "carol",
+		"/newtron/v1/networks/default/create-service",
+		map[string]any{"name": "svc-carol", "type": "routed"})
+	if w.Code == http.StatusForbidden {
+		t.Errorf("carol (architects) creating a service was denied: %s", w.Body.String())
+	}
+
+	// dave (iam) creating a service — Context.Field is "services",
+	// dave's where says permissions,user_groups,super_users only,
+	// so "services" is NOT matched — denied.
+	w = postAs(t, s, "dave",
+		"/newtron/v1/networks/default/create-service",
+		map[string]any{"name": "svc-dave", "type": "routed"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("dave (iam) creating a service should be 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAuthorizationL5_LegacyShorthandStillWorks pins the §40
+// compat shim: a pre-L5 ["group"] flat list still grants every
+// matching caller, no matter the Context dimensions. The grant
+// table written in legacy form must produce the same authorization
+// decisions as before L5.
+func TestAuthorizationL5_LegacyShorthandStillWorks(t *testing.T) {
+	grants := `{
+    "spec.author": ["architects"]
+  }`
+	specDir := scaffoldWithGrants(t, grants)
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	// carol (architects) — legacy grants don't constrain by field,
+	// so she can mutate any spec.
+	w := postAs(t, s, "carol",
+		"/newtron/v1/networks/default/create-service",
+		map[string]any{"name": "svc-legacy", "type": "routed"})
+	if w.Code == http.StatusForbidden {
+		t.Errorf("carol denied under legacy grant: %s", w.Body.String())
+	}
+
+	// dave is not in architects, so no grant applies.
+	w = postAs(t, s, "dave",
+		"/newtron/v1/networks/default/create-service",
+		map[string]any{"name": "svc-dave-legacy", "type": "routed"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("dave should be 403 under legacy grant scoped to architects, got %d", w.Code)
+	}
+}
+
 // TestAuthorizationL4_InterfaceMutationsGated walks one representative
 // endpoint per permission family in the Interface mutation surface and
 // asserts a non-permitted caller gets 403. Same scope rationale as

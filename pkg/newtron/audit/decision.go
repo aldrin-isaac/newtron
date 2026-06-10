@@ -9,18 +9,38 @@ import "time"
 // is the HTTP method + path.
 const DecisionOperationPrefix = "authcheck:"
 
-// LogDecision emits an audit Event for one Network.checkPermission
-// call (auth-design.md L3). One event per decision — allow and deny
-// alike — so a reviewer reading the audit log can answer "did
-// authorization happen, who got allowed, who got denied" without
-// inferring from request-level success.
+// Decision is the per-call input shape for LogDecision. It mirrors
+// the auth.Context dimensions plus the L1-verified identity, all
+// flattened to strings so the audit package doesn't import the auth
+// package (which would create a cycle: auth → audit via the request
+// context already, and audit → auth via this decision shape would
+// close it).
 //
-// caller and source come from the verified identity attached to the
-// request by the HTTP boundary (audit.CallerFromContext). resource
-// is the scoping resource the permission is being checked against
-// (service name, profile name, etc.) — surfaced so a reviewer
-// doesn't have to cross-reference the corresponding L1 event to
-// learn what was being acted on.
+// Permission is the action that was checked (e.g. "device.write").
+// Caller and Source come from the verified identity (L1/L2).
+// Device, Service, Interface, Resource, Field are the populated
+// dimensions of auth.Context at decision time — Reviewers reconstruct
+// the L5 where-clause evaluation from these. Error is the decision
+// result: nil = allow, non-nil = deny (and the error's message is
+// recorded on the event).
+type Decision struct {
+	Permission string
+	Caller     string
+	Source     VerificationSource
+	Device     string
+	Service    string
+	Interface  string
+	Resource   string
+	Field      string
+	Error      error
+}
+
+// LogDecision emits an audit Event for one Network.checkPermission
+// call (auth-design.md L3+L5). One event per decision — allow and
+// deny alike — so a reviewer reading the audit log can answer
+// "did authorization happen, who got allowed, who got denied, and
+// against which L5 context dimensions" without inferring from the
+// request-level event alone.
 //
 // Like Log, LogDecision is a silent no-op when no default logger is
 // configured (auth-design.md L1 disabled state preserved). A
@@ -29,20 +49,24 @@ const DecisionOperationPrefix = "authcheck:"
 // The Event ID field stays empty, matching the L1 request-level
 // events emitted by auditMiddleware — populating IDs is L1
 // hardening, not L3 scope.
-func LogDecision(permission, caller string, source VerificationSource, resource string, decision error) {
+func LogDecision(d Decision) {
 	if getDefaultLogger() == nil {
 		return
 	}
 	event := &Event{
 		Timestamp:          time.Now().UTC(),
-		User:               caller,
-		VerificationSource: source,
-		Operation:          DecisionOperationPrefix + permission,
-		Service:            resource,
-		Success:            decision == nil,
+		User:               d.Caller,
+		VerificationSource: d.Source,
+		Device:             d.Device,
+		Operation:          DecisionOperationPrefix + d.Permission,
+		Service:            d.Service,
+		Interface:          d.Interface,
+		Resource:           d.Resource,
+		Field:              d.Field,
+		Success:            d.Error == nil,
 	}
-	if decision != nil {
-		event.Error = decision.Error()
+	if d.Error != nil {
+		event.Error = d.Error.Error()
 	}
 	_ = Log(event)
 }

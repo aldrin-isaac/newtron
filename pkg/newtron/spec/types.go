@@ -43,8 +43,13 @@ type OverridableSpecs struct {
 type NetworkSpecFile struct {
 	Version     string              `json:"version"`
 	SuperUsers  []string            `json:"super_users"`
-	UserGroups  map[string][]string `json:"user_groups"`  // Group name → user list
-	Permissions map[string][]string `json:"permissions"`  // Action → allowed groups
+	UserGroups  map[string][]string `json:"user_groups"` // Group name → user list
+	// Permissions maps each action (e.g. "device.write") to its grants.
+	// Each grant scopes its allowed groups by a where clause
+	// (auth-design.md L5). The legacy ["group1", "group2"] shorthand is
+	// accepted on the wire and produces one PermissionGrant with an
+	// empty Where (matches every Context).
+	Permissions map[string]PermissionGrants `json:"permissions"`
 	Zones       map[string]*ZoneSpec `json:"zones"`
 
 	OverridableSpecs // Embedded — all 7 overridable spec maps
@@ -133,8 +138,11 @@ type ServiceSpec struct {
 	// QoS
 	QoSPolicy string `json:"qos_policy,omitempty"`
 
-	// Permissions (override global permissions for this service)
-	Permissions map[string][]string `json:"permissions,omitempty"`
+	// Permissions overrides global grants for callers acting on this
+	// service (auth-design.md L3 service-level override). Same grant
+	// shape as NetworkSpecFile.Permissions — including legacy
+	// shorthand acceptance and per-grant Where scoping (L5).
+	Permissions map[string]PermissionGrants `json:"permissions,omitempty"`
 }
 
 // RoutingSpec defines routing protocol specification for a service.

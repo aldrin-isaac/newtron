@@ -9,6 +9,15 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// shorthand makes a spec.PermissionGrants with one grant whose
+// Where clause is empty — the in-test equivalent of the pre-L5
+// ["group1", "group2"] flat list. Tests that exercise the L5
+// where-clause semantics construct PermissionGrant literals
+// directly instead of using this helper.
+func shorthand(groups ...string) spec.PermissionGrants {
+	return spec.PermissionGrants{{Groups: groups}}
+}
+
 func TestContext_Chaining(t *testing.T) {
 	ctx := NewContext().
 		WithCaller("alice").
@@ -42,25 +51,25 @@ func createTestNetworkSpec() *spec.NetworkSpecFile {
 			"netops": {"charlie", "diana"},
 			"viewer": {"eve"},
 		},
-		Permissions: map[string][]string{
-			"all":            {"neteng"},
-			"service.apply":  {"neteng", "netops"},
-			"service.remove": {"neteng", "netops", "viewer"},
-			"vlan.create":    {"neteng"},
-			"device.cleanup": {"neteng", "netops", "viewer"},
+		Permissions: map[string]spec.PermissionGrants{
+			"all":            shorthand("neteng"),
+			"service.apply":  shorthand("neteng", "netops"),
+			"service.remove": shorthand("neteng", "netops", "viewer"),
+			"vlan.create":    shorthand("neteng"),
+			"device.cleanup": shorthand("neteng", "netops", "viewer"),
 		},
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
 				"customer-l3": {
 					Description: "Customer L3",
-					Permissions: map[string][]string{
-						"service.apply": {"netops"}, // More restrictive
+					Permissions: map[string]spec.PermissionGrants{
+						"service.apply": shorthand("netops"), // More restrictive
 					},
 				},
 				"transit": {
 					Description: "Transit service",
-					Permissions: map[string][]string{
-						"all": {"neteng"}, // Only neteng
+					Permissions: map[string]spec.PermissionGrants{
+						"all": shorthand("neteng"), // Only neteng
 					},
 				},
 			},
@@ -175,8 +184,8 @@ func TestChecker_PermissionError(t *testing.T) {
 
 func TestChecker_DirectUserPermission(t *testing.T) {
 	network := &spec.NetworkSpecFile{
-		Permissions: map[string][]string{
-			"service.apply": {"direct-user"}, // Direct user, not a group
+		Permissions: map[string]spec.PermissionGrants{
+			"service.apply": shorthand("direct-user"), // Direct user, not a group
 		},
 	}
 	checker := NewChecker(network)
@@ -214,8 +223,8 @@ func TestChecker_ServiceWithNilPermissions(t *testing.T) {
 		UserGroups: map[string][]string{
 			"neteng": {"alice"},
 		},
-		Permissions: map[string][]string{
-			"service.apply": {"neteng"},
+		Permissions: map[string]spec.PermissionGrants{
+			"service.apply": shorthand("neteng"),
 		},
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
@@ -239,7 +248,7 @@ func TestChecker_GlobalPermissionNotFound(t *testing.T) {
 	network := &spec.NetworkSpecFile{
 		SuperUsers:  []string{},
 		UserGroups:  map[string][]string{},
-		Permissions: map[string][]string{}, // No permissions defined
+		Permissions: map[string]spec.PermissionGrants{}, // No permissions defined
 	}
 	checker := NewChecker(network)
 
@@ -257,8 +266,8 @@ func TestChecker_GlobalAllPermissionNotGranted(t *testing.T) {
 			"admins": {"admin-user"},
 			"users":  {"normal-user"},
 		},
-		Permissions: map[string][]string{
-			"all": {"admins"}, // Only admins have 'all'
+		Permissions: map[string]spec.PermissionGrants{
+			"all": shorthand("admins"), // Only admins have 'all'
 		},
 	}
 	checker := NewChecker(network)
@@ -277,13 +286,13 @@ func TestChecker_ServiceAllPermissionNotGranted(t *testing.T) {
 			"admins": {"admin-user"},
 			"users":  {"normal-user"},
 		},
-		Permissions: map[string][]string{},
+		Permissions: map[string]spec.PermissionGrants{},
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
 				"restricted": {
 					Description: "Restricted service",
-					Permissions: map[string][]string{
-						"all": {"admins"}, // Only admins have 'all' on this service
+					Permissions: map[string]spec.PermissionGrants{
+						"all": shorthand("admins"), // Only admins have 'all' on this service
 					},
 				},
 			},
