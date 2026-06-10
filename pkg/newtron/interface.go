@@ -3,6 +3,7 @@ package newtron
 import (
 	"context"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
@@ -15,12 +16,28 @@ type Interface struct {
 	internal *node.Interface
 }
 
+// gate consults the parent Network's permission checker (auth-design.md
+// L4) before an Interface mutation acts. Populates auth.Context.Device,
+// Interface, and Resource so the audit decision event records the full
+// dimensional context for L5 to later constrain. When the resource
+// argument is empty (e.g., ConfigureInterface has no per-call resource
+// beyond the interface itself), Resource stays empty.
+func (i *Interface) gate(ctx context.Context, perm auth.Permission, resource string) error {
+	return i.node.net.checkPermission(ctx, perm, auth.NewContext().
+		WithDevice(i.node.internal.Name()).
+		WithInterface(i.internal.Name()).
+		WithResource(resource))
+}
+
 // ============================================================================
 // Write Operations
 // ============================================================================
 
 // ApplyService applies a service definition to this interface.
 func (i *Interface) ApplyService(ctx context.Context, service string, opts ApplyServiceOpts) error {
+	if err := i.gate(ctx, auth.PermServiceApply, service); err != nil {
+		return err
+	}
 	service = util.NormalizeName(service)
 	cs, err := i.internal.ApplyService(ctx, service, node.ApplyServiceOpts{
 		IPAddress: opts.IPAddress,
@@ -37,6 +54,9 @@ func (i *Interface) ApplyService(ctx context.Context, service string, opts Apply
 
 // RemoveService removes the service from this interface.
 func (i *Interface) RemoveService(ctx context.Context) error {
+	if err := i.gate(ctx, auth.PermServiceRemove, ""); err != nil {
+		return err
+	}
 	cs, err := i.internal.RemoveService(ctx)
 	if err != nil {
 		return err
@@ -47,6 +67,9 @@ func (i *Interface) RemoveService(ctx context.Context) error {
 
 // RefreshService reapplies the service configuration to sync with the service definition.
 func (i *Interface) RefreshService(ctx context.Context) error {
+	if err := i.gate(ctx, auth.PermServiceApply, ""); err != nil {
+		return err
+	}
 	cs, err := i.internal.RefreshService(ctx)
 	if err != nil {
 		return err
@@ -57,6 +80,9 @@ func (i *Interface) RefreshService(ctx context.Context) error {
 
 // BindACL binds an ACL to this interface.
 func (i *Interface) BindACL(ctx context.Context, acl, direction string) error {
+	if err := i.gate(ctx, auth.PermACLModify, acl); err != nil {
+		return err
+	}
 	cs, err := i.internal.BindACL(ctx, acl, direction)
 	if err != nil {
 		return err
@@ -69,6 +95,9 @@ func (i *Interface) BindACL(ctx context.Context, acl, direction string) error {
 // Delegates to the Node-level UnbindACLFromInterface method, which resolves
 // the interface name internally.
 func (i *Interface) UnbindACL(ctx context.Context, acl string) error {
+	if err := i.gate(ctx, auth.PermACLModify, acl); err != nil {
+		return err
+	}
 	cs, err := i.node.internal.UnbindACLFromInterface(ctx, acl, i.internal.Name())
 	if err != nil {
 		return err
@@ -79,6 +108,9 @@ func (i *Interface) UnbindACL(ctx context.Context, acl string) error {
 
 // AddBGPPeer adds a direct BGP peer on this interface.
 func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) error {
+	if err := i.gate(ctx, auth.PermVRFModify, config.NeighborIP); err != nil {
+		return err
+	}
 	cs, err := i.internal.AddBGPPeer(ctx, node.DirectBGPPeerConfig{
 		NeighborIP:  config.NeighborIP,
 		RemoteAS:    config.RemoteAS,
@@ -95,6 +127,9 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 // RemoveBGPPeer removes a direct BGP peer from this interface.
 // The neighbor IP is read from the intent record.
 func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
+	if err := i.gate(ctx, auth.PermVRFModify, ""); err != nil {
+		return err
+	}
 	cs, err := i.internal.RemoveBGPPeer(ctx)
 	if err != nil {
 		return err
@@ -106,6 +141,9 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
 // ConfigureInterface sets forwarding mode on an interface. Routed mode (VRF+IP)
 // and bridged mode (VLAN membership) are mutually exclusive.
 func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) error {
+	if err := i.gate(ctx, auth.PermInterfaceModify, ""); err != nil {
+		return err
+	}
 	cs, err := i.internal.ConfigureInterface(ctx, node.InterfaceConfig{
 		VRF: cfg.VRF, IP: cfg.IP, VLAN: cfg.VLAN, Tagged: cfg.Tagged,
 	})
@@ -119,6 +157,9 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 // UnconfigureInterface reverses ConfigureInterface. Reads the intent record to
 // determine what was configured, then undoes it. No parameters needed.
 func (i *Interface) UnconfigureInterface(ctx context.Context) error {
+	if err := i.gate(ctx, auth.PermInterfaceModify, ""); err != nil {
+		return err
+	}
 	cs, err := i.internal.UnconfigureInterface(ctx)
 	if err != nil {
 		return err
@@ -130,6 +171,9 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) error {
 // SetProperty sets a property on this interface.
 // Supported properties: mtu, speed, admin-status, description.
 func (i *Interface) SetProperty(ctx context.Context, property, value string) error {
+	if err := i.gate(ctx, auth.PermInterfaceModify, property); err != nil {
+		return err
+	}
 	cs, err := i.internal.SetProperty(ctx, property, value)
 	if err != nil {
 		return err
@@ -141,6 +185,9 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) err
 // ClearProperty removes a property override from this interface,
 // reverting the field to its default and deleting the property intent.
 func (i *Interface) ClearProperty(ctx context.Context, property string) error {
+	if err := i.gate(ctx, auth.PermInterfaceModify, property); err != nil {
+		return err
+	}
 	cs, err := i.internal.ClearProperty(ctx, property)
 	if err != nil {
 		return err
@@ -152,6 +199,9 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) error {
 // ApplyQoS applies a QoS policy to this interface.
 // Resolves the QoS policy spec by name from the node's SpecProvider.
 func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
+	if err := i.gate(ctx, auth.PermQoSModify, policy); err != nil {
+		return err
+	}
 	policy = util.NormalizeName(policy)
 	policyDef, err := i.node.internal.GetQoSPolicy(policy)
 	if err != nil {
@@ -167,6 +217,9 @@ func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
 
 // RemoveQoS removes QoS configuration from this interface.
 func (i *Interface) RemoveQoS(ctx context.Context) error {
+	if err := i.gate(ctx, auth.PermQoSModify, ""); err != nil {
+		return err
+	}
 	cs, err := i.internal.RemoveQoS(ctx)
 	if err != nil {
 		return err

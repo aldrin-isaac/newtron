@@ -95,6 +95,9 @@ var ErrAlreadyInitialized = errors.New("device already initialized")
 var ErrActiveConfiguration = errors.New("device has active BGP configuration; use --force to proceed (this will restart bgp, drop all sessions, and replace frr.conf — any vtysh-only config not in CONFIG_DB will be lost)")
 
 func (net *Network) InitDevice(ctx context.Context, device string, force bool) error {
+	if err := net.checkPermission(ctx, auth.PermDeviceWrite, auth.NewContext().WithDevice(device)); err != nil {
+		return err
+	}
 	dev, err := net.internal.ConnectNodeForSetup(ctx, device)
 	if err != nil {
 		return fmt.Errorf("connecting to %s: %w", device, err)
@@ -177,7 +180,10 @@ func (net *Network) GetTopology() *spec.TopologySpecFile {
 // AddTopologyDevice adds a device entry to topology.json. Returns
 // *ConflictError when a device with this name already exists. The matching
 // profile file must already exist. Persists atomically. §7 + §15 + §27 + §46.
-func (net *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) error {
+func (net *Network) AddTopologyDevice(ctx context.Context, name string, device *spec.TopologyDevice) error {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		return err
+	}
 	return translateInternalError(net.internal.AddTopologyDevice(name, device))
 }
 
@@ -185,14 +191,20 @@ func (net *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) 
 // *ConflictError when any link still references the device, unless force=true.
 // With force=true, cascade-deletes the referring links before removing the
 // device. Persists atomically. §15 (cascade is explicit).
-func (net *Network) DeleteTopologyDevice(name string, force bool) error {
+func (net *Network) DeleteTopologyDevice(ctx context.Context, name string, force bool) error {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		return err
+	}
 	return translateInternalError(net.internal.DeleteTopologyDevice(name, force))
 }
 
 // UpdateTopologyDevice replaces the device entry at name with the given
 // TopologyDevice (full-replacement semantics; no partial patch). Returns
 // *NotFoundError when name doesn't exist.
-func (net *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice) error {
+func (net *Network) UpdateTopologyDevice(ctx context.Context, name string, device *spec.TopologyDevice) error {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		return err
+	}
 	return translateInternalError(net.internal.UpdateTopologyDevice(name, device))
 }
 
@@ -200,7 +212,10 @@ func (net *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevic
 // either endpoint is already wired to another link (a port participates in
 // at most one link). Validates that both endpoint devices exist in topology
 // AND that each interface is declared on its device's Ports map.
-func (net *Network) AddTopologyLink(link *spec.TopologyLink) error {
+func (net *Network) AddTopologyLink(ctx context.Context, link *spec.TopologyLink) error {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext()); err != nil {
+		return err
+	}
 	return translateInternalError(net.internal.AddTopologyLink(link))
 }
 
@@ -209,7 +224,10 @@ func (net *Network) AddTopologyLink(link *spec.TopologyLink) error {
 // a port participates in at most one link, so one endpoint uniquely
 // identifies the link. Returns *NotFoundError when no link contains the
 // endpoint.
-func (net *Network) DeleteTopologyLink(endpoint string) error {
+func (net *Network) DeleteTopologyLink(ctx context.Context, endpoint string) error {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(endpoint)); err != nil {
+		return err
+	}
 	return translateInternalError(net.internal.DeleteTopologyLink(endpoint))
 }
 

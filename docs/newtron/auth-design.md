@@ -113,9 +113,9 @@ Deployments adopt layers at their own pace. Specifically:
   `ReloadNetwork`; default `false` means `checkPermission` stays a
   no-op even though identity from L1/L2 is populated.
 - **L4 coverage checks:** controlled by the same
-  `--enforce-authorization` toggle as L3 — once L4 lands, every
-  mutation has a check, but checks are bypassed uniformly when
-  enforcement is off.
+  `--enforce-authorization` toggle as L3. Every mutation has a
+  check (verified by `TestAPICompleteness`); checks are bypassed
+  uniformly when enforcement is off.
 - **L5 fine-grained grants:** dictated by spec format. Old
   shorthand keeps working (it's syntactic sugar for the richer
   form); operators opt into per-resource grants by writing them.
@@ -444,9 +444,10 @@ spec/profile mutation methods so the verified caller travels from
 `pkg/newtron/api/authorization_test.go`. New operational HOWTO
 `docs/newtron/authorization-howto.md`.
 
-**Independent value.** Spec-authoring grants are real. The existing
-26 call sites stop lying. Node-level operations remain ungated for
-now — that's L4's job — but the existing coverage is honest.
+**Independent value.** Spec-authoring grants are real. The
+spec-mutation call sites stop lying. Node and Interface operations
+land in L4 (the next layer); the L3 coverage is honest about its
+scope.
 
 ### L4 — Coverage Closure (Every Mutation Gated)
 
@@ -457,12 +458,16 @@ has a `checkPermission` call before any state change. The
 named permission, OR in `unauthorizedExcept` with a documented reason
 (e.g., `RestartService` is operational, not authorization-gated)."
 
-Node-level write operations get a new permission family:
-`device.write` (broad, catches everything new by default) plus
-finer-grained constants for operations where reviewers want
-distinction (e.g., `device.write.dataplane`, `device.write.runtime`).
-The 15 unused Permission constants get pruned where they don't fit
-the new coverage rules; replacements get added where they do.
+Node-level write operations gate on the verb-family permissions
+already defined for the L3 constants (`vlan.create`, `vrf.modify`,
+`lag.delete`, etc.) — what were "15 unused constants" before L4
+became the spec vocabulary for the per-device verbs. L4 adds three
+new constants: `acl.create` and `acl.delete` for symmetry with the
+create/delete pattern (the pre-L4 family had only `acl.modify`),
+and `device.write` as the catch-all for operational mutations
+(`setup-device`, `init-device`, `config-reload`, `restart-service`,
+`exec-command`, `save`, `reconcile`) whose verb is a device-state
+operation rather than a config-table mutation.
 
 **Audit criterion met when this layer lands.** "Can any unauthorized
 caller mutate any state?" → no. A reviewer can answer by reading the
@@ -651,12 +656,17 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   decisions, and the verification source (from L1/L2) is recorded
   alongside the caller.
 - Every shipped `network.json` has `super_users: null`,
-  `user_groups: null`, `permissions: null`. No operator has authored
-  permission grants because there is nothing to grant.
-- Out of 20 Permission constants, 5 are referenced (in spec/profile
-  authoring); 15 are declared but never used.
-- All three URL-derivable Context dimensions (`Device`, `Service`,
-  `Interface`) have unused setters; only `Resource` is ever populated.
+  `user_groups: null`, `permissions: null`. Operators author grants
+  per their deployment; the shipped fixtures don't ship grants.
+- The Permission constants now have 22 references across spec, profile,
+  topology, Node, and Interface mutations. L4 added `PermACLCreate`,
+  `PermACLDelete`, and `PermDeviceWrite` for symmetry and to cover
+  operational mutations that don't fit a create/modify/delete verb on
+  a domain noun.
+- The URL-derivable Context dimensions (`Device`, `Interface`) are
+  populated as of L4 via the `gate` helpers on Node and Interface;
+  L5 will read them in `where` clauses. `Service` is populated by
+  Interface.ApplyService / RemoveService.
 
 Both L0 deliverables are shipped (this doc + the secret store).
 L1 audit log is shipped. L2a inter-service mTLS is shipped. L2b
@@ -679,12 +689,30 @@ and `ReloadNetwork`. Per-decision audit events
 events in the audit log when both `--enforce-authorization` and
 `--audit-log` are set. Denials surface as HTTP 403 with the typed
 `AuthorizationError` payload on the response `Data` field
-(`Caller`, `Permission`, `Resource`). Coverage stays scoped to the
-26 existing call sites (`spec.author`, `qos.create`, `qos.delete`,
-`filter.create`, `filter.delete` on spec/profile mutations);
-Node-level write operations remain ungated — that's L4's job.
-Test: `TestAuthorizationActuallyEnforces` in
+(`caller`, `permission`, `resource`). Test:
+`TestAuthorizationActuallyEnforces` in
 `pkg/newtron/api/authorization_test.go`.
+
+**L4 coverage closure is shipped.** Every public mutation method
+on `*Network`, `*Node`, and `*Interface` now calls a gate before
+any state-touching code. Network methods call `checkPermission`
+directly; Node methods call `(*Node).gate(ctx, perm, resource)`;
+Interface methods call `(*Interface).gate(ctx, perm, resource)`.
+Both gate helpers populate `auth.Context.Device` (and `Interface`
+on the interface helper) so L5 can later read them in `where`
+clauses. New constants: `PermACLCreate`, `PermACLDelete`,
+`PermDeviceWrite` (the operational catch-all). The five topology-
+mutation methods (`AddTopologyDevice`, `DeleteTopologyDevice`,
+`UpdateTopologyDevice`, `AddTopologyLink`, `DeleteTopologyLink`)
+were L3 gaps that L4 closes — they live in `network.go` not
+`spec_ops.go`, so L3's spec-ops sweep missed them. `TestAPI-
+Completeness` grows a new dimension: every HTTP-exposed method
+must appear in either `authorizedMethods` (with a Permission
+constant) or `readOnlyMethods` (with a documented reason); the
+compiler enforces the permission constant exists, and the test
+enforces classification. Tests:
+`TestAuthorizationL4_NodeMutationsGated` and
+`TestAuthorizationL4_InterfaceMutationsGated`.
 
 The shipped topology specs in `newtrun/topologies/` continue to
 carry plaintext passwords — those 58 instances are operator-
@@ -695,7 +723,7 @@ newtrun/topologies/` still returns plaintexts; the L0 audit
 criterion ("no plaintext in spec dir") is met for any *operator-
 configured* deployment but not for the in-tree test fixtures.
 
-L4–L6 remain proposed; none has shipped.
+L5–L6 remain proposed; neither has shipped.
 
 ---
 

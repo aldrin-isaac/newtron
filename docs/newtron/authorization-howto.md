@@ -17,12 +17,16 @@ is the intended deployment shape.
 
 ## 1. When to use authorization enforcement
 
-Authorization enforcement applies wherever an operator can mutate spec
-state through the HTTP surface (services, profiles, filters, QoS
-policies, route policies, prefix lists, zones). Today's 26 gated call
-sites cover the spec-authoring surface; Node-level write operations
-(creating VLANs, applying services to interfaces) remain ungated —
-that's a future layer (auth-design.md L4).
+Authorization enforcement applies wherever an operator can mutate
+state through newtron's HTTP surface. Coverage as of L4 is full:
+spec mutations (services, profiles, filters, QoS policies, route
+policies, prefix lists, zones), topology mutations (devices, links),
+Node-level operations (VLANs, VRFs, ACLs, port-channels, EVPN
+peers), and Interface-level operations (service apply, ACL bind,
+BGP peers, property set/clear, QoS apply) all gate before any
+state change. Operational mutations like `setup-device`,
+`init-device`, `config-reload`, `restart-service`, `exec-command`,
+`save`, and `reconcile` gate behind the catch-all `device.write`.
 
 | Deployment | Authorization enforcement applies? |
 |---|---|
@@ -47,11 +51,31 @@ top-level keys carry the inputs:
     "ops": ["charlie"]
   },
   "permissions": {
-    "spec.author":   ["spec-team"],
-    "qos.create":    ["spec-team", "ops"],
-    "qos.delete":    ["spec-team"],
-    "filter.create": ["spec-team"],
-    "filter.delete": ["spec-team"]
+    "spec.author":      ["spec-team"],
+    "qos.create":       ["spec-team", "ops"],
+    "qos.delete":       ["spec-team"],
+    "qos.modify":       ["spec-team", "ops"],
+    "filter.create":    ["spec-team"],
+    "filter.delete":    ["spec-team"],
+
+    "vlan.create":      ["ops"],
+    "vlan.modify":      ["ops"],
+    "vlan.delete":      ["ops"],
+    "vrf.create":       ["ops"],
+    "vrf.modify":       ["ops"],
+    "vrf.delete":       ["ops"],
+    "acl.create":       ["ops"],
+    "acl.modify":       ["ops"],
+    "acl.delete":       ["ops"],
+    "lag.create":       ["ops"],
+    "lag.modify":       ["ops"],
+    "lag.delete":       ["ops"],
+    "evpn.modify":      ["ops"],
+    "service.apply":    ["ops"],
+    "service.remove":   ["ops"],
+    "interface.modify": ["ops"],
+
+    "device.write":     ["ops"]
   }
 }
 ```
@@ -68,6 +92,22 @@ top-level keys carry the inputs:
 Service-level overrides live under `services.<name>.permissions`
 and tighten the global grant: an operator must satisfy the more
 restrictive of the two.
+
+**Permission families** (auth-design.md L3 + L4):
+
+| Family | What it gates |
+|---|---|
+| `spec.author` | Service/IPVPN/MACVPN/profile/zone/topology mutations on `network.json` and `topology.json` |
+| `qos.create` / `qos.modify` / `qos.delete` | QoS policy spec + per-interface QoS apply |
+| `filter.create` / `filter.delete` | Filter (ACL spec) authoring |
+| `vlan.create` / `vlan.modify` / `vlan.delete` | Per-device VLAN + IRB configuration |
+| `vrf.create` / `vrf.modify` / `vrf.delete` | Per-device VRF + IPVPN bind/unbind + static routes + per-interface BGP peers |
+| `acl.create` / `acl.modify` / `acl.delete` | Per-device ACL CRUD + per-interface ACL bind/unbind |
+| `lag.create` / `lag.modify` / `lag.delete` | PortChannel CRUD + member add/remove |
+| `evpn.modify` | EVPN BGP peers + MACVPN bind/unbind |
+| `service.apply` / `service.remove` | Per-interface service application |
+| `interface.modify` | Per-interface property set/clear, configure/unconfigure |
+| `device.write` | Operational mutations: `setup-device`, `init-device`, `config-reload`, `restart-service`, `exec-command`, `save`, `reconcile` |
 
 ## 3. Enable enforcement
 

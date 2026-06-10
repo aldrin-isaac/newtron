@@ -351,7 +351,7 @@ func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "name and device required"})
 		return
 	}
-	if err := ne.net.AddTopologyDevice(req.Name, req.Device); err != nil {
+	if err := ne.net.AddTopologyDevice(r.Context(), req.Name, req.Device); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -370,7 +370,7 @@ func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request
 	}
 	name := r.PathValue("name")
 	force := r.URL.Query().Get("force") == "true"
-	if err := ne.net.DeleteTopologyDevice(name, force); err != nil {
+	if err := ne.net.DeleteTopologyDevice(r.Context(), name, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -393,7 +393,7 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	if err := ne.net.UpdateTopologyDevice(name, &device); err != nil {
+	if err := ne.net.UpdateTopologyDevice(r.Context(), name, &device); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -414,7 +414,7 @@ func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	if err := ne.net.AddTopologyLink(&link); err != nil {
+	if err := ne.net.AddTopologyLink(r.Context(), &link); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -437,7 +437,7 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 		return
 	}
 	endpoint := device + ":" + iface
-	if err := ne.net.DeleteTopologyLink(endpoint); err != nil {
+	if err := ne.net.DeleteTopologyLink(r.Context(), endpoint); err != nil {
 		writeError(w, err)
 		return
 	}
