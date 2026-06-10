@@ -123,14 +123,14 @@ The reload re-resolves references against the new store content.
 Networks not touched by the reload keep their previously-resolved
 values until they're individually reloaded (or the server restarts).
 
-## 6. Threat model — what L0 addresses, what it doesn't
+## 6. Threat model — what the secret store addresses, what it doesn't
 
 **Addressed**:
 
 - *Plaintext passwords in the version-controlled spec directory*.
   The 58 plaintext password instances across shipped topologies were
-  the original L0 motivator; after migration, `grep -r ssh_pass
-  newtrun/topologies/` finds only references.
+  the original motivator for the secret store; after migration,
+  `grep -r ssh_pass newtrun/topologies/` finds only references.
 - *Misconfigured permissions*. `NewFileStore` refuses to open a
   store file with mode broader than 0600. An operator who
   accidentally `chmod 644`s the file gets a startup error instead of
@@ -139,17 +139,17 @@ values until they're individually reloaded (or the server restarts).
   write leaves either the old file or the new file in place — never
   a partial JSON object.
 
-**Not addressed in L0** (separate concerns, separate layers):
+**Not addressed by the secret store** (separate concerns, separate layers):
 
 - *Encryption at rest of the secret file itself*. The shipped
   FileStore writes plaintext. An attacker who can read the file
   (e.g., via backup access, a host compromise) gets the values. A
   future Store implementation (age-encrypted, KMS-backed) plugs into
   the same interface; operators choose at deployment time.
-- *Server-side key rotation tracking*. L0 ships the manual
-  rotate-and-reload flow above. L6 (auth-design.md) will add
-  automatic spec-file watching so rotations propagate without
-  explicit reload.
+- *Server-side key rotation tracking*. The secret store ships the
+  manual rotate-and-reload flow above. A future layer (auth-design.md
+  L6) will add automatic spec-file watching so rotations propagate
+  without explicit reload.
 - *Per-secret authorization*. Anyone with access to the secret store
   file or the operator's CLI can read every secret. Per-secret
   grants (`alice can read switch1-ssh but not switch2-ssh`) are out

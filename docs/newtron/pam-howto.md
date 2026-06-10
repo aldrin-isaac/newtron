@@ -7,31 +7,32 @@ runs the request through HTTP Basic + the host's PAM stack via
 Unix username flows into `audit.Caller` with
 `verification_source: "pam"`. On failure: HTTP 401.
 
-L2b pairs symmetrically with L2a (inter-service mTLS): together they
-close both transport-authentication surfaces. Once both layers are
-active, every request reaching an engine carries a verified
-identity — operator (PAM-verified) or peer engine (cert CN).
+PAM authentication pairs symmetrically with inter-service mTLS
+(auth-design.md L2a): together they close both transport-authentication
+surfaces. Once both layers are active, every request reaching an engine
+carries a verified identity — operator (PAM-verified) or peer engine
+(cert CN).
 
-## 1. When to use L2b
+## 1. When to use PAM authentication
 
-L2b applies whenever an engine accepts TCP requests from operators.
-The composed `newt-server` binary, the three standalone engine
+PAM authentication applies whenever an engine accepts TCP requests from
+operators. The composed `newt-server` binary, the three standalone engine
 binaries, and any topology that exposes a non-loopback listener all
 benefit:
 
-| Listener type | L2b applies? |
+| Listener type | PAM authentication applies? |
 |---|---|
 | Plain TCP (loopback or non-loopback) | **Yes** — without it, any process reaching the listener can act as any user. |
-| Unix socket (L1) | **No** — kernel peer creds already identify the caller; the middleware skips PAM. |
-| mTLS (L2a) | **No** — the verified peer cert CN identifies the caller; the middleware skips PAM. |
+| Unix socket (auth-design.md L1) | **No** — kernel peer creds already identify the caller; the middleware skips PAM. |
+| mTLS (auth-design.md L2a) | **No** — the verified peer cert CN identifies the caller; the middleware skips PAM. |
 
 The middleware skips automatically — no separate configuration
 required. Operators just set `--auth-pam-service=NAME` on the TCP
-side and L2b activates for that surface.
+side and PAM authentication activates for that surface.
 
 **Enable/disable per auth-design.md §2.4:** `--auth-pam-service` defaults
 empty; with no flag set, TCP requests pass through unauthenticated
-(pre-L2b behavior). Set it to a PAM service name to enable.
+(pre-PAM behavior). Set it to a PAM service name to enable.
 
 ## 2. Configure PAM on the host
 
@@ -121,8 +122,8 @@ differently.
 The composed `bin/newt-server` accepts the same flag and applies
 PAM authentication to its single combined TCP listener. There is no
 inter-engine authentication concern there (the engines share one
-process) — L2b on `newt-server` protects external operator traffic
-to the composed listener.
+process) — PAM authentication on `newt-server` protects external
+operator traffic to the composed listener.
 
 ## 4. Verify
 
@@ -155,7 +156,7 @@ authenticated request shows up in the JSON-lines audit log with:
 
 ## 5. Concurrent layers
 
-L2b composes with the other identity sources:
+PAM authentication composes with the other identity sources:
 
 | Listener type for this request | What identifies the caller |
 |---|---|
@@ -169,14 +170,14 @@ creds > PAM > self-attested header. A reviewer reading the audit log
 can always tell which path provided the identity by the
 `verification_source` field.
 
-## 6. Threat model — what L2b addresses, what it doesn't
+## 6. Threat model — what PAM authentication addresses, what it doesn't
 
 **Addressed**:
 
 - *User impersonation on the TCP listener.* Without valid PAM
   credentials, requests are rejected at HTTP 401. The handler never
   runs; the audit log records the rejection if logging is enabled.
-- *Identity attribution for the audit log.* L2b-authenticated
+- *Identity attribution for the audit log.* PAM-authenticated
   requests carry the PAM-verified username in `audit.Caller` — a
   reviewer can answer "who did this?" without trusting any header.
 - *Composability with directory backends.* By delegating to PAM,
@@ -185,23 +186,23 @@ can always tell which path provided the identity by the
   via `pam_unix`, etc.). newtron does not ship a parallel user
   database.
 
-**Not addressed in L2b**:
+**Not addressed by PAM authentication**:
 
-- *Authorization.* L2b verifies who the user is, not what they're
-  allowed to do. L3 enforces the entitlement pattern when
-  `--enforce-authorization` is set — the PAM-verified username flows
-  through `auth.Context.Caller` and the spec-declared grants in
-  `network.json` decide what the user may do. See
+- *Authorization.* PAM authentication verifies who the user is, not
+  what they're allowed to do. Authorization enforcement (auth-design.md
+  L3) runs when `--enforce-authorization` is set — the PAM-verified
+  username flows through `auth.Context.Caller` and the spec-declared
+  grants in `network.json` decide what the user may do. See
   [`authorization-howto.md`](authorization-howto.md).
 - *Brute-force protection.* PAM modules like `pam_faillock` /
   `pam_tally2` provide rate-limiting; newtron does not add an HTTP-
   layer rate limiter. Operators configure that at the PAM level or
   via a fronting reverse proxy.
 - *Password transit security.* HTTP Basic sends credentials base64-
-  encoded but not encrypted. **L2b without TLS is insecure.** Combine
-  with L2a (`--tls-cert`/`--tls-key`/`--tls-ca`) for the listener,
-  OR put a TLS-terminating reverse proxy in front, OR restrict the
-  listener to loopback / VPN / Unix socket.
+  encoded but not encrypted. **PAM authentication without TLS is insecure.**
+  Combine with inter-service mTLS (`--tls-cert`/`--tls-key`/`--tls-ca`)
+  for the listener, OR put a TLS-terminating reverse proxy in front, OR
+  restrict the listener to loopback / VPN / Unix socket.
 - *Session reuse.* Each request goes through `pam_authenticate`
   independently — there's no cookie or token. Suitable for CLI /
   programmatic use; not yet suitable for browser sessions (a future

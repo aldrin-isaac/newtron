@@ -1,27 +1,30 @@
 # Authorization Enforcement — Operational HOWTO
 
-The authorization feature (auth-design.md L3) gates spec-mutation
-endpoints on `newtron-server` and `newt-server` against the
-`permissions` map in `network.json`. With it on, a caller verified
-by L1 (Unix peer creds or self-attested header) or L2 (mTLS cert
-CN, PAM-verified username) must hold the matching grant — otherwise
+The authorization enforcement feature (auth-design.md L3) gates
+spec-mutation endpoints on `newtron-server` and `newt-server` against
+the `permissions` map in `network.json`. With it on, a caller verified
+by identity verification (Unix peer creds or self-attested header for
+audit log identity, or mTLS cert CN / PAM-verified username for
+transport authentication) must hold the matching grant — otherwise
 the engine returns HTTP 403 instead of acting.
 
-L3 sits on top of L1 + L2: L1/L2 answer "who is calling," L3
-answers "may they do this." Without L1/L2 supplying an identity,
-L3 fails closed — every check denies. The two-layer pairing is the
-intended deployment shape.
+Authorization enforcement sits on top of identity verification (audit
+log identity + transport authentication): identity verification answers
+"who is calling," authorization enforcement answers "may they do this."
+Without identity verification supplying an identity, authorization
+enforcement fails closed — every check denies. The two-layer pairing
+is the intended deployment shape.
 
-## 1. When to use L3
+## 1. When to use authorization enforcement
 
-L3 applies wherever an operator can mutate spec state through the
-HTTP surface (services, profiles, filters, QoS policies, route
-policies, prefix lists, zones). Today's 26 gated call sites cover
-the spec-authoring surface; Node-level write operations (creating
-VLANs, applying services to interfaces) remain ungated — that's
-L4.
+Authorization enforcement applies wherever an operator can mutate spec
+state through the HTTP surface (services, profiles, filters, QoS
+policies, route policies, prefix lists, zones). Today's 26 gated call
+sites cover the spec-authoring surface; Node-level write operations
+(creating VLANs, applying services to interfaces) remain ungated —
+that's a future layer (auth-design.md L4).
 
-| Deployment | L3 applies? |
+| Deployment | Authorization enforcement applies? |
 |---|---|
 | Single operator, loopback-only | Optional — the OS already gates who can reach 127.0.0.1. |
 | Multi-operator, shared engine host | **Yes** — distinguishes who may author specs from who may only read. |
@@ -29,7 +32,7 @@ L4.
 
 **Enable/disable per auth-design.md §2.4:** `--enforce-authorization`
 defaults `false`; with no flag set, the 26 `checkPermission` call
-sites are no-ops (pre-L3 behavior). Set it to `true` to enable.
+sites are no-ops (pre-enforcement behavior). Set it to `true` to enable.
 
 ## 2. Author the grants in `network.json`
 
@@ -66,7 +69,7 @@ Service-level overrides live under `services.<name>.permissions`
 and tighten the global grant: an operator must satisfy the more
 restrictive of the two.
 
-## 3. Enable L3
+## 3. Enable enforcement
 
 On `newtron-server` or `newt-server`:
 
@@ -78,11 +81,12 @@ bin/newt-server \
   --enforce-authorization
 ```
 
-The five flags above engage L1 (audit log + header identity) and
-L3 (enforcement). For production deployments add `--unix-socket`,
-`--tls-cert`/`--tls-key`/`--tls-ca` (L2a), and `--auth-pam-service`
-(L2b) so the identity surfaces are verified rather than self-
-attested.
+The five flags above engage the mutation audit log with header identity
+(auth-design.md L1) and authorization enforcement (auth-design.md L3).
+For production deployments add `--unix-socket`,
+`--tls-cert`/`--tls-key`/`--tls-ca` (auth-design.md L2a), and
+`--auth-pam-service` (auth-design.md L2b) so the identity surfaces are
+verified rather than self-attested.
 
 ## 4. Verify
 
@@ -108,7 +112,7 @@ curl -X POST http://127.0.0.1:18080/newtron/v1/networks/default/create-service \
 #  "error":"authorization denied: mallory lacks spec.author on svc-b"}
 ```
 
-A no-identity request (the L1/L2 fallthrough case):
+A no-identity request (no identity surface configured — no Unix socket peer creds, no mTLS cert CN, no PAM, no caller header):
 
 ```sh
 curl -X POST http://127.0.0.1:18080/newtron/v1/networks/default/create-service \
@@ -139,11 +143,11 @@ permission check writes one JSON-line event:
 }
 ```
 
-(The `id` field is currently empty for every audit event — L1 has
-not yet wired ID generation. The other zero-valued fields —
-`device`, `changes`, `execute_mode`, `dry_run`, `duration` — are
-shared shape with L1 request-level events; decision events leave
-them at their zero values.)
+(The `id` field is currently empty for every audit event — the audit
+log implementation has not yet wired ID generation. The other
+zero-valued fields — `device`, `changes`, `execute_mode`, `dry_run`,
+`duration` — are shared shape with request-level audit events;
+decision events leave them at their zero values.)
 
 To filter for just decisions:
 
@@ -152,14 +156,14 @@ grep '"authcheck:' /var/log/newtron-audit.jsonl
 ```
 
 A denial entry has `"success": false` and an `error` field with
-the human-readable reason. The pre-decision L1 event for the same
-request (`Operation: "POST /newtron/v1/networks/.../create-service"`)
+the human-readable reason. The pre-decision request-level audit event
+for the same request (`Operation: "POST /newtron/v1/networks/.../create-service"`)
 appears in the same log file — match them by timestamp + user.
 
 ## 6. Revoking access
 
-Today L3 reads the grant table when `EnableAuthorization` is
-called. To revoke a grant after startup:
+Today the authorization enforcer reads the grant table when
+`EnableAuthorization` is called. To revoke a grant after startup:
 
 1. Edit `network.json` on disk (remove the user from the group, or
    the group from the permission entry).
@@ -168,7 +172,8 @@ called. To revoke a grant after startup:
    `EnableAuthorization` call binds the new grant table.
 
 The window between the file edit and the reload is the revocation
-SLA; L6 adds an automatic file watcher to shrink it.
+SLA; a future layer (auth-design.md L6) adds an automatic file
+watcher to shrink it.
 
 ## 7. Failure modes
 
@@ -176,9 +181,9 @@ SLA; L6 adds an automatic file watcher to shrink it.
 |---|---|---|
 | Every call returns 403 even for super_users | `network.json` has `null` super_users + an empty `permissions` map; nothing matches. | Author at least one grant or a non-empty super_users list. |
 | Same caller works on one engine, gets 403 on another | The engines have different `network.json` files; the spec is per-engine, not global. | Ensure both engines load the same spec dir (or share a registered network ID). |
-| A new service's grants don't take effect | L3 binds the Checker to the live spec at `EnableAuthorization` time. In-process spec mutations are observed through the same pointer, so this should not happen — but `Reload` is the safe path if grants don't engage. | `POST /newtron/v1/networks/<id>/reload`. |
+| A new service's grants don't take effect | The authorization enforcer binds the Checker to the live spec at `EnableAuthorization` time. In-process spec mutations are observed through the same pointer, so this should not happen — but `Reload` is the safe path if grants don't engage. | `POST /newtron/v1/networks/<id>/reload`. |
 | Decision audit entries are missing | `--audit-log` not set. | Add `--audit-log=/path/to/file.jsonl`. |
-| 403 with empty `Caller` in the response data | No identity surface configured: no Unix socket, no mTLS, no PAM, no `--audit-caller-header`. | Engage at least one identity source per the L1/L2 HOWTOs. |
+| 403 with empty `Caller` in the response data | No identity surface configured: no Unix socket, no mTLS, no PAM, no `--audit-caller-header`. | Engage at least one identity source per the audit log / mTLS / PAM HOWTOs. |
 
 ## Related
 

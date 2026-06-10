@@ -16,13 +16,13 @@ cross-process call uses mTLS. The audit log on the receiving side
 records `verification_source: "service_cert_cn"` and the cert's
 Subject CN as the caller identity.
 
-## 1. When to use L2a
+## 1. When to use inter-service mTLS
 
-| Deployment | L2a status |
+| Deployment | mTLS status |
 |---|---|
 | Composed `newt-server` (all engines in one process) | **No-op** — cross-engine calls are in-process Go calls. The same `--tls-cert` flag could secure external traffic to the composed listener, but inter-engine isolation isn't a feature of this layout. |
-| Three standalone binaries on one host, talking via localhost | L2a is **valuable but not strictly required** — localhost-only TCP is hard to MITM. Recommended if the host has other users or services. |
-| Three standalone binaries on separate hosts (multi-host lab) | L2a is **required**. Without it, any process on the network can impersonate any engine. |
+| Three standalone binaries on one host, talking via localhost | mTLS is **valuable but not strictly required** — localhost-only TCP is hard to MITM. Recommended if the host has other users or services. |
+| Three standalone binaries on separate hosts (multi-host lab) | mTLS is **required**. Without it, any process on the network can impersonate any engine. |
 
 ## 2. Flag inventory
 
@@ -52,7 +52,7 @@ all three binaries, every cross-engine call ends up with mTLS.
 
 **Enable/disable per `auth-design.md` §2.4:** all three flags default
 empty. With no flags set, the binaries serve plain HTTP and clients
-dial plain HTTP — the pre-L2a behavior is preserved exactly.
+dial plain HTTP — the pre-mTLS behavior is preserved exactly.
 
 ## 3. Set up a small CA
 
@@ -161,7 +161,7 @@ with:
 }
 ```
 
-## 6. Threat model — what L2a addresses, what it doesn't
+## 6. Threat model — what inter-service mTLS addresses, what it doesn't
 
 **Addressed**:
 
@@ -176,12 +176,12 @@ with:
   caller's verified CN; a reviewer can answer "which engine asked
   for this?" without trusting any header.
 
-**Not addressed in L2a**:
+**Not addressed by inter-service mTLS**:
 
-- *Authorization.* L2a verifies who the caller is, not what they're
-  allowed to do. L3 enforces the entitlement pattern when
-  `--enforce-authorization` is set — the verified cert CN flows
-  through `auth.Context.Caller` and the spec-declared grants in
+- *Authorization.* Inter-service mTLS verifies who the caller is, not
+  what they're allowed to do. Authorization enforcement (auth-design.md
+  L3) runs when `--enforce-authorization` is set — the verified cert CN
+  flows through `auth.Context.Caller` and the spec-declared grants in
   `network.json` decide what the peer may do. Without
   `--enforce-authorization`, every verified peer can call every
   endpoint. (See [`authorization-howto.md`](authorization-howto.md).)
@@ -191,7 +191,7 @@ with:
   operators bound the blast radius with short cert lifetimes (the
   example above uses 365-day engine certs).
 - *Identity in the composed `newt-server` binary.* Inter-engine calls
-  there are in-process Go function calls, not network calls. L2a
+  there are in-process Go function calls, not network calls. mTLS
   has nothing to enforce; the same flags do nothing useful in that
   topology.
 
