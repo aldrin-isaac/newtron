@@ -11,11 +11,15 @@ import (
 
 func TestContext_Chaining(t *testing.T) {
 	ctx := NewContext().
+		WithCaller("alice").
 		WithDevice("leaf1-ny").
 		WithService("customer-l3").
 		WithInterface("Ethernet0").
 		WithResource("vlan100")
 
+	if ctx.Caller != "alice" {
+		t.Errorf("Caller = %q", ctx.Caller)
+	}
 	if ctx.Device != "leaf1-ny" {
 		t.Errorf("Device = %q", ctx.Device)
 	}
@@ -39,11 +43,11 @@ func createTestNetworkSpec() *spec.NetworkSpecFile {
 			"viewer": {"eve"},
 		},
 		Permissions: map[string][]string{
-			"all":             {"neteng"},
-			"service.apply":   {"neteng", "netops"},
-			"service.remove":  {"neteng", "netops", "viewer"},
-			"vlan.create":     {"neteng"},
-			"device.cleanup":  {"neteng", "netops", "viewer"},
+			"all":            {"neteng"},
+			"service.apply":  {"neteng", "netops"},
+			"service.remove": {"neteng", "netops", "viewer"},
+			"vlan.create":    {"neteng"},
+			"device.cleanup": {"neteng", "netops", "viewer"},
 		},
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
@@ -64,16 +68,22 @@ func createTestNetworkSpec() *spec.NetworkSpecFile {
 	}
 }
 
+// callerCtx returns an auth Context for the given caller. Convenience
+// wrapper so tests read as "alice asking about X" rather than
+// boilerplate Context construction.
+func callerCtx(caller string) *Context {
+	return NewContext().WithCaller(caller)
+}
+
 func TestChecker_SuperUser(t *testing.T) {
 	network := createTestNetworkSpec()
 	checker := NewChecker(network)
-	checker.currentUser = "admin"
 
 	// Superuser should pass all checks
-	if err := checker.Check(PermServiceApply, nil); err != nil {
+	if err := checker.Check(PermServiceApply, callerCtx("admin")); err != nil {
 		t.Errorf("Superuser should be allowed: %v", err)
 	}
-	if !checker.isSuperUser(checker.currentUser) {
+	if !checker.isSuperUser("admin") {
 		t.Error("admin should be superuser")
 	}
 }
@@ -83,26 +93,22 @@ func TestChecker_GlobalPermissions(t *testing.T) {
 	checker := NewChecker(network)
 
 	t.Run("user in allowed group", func(t *testing.T) {
-		checker.currentUser = "alice" // In neteng
-		if err := checker.Check(PermServiceApply, nil); err != nil {
+		if err := checker.Check(PermServiceApply, callerCtx("alice")); err != nil {
 			t.Errorf("alice (neteng) should have service.apply: %v", err)
 		}
 	})
 
 	t.Run("user with 'all' permission", func(t *testing.T) {
-		checker.currentUser = "bob" // In neteng which has 'all'
-		if err := checker.Check(PermVLANCreate, nil); err != nil {
+		if err := checker.Check(PermVLANCreate, callerCtx("bob")); err != nil {
 			t.Errorf("bob (neteng with 'all') should have vlan.create: %v", err)
 		}
 	})
 
 	t.Run("user without permission", func(t *testing.T) {
-		checker.currentUser = "eve" // In viewer only
-		if err := checker.Check(PermServiceApply, nil); err == nil {
+		if err := checker.Check(PermServiceApply, callerCtx("eve")); err == nil {
 			t.Error("eve (viewer) should not have service.apply")
 		}
 	})
-
 }
 
 func TestChecker_ServicePermissions(t *testing.T) {
@@ -110,29 +116,21 @@ func TestChecker_ServicePermissions(t *testing.T) {
 	checker := NewChecker(network)
 
 	t.Run("service-specific override", func(t *testing.T) {
-		checker.currentUser = "charlie" // In netops
-		ctx := NewContext().WithService("customer-l3")
-
-		// charlie should have service.apply for customer-l3 (service override)
+		ctx := callerCtx("charlie").WithService("customer-l3")
 		if err := checker.Check(PermServiceApply, ctx); err != nil {
 			t.Errorf("charlie should have permission via service override: %v", err)
 		}
 	})
 
 	t.Run("service with 'all' permission", func(t *testing.T) {
-		checker.currentUser = "alice" // In neteng
-		ctx := NewContext().WithService("transit")
-
-		// alice should have any permission on transit (service has 'all' for neteng)
+		ctx := callerCtx("alice").WithService("transit")
 		if err := checker.Check(PermServiceApply, ctx); err != nil {
 			t.Errorf("alice should have permission via service 'all': %v", err)
 		}
 	})
 
 	t.Run("no service permission falls back to global", func(t *testing.T) {
-		checker.currentUser = "diana" // In netops
-		ctx := NewContext().WithService("transit")
-
+		ctx := callerCtx("diana").WithService("transit")
 		// diana is netops, transit has no netops permission, but global does
 		if err := checker.Check(PermServiceApply, ctx); err != nil {
 			t.Errorf("diana should have permission via global fallback: %v", err)
@@ -143,9 +141,8 @@ func TestChecker_ServicePermissions(t *testing.T) {
 func TestChecker_PermissionError(t *testing.T) {
 	network := createTestNetworkSpec()
 	checker := NewChecker(network)
-	checker.currentUser = "eve"
 
-	ctx := NewContext().WithService("customer-l3").WithDevice("leaf1-ny")
+	ctx := callerCtx("eve").WithService("customer-l3").WithDevice("leaf1-ny")
 	err := checker.Check(PermServiceApply, ctx)
 
 	if err == nil {
@@ -183,27 +180,32 @@ func TestChecker_DirectUserPermission(t *testing.T) {
 		},
 	}
 	checker := NewChecker(network)
-	checker.currentUser = "direct-user"
 
-	if err := checker.Check(PermServiceApply, nil); err != nil {
+	if err := checker.Check(PermServiceApply, callerCtx("direct-user")); err != nil {
 		t.Errorf("Direct user permission should work: %v", err)
 	}
 }
 
-func TestChecker_CurrentUser(t *testing.T) {
-	network := createTestNetworkSpec()
-	checker := NewChecker(network)
+// TestChecker_EmptyCallerDenied pins the L3 fail-closed contract:
+// a Check with no Caller (nil context or empty Caller field) is
+// denied even when a permission matches no groups. The HTTP boundary
+// is responsible for populating Caller from a verified identity; the
+// absence of one IS the absence of verified authentication, which
+// must not be allowed to act.
+func TestChecker_EmptyCallerDenied(t *testing.T) {
+	checker := NewChecker(createTestNetworkSpec())
 
-	// Initially should have some username (from os/user)
-	if checker.currentUser == "" {
-		t.Error("currentUser should not be empty after NewChecker")
-	}
+	t.Run("nil context", func(t *testing.T) {
+		if err := checker.Check(PermServiceApply, nil); err == nil {
+			t.Error("nil context should be denied — no Caller means no verified identity")
+		}
+	})
 
-	// After setting currentUser, should reflect the new value
-	checker.currentUser = "test-user"
-	if checker.currentUser != "test-user" {
-		t.Errorf("currentUser = %q, want %q", checker.currentUser, "test-user")
-	}
+	t.Run("empty Caller", func(t *testing.T) {
+		if err := checker.Check(PermServiceApply, NewContext()); err == nil {
+			t.Error("empty Caller should be denied — no Caller means no verified identity")
+		}
+	})
 }
 
 func TestChecker_ServiceWithNilPermissions(t *testing.T) {
@@ -225,10 +227,9 @@ func TestChecker_ServiceWithNilPermissions(t *testing.T) {
 		},
 	}
 	checker := NewChecker(network)
-	checker.currentUser = "alice"
 
 	// Should fall back to global permissions
-	ctx := NewContext().WithService("no-perms-service")
+	ctx := callerCtx("alice").WithService("no-perms-service")
 	if err := checker.Check(PermServiceApply, ctx); err != nil {
 		t.Errorf("Should fall back to global permission: %v", err)
 	}
@@ -241,9 +242,8 @@ func TestChecker_GlobalPermissionNotFound(t *testing.T) {
 		Permissions: map[string][]string{}, // No permissions defined
 	}
 	checker := NewChecker(network)
-	checker.currentUser = "anyone"
 
-	err := checker.Check(PermServiceApply, nil)
+	err := checker.Check(PermServiceApply, callerCtx("anyone"))
 	if err == nil {
 		t.Error("Should be denied when no permissions defined")
 	}
@@ -262,10 +262,9 @@ func TestChecker_GlobalAllPermissionNotGranted(t *testing.T) {
 		},
 	}
 	checker := NewChecker(network)
-	checker.currentUser = "normal-user"
 
 	// normal-user should be denied (not in admins group)
-	err := checker.Check(PermServiceApply, nil)
+	err := checker.Check(PermServiceApply, callerCtx("normal-user"))
 	if err == nil {
 		t.Error("normal-user should not have permission via 'all'")
 	}
@@ -291,9 +290,8 @@ func TestChecker_ServiceAllPermissionNotGranted(t *testing.T) {
 		},
 	}
 	checker := NewChecker(network)
-	checker.currentUser = "normal-user"
 
-	ctx := NewContext().WithService("restricted")
+	ctx := callerCtx("normal-user").WithService("restricted")
 	err := checker.Check(PermServiceApply, ctx)
 	if err == nil {
 		t.Error("normal-user should not have permission via service 'all'")
@@ -353,4 +351,3 @@ func TestPermissionError_ContextVariations(t *testing.T) {
 		}
 	})
 }
-

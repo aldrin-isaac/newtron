@@ -495,7 +495,7 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateService(req, opts); err != nil {
+	if err := ne.net.CreateService(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -515,7 +515,7 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteService(req.Name, opts); err != nil {
+	if err := ne.net.DeleteService(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -533,7 +533,7 @@ func (s *Server) handleCreateIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateIPVPN(req, opts); err != nil {
+	if err := ne.net.CreateIPVPN(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -553,7 +553,7 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteIPVPN(req.Name, opts); err != nil {
+	if err := ne.net.DeleteIPVPN(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -571,7 +571,7 @@ func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateMACVPN(req, opts); err != nil {
+	if err := ne.net.CreateMACVPN(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -591,7 +591,7 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteMACVPN(req.Name, opts); err != nil {
+	if err := ne.net.DeleteMACVPN(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -609,7 +609,7 @@ func (s *Server) handleCreateQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateQoSPolicy(req, opts); err != nil {
+	if err := ne.net.CreateQoSPolicy(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -629,7 +629,7 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteQoSPolicy(req.Name, opts); err != nil {
+	if err := ne.net.DeleteQoSPolicy(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -647,7 +647,7 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.AddQoSQueue(req, opts); err != nil {
+	if err := ne.net.AddQoSQueue(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -668,7 +668,7 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemoveQoSQueue(req.Policy, req.QueueID, opts); err != nil {
+	if err := ne.net.RemoveQoSQueue(r.Context(), req.Policy, req.QueueID, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -686,7 +686,7 @@ func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateFilter(req, opts); err != nil {
+	if err := ne.net.CreateFilter(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -706,7 +706,7 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteFilter(req.Name, opts); err != nil {
+	if err := ne.net.DeleteFilter(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -724,7 +724,7 @@ func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.AddFilterRule(req, opts); err != nil {
+	if err := ne.net.AddFilterRule(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -745,7 +745,7 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemoveFilterRule(req.Filter, req.Sequence, opts); err != nil {
+	if err := ne.net.RemoveFilterRule(r.Context(), req.Filter, req.Sequence, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -781,7 +781,7 @@ func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreatePrefixList(req, opts); err != nil {
+	if err := ne.net.CreatePrefixList(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -801,7 +801,7 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeletePrefixList(req.Name, opts); err != nil {
+	if err := ne.net.DeletePrefixList(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -819,7 +819,7 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.AddPrefixListEntry(req, opts); err != nil {
+	if err := ne.net.AddPrefixListEntry(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -840,7 +840,7 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemovePrefixListEntry(req.PrefixList, req.Prefix, opts); err != nil {
+	if err := ne.net.RemovePrefixListEntry(r.Context(), req.PrefixList, req.Prefix, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -876,7 +876,7 @@ func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateRoutePolicy(req, opts); err != nil {
+	if err := ne.net.CreateRoutePolicy(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -896,7 +896,7 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteRoutePolicy(req.Name, opts); err != nil {
+	if err := ne.net.DeleteRoutePolicy(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -914,7 +914,7 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.AddRoutePolicyRule(req, opts); err != nil {
+	if err := ne.net.AddRoutePolicyRule(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -935,7 +935,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemoveRoutePolicyRule(req.Policy, req.Sequence, opts); err != nil {
+	if err := ne.net.RemoveRoutePolicyRule(r.Context(), req.Policy, req.Sequence, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -980,7 +980,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateProfile(req, opts); err != nil {
+	if err := ne.net.CreateProfile(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -1001,7 +1001,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	force := r.URL.Query().Get("force") == "true"
-	if err := ne.net.DeleteProfile(req.Name, opts, force); err != nil {
+	if err := ne.net.DeleteProfile(r.Context(), req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -1045,7 +1045,7 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateZone(req, opts); err != nil {
+	if err := ne.net.CreateZone(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -1065,7 +1065,7 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteZone(req.Name, opts); err != nil {
+	if err := ne.net.DeleteZone(r.Context(), req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}

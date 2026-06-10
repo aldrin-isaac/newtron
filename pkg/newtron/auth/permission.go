@@ -43,8 +43,18 @@ const (
 	PermFilterDelete Permission = "filter.delete"
 )
 
-// Context provides context for permission checks
+// Context carries the per-decision inputs Checker.Check consumes.
+//
+// Caller is the username the check is being made for. The HTTP path
+// (auth-design.md L3) populates it from the verified identity on the
+// request context — Unix peer creds, mTLS cert CN, or PAM-verified
+// username. CLI in-process callers populate it directly when they
+// engage the checker.
+//
+// Device, Service, Interface, Resource are scoping dimensions the
+// Checker reads against per-service grants and (in L5) where clauses.
 type Context struct {
+	Caller    string
 	Device    string
 	Service   string
 	Interface string
@@ -54,6 +64,16 @@ type Context struct {
 // NewContext creates a new permission context
 func NewContext() *Context {
 	return &Context{}
+}
+
+// WithCaller sets the username the check is being made for. Required
+// for any Check call once Network.EnableAuthorization has been called
+// (auth-design.md L3) — otherwise the check denies. The HTTP boundary
+// populates this from audit.CallerFromContext via
+// Network.checkPermission; direct in-process callers set it themselves.
+func (c *Context) WithCaller(caller string) *Context {
+	c.Caller = caller
+	return c
 }
 
 // WithDevice sets the device context

@@ -1,6 +1,7 @@
 package newtron
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
@@ -26,7 +27,7 @@ func (net *Network) ShowService(name string) (*ServiceDetail, error) {
 }
 
 // CreateService creates a new service definition.
-func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error {
+func (net *Network) CreateService(ctx context.Context, req CreateServiceRequest, opts ExecOpts) error {
 	if req.Type == "" {
 		return &ValidationError{Field: "type", Message: "required"}
 	}
@@ -34,7 +35,7 @@ func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error
 		return fmt.Errorf("service '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -68,12 +69,12 @@ func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error
 }
 
 // DeleteService removes a service definition.
-func (net *Network) DeleteService(name string, opts ExecOpts) error {
+func (net *Network) DeleteService(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetService(name); err != nil {
 		return nil // idempotent: already absent
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -107,12 +108,12 @@ func (net *Network) ShowIPVPN(name string) (*IPVPNDetail, error) {
 }
 
 // CreateIPVPN creates a new IP-VPN definition.
-func (net *Network) CreateIPVPN(req CreateIPVPNRequest, opts ExecOpts) error {
+func (net *Network) CreateIPVPN(ctx context.Context, req CreateIPVPNRequest, opts ExecOpts) error {
 	if req.L3VNI <= 0 {
 		return &ValidationError{Field: "l3vni", Message: "required"}
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -129,12 +130,12 @@ func (net *Network) CreateIPVPN(req CreateIPVPNRequest, opts ExecOpts) error {
 }
 
 // DeleteIPVPN removes an IP-VPN definition.
-func (net *Network) DeleteIPVPN(name string, opts ExecOpts) error {
+func (net *Network) DeleteIPVPN(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetIPVPN(name); err != nil {
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -168,12 +169,12 @@ func (net *Network) ShowMACVPN(name string) (*MACVPNDetail, error) {
 }
 
 // CreateMACVPN creates a new MAC-VPN definition.
-func (net *Network) CreateMACVPN(req CreateMACVPNRequest, opts ExecOpts) error {
+func (net *Network) CreateMACVPN(ctx context.Context, req CreateMACVPNRequest, opts ExecOpts) error {
 	if req.VNI <= 0 {
 		return &ValidationError{Field: "vni", Message: "required"}
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -193,12 +194,12 @@ func (net *Network) CreateMACVPN(req CreateMACVPNRequest, opts ExecOpts) error {
 }
 
 // DeleteMACVPN removes a MAC-VPN definition.
-func (net *Network) DeleteMACVPN(name string, opts ExecOpts) error {
+func (net *Network) DeleteMACVPN(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetMACVPN(name); err != nil {
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -227,12 +228,12 @@ func (net *Network) ShowQoSPolicy(name string) (*QoSPolicyDetail, error) {
 }
 
 // CreateQoSPolicy creates a new QoS policy.
-func (net *Network) CreateQoSPolicy(req CreateQoSPolicyRequest, opts ExecOpts) error {
+func (net *Network) CreateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequest, opts ExecOpts) error {
 	if _, err := net.internal.GetQoSPolicy(req.Name); err == nil {
 		return fmt.Errorf("QoS policy '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermQoSCreate, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermQoSCreate, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -247,12 +248,12 @@ func (net *Network) CreateQoSPolicy(req CreateQoSPolicyRequest, opts ExecOpts) e
 }
 
 // DeleteQoSPolicy removes a QoS policy.
-func (net *Network) DeleteQoSPolicy(name string, opts ExecOpts) error {
+func (net *Network) DeleteQoSPolicy(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetQoSPolicy(name); err != nil {
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermQoSDelete, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermQoSDelete, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -263,12 +264,12 @@ func (net *Network) DeleteQoSPolicy(name string, opts ExecOpts) error {
 }
 
 // AddQoSQueue adds a queue to a QoS policy.
-func (net *Network) AddQoSQueue(req AddQoSQueueRequest, opts ExecOpts) error {
+func (net *Network) AddQoSQueue(ctx context.Context, req AddQoSQueueRequest, opts ExecOpts) error {
 	if req.QueueID < 0 || req.QueueID > 7 {
 		return &ValidationError{Field: "queue_id", Message: "must be 0-7"}
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Policy)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Policy)); err != nil {
 			return err
 		}
 	}
@@ -295,9 +296,9 @@ func (net *Network) AddQoSQueue(req AddQoSQueueRequest, opts ExecOpts) error {
 }
 
 // RemoveQoSQueue removes a queue from a QoS policy.
-func (net *Network) RemoveQoSQueue(policy string, queueID int, opts ExecOpts) error {
+func (net *Network) RemoveQoSQueue(ctx context.Context, policy string, queueID int, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(policy)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(policy)); err != nil {
 			return err
 		}
 	}
@@ -333,7 +334,7 @@ func (net *Network) ShowFilter(name string) (*FilterDetail, error) {
 }
 
 // CreateFilter creates a new filter template.
-func (net *Network) CreateFilter(req CreateFilterRequest, opts ExecOpts) error {
+func (net *Network) CreateFilter(ctx context.Context, req CreateFilterRequest, opts ExecOpts) error {
 	if req.Type == "" {
 		return &ValidationError{Field: "type", Message: "required (ipv4, ipv6)"}
 	}
@@ -341,7 +342,7 @@ func (net *Network) CreateFilter(req CreateFilterRequest, opts ExecOpts) error {
 		return fmt.Errorf("filter '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermFilterCreate, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermFilterCreate, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -357,12 +358,12 @@ func (net *Network) CreateFilter(req CreateFilterRequest, opts ExecOpts) error {
 }
 
 // DeleteFilter removes a filter template.
-func (net *Network) DeleteFilter(name string, opts ExecOpts) error {
+func (net *Network) DeleteFilter(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetFilter(name); err != nil {
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermFilterDelete, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermFilterDelete, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -373,9 +374,9 @@ func (net *Network) DeleteFilter(name string, opts ExecOpts) error {
 }
 
 // AddFilterRule adds a rule to a filter template.
-func (net *Network) AddFilterRule(req AddFilterRuleRequest, opts ExecOpts) error {
+func (net *Network) AddFilterRule(ctx context.Context, req AddFilterRuleRequest, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Filter)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Filter)); err != nil {
 			return err
 		}
 	}
@@ -408,9 +409,9 @@ func (net *Network) AddFilterRule(req AddFilterRuleRequest, opts ExecOpts) error
 }
 
 // RemoveFilterRule removes a rule from a filter template by sequence number.
-func (net *Network) RemoveFilterRule(filter string, seq int, opts ExecOpts) error {
+func (net *Network) RemoveFilterRule(ctx context.Context, filter string, seq int, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(filter)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(filter)); err != nil {
 			return err
 		}
 	}
@@ -468,12 +469,12 @@ func (net *Network) ShowPrefixList(name string) (*PrefixListDetail, error) {
 }
 
 // CreatePrefixList creates a new prefix list.
-func (net *Network) CreatePrefixList(req CreatePrefixListRequest, opts ExecOpts) error {
+func (net *Network) CreatePrefixList(ctx context.Context, req CreatePrefixListRequest, opts ExecOpts) error {
 	if _, err := net.internal.GetPrefixList(req.Name); err == nil {
 		return fmt.Errorf("prefix list '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -488,12 +489,12 @@ func (net *Network) CreatePrefixList(req CreatePrefixListRequest, opts ExecOpts)
 }
 
 // DeletePrefixList removes a prefix list.
-func (net *Network) DeletePrefixList(name string, opts ExecOpts) error {
+func (net *Network) DeletePrefixList(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetPrefixList(name); err != nil {
 		return nil // idempotent: already absent
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -504,9 +505,9 @@ func (net *Network) DeletePrefixList(name string, opts ExecOpts) error {
 }
 
 // AddPrefixListEntry adds a prefix to a prefix list.
-func (net *Network) AddPrefixListEntry(req AddPrefixListEntryRequest, opts ExecOpts) error {
+func (net *Network) AddPrefixListEntry(ctx context.Context, req AddPrefixListEntryRequest, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.PrefixList)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.PrefixList)); err != nil {
 			return err
 		}
 	}
@@ -526,9 +527,9 @@ func (net *Network) AddPrefixListEntry(req AddPrefixListEntryRequest, opts ExecO
 }
 
 // RemovePrefixListEntry removes a prefix from a prefix list.
-func (net *Network) RemovePrefixListEntry(prefixList, prefix string, opts ExecOpts) error {
+func (net *Network) RemovePrefixListEntry(ctx context.Context, prefixList, prefix string, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(prefixList)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(prefixList)); err != nil {
 			return err
 		}
 	}
@@ -564,12 +565,12 @@ func (net *Network) ShowRoutePolicy(name string) (*RoutePolicyDetail, error) {
 }
 
 // CreateRoutePolicy creates a new route policy.
-func (net *Network) CreateRoutePolicy(req CreateRoutePolicyRequest, opts ExecOpts) error {
+func (net *Network) CreateRoutePolicy(ctx context.Context, req CreateRoutePolicyRequest, opts ExecOpts) error {
 	if _, err := net.internal.GetRoutePolicy(req.Name); err == nil {
 		return fmt.Errorf("route policy '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -584,12 +585,12 @@ func (net *Network) CreateRoutePolicy(req CreateRoutePolicyRequest, opts ExecOpt
 }
 
 // DeleteRoutePolicy removes a route policy.
-func (net *Network) DeleteRoutePolicy(name string, opts ExecOpts) error {
+func (net *Network) DeleteRoutePolicy(ctx context.Context, name string, opts ExecOpts) error {
 	if _, err := net.internal.GetRoutePolicy(name); err != nil {
 		return nil // idempotent: already absent
 	}
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -600,9 +601,9 @@ func (net *Network) DeleteRoutePolicy(name string, opts ExecOpts) error {
 }
 
 // AddRoutePolicyRule adds a rule to a route policy.
-func (net *Network) AddRoutePolicyRule(req AddRoutePolicyRuleRequest, opts ExecOpts) error {
+func (net *Network) AddRoutePolicyRule(ctx context.Context, req AddRoutePolicyRuleRequest, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Policy)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(req.Policy)); err != nil {
 			return err
 		}
 	}
@@ -635,9 +636,9 @@ func (net *Network) AddRoutePolicyRule(req AddRoutePolicyRuleRequest, opts ExecO
 }
 
 // RemoveRoutePolicyRule removes a rule from a route policy by sequence number.
-func (net *Network) RemoveRoutePolicyRule(policy string, seq int, opts ExecOpts) error {
+func (net *Network) RemoveRoutePolicyRule(ctx context.Context, policy string, seq int, opts ExecOpts) error {
 	if opts.Execute {
-		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(policy)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithResource(policy)); err != nil {
 			return err
 		}
 	}

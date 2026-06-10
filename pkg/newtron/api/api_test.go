@@ -216,7 +216,7 @@ func TestAPICompleteness(t *testing.T) {
 	// excludedMethods lists methods intentionally NOT exposed via HTTP.
 	excludedMethods := map[string]map[string]string{
 		"Network": {
-			"SetAuth":               "server-internal initialization (auth not yet enabled)",
+			"EnableAuthorization":   "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
 			"BuildEmptyTopologyNode": "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"BuildTopologyNode":      "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"InitFromDeviceIntent":   "intent mode initialization — invoked by NodeActor.ensureActuatedIntent",
@@ -878,7 +878,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	}
 
 	// Refuses without force.
-	err = net.DeleteProfile("switch2", newtron.ExecOpts{Execute: true}, false)
+	err = net.DeleteProfile(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, false)
 	if err == nil {
 		t.Fatal("expected conflict on profile-delete-with-topology-device, got nil")
 	}
@@ -888,7 +888,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	}
 
 	// Force cascade.
-	if err := net.DeleteProfile("switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
+	if err := net.DeleteProfile(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
 		t.Fatalf("force-delete profile: %v", err)
 	}
 	topo := net.GetTopology()
