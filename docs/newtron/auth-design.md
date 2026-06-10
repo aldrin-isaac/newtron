@@ -119,7 +119,7 @@ Deployments adopt layers at their own pace. Specifically:
 - **L5 fine-grained grants:** dictated by spec format. Old
   shorthand keeps working (it's syntactic sugar for the richer
   form); operators opt into per-resource grants by writing them.
-- **L6 revocation + log integrity:** `--watch-spec=true` enables
+- **L6 revocation + log integrity:** `--spec-watch=true` enables
   the file watcher; `--audit-log-integrity=true` enables the hash
   chain. Default `false`.
 

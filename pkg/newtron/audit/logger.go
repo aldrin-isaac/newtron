@@ -108,7 +108,7 @@ func (l *FileLogger) Log(event *Event) error {
 
 	if l.integrity {
 		event.PrevHash = l.lastHash
-		content, err := canonicalEventBytes(event)
+		content, err := marshalCanonical(event)
 		if err != nil {
 			return fmt.Errorf("hashing audit event: %w", err)
 		}

@@ -344,12 +344,18 @@ every subsequent link.
 
 ```sh
 bin/newtron audit verify /var/log/newtron-audit.jsonl
-# verified 18342 entries; chain head = 7c0a2b...
+# verified 18342 entries; chain head = 7c0a2bf9d3e1c5a8...
 
+# After a tamper:
 bin/newtron audit verify /var/log/newtron-audit.jsonl
-# audit chain broken at line 1428: prev_hash mismatch (got "0", expected "f3...")
-# exit code 1
+# audit chain broken at line 1428: id hash mismatch (entry content modified)
+# (exits 1)
 ```
+
+The exact reason depends on the tamper shape: modifying any field of
+an existing entry produces `id hash mismatch (entry content
+modified)`; deleting or inserting an entry produces `prev_hash
+mismatch (got "<hash>", expected "<hash>")`.
 
 The verifier returns:
 

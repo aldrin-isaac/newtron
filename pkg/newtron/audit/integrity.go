@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-// canonicalEventBytes serializes an Event for hashing. The ID field
+// marshalCanonical serializes an Event for hashing. The ID field
 // is zeroed in the copy because it IS the hash; including itself in
 // its own hash would be self-referential. Everything else — including
 // PrevHash — is included so a verifier can reproduce the hash from
@@ -19,7 +19,7 @@ import (
 // emits struct fields in declaration order and map keys in sorted
 // order. Two Events with identical field values produce byte-for-byte
 // identical canonical JSON.
-func canonicalEventBytes(e *Event) ([]byte, error) {
+func marshalCanonical(e *Event) ([]byte, error) {
 	clone := *e
 	clone.ID = ""
 	return json.Marshal(&clone)
@@ -133,7 +133,7 @@ func Verify(path string) (VerifyResult, error) {
 			result.Reason = fmt.Sprintf("prev_hash mismatch (got %q, expected %q)", e.PrevHash, prevHash)
 			return result, nil
 		}
-		content, err := canonicalEventBytes(&e)
+		content, err := marshalCanonical(&e)
 		if err != nil {
 			return VerifyResult{}, fmt.Errorf("line %d: canonical JSON: %w", line, err)
 		}
