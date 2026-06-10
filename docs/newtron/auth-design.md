@@ -166,6 +166,15 @@ criteria a security review must be able to verify:
    (L0 foundation); plaintext exists only in process memory while in
    use. Without this, an attacker who reads the spec directory has
    device-admin access regardless of any later layer's enforcement.
+9. **Meta-authority is separable.** "Who can grant access to others"
+   is its own permission dimension, not collapsed into "who can edit
+   spec files." A service architect can author services without also
+   being able to add themselves to a group; an IAM operator can
+   manage groups and grants without also being able to edit service
+   specs. `super_users` remains the sole bypass — and is itself a
+   gated field, not a global escape hatch for anyone with
+   `spec.author`. (Lands as part of L5's `where` dimension; see §5
+   "Meta-Authorization: Who Can Grant Access.")
 
 The current entitlement pattern (Checker, Permission, Context,
 `network.json` permissions map, groups, superusers) **is the destination
@@ -484,20 +493,72 @@ existing specs keep working. This is the only place a "compat shim"
 exists in the auth subsystem; it's load-bearing because the shorthand
 is the obviously-right form for "no constraints needed."
 
+#### Meta-Authorization: Who Can Grant Access
+
+Before L5, "who can grant access to others" is implicit and coarse:
+
+- `super_users` bypass all checks, including any check that would
+  guard changes to the permissions map itself.
+- `spec.author` is the only gate on spec mutation. Because
+  `network.json` is a spec file, and the `permissions` /
+  `user_groups` / `super_users` fields live inside it, anyone with
+  `spec.author` can edit who else has access.
+
+This collapses two distinct responsibilities — **service architect**
+(writes services, profiles, topology) and **IAM operator** (decides
+who's in which group, who has what permission) — into one role.
+Acceptable for a small trusted team; not acceptable for a deployment
+with separate security ownership.
+
+L5's `where` clauses absorb this dimension cleanly. The spec-field
+constraint is one more case in the matcher, not a new permission
+constant:
+
+```json
+{
+  "permissions": {
+    "spec.author": [
+      { "groups": ["service-architects"],
+        "where": { "field": "!permissions,!user_groups,!super_users" } },
+      { "groups": ["iam-team"],
+        "where": { "field": "permissions,user_groups" } }
+    ]
+  }
+}
+```
+
+`super_users` continues to bypass everything — by design — and is
+itself protected by the same `where: { field: "super_users" }`
+clause. The bootstrap path remains "edit `network.json` on disk and
+restart"; once running, only configured grantees can change the
+grant table.
+
+If meta-authority separation is needed before L5 ships, the smallest
+intermediate is splitting `spec.author` into `spec.author.permissions`
+and `spec.author.everything-else` — two new constants and one
+refactor pass on the spec-mutation handlers. The full L5 dimension
+model is strictly more expressive.
+
 **Audit criterion met when this layer lands.** "Can alice modify
 VLANs only on edge switches?" → yes, expressible in `network.json`,
-enforced at runtime, audited on every decision.
+enforced at runtime, audited on every decision. "Can bob manage who
+has access without also being able to edit service specs?" → yes,
+via the `field` dimension on `spec.author`.
 
 **Dependencies.** L0–L4.
 
 **Scope of changes.** Spec type for permission entries (struct or
 union for old/new form). Loader migration handling. Checker evaluation
-of `where` clauses. Handler-side population of Context dimensions
-(handlers know device from URL path). Audit log records the populated
-context dimensions in every decision entry.
+of `where` clauses, including the `field` dimension for meta-auth.
+Handler-side population of Context dimensions (handlers know device
+from URL path; spec-mutation handlers know the field path being
+written). Audit log records the populated context dimensions in every
+decision entry.
 
-**Independent value.** Real role separation. Least-privilege is
-expressible without forking spec files per role.
+**Independent value.** Real role separation along two axes:
+operational scope (which devices/services) and authority scope (who
+can grant). Least-privilege is expressible without forking spec
+files per role.
 
 ### L6 — Operational Hardening (Revocation + Audit Log Integrity)
 
