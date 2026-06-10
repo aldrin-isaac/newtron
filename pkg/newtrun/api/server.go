@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -45,6 +46,12 @@ type Config struct {
 
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
+
+	// TLSConfig enables inter-service mTLS on the TCP listener
+	// (auth-design.md L2a). Build with httputil.LoadServerTLSConfig
+	// from the operator's --tls-cert / --tls-key / --client-ca flags.
+	// nil keeps the default plain-HTTP listener — the disabled state.
+	TLSConfig *tls.Config
 }
 
 // Server is the newtrun HTTP server. The HTTP listener lifecycle
@@ -82,6 +89,7 @@ func NewServer(cfg Config) *Server {
 		httputil.ServerLabel("newtrun-server"),
 		// SSE-friendly: no per-request write deadline.
 		httputil.WriteTimeout(0),
+		httputil.TLSConfig(cfg.TLSConfig),
 		httputil.OnShutdown(func() {
 			s.registry.CancelAll(5 * time.Second)
 		}),

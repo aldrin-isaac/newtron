@@ -5,6 +5,7 @@ package client
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,14 +55,37 @@ func (e *AlreadyRegisteredError) Error() string {
 	)
 }
 
-// New creates a new Client.
-func New(baseURL, networkID string) *Client {
-	return &Client{
+// New creates a new Client. Functional options configure transport-
+// level concerns (TLS for L2a inter-service mTLS, etc.) without
+// changing the signature for the common case.
+func New(baseURL, networkID string, opts ...Option) *Client {
+	c := &Client{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		networkID: networkID,
 		httpClient: &http.Client{
 			Timeout: 6 * time.Minute, // slightly above server's 5min write timeout
 		},
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// Option configures a Client at construction.
+type Option func(*Client)
+
+// WithTLS attaches a *tls.Config to the client's HTTP transport
+// (auth-design.md L2a). When tlsCfg is nil the client stays on plain
+// HTTP — the disabled state. Build the config with
+// httputil.LoadClientTLSConfig from the operator's --tls-cert /
+// --tls-key / --tls-ca flags.
+func WithTLS(tlsCfg *tls.Config) Option {
+	return func(c *Client) {
+		if tlsCfg == nil {
+			return
+		}
+		c.httpClient.Transport = &http.Transport{TLSClientConfig: tlsCfg}
 	}
 }
 

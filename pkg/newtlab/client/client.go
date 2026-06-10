@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,13 +45,35 @@ func (e *ServerError) Error() string {
 }
 
 // New constructs a Client targeting newtlab-server at baseURL
-// (e.g., "http://127.0.0.1:18080").
-func New(baseURL string) *Client {
-	return &Client{
+// (e.g., "http://127.0.0.1:18080"). Functional options configure
+// transport-level concerns (TLS for L2a inter-service mTLS, etc.)
+// without changing the signature for the common case.
+func New(baseURL string, opts ...Option) *Client {
+	c := &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// Option configures a Client at construction.
+type Option func(*Client)
+
+// WithTLS attaches a *tls.Config to the client's HTTP transport
+// (auth-design.md L2a). nil tlsCfg keeps the default plain-HTTP
+// transport — the disabled state. Build the config with
+// httputil.LoadClientTLSConfig.
+func WithTLS(tlsCfg *tls.Config) Option {
+	return func(c *Client) {
+		if tlsCfg == nil {
+			return
+		}
+		c.httpClient.Transport = &http.Transport{TLSClientConfig: tlsCfg}
 	}
 }
 
