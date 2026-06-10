@@ -10,6 +10,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
 var auditCmd = &cobra.Command{
@@ -98,6 +99,48 @@ var auditListCmd = &cobra.Command{
 	},
 }
 
+// auditVerifyCmd verifies the hash chain on an audit log file
+// (auth-design.md L6). The operator runs it periodically (cron or
+// after a suspected intrusion) to detect entries that were inserted,
+// removed, reordered, or modified after the fact.
+//
+// Exit codes:
+//   0   chain verified clean (or file missing — nothing to tamper)
+//   1   tamper detected; the breakpoint is printed to stderr
+//   2   I/O or argument error
+var auditVerifyCmd = &cobra.Command{
+	Use:   "verify [path]",
+	Short: "Verify the hash chain on an audit log",
+	Long: `Walk a JSON-lines audit log written with --audit-log-integrity
+and confirm each entry's PrevHash matches the running chain head and
+each entry's ID reproduces SHA256(prev_hash || canonical_json).
+
+Exit 0 = chain clean. Exit 1 = tamper detected; line number printed
+to stderr. Exit 2 = I/O or argument error.
+
+If no path is provided, the configured audit log path is used.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path := app.settings.GetAuditLogPath(app.specDir)
+		if len(args) == 1 {
+			path = args[0]
+		}
+		result, err := audit.Verify(path)
+		if err != nil {
+			return fmt.Errorf("verifying %s: %w", path, err)
+		}
+		if result.BrokenAt > 0 {
+			fmt.Fprintf(os.Stderr, "audit chain broken at line %d: %s\n", result.BrokenAt, result.Reason)
+			os.Exit(1)
+		}
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(result)
+		}
+		fmt.Printf("verified %d entries; chain head = %s\n", result.Entries, result.Head)
+		return nil
+	},
+}
+
 func init() {
 	auditListCmd.Flags().StringVar(&auditDevice, "device", "", "Filter by device")
 	auditListCmd.Flags().StringVar(&auditUser, "user", "", "Filter by user")
@@ -105,5 +148,5 @@ func init() {
 	auditListCmd.Flags().IntVar(&auditLimit, "limit", 100, "Maximum events to show")
 	auditListCmd.Flags().BoolVar(&auditFailures, "failures", false, "Show only failed operations")
 
-	auditCmd.AddCommand(auditListCmd)
+	auditCmd.AddCommand(auditListCmd, auditVerifyCmd)
 }

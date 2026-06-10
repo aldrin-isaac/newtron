@@ -43,9 +43,17 @@ const (
 	VerificationServiceCertCN VerificationSource = "service_cert_cn"
 )
 
-// Event represents an auditable configuration change event
+// Event represents an auditable configuration change event.
+//
+// ID is empty by default. With audit-design.md L6 hash-chain
+// integrity enabled, ID is populated by FileLogger.Log with
+// SHA256(prev_hash || canonical_json_of_event_with_empty_id).
+// PrevHash carries the previous entry's ID so a verifier can walk
+// the chain and detect any tampered entry — the first broken hash
+// reveals the position of the alteration.
 type Event struct {
 	ID                 string             `json:"id"`
+	PrevHash           string             `json:"prev_hash,omitempty"`
 	Timestamp          time.Time          `json:"timestamp"`
 	User               string             `json:"user"`
 	VerificationSource VerificationSource `json:"verification_source,omitempty"`

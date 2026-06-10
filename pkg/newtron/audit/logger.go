@@ -23,11 +23,13 @@ type Logger interface {
 
 // FileLogger logs audit events to a JSON-lines file
 type FileLogger struct {
-	path     string
-	file     *os.File
-	encoder  *json.Encoder
-	mu       sync.RWMutex
-	rotation RotationConfig
+	path      string
+	file      *os.File
+	encoder   *json.Encoder
+	mu        sync.RWMutex
+	rotation  RotationConfig
+	integrity bool
+	lastHash  string
 }
 
 // RotationConfig configures log file rotation
@@ -38,6 +40,24 @@ type RotationConfig struct {
 
 // NewFileLogger creates a new file-based audit logger
 func NewFileLogger(path string, rotation RotationConfig) (*FileLogger, error) {
+	return newFileLogger(path, rotation, false)
+}
+
+// NewFileLoggerWithIntegrity creates a file-based audit logger with
+// hash-chain integrity (auth-design.md L6). Each event's ID is set
+// to SHA256(prev_hash || canonical_json_of_event) before append;
+// PrevHash links to the previous entry. Operators run audit.Verify
+// on the file periodically to detect tampering.
+//
+// On startup, the chain head is recovered from the file's last
+// well-formed entry's ID. The chain therefore continues across
+// server restarts — operators see one verifiable chain end to end
+// over multiple lifecycles.
+func NewFileLoggerWithIntegrity(path string, rotation RotationConfig) (*FileLogger, error) {
+	return newFileLogger(path, rotation, true)
+}
+
+func newFileLogger(path string, rotation RotationConfig, integrity bool) (*FileLogger, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("creating audit log directory: %w", err)
@@ -48,15 +68,29 @@ func NewFileLogger(path string, rotation RotationConfig) (*FileLogger, error) {
 		return nil, fmt.Errorf("opening audit log: %w", err)
 	}
 
-	return &FileLogger{
-		path:     path,
-		file:     file,
-		encoder:  json.NewEncoder(file),
-		rotation: rotation,
-	}, nil
+	l := &FileLogger{
+		path:      path,
+		file:      file,
+		encoder:   json.NewEncoder(file),
+		rotation:  rotation,
+		integrity: integrity,
+	}
+	if integrity {
+		head, err := readChainHead(path)
+		if err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("recovering audit chain head: %w", err)
+		}
+		l.lastHash = head
+	}
+	return l, nil
 }
 
-// Log writes an audit event to the log file
+// Log writes an audit event to the log file. When integrity is on
+// (auth-design.md L6), Log populates event.PrevHash with the running
+// chain head and event.ID with SHA256(prev_hash || canonical JSON
+// of the event) before append; the chain head advances so the next
+// entry links to this one.
 func (l *FileLogger) Log(event *Event) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -70,6 +104,16 @@ func (l *FileLogger) Log(event *Event) error {
 				}
 			}
 		}
+	}
+
+	if l.integrity {
+		event.PrevHash = l.lastHash
+		content, err := canonicalEventBytes(event)
+		if err != nil {
+			return fmt.Errorf("hashing audit event: %w", err)
+		}
+		event.ID = computeEventHash(l.lastHash, content)
+		l.lastHash = event.ID
 	}
 
 	return l.encoder.Encode(event)
@@ -230,7 +274,7 @@ func (l *FileLogger) cleanupOldFiles() {
 
 		// Remove oldest files
 		toRemove := len(files) - l.rotation.MaxBackups
-		for i := 0; i < toRemove; i++ {
+		for i := range toRemove {
 			if err := os.Remove(files[i].path); err != nil {
 				util.Logger.Warnf("audit: failed to remove old log file %s: %v", files[i].path, err)
 			}

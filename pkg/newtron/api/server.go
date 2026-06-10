@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
@@ -77,6 +79,12 @@ type Server struct {
 	// EnableAuthorization on every RegisterNetwork / ReloadNetwork
 	// path. false → checkPermission stays inert; pre-L3 behavior.
 	enforceAuthorization bool
+
+	// watcher is the auth-design.md L6 revocation watcher. nil when
+	// cfg.SpecWatch is false. When set, RegisterNetwork adds the
+	// spec dir; UnregisterNetwork removes it; on settled spec-file
+	// changes the watcher calls back into ReloadNetwork.
+	watcher *netpkg.SpecWatcher
 }
 
 
@@ -163,6 +171,16 @@ type Config struct {
 	// contract. Composed in from --enforce-authorization on
 	// cmd/newtron-server.
 	EnforceAuthorization bool
+
+	// SpecWatch enables the auth-design.md L6 revocation watcher.
+	// When true, the server installs an fsnotify-backed watcher
+	// on every RegisterNetwork's specDir; on settled file changes
+	// (1s debounce) it invokes ReloadNetwork for the affected
+	// network. Removing a grant from network.json then takes
+	// effect within the debounce window without an explicit
+	// /reload call. When false (default), the operator must POST
+	// /reload to make a spec change observable.
+	SpecWatch bool
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -188,6 +206,16 @@ func NewServer(cfg Config) *Server {
 		authenticator:        cfg.Authenticator,
 		enforceAuthorization: cfg.EnforceAuthorization,
 	}
+	if cfg.SpecWatch {
+		w, err := netpkg.NewSpecWatcher(logger, 0, func(id string) error {
+			return s.ReloadNetwork(id)
+		})
+		if err != nil {
+			logger.Printf("spec-watcher: disabled (init failed): %v", err)
+		} else {
+			s.watcher = w
+		}
+	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),
 		// newtron handlers can do long device-facing operations; a
@@ -197,6 +225,9 @@ func NewServer(cfg Config) *Server {
 		httputil.UnixSocketPath(cfg.UnixSocketPath),
 		httputil.TLSConfig(cfg.TLSConfig),
 		httputil.OnShutdown(func() {
+			if s.watcher != nil {
+				s.watcher.Stop()
+			}
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			for _, entity := range s.networks {
@@ -205,6 +236,9 @@ func NewServer(cfg Config) *Server {
 			s.networks = make(map[string]*networkEntity)
 		}),
 	)
+	if s.watcher != nil {
+		s.watcher.Start(context.Background())
+	}
 	return s
 }
 
@@ -236,6 +270,11 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 
 	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout)
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
+	if s.watcher != nil {
+		if err := s.watcher.Add(specDir, id); err != nil {
+			s.logger.Printf("spec-watcher: cannot watch %s for network '%s': %v", specDir, id, err)
+		}
+	}
 	return nil
 }
 
@@ -267,6 +306,9 @@ func (s *Server) UnregisterNetwork(id string) error {
 
 	entity.stop()
 	delete(s.networks, id)
+	if s.watcher != nil {
+		_ = s.watcher.Remove(entity.specDir)
+	}
 	s.logger.Printf("unregistered network '%s'", id)
 	return nil
 }

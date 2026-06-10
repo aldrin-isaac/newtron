@@ -59,6 +59,8 @@ func main() {
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution. (auth-design.md L0)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime for the newtron engine; denials surface as HTTP 403. Off (default) preserves pre-enforcement behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made. (auth-design.md L3)")
+	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
+	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -82,12 +84,21 @@ func main() {
 	// auth-design.md L1: install the audit logger when --audit-log
 	// is set. The audit middleware in pkg/newtron/api/ reads via
 	// audit.Log; an unset logger makes Log a silent no-op.
+	// auth-design.md L6: --audit-log-integrity engages the hash chain.
 	if *auditLog != "" {
-		al, err := audit.NewFileLogger(*auditLog, audit.RotationConfig{})
+		var al *audit.FileLogger
+		var err error
+		if *auditIntegrity {
+			al, err = audit.NewFileLoggerWithIntegrity(*auditLog, audit.RotationConfig{})
+		} else {
+			al, err = audit.NewFileLogger(*auditLog, audit.RotationConfig{})
+		}
 		if err != nil {
 			logger.Fatalf("failed to open audit log %s: %v", *auditLog, err)
 		}
 		audit.SetDefaultLogger(al)
+	} else if *auditIntegrity {
+		logger.Println("WARNING: --audit-log-integrity has no effect without --audit-log")
 	}
 
 	// auth-design.md L0: open the secret store when --secret-store
@@ -110,6 +121,7 @@ func main() {
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
 		EnforceAuthorization: *enforceAuthz,
+		SpecWatch:            *specWatch,
 	})
 	if *specDir != "" {
 		if err := newtronSrv.RegisterNetwork(*netID, *specDir); err != nil {

@@ -591,9 +591,9 @@ foundational, not operational.)
 
 1. **Revocation.** Removing a grant from `network.json` takes effect
    within a bounded interval without server restart. The existing
-   `ReloadNetwork` HTTP endpoint already supports this — L6 adds a
-   spec-file watcher that triggers reload automatically on file
-   change, plus a documented operational pattern for "revoke alice."
+   `ReloadNetwork` HTTP endpoint already supports this; the L6
+   spec-file watcher triggers it automatically on file change, plus
+   a documented operational pattern for "revoke alice."
 2. **Audit log integrity.** L1's audit log is append-only at the
    application level but a determined attacker with file write access
    could rewrite it. L6 adds optional hash-chain log integrity: each
@@ -611,9 +611,15 @@ integrity enabled.
 
 **Dependencies.** L0–L5.
 
-**Scope of changes.** Spec file watcher in `pkg/newtron/network/`.
-Hash chain in `pkg/newtron/audit/`. New HOWTO section on operational
-procedures.
+**Scope of changes.** Spec file watcher in `pkg/newtron/network/`
+(`SpecWatcher`, fsnotify-backed, 1s debounce). Hash chain in
+`pkg/newtron/audit/` (`Event.PrevHash`, `Event.ID = SHA256(prev_hash
+|| canonical_json)`, `Verify` walks the file and reports the first
+broken position). `--spec-watch` and `--audit-log-integrity` flags
+on `cmd/newtron-server` and `cmd/newt-server`. CLI verifier:
+`bin/newtron audit verify <path>`. Both halves default off per
+§2.4. New HOWTO sections on the daily revoke flow and the
+verification workflow.
 
 **Independent value.** The system can be operated by a real team
 day-to-day without "wait for the next deploy window to revoke that
@@ -759,7 +765,42 @@ specs" test scenario lives in
 `pkg/newtron/auth/where_match_test.go`,
 `pkg/newtron/api/authorization_test.go` (`TestAuthorizationL5_*`).
 
-L6 remains proposed — revocation watcher + audit log integrity.
+**L6 operational hardening is shipped.** The auth arc is complete.
+
+Revocation half: `--spec-watch=true` engages an fsnotify-backed
+watcher on every registered network's spec directory
+(`pkg/newtron/network/watcher.go`). On settled change (1s
+debounce; configurable via `NewSpecWatcher`), the watcher invokes
+`Server.ReloadNetwork(id)` which re-binds the auth checker to the
+new grant table. Removing alice from a group in `network.json`
+then takes effect within the debounce window without any explicit
+`/reload` call.
+
+Audit log integrity half: `--audit-log-integrity=true` switches the
+FileLogger to a hash-chained mode. Each emitted event is populated
+with `PrevHash` (the previous entry's `ID`) and `ID` (computed as
+`SHA256(prev_hash || canonical_json_of_event_with_zero_id)`).
+Tampering with any past entry breaks the chain at that point and
+every subsequent link. Operators run `bin/newtron audit verify
+<path>` periodically (cron or post-incident); exit code 1 + line
+number on stderr signals tampering, exit 0 verifies clean. The
+chain head is recovered from the file's last well-formed entry on
+startup, so the chain continues across server restarts. Pre-L6
+entries (with empty `ID`) are skipped during verification so a log
+that pre-dates the upgrade still parses.
+
+Both halves default off per §2.4. With `--spec-watch=false` the
+operator continues to POST `/reload`; with
+`--audit-log-integrity=false` the FileLogger writes entries with
+empty `ID` exactly as before L6. Tests:
+`pkg/newtron/network/watcher_test.go` (3 tests),
+`pkg/newtron/audit/integrity_test.go` (5 tests).
+
+The L0 plaintext-password migration remains as the only out-of-arc
+operator-side cleanup: `grep -r ssh_pass newtrun/topologies/`
+still returns the in-tree test fixtures' plaintexts because the
+operator workflow to migrate them lives outside the server code
+path. See [`secret-store.md`](secret-store.md).
 
 ---
 
