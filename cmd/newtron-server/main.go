@@ -21,6 +21,7 @@ import (
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 )
 
 // defaultListen — loopback-only; newt-server fronts external traffic on :18080.
@@ -36,6 +37,7 @@ func main() {
 	auditLog := flag.String("audit-log", "", "auth-design.md L1: file path for the mutation audit log; empty disables audit emission entirely (default)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "auth-design.md L1: HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set)")
 	unixSocket := flag.String("unix-socket", "", "auth-design.md L1: Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only)")
+	secretStore := flag.String("secret-store", "", "auth-design.md L0: file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution — plaintext spec values keep working; references in spec become hard errors.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -64,6 +66,18 @@ func main() {
 		audit.SetDefaultLogger(al)
 	}
 
+	// auth-design.md L0: open the secret store when --secret-store
+	// is set. Nil store is the L0 disabled state (plaintext spec
+	// values work; references would error at load).
+	var store secret.Store
+	if *secretStore != "" {
+		fs, err := secret.NewFileStore(*secretStore)
+		if err != nil {
+			logger.Fatalf("opening secret store %s: %v", *secretStore, err)
+		}
+		store = fs
+	}
+
 	srv := api.NewServer(api.Config{
 		Logger:            logger,
 		IdleTimeout:       *idleTimeout,
@@ -71,6 +85,7 @@ func main() {
 		ScaffoldRoot:      *scaffoldRoot,
 		AuditCallerHeader: *auditCallerHeader,
 		UnixSocketPath:    *unixSocket,
+		SecretStore:       store,
 	})
 
 	if *specDir != "" {

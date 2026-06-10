@@ -10,6 +10,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -25,8 +26,14 @@ type Network struct {
 // (e.g., "1node-vs"). pr is consulted at Device.Connect time to
 // resolve per-node SSH ports. Pass nil for tests and real-hardware
 // deployments.
-func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver) (*Network, error) {
-	net, err := netpkg.NewNetwork(specDir, topologyName, pr)
+//
+// secretStore (auth-design.md L0) is the operator-configured secret
+// backend. When non-nil, ${secret:KEY} references in profile and
+// platform values are resolved at load time. nil preserves the
+// plaintext-only behavior — references in specs become hard errors
+// at load.
+func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store) (*Network, error) {
+	net, err := netpkg.NewNetwork(specDir, topologyName, pr, secretStore)
 	if err != nil {
 		return nil, err
 	}

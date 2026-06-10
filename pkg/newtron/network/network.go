@@ -16,6 +16,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
@@ -69,6 +70,14 @@ type Network struct {
 	// transparent transport — the middle layer has no logic).
 	portResolver sonic.PortResolver
 
+	// secretStore is the operator-configured secret backend
+	// (auth-design.md L0). When non-nil, ${secret:KEY} references in
+	// profile and platform values are resolved at load time. When
+	// nil (the L0 disabled state), references are an error and
+	// plaintext values pass through — preserving the pre-L0
+	// behavior exactly.
+	secretStore secret.Store
+
 	// Loader for loading device profiles (already initialized with Load())
 	loader *spec.Loader
 
@@ -92,7 +101,16 @@ type Network struct {
 //
 // pr is the port resolver used at Device.Connect time. Pass nil for
 // tests and real-hardware deployments.
-func NewNetwork(specDir, topologyName string, pr sonic.PortResolver) (*Network, error) {
+//
+// secretStore (auth-design.md L0) is the operator-configured secret
+// backend. When non-nil, ${secret:KEY} references in spec values
+// (currently DeviceProfile.SSHPass and PlatformSpec.VMCredentials)
+// are resolved at network load. nil disables resolution: plaintext
+// spec values keep working, but a reference under a nil store is a
+// hard error from secret.Resolve so the operator finds out
+// immediately rather than silently sending "${secret:KEY}" as a
+// password.
+func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store) (*Network, error) {
 	loader := spec.NewLoader(specDir)
 
 	// Load all spec files
@@ -100,15 +118,53 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver) (*Network, 
 		return nil, fmt.Errorf("loading specs: %w", err)
 	}
 
+	platforms := loader.GetPlatforms()
+	if err := resolvePlatformSecrets(platforms, secretStore); err != nil {
+		return nil, fmt.Errorf("resolving platform secrets: %w", err)
+	}
+
 	return &Network{
 		spec:         loader.GetNetwork(),
-		platforms:    loader.GetPlatforms(),
+		platforms:    platforms,
 		topology:     loader.GetTopology(),
 		topologyName: topologyName,
 		portResolver: pr,
+		secretStore:  secretStore,
 		loader:       loader,
 		devices:      make(map[string]*node.Node),
 	}, nil
+}
+
+// resolvePlatformSecrets walks every PlatformSpec.VMCredentials and
+// resolves any ${secret:KEY} references in the User and Pass fields
+// against the configured store. Mutates the spec in place — the
+// resolved plaintext is what subsequent reads of platforms.json see
+// (whether through Network.Platforms() or the HTTP /platforms
+// endpoint).
+//
+// Per auth-design.md L0, plaintext values pass through unchanged
+// regardless of whether a store is configured; references with no
+// store configured are an error.
+func resolvePlatformSecrets(p *spec.PlatformSpecFile, store secret.Store) error {
+	if p == nil {
+		return nil
+	}
+	for name, platform := range p.Platforms {
+		if platform == nil || platform.VMCredentials == nil {
+			continue
+		}
+		user, err := secret.Resolve(platform.VMCredentials.User, store)
+		if err != nil {
+			return fmt.Errorf("platform %q vm_credentials.user: %w", name, err)
+		}
+		pass, err := secret.Resolve(platform.VMCredentials.Pass, store)
+		if err != nil {
+			return fmt.Errorf("platform %q vm_credentials.pass: %w", name, err)
+		}
+		platform.VMCredentials.User = user
+		platform.VMCredentials.Pass = pass
+	}
+	return nil
 }
 
 // TopologyName returns the topology name this Network is associated with.
@@ -1709,8 +1765,19 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 
 	// SSH credentials (for Redis tunnel). SSH port is resolved from
 	// newtlab at Device.Connect time, not from the profile spec.
-	resolved.SSHUser = profile.SSHUser
-	resolved.SSHPass = profile.SSHPass
+	// auth-design.md L0: ssh_user / ssh_pass may carry ${secret:KEY}
+	// references; secret.Resolve does the lookup against the
+	// configured store, or passes plaintext through unchanged.
+	sshUser, err := secret.Resolve(profile.SSHUser, n.secretStore)
+	if err != nil {
+		return nil, fmt.Errorf("profile %q ssh_user: %w", name, err)
+	}
+	sshPass, err := secret.Resolve(profile.SSHPass, n.secretStore)
+	if err != nil {
+		return nil, fmt.Errorf("profile %q ssh_pass: %w", name, err)
+	}
+	resolved.SSHUser = sshUser
+	resolved.SSHPass = sshPass
 
 	// eBGP underlay ASN
 	resolved.UnderlayASN = profile.UnderlayASN

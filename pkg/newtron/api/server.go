@@ -11,6 +11,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -59,6 +60,12 @@ type Server struct {
 	// self-attested caller identity (auth-design.md L1). Read by
 	// callerMiddleware. Empty disables header-based identity.
 	auditCallerHeader string
+
+	// secretStore is the operator-configured secret backend
+	// (auth-design.md L0). Passed to LoadNetwork on every
+	// RegisterNetwork / ReloadNetwork. nil keeps plaintext-only
+	// spec behavior.
+	secretStore secret.Store
 }
 
 
@@ -110,6 +117,15 @@ type Config struct {
 	// caller-extraction middleware tags them with
 	// VerificationUnixPeerCreds. Empty disables the Unix listener.
 	UnixSocketPath string
+
+	// SecretStore is the operator-configured secret backend
+	// (auth-design.md L0). When non-nil, networks loaded through
+	// RegisterNetwork / ReloadNetwork resolve ${secret:KEY}
+	// references in profile and platform spec values. nil means no
+	// resolution: plaintext spec values pass through, references
+	// become hard errors at load. Composed in by cmd/newtron-server
+	// or cmd/newt-server from a --secret-store=PATH flag.
+	SecretStore secret.Store
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -131,6 +147,7 @@ func NewServer(cfg Config) *Server {
 		portResolver:      cfg.PortResolver,
 		scaffoldRoot:      cfg.ScaffoldRoot,
 		auditCallerHeader: cfg.AuditCallerHeader,
+		secretStore:       cfg.SecretStore,
 	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),
@@ -169,7 +186,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		return &alreadyRegisteredError{id: id, existingSpecDir: existing.specDir}
 	}
 
-	net, err := newtron.LoadNetwork(specDir, topologyName(specDir), s.portResolver)
+	net, err := newtron.LoadNetwork(specDir, topologyName(specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
@@ -227,7 +244,7 @@ func (s *Server) ReloadNetwork(id string) error {
 	entity.stop()
 
 	// Reload specs from disk
-	net, err := newtron.LoadNetwork(entity.specDir, topologyName(entity.specDir), s.portResolver)
+	net, err := newtron.LoadNetwork(entity.specDir, topologyName(entity.specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
 	}

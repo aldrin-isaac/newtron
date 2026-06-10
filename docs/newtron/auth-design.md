@@ -232,9 +232,18 @@ backend, and `--secret-store=PATH` config in
 `cmd/newtron-server`/`cmd/newt-server`. Migration tooling for existing
 plaintext profiles ships alongside.
 
-**Status.** The doc is in. The encryption implementation is L0's
-work-remaining; L1 (audit log) does not depend on it and can be shipped
-in parallel.
+**Status.** Both deliverables shipped. The threat-model doc is this
+file. The encryption-at-rest deliverable is `pkg/newtron/secret/`
+(`Store` interface + `FileStore` backend) wired into network load via
+`Config.SecretStore` and the `--secret-store=PATH` server flag.
+Operator-facing CLI: `bin/newtron secrets put|get|list|delete`.
+Reference syntax `${secret:KEY}` in `profiles/*.json` and
+`platforms.json` values. See [`secret-store.md`](secret-store.md)
+for the operational HOWTO. The shipped `FileStore` writes plaintext
+to a mode-0600 file outside the version-controlled spec directory;
+an age-encrypted backend (or any other operator-supplied
+implementation of `Store`) plugs into the same interface without
+contract changes.
 
 ### L1 — Tamper-Evident Operation Audit Log
 
@@ -559,13 +568,16 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
 - All three URL-derivable Context dimensions (`Device`, `Service`,
   `Interface`) have unused setters; only `Resource` is ever populated.
 
-L0's doc deliverable is shipped (this file). L0's encryption-at-rest
-deliverable is work-remaining — no PR has landed for it yet. L1
-(audit log) is the second layer to ship and is included here. L2 and
-later do depend on L0 encryption: L2b's PAM service needs a directory
-of users whose passwords aren't in the spec dir, and the trust model
-for L3+ collapses if device admin passwords are leaking from
-`profiles/*.json` to anyone with read access to the topology repo.
+Both L0 deliverables are shipped (this doc + the secret store).
+L1 audit log is shipped. The shipped topology specs in
+`newtrun/topologies/` continue to carry plaintext passwords — those
+58 instances are operator-migration work, not server work; the
+operator's workflow is documented in
+[`secret-store.md`](secret-store.md). Until those plaintexts get
+migrated to references, `grep -r ssh_pass newtrun/topologies/` still
+returns plaintexts; the L0 audit criterion ("no plaintext in spec
+dir") is met for any *operator-configured* deployment but not for
+the in-tree test fixtures.
 
 L2–L6 remain proposed; none has shipped.
 
