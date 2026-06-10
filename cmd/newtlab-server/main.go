@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
@@ -40,6 +41,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "auth-design.md L2a: PEM-encoded TLS certificate for the TCP listener (also used as client cert when calling newtron-server). Empty disables TLS — plain HTTP.")
 	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
 	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs AND to verify newtron-server's cert when calling it. Empty: TLS-only (no mTLS).")
+	authPAMService := flag.String("auth-pam-service", "", "auth-design.md L2b: PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM enforcement.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtlab-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -71,6 +73,12 @@ func main() {
 	// BridgeStats back to it (#118). For loopback listens we use
 	// http://<listen>; for non-loopback listens we trust the operator
 	// to have configured a reachable address.
+	// auth-design.md L2b: install PAM authenticator when configured.
+	var pamAuth httputil.Authenticator
+	if *authPAMService != "" {
+		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
+	}
+
 	srv := api.NewServer(api.Config{
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
@@ -79,6 +87,7 @@ func main() {
 		},
 		OrchestratorURL: "http://" + *listen,
 		TLSConfig:       serverTLS,
+		Authenticator:   pamAuth,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

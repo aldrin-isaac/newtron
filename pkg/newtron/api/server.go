@@ -67,6 +67,11 @@ type Server struct {
 	// RegisterNetwork / ReloadNetwork. nil keeps plaintext-only
 	// spec behavior.
 	secretStore secret.Store
+
+	// authenticator is the user-to-service Authenticator for TCP
+	// requests (auth-design.md L2b). Installed in the handler chain
+	// via PAMMiddleware. nil → L2b disabled.
+	authenticator httputil.Authenticator
 }
 
 
@@ -133,6 +138,16 @@ type Config struct {
 	// from the operator's --tls-cert / --tls-key / --client-ca flags.
 	// nil keeps the default plain-HTTP listener — the disabled state.
 	TLSConfig *tls.Config
+
+	// Authenticator enables user-to-service authentication on the
+	// TCP listener via HTTP Basic + PAM (auth-design.md L2b). When
+	// non-nil, TCP requests without verified Unix peer creds or
+	// mTLS peer cert must present credentials the Authenticator
+	// accepts; otherwise → 401. Composed in by cmd/newtron-server
+	// from a --auth-pam-service=NAME flag wrapping a
+	// pamauth.PAMAuthenticator. nil disables — the L2b disabled
+	// state; pre-L2b behavior preserved.
+	Authenticator httputil.Authenticator
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -155,6 +170,7 @@ func NewServer(cfg Config) *Server {
 		scaffoldRoot:      cfg.ScaffoldRoot,
 		auditCallerHeader: cfg.AuditCallerHeader,
 		secretStore:       cfg.SecretStore,
+		authenticator:     cfg.Authenticator,
 	}
 	s.Server = httputil.NewServer(s.buildMux(), logger,
 		httputil.ServerLabel("newtron-server"),

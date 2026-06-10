@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
@@ -42,6 +43,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "auth-design.md L2a: PEM-encoded TLS certificate for the TCP listener (both this server's identity to peers AND its client cert when calling newtlab-server). Empty disables TLS — plain HTTP.")
 	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
 	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs (mTLS on the listener) AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS); inter-service trust is undefined.")
+	authPAMService := flag.String("auth-pam-service", "", "auth-design.md L2b: PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM enforcement — TCP requests are not user-authenticated; Unix socket peer creds and mTLS cert CN still work where configured.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -98,6 +100,14 @@ func main() {
 		store = fs
 	}
 
+	// auth-design.md L2b: install the PAM authenticator when a
+	// service name is configured. Empty disables — TCP requests
+	// pass through PAMMiddleware unchanged.
+	var pamAuth httputil.Authenticator
+	if *authPAMService != "" {
+		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
+	}
+
 	srv := api.NewServer(api.Config{
 		Logger:            logger,
 		IdleTimeout:       *idleTimeout,
@@ -107,6 +117,7 @@ func main() {
 		UnixSocketPath:    *unixSocket,
 		SecretStore:       store,
 		TLSConfig:         serverTLS,
+		Authenticator:     pamAuth,
 	})
 
 	if *specDir != "" {

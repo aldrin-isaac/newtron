@@ -52,6 +52,13 @@ type Config struct {
 	// from the operator's --tls-cert / --tls-key / --client-ca flags.
 	// nil keeps the default plain-HTTP listener — the disabled state.
 	TLSConfig *tls.Config
+
+	// Authenticator enables user-to-service authentication on the
+	// TCP listener via HTTP Basic + PAM (auth-design.md L2b). nil
+	// disables — the L2b disabled state. Composed in by cmd/newtrun-
+	// server from a --auth-pam-service=NAME flag wrapping a
+	// pamauth.PAMAuthenticator.
+	Authenticator httputil.Authenticator
 }
 
 // Server is the newtrun HTTP server. The HTTP listener lifecycle
@@ -153,8 +160,12 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("PUT /newtrun/v1/suites/{suite}/scenarios/{name}", s.handlePutScenario)
 	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
+	// auth-design.md L2b: PAMMiddleware enforces TCP user
+	// authentication when cfg.Authenticator is configured. nil →
+	// passthrough (L2b disabled state).
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)
+	handler = httputil.PAMMiddleware(s.cfg.Authenticator)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Recovery(s.logger)(handler)
 	return handler

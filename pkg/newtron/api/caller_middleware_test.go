@@ -150,6 +150,56 @@ func TestCallerMiddleware_ServiceCertCNYieldsVerifiedCaller(t *testing.T) {
 	}
 }
 
+// TestCallerMiddleware_PAMUsernameYieldsVerifiedCaller pins the
+// L2b path: the PAM middleware in pkg/httputil set a verified
+// username on the request context; the caller middleware picks it
+// up and tags the audit Caller with VerificationPAM.
+func TestCallerMiddleware_PAMUsernameYieldsVerifiedCaller(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req = req.WithContext(httputil.WithPAMUsernameForTest(req.Context(), "alice"))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller from PAM username; got nil")
+	}
+	if gotCaller.Source != audit.VerificationPAM {
+		t.Errorf("Source = %q, want %q", gotCaller.Source, audit.VerificationPAM)
+	}
+	if gotCaller.Username != "alice" {
+		t.Errorf("Username = %q, want alice", gotCaller.Username)
+	}
+}
+
+// TestCallerMiddleware_PAMWinsOverHeader pins that a verified PAM
+// username overrides a self-attested header. The header is the
+// fallback path for deployments that didn't configure PAM; once
+// PAM is in the chain, its output is the truth.
+func TestCallerMiddleware_PAMWinsOverHeader(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req.Header.Set("X-Newtron-Caller", "spoofed-bob")
+	req = req.WithContext(httputil.WithPAMUsernameForTest(req.Context(), "alice"))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller; got nil")
+	}
+	if gotCaller.Source != audit.VerificationPAM {
+		t.Errorf("Source = %q, want %q (PAM must beat self-attested header)",
+			gotCaller.Source, audit.VerificationPAM)
+	}
+	if gotCaller.Username != "alice" {
+		t.Errorf("Username = %q, want alice (not header spoof)", gotCaller.Username)
+	}
+}
+
 // TestCallerMiddleware_ServiceCertCNWinsOverEverything pins the
 // L2a precedence rule: cert CN beats peer creds AND header. A
 // rogue client that controls both header and connection cannot

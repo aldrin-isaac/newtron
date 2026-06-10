@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
@@ -35,6 +36,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "auth-design.md L2a: PEM-encoded TLS certificate for the TCP listener (also used as client cert when calling newtlab-server). Empty disables TLS — plain HTTP.")
 	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
 	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS).")
+	authPAMService := flag.String("auth-pam-service", "", "auth-design.md L2b: PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM enforcement.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtrun-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -56,15 +58,22 @@ func main() {
 		logger.Fatalf("client TLS: %v", err)
 	}
 
+	// auth-design.md L2b: install PAM authenticator when configured.
+	var pamAuth httputil.Authenticator
+	if *authPAMService != "" {
+		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
+	}
+
 	// Compose the newtlab HTTP client at the entry point — newtrun's
 	// api package sees only the LabClient contract (pkg/newtrun.
 	// LabClient), the client package supplies the concrete satisfier.
 	// Empty --newtlab-server leaves the client nil; Runner.Run rejects
 	// deploy in that case with a clear error.
 	cfg := api.Config{
-		SuitesBase: *suitesBase,
-		Logger:     logger,
-		TLSConfig:  serverTLS,
+		SuitesBase:    *suitesBase,
+		Logger:        logger,
+		TLSConfig:     serverTLS,
+		Authenticator: pamAuth,
 	}
 	if *newtlabServer != "" {
 		cfg.NewtlabClient = newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS))

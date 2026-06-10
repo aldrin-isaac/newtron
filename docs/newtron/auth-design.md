@@ -569,22 +569,27 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   `Interface`) have unused setters; only `Resource` is ever populated.
 
 Both L0 deliverables are shipped (this doc + the secret store).
-L1 audit log is shipped. L2a inter-service mTLS is shipped — three
-flags per standalone server binary (`--tls-cert`, `--tls-key`,
-`--tls-ca`), `WithTLS` functional options on the three client
-packages, cert-CN extraction in `pkg/httputil` via
-`ServiceCertCNFromRequest` populated into `audit.Caller` with
-`VerificationServiceCertCN` in the newtron caller middleware. The
-shipped topology specs in `newtrun/topologies/` continue to carry
-plaintext passwords — those 58 instances are operator-migration
-work, not server work; the operator's workflow is documented in
+L1 audit log is shipped. L2a inter-service mTLS is shipped. L2b
+user-to-service PAM is shipped — `--auth-pam-service=NAME` flag on
+each standalone engine binary; the `PAMMiddleware` in
+`pkg/httputil` enforces HTTP Basic + `pam_authenticate` on TCP
+requests that don't already carry a verified identity (Unix peer
+creds from L1, mTLS cert CN from L2a). The cgo-backed
+`PAMAuthenticator` lives in `pkg/httputil/pamauth` (separate
+package so non-PAM consumers don't pull in cgo). The newtron caller
+middleware reads `PAMUsernameFromContext` and tags
+`audit.Caller` with `VerificationPAM`. Operational doc:
+[`pam-howto.md`](pam-howto.md). The shipped topology specs in
+`newtrun/topologies/` continue to carry plaintext passwords —
+those 58 instances are operator-migration work, not server work;
+the operator's workflow is documented in
 [`secret-store.md`](secret-store.md). Until those plaintexts get
 migrated to references, `grep -r ssh_pass newtrun/topologies/` still
 returns plaintexts; the L0 audit criterion ("no plaintext in spec
 dir") is met for any *operator-configured* deployment but not for
 the in-tree test fixtures.
 
-L2b–L6 remain proposed; none has shipped.
+L3–L6 remain proposed; none has shipped.
 
 ---
 
