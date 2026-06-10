@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"log"
 	"net/http"
 	"time"
@@ -43,6 +44,12 @@ type Config struct {
 	// setupBridges path inside newtlab.Lab.Deploy to fail rather than
 	// spawn workers that push to nowhere.
 	OrchestratorURL string
+
+	// TLSConfig enables inter-service mTLS on the TCP listener
+	// (auth-design.md L2a). Build with httputil.LoadServerTLSConfig
+	// from the operator's --tls-cert / --tls-key / --client-ca flags.
+	// nil keeps the default plain-HTTP listener — the disabled state.
+	TLSConfig *tls.Config
 }
 
 // Server is the newtlab HTTP server. The HTTP listener lifecycle
@@ -77,6 +84,7 @@ func NewServer(cfg Config) *Server {
 		httputil.ServerLabel("newtlab-server"),
 		// SSE-friendly: no per-request write deadline.
 		httputil.WriteTimeout(0),
+		httputil.TLSConfig(cfg.TLSConfig),
 		// On shutdown, cancel every in-flight deploy with a 5s drain
 		// window before the HTTP listener closes.
 		httputil.OnShutdown(func() {

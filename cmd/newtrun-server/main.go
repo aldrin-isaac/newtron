@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
@@ -31,12 +32,28 @@ func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories")
 	newtlabServer := flag.String("newtlab-server", "http://127.0.0.1:18080", "newtlab-server base URL; deploy/destroy/status route through this HTTP surface (§27 — newtlab owns LabState). Empty disables newtlab calls (CLI-only / real-hardware deployments).")
+	tlsCert := flag.String("tls-cert", "", "auth-design.md L2a: PEM-encoded TLS certificate for the TCP listener (also used as client cert when calling newtlab-server). Empty disables TLS — plain HTTP.")
+	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
+	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS).")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtrun-server: ", log.LstdFlags|log.Lmsgprefix)
 
 	if err := warnIfNonLoopback(*listen, logger); err != nil {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
+	}
+
+	// auth-design.md L2a: server cert + identical client cert
+	// (typical service-mesh pattern). nil from either Load means the
+	// corresponding flag set was empty — L2a disabled on that
+	// direction.
+	serverTLS, err := httputil.LoadServerTLSConfig(*tlsCert, *tlsKey, *tlsCA)
+	if err != nil {
+		logger.Fatalf("server TLS: %v", err)
+	}
+	clientTLS, err := httputil.LoadClientTLSConfig(*tlsCert, *tlsKey, *tlsCA)
+	if err != nil {
+		logger.Fatalf("client TLS: %v", err)
 	}
 
 	// Compose the newtlab HTTP client at the entry point — newtrun's
@@ -47,9 +64,10 @@ func main() {
 	cfg := api.Config{
 		SuitesBase: *suitesBase,
 		Logger:     logger,
+		TLSConfig:  serverTLS,
 	}
 	if *newtlabServer != "" {
-		cfg.NewtlabClient = newtlabclient.New(*newtlabServer)
+		cfg.NewtlabClient = newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS))
 	}
 	srv := api.NewServer(cfg)
 

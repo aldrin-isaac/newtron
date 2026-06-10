@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
@@ -38,6 +39,9 @@ func main() {
 	auditCallerHeader := flag.String("audit-caller-header", "", "auth-design.md L1: HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set)")
 	unixSocket := flag.String("unix-socket", "", "auth-design.md L1: Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only)")
 	secretStore := flag.String("secret-store", "", "auth-design.md L0: file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution — plaintext spec values keep working; references in spec become hard errors.")
+	tlsCert := flag.String("tls-cert", "", "auth-design.md L2a: PEM-encoded TLS certificate for the TCP listener (both this server's identity to peers AND its client cert when calling newtlab-server). Empty disables TLS — plain HTTP.")
+	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
+	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs (mTLS on the listener) AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS); inter-service trust is undefined.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -46,13 +50,29 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
+	// auth-design.md L2a: load TLS config once; reuse for both
+	// directions. The same cert/key acts as this server's identity
+	// to incoming peers AND as its client cert when dialing
+	// newtlab-server. nil from either Load means the corresponding
+	// path is empty — the L2a disabled state on that direction.
+	serverTLS, err := httputil.LoadServerTLSConfig(*tlsCert, *tlsKey, *tlsCA)
+	if err != nil {
+		logger.Fatalf("server TLS: %v", err)
+	}
+	clientTLS, err := httputil.LoadClientTLSConfig(*tlsCert, *tlsKey, *tlsCA)
+	if err != nil {
+		logger.Fatalf("client TLS: %v", err)
+	}
+
 	// cmd is the composition layer: it knows which engine provides
 	// the port-resolver implementation. newtron's api package sees
 	// only the contract (api.PortResolver); newtlab's client package
 	// supplies the concrete satisfier.
 	var portResolver api.PortResolver
 	if *newtlabServer != "" {
-		portResolver = newtlabclient.NewPortResolver(newtlabclient.New(*newtlabServer))
+		portResolver = newtlabclient.NewPortResolver(
+			newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS)),
+		)
 	}
 
 	// auth-design.md L1: install the audit logger when --audit-log
@@ -86,6 +106,7 @@ func main() {
 		AuditCallerHeader: *auditCallerHeader,
 		UnixSocketPath:    *unixSocket,
 		SecretStore:       store,
+		TLSConfig:         serverTLS,
 	})
 
 	if *specDir != "" {

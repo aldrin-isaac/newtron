@@ -53,10 +53,41 @@ func callerMiddleware(headerName string) func(http.Handler) http.Handler {
 }
 
 // resolveCaller returns the *audit.Caller this request should carry,
-// or nil when no identity is available. Unix peer creds win over the
-// TCP header — a request arriving on the Unix listener is
-// kernel-verified and the header (which the client set) is ignored.
+// or nil when no identity is available.
+//
+// Priority order (highest first):
+//
+//  1. **Service cert CN** (auth-design.md L2a) — verified at the TLS
+//     handshake by the CA. Inter-service mTLS; the most authoritative
+//     source because it covers both transport and identity.
+//  2. **Unix peer creds** (auth-design.md L1) — kernel-attested UID
+//     from SO_PEERCRED on the Unix socket listener.
+//  3. **Self-attested header** (auth-design.md L1) — TCP fallback,
+//     trustworthy only when the operator's deployment confirms no
+//     untrusted client can reach the listener.
+//
+// Higher-priority sources override lower ones unconditionally — a
+// TCP client cannot spoof a cert CN by setting a header, and a TLS
+// client cannot have its verified cert overridden by a header it
+// also happens to set.
 func resolveCaller(r *http.Request, headerName string) *audit.Caller {
+	if cn := httputil.ServiceCertCNFromRequest(r); cn != "" {
+		return &audit.Caller{
+			Username: string(cn),
+			Source:   audit.VerificationServiceCertCN,
+		}
+	}
+	// Per the test-only override path: the
+	// ServiceCertCNFromContext value is set by middleware tests
+	// that don't have a real *http.Request with TLS state. In
+	// production this never returns a value because no production
+	// code calls WithServiceCertCNForTest.
+	if cn := httputil.ServiceCertCNFromContext(r.Context()); cn != "" {
+		return &audit.Caller{
+			Username: string(cn),
+			Source:   audit.VerificationServiceCertCN,
+		}
+	}
 	if pc := httputil.PeerCredFromContext(r.Context()); pc != nil {
 		username := lookupUsername(pc.UID)
 		return &audit.Caller{

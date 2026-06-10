@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
@@ -36,12 +37,28 @@ func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories")
 	newtronServer := flag.String("newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
+	tlsCert := flag.String("tls-cert", "", "auth-design.md L2a: PEM-encoded TLS certificate for the TCP listener (also used as client cert when calling newtron-server). Empty disables TLS — plain HTTP.")
+	tlsKey := flag.String("tls-key", "", "auth-design.md L2a: PEM-encoded private key for --tls-cert.")
+	tlsCA := flag.String("tls-ca", "", "auth-design.md L2a: PEM-encoded CA bundle used both to verify incoming peer client certs AND to verify newtron-server's cert when calling it. Empty: TLS-only (no mTLS).")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtlab-server: ", log.LstdFlags|log.Lmsgprefix)
 
 	if err := warnIfNonLoopback(*listen, logger); err != nil {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
+	}
+
+	// auth-design.md L2a: server cert serves on the TCP listener;
+	// the same identity acts as client cert when dialing newtron-
+	// server. nil from either Load means the corresponding flag set
+	// was empty — the L2a disabled state on that direction.
+	serverTLS, err := httputil.LoadServerTLSConfig(*tlsCert, *tlsKey, *tlsCA)
+	if err != nil {
+		logger.Fatalf("server TLS: %v", err)
+	}
+	clientTLS, err := httputil.LoadClientTLSConfig(*tlsCert, *tlsKey, *tlsCA)
+	if err != nil {
+		logger.Fatalf("client TLS: %v", err)
 	}
 
 	// newtlab consumes spec data via newtron's HTTP API (§27). Each lab
@@ -58,9 +75,10 @@ func main() {
 		TopologiesBase: *topologiesBase,
 		Logger:         logger,
 		NewtronClientFor: func(networkID string) newtlab.SpecClient {
-			return newtronclient.New(newtronURL, networkID)
+			return newtronclient.New(newtronURL, networkID, newtronclient.WithTLS(clientTLS))
 		},
 		OrchestratorURL: "http://" + *listen,
+		TLSConfig:       serverTLS,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

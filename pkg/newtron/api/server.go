@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net/http"
@@ -126,6 +127,12 @@ type Config struct {
 	// become hard errors at load. Composed in by cmd/newtron-server
 	// or cmd/newt-server from a --secret-store=PATH flag.
 	SecretStore secret.Store
+
+	// TLSConfig enables inter-service mTLS on the TCP listener
+	// (auth-design.md L2a). Build with httputil.LoadServerTLSConfig
+	// from the operator's --tls-cert / --tls-key / --client-ca flags.
+	// nil keeps the default plain-HTTP listener — the disabled state.
+	TLSConfig *tls.Config
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -156,6 +163,7 @@ func NewServer(cfg Config) *Server {
 		// newtlab which keep WriteTimeout=0 for SSE.
 		httputil.WriteTimeout(5*time.Minute),
 		httputil.UnixSocketPath(cfg.UnixSocketPath),
+		httputil.TLSConfig(cfg.TLSConfig),
 		httputil.OnShutdown(func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()

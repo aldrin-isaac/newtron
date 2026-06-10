@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,15 +40,39 @@ type Client struct {
 }
 
 // New constructs a client targeting the given base URL. baseURL must not
-// have a trailing slash.
-func New(baseURL string) *Client {
+// have a trailing slash. Functional options configure transport-level
+// concerns (TLS for L2a inter-service mTLS, etc.) without changing the
+// signature for the common case.
+func New(baseURL string, opts ...Option) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
-	return &Client{
+	c := &Client{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 		streamClient: &http.Client{}, // no timeout for SSE
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// Option configures a Client at construction.
+type Option func(*Client)
+
+// WithTLS attaches a *tls.Config to both the request/response client
+// and the SSE stream client (auth-design.md L2a). nil tlsCfg keeps
+// the default plain-HTTP transport — the disabled state. Build the
+// config with httputil.LoadClientTLSConfig.
+func WithTLS(tlsCfg *tls.Config) Option {
+	return func(c *Client) {
+		if tlsCfg == nil {
+			return
+		}
+		tr := &http.Transport{TLSClientConfig: tlsCfg}
+		c.httpClient.Transport = tr
+		c.streamClient.Transport = tr
 	}
 }
 

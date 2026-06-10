@@ -2,6 +2,7 @@ package httputil
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log"
 	"net"
@@ -70,6 +71,15 @@ type Server struct {
 	// completion state concurrently.
 	unixServeErr   error
 	unixServeErrMu sync.Mutex
+
+	// tlsConfig is the optional inter-service mTLS configuration
+	// (auth-design.md L2a). When non-nil, the TCP listener is
+	// wrapped with tls.NewListener and the connContext hook
+	// extracts the verified peer cert CN from each connection
+	// (parallel to SO_PEERCRED extraction from Unix-socket
+	// connections — L1). nil means plain HTTP, which is the
+	// default behavior and preserves the pre-L2a posture exactly.
+	tlsConfig *tls.Config
 }
 
 // ServerOption tunes the base server at construction time.
@@ -82,6 +92,7 @@ type serverConfig struct {
 	idleTimeout    time.Duration
 	onShutdown     []func()
 	unixSocketPath string
+	tlsConfig      *tls.Config
 }
 
 // ServerLabel sets the prefix used in the startup log line. Default is
@@ -123,6 +134,24 @@ func UnixSocketPath(path string) ServerOption {
 	return func(c *serverConfig) { c.unixSocketPath = path }
 }
 
+// TLSConfig enables inter-service mTLS on the TCP listener
+// (auth-design.md L2a). Build the *tls.Config with
+// httputil.LoadServerTLSConfig; pass nil to keep the default plain-
+// HTTP listener (the L2a disabled state).
+//
+// When the config has ClientAuth = tls.RequireAndVerifyClientCert
+// (set by LoadServerTLSConfig when a clientCAFile is provided),
+// every TCP connection completes a mTLS handshake and the verified
+// peer cert CN flows into the request context via connContext for
+// the identity-extraction middleware to read.
+//
+// TLS applies to TCP only. The Unix socket listener, when also
+// configured, stays plain — OS-level peer credentials already
+// provide verified identity on the Unix path.
+func TLSConfig(cfg *tls.Config) ServerOption {
+	return func(c *serverConfig) { c.tlsConfig = cfg }
+}
+
 // NewServer constructs a base server. handler is the
 // already-middleware-wrapped http.Handler the engine wants to serve.
 // logger may be nil; if so, log.Default() is used.
@@ -144,20 +173,23 @@ func NewServer(handler http.Handler, logger *log.Logger, opts ...ServerOption) *
 		label:          cfg.label,
 		onShutdown:     cfg.onShutdown,
 		unixSocketPath: cfg.unixSocketPath,
+		tlsConfig:      cfg.tlsConfig,
 		httpServer: &http.Server{
 			Handler:      handler,
 			ReadTimeout:  cfg.readTimeout,
 			WriteTimeout: cfg.writeTimeout,
 			IdleTimeout:  cfg.idleTimeout,
+			TLSConfig:    cfg.tlsConfig,
 		},
 	}
-	// When a Unix socket is configured, install the connContext
-	// hook so requests arriving on the Unix listener carry
-	// verified peer credentials in their context. TCP requests
-	// pass through unchanged; the downstream identity middleware
-	// distinguishes them by the presence (or absence) of
-	// PeerCredFromContext.
-	if cfg.unixSocketPath != "" {
+	// Install the connContext hook whenever a verified-identity
+	// source is configured. The hook is the join point for L1's
+	// Unix-socket SO_PEERCRED and L2a's TLS peer-cert-CN
+	// extraction; with either source enabled, every request
+	// carries the verified identity in its context for the
+	// downstream identity middleware to read. TCP-without-TLS
+	// requests pass through unchanged either way.
+	if cfg.unixSocketPath != "" || cfg.tlsConfig != nil {
 		s.httpServer.ConnContext = connContext
 	}
 	return s
@@ -198,8 +230,28 @@ func (s *Server) Start(addr string) error {
 		}()
 	}
 
-	s.logger.Printf("%s listening on %s", s.label, addr)
-	err := s.httpServer.ListenAndServe()
+	tcpProto := "http"
+	if s.tlsConfig != nil {
+		tcpProto = "https"
+	}
+	s.logger.Printf("%s listening on %s (%s)", s.label, addr, tcpProto)
+
+	var err error
+	if s.tlsConfig != nil {
+		// Hand-rolled TLS path so the wrapping listener and the
+		// connContext hook see *tls.Conn directly. Using
+		// ListenAndServeTLS hides the conn type behind the http
+		// framework and breaks cert-CN extraction in connContext.
+		tcpLn, lerr := net.Listen("tcp", addr)
+		if lerr != nil {
+			err = lerr
+		} else {
+			tlsLn := tls.NewListener(tcpLn, s.tlsConfig)
+			err = s.httpServer.Serve(tlsLn)
+		}
+	} else {
+		err = s.httpServer.ListenAndServe()
+	}
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}

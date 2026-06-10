@@ -125,3 +125,55 @@ func TestCallerMiddleware_PeerCredWinsOverHeader(t *testing.T) {
 		t.Errorf("Username = %q, want NOT the spoofed header value", gotCaller.Username)
 	}
 }
+
+// TestCallerMiddleware_ServiceCertCNYieldsVerifiedCaller pins the L2a
+// path: a request whose context carries a verified service cert CN
+// (set by httputil.connContext on mTLS connections) produces a
+// Caller with VerificationServiceCertCN.
+func TestCallerMiddleware_ServiceCertCNYieldsVerifiedCaller(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req = req.WithContext(httputil.WithServiceCertCNForTest(req.Context(), "newtlab-server"))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller; got nil")
+	}
+	if gotCaller.Source != audit.VerificationServiceCertCN {
+		t.Errorf("Source = %q, want %q", gotCaller.Source, audit.VerificationServiceCertCN)
+	}
+	if gotCaller.Username != "newtlab-server" {
+		t.Errorf("Username = %q, want newtlab-server", gotCaller.Username)
+	}
+}
+
+// TestCallerMiddleware_ServiceCertCNWinsOverEverything pins the
+// L2a precedence rule: cert CN beats peer creds AND header. A
+// rogue client that controls both header and connection cannot
+// downgrade the recorded source.
+func TestCallerMiddleware_ServiceCertCNWinsOverEverything(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req.Header.Set("X-Newtron-Caller", "spoofed-alice")
+	ctx := peerCredCtx(req.Context(), uint32(0))
+	ctx = httputil.WithServiceCertCNForTest(ctx, "newtlab-server")
+	req = req.WithContext(ctx)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller; got nil")
+	}
+	if gotCaller.Source != audit.VerificationServiceCertCN {
+		t.Errorf("Source = %q, want %q (cert CN must beat both peer creds and header)",
+			gotCaller.Source, audit.VerificationServiceCertCN)
+	}
+	if gotCaller.Username != "newtlab-server" {
+		t.Errorf("Username = %q, want newtlab-server", gotCaller.Username)
+	}
+}
