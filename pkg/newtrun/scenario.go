@@ -70,6 +70,20 @@ type Step struct {
 	// step = one identity. Empty/nil preserves pre-Headers behavior.
 	Headers map[string]string `yaml:"headers,omitempty"`
 
+	// Capture extracts values from the response body of a successful
+	// newtron HTTP call and binds them to scenario-scoped variable
+	// names. Each map value is a JQ expression run against the
+	// response JSON; the result is stored under the map key and
+	// referenced by later steps via {{captured.NAME}}. The captured
+	// map is scenario-scoped (per parameterized iteration when applicable),
+	// so cross-scenario carry is intentionally not supported — the
+	// dependency graph in requires:/after: has parallel branches and
+	// shared mutable state across them would be ambiguous. Capture
+	// applies only to single-call newtron steps; batch and poll
+	// modes reject it at parse time because their result shape isn't
+	// a single response. Empty/nil preserves pre-Capture behavior.
+	Capture map[string]string `yaml:"capture,omitempty"`
+
 	// run-suite (composition: invoke another suite as a step)
 	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved under SuitesBase)
 	Parameters map[string]any      `yaml:"parameters,omitempty"` // parameter overrides for the called suite

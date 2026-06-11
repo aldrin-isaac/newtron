@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/itchyny/gojq"
-
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -41,17 +39,31 @@ func (e *newtronExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 	// One-shot mode: per-device parallel execution.
 	if hasDeviceTemplate(step.URL) {
 		return r.executeForDevices(step, func(name string) (string, error) {
-			return e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
+			msg, _, err := e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
+			return msg, err
 		})
 	}
 
 	// No {{device}} template — network-scoped call (no device parallelism).
-	msg, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
+	msg, raw, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
 	if err != nil {
 		return &StepOutput{Result: &StepResult{
 			Status:  StepStatusFailed,
 			Message: err.Error(),
 		}}
+	}
+	// Response-capture runs only on the single-call path. Batch and
+	// poll modes don't expose a single response shape (batch =
+	// multiple calls; poll = the assertion result, not the final
+	// body); the parser rejects capture: on those step shapes so
+	// this is the only place capture extraction is wired.
+	if len(step.Capture) > 0 {
+		if err := applyCaptures(r.captured, step.Capture, raw); err != nil {
+			return &StepOutput{Result: &StepResult{
+				Status:  StepStatusFailed,
+				Message: fmt.Sprintf("response-capture: %s", err),
+			}}
+		}
 	}
 	return &StepOutput{Result: &StepResult{
 		Status:  StepStatusPassed,
@@ -80,7 +92,7 @@ func (e *newtronExecutor) executeBatch(ctx context.Context, r *Runner, step *Ste
 				if method == "" {
 					method = "GET"
 				}
-				_, err := e.doCall(r, method, call.URL, call.Params, name, step.Headers, nil)
+				_, _, err := e.doCall(r, method, call.URL, call.Params, name, step.Headers, nil)
 				if err != nil {
 					return "", fmt.Errorf("batch[%d] %s %s: %s", i, method, call.URL, err)
 				}
@@ -95,7 +107,7 @@ func (e *newtronExecutor) executeBatch(ctx context.Context, r *Runner, step *Ste
 		if method == "" {
 			method = "GET"
 		}
-		_, err := e.doCall(r, method, call.URL, call.Params, "", step.Headers, nil)
+		_, _, err := e.doCall(r, method, call.URL, call.Params, "", step.Headers, nil)
 		if err != nil {
 			return &StepOutput{Result: &StepResult{
 				Status:  StepStatusFailed,
@@ -126,7 +138,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 		pollStep.Expect = &pollExpect
 
 		return r.pollForDevices(ctx, &pollStep, func(name string) (bool, string, error) {
-			msg, err := e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
+			msg, _, err := e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
 			if err != nil {
 				// For polling, errors mean "not ready yet" — keep polling.
 				return false, err.Error(), nil
@@ -138,7 +150,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 	// No device template — poll a network-scoped endpoint.
 	var lastMsg string
 	err := pollUntil(ctx, step.Poll.Timeout, step.Poll.Interval, func() (bool, error) {
-		msg, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
+		msg, _, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
 		if err != nil {
 			lastMsg = err.Error()
 			return false, nil
@@ -158,11 +170,13 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 	}}
 }
 
-// doCall makes a single HTTP call, evaluates the jq expression if present,
-// and returns a human-readable message. Step-level headers are
-// applied uniformly across every call from a step (including each
-// call in a batch) so one step = one caller identity.
-func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, headers map[string]string, expect *ExpectBlock) (string, error) {
+// doCall makes a single HTTP call, evaluates the jq expression if
+// present, and returns (human-readable message, raw response body,
+// error). The raw body is propagated so the single-call path in
+// Execute can run response-capture against it. Step-level headers
+// are applied uniformly across every call from a step (including
+// each call in a batch) so one step = one caller identity.
+func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, headers map[string]string, expect *ExpectBlock) (string, json.RawMessage, error) {
 	path := expandURL(urlTemplate, r.Client.NetworkID(), device)
 
 	// Build body for POST/PUT/DELETE — only if params are provided.
@@ -178,48 +192,32 @@ func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params m
 
 	data, err := r.Client.RawRequest(method, path, body, opts...)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// If no jq assertion, success is simply a non-error response.
 	if expect == nil || expect.JQ == "" {
-		return fmt.Sprintf("%s %s: ok", method, path), nil
+		return fmt.Sprintf("%s %s: ok", method, path), data, nil
 	}
 
 	// Evaluate jq expression against response data.
-	return evalJQ(expect.JQ, data, method, path)
+	msg, err := evalJQ(expect.JQ, data, method, path)
+	return msg, data, err
 }
 
-// evalJQ compiles and runs a jq expression against JSON data.
-// The expression must produce a single boolean true to pass.
+// evalJQ runs a jq expression against JSON data and asserts the
+// result is boolean true. Layered on runJQ (jq.go) — that helper
+// owns the parse + decode + first-result plumbing; this function
+// adds only the bool assertion + the "passed/failed" message
+// shape the suite reporter expects.
 func evalJQ(expr string, data json.RawMessage, method, path string) (string, error) {
-	query, err := gojq.Parse(expr)
+	v, err := runJQ(expr, data)
 	if err != nil {
-		return "", fmt.Errorf("jq parse error: %w", err)
+		return "", err
 	}
-
-	// Decode response data into a generic value for jq evaluation.
-	var input any
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &input); err != nil {
-			return "", fmt.Errorf("jq: cannot decode response: %w", err)
-		}
-	}
-
-	iter := query.Run(input)
-	v, ok := iter.Next()
-	if !ok {
-		return "", fmt.Errorf("jq: expression produced no output")
-	}
-	if err, isErr := v.(error); isErr {
-		return "", fmt.Errorf("jq eval error: %w", err)
-	}
-
-	// Boolean true passes; anything else is a failure.
 	if b, isBool := v.(bool); isBool && b {
 		return fmt.Sprintf("%s %s: jq assertion passed", method, path), nil
 	}
-
 	// Format the actual value for debugging.
 	out, _ := json.Marshal(v)
 	return "", fmt.Errorf("jq assertion failed: expression %q evaluated to %s", expr, string(out))

@@ -125,6 +125,29 @@ var stepValidations = map[StepAction]stepValidation{
 		if step.URL == "" && len(step.Batch) == 0 {
 			return fmt.Errorf("%s: newtron requires url or batch", prefix)
 		}
+		// Capture extracts values from a single response body. Batch
+		// emits multiple responses with no canonical "the response";
+		// poll loops until an assertion holds and reports only the
+		// passing iteration's status, not the final body. In both
+		// cases there is no single response to extract from — reject
+		// at parse time so the suite author gets a clear message
+		// instead of a "captured nothing" surprise at runtime.
+		if len(step.Capture) > 0 {
+			if len(step.Batch) > 0 {
+				return fmt.Errorf("%s: capture is not supported on batch steps (no single response body)", prefix)
+			}
+			if step.Poll != nil {
+				return fmt.Errorf("%s: capture is not supported on poll steps (no single response body)", prefix)
+			}
+			for name, expr := range step.Capture {
+				if name == "" {
+					return fmt.Errorf("%s: capture has an entry with empty variable name (each entry must have a non-empty name to reference as {{captured.NAME}})", prefix)
+				}
+				if expr == "" {
+					return fmt.Errorf("%s: capture %q has empty JQ expression (each entry must have a non-empty JQ expression, e.g. \".key\")", prefix, name)
+				}
+			}
+		}
 		return nil
 	}},
 	ActionRunSuite: {custom: func(prefix string, step *Step) error {
@@ -165,6 +188,12 @@ func validateStepFields(scenario string, index int, step *Step) error {
 		if len(step.Targets) > 0 {
 			return fmt.Errorf("%s: 'targets' is only valid for action run-suite (got action %q)", prefix, step.Action)
 		}
+	}
+	// Response-capture is wired only for the single-call newtron
+	// path; other actions don't produce a JSON body the JQ
+	// extractor can read.
+	if step.Action != ActionNewtron && len(step.Capture) > 0 {
+		return fmt.Errorf("%s: 'capture' is only valid for action newtron (got action %q)", prefix, step.Action)
 	}
 
 	v, ok := stepValidations[step.Action]

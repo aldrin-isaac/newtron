@@ -28,7 +28,7 @@ These verifications can't fit the current newtrun suite model:
 
 - **L2a inter-service mTLS** — N/A for `newt-server` (single process, no inter-engine network calls).
 - **L2b user-to-service PAM** — requires host PAM configuration (`/etc/pam.d/newtron-server`) and a real OS account; the suite can forge `X-Newtron-Caller` but not real Basic-auth credentials.
-- **L2c session-key round trip** — L2c only engages with L2b configured, and `newt-server` has no `--auth-pam-service` flag today. Even with PAM, the round-trip (`POST /auth/login` → capture key → `POST /create-zone Authorization: Bearer <key>` → `POST /auth/logout` → verify the key is gone) needs response-capture in newtrun, which doesn't exist yet. The `25-L2c-disabled-routes` scenario covers what's testable today; the round-trip is in "Manual verifications" below.
+- **L2c session-key round trip** — L2c only engages with L2b configured, and `newt-server` has no `--auth-pam-service` flag today. Once `newt-server` gains the PAM flag, the round-trip can be expressed as a suite scenario using newtrun's response-capture: `POST /auth/login` captures `.key` as `session_key`, the next mutation step's headers carry `Authorization: Bearer {{captured.session_key}}`, `POST /auth/logout` revokes, and a final mutation with the same captured key asserts 401. The `25-L2c-disabled-routes` scenario covers what's testable today (against the PAM-less `newt-server`); the round-trip is in "Manual verifications" below.
 - **L6 spec-watch** — requires editing `network.json` mid-suite to observe auto-reload. There's no `local-exec` step action today (deferred follow-up).
 - **L6 audit tamper detection** — requires modifying a log entry mid-suite to confirm verify catches it. Same `local-exec` gap.
 
