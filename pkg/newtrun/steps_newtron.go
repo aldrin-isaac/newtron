@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/itchyny/gojq"
+
+	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
 // newtronExecutor implements the generic "newtron" action — a single step type
@@ -39,12 +41,12 @@ func (e *newtronExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 	// One-shot mode: per-device parallel execution.
 	if hasDeviceTemplate(step.URL) {
 		return r.executeForDevices(step, func(name string) (string, error) {
-			return e.doCall(r, method, step.URL, step.Params, name, step.Expect)
+			return e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
 		})
 	}
 
 	// No {{device}} template — network-scoped call (no device parallelism).
-	msg, err := e.doCall(r, method, step.URL, step.Params, "", step.Expect)
+	msg, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
 	if err != nil {
 		return &StepOutput{Result: &StepResult{
 			Status:  StepStatusFailed,
@@ -78,7 +80,7 @@ func (e *newtronExecutor) executeBatch(ctx context.Context, r *Runner, step *Ste
 				if method == "" {
 					method = "GET"
 				}
-				_, err := e.doCall(r, method, call.URL, call.Params, name, nil)
+				_, err := e.doCall(r, method, call.URL, call.Params, name, step.Headers, nil)
 				if err != nil {
 					return "", fmt.Errorf("batch[%d] %s %s: %s", i, method, call.URL, err)
 				}
@@ -93,7 +95,7 @@ func (e *newtronExecutor) executeBatch(ctx context.Context, r *Runner, step *Ste
 		if method == "" {
 			method = "GET"
 		}
-		_, err := e.doCall(r, method, call.URL, call.Params, "", nil)
+		_, err := e.doCall(r, method, call.URL, call.Params, "", step.Headers, nil)
 		if err != nil {
 			return &StepOutput{Result: &StepResult{
 				Status:  StepStatusFailed,
@@ -124,7 +126,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 		pollStep.Expect = &pollExpect
 
 		return r.pollForDevices(ctx, &pollStep, func(name string) (bool, string, error) {
-			msg, err := e.doCall(r, method, step.URL, step.Params, name, step.Expect)
+			msg, err := e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
 			if err != nil {
 				// For polling, errors mean "not ready yet" — keep polling.
 				return false, err.Error(), nil
@@ -136,7 +138,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 	// No device template — poll a network-scoped endpoint.
 	var lastMsg string
 	err := pollUntil(ctx, step.Poll.Timeout, step.Poll.Interval, func() (bool, error) {
-		msg, err := e.doCall(r, method, step.URL, step.Params, "", step.Expect)
+		msg, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
 		if err != nil {
 			lastMsg = err.Error()
 			return false, nil
@@ -157,8 +159,10 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 }
 
 // doCall makes a single HTTP call, evaluates the jq expression if present,
-// and returns a human-readable message.
-func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, expect *ExpectBlock) (string, error) {
+// and returns a human-readable message. Step-level headers are
+// applied uniformly across every call from a step (including each
+// call in a batch) so one step = one caller identity.
+func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, headers map[string]string, expect *ExpectBlock) (string, error) {
 	path := expandURL(urlTemplate, r.Client.NetworkID(), device)
 
 	// Build body for POST/PUT/DELETE — only if params are provided.
@@ -167,7 +171,12 @@ func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params m
 		body = params
 	}
 
-	data, err := r.Client.RawRequest(method, path, body)
+	opts := make([]client.RequestOption, 0, len(headers))
+	for k, v := range headers {
+		opts = append(opts, client.WithHeader(k, v))
+	}
+
+	data, err := r.Client.RawRequest(method, path, body, opts...)
 	if err != nil {
 		return "", err
 	}

@@ -287,10 +287,30 @@ func (c *Client) doPost(path string, body any, result any) error {
 }
 
 
+// RequestOption modifies an outbound *http.Request before send. Use
+// WithHeader (and other future option constructors) to attach
+// per-call concerns — typically caller identity headers
+// (X-Newtron-Caller, HTTP Basic) the auth-design.md L1/L2 surfaces
+// pick up at the server.
+type RequestOption func(*http.Request)
+
+// WithHeader sets the named HTTP header on the outbound request.
+// Repeated calls with the same key overwrite — last value wins —
+// matching http.Header.Set semantics.
+func WithHeader(key, value string) RequestOption {
+	return func(req *http.Request) {
+		req.Header.Set(key, value)
+	}
+}
+
 // RawRequest performs an HTTP request and returns the response Data as raw JSON.
 // It unwraps the APIResponse envelope and returns the Data field without decoding
 // it into a typed struct — the caller receives the raw JSON for flexible evaluation.
-func (c *Client) RawRequest(method, path string, body any) (json.RawMessage, error) {
+//
+// Per-call RequestOptions (typically WithHeader for caller identity)
+// run after the Content-Type default, so a passed-in Content-Type
+// override wins — useful for batch + content-type composition.
+func (c *Client) RawRequest(method, path string, body any, opts ...RequestOption) (json.RawMessage, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -306,6 +326,9 @@ func (c *Client) RawRequest(method, path string, body any) (json.RawMessage, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for _, opt := range opts {
+		opt(req)
 	}
 
 	resp, err := c.httpClient.Do(req)
