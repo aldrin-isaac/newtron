@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "1-node topology used by the 1node-vs-auth suite to drive the auth arc (L0+L1+L3+L4+L5+L6) end-to-end. Mirrors 1node-vs structure; runs in --loopback so no SONiC VM is required.",
+  "devices": {
+    "switch1": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "65001",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch1",
+              "hwsku": "Force10-S6000",
+              "type": "LeafRouter"
+            }
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": "9100"
+        }
+      }
+    }
+  },
+  "links": []
+}

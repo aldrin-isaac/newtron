@@ -1,0 +1,103 @@
+name: L3-spec-mutations-gated
+description: |
+  auth-design.md L3: spec-mutation endpoints (spec.author family,
+  qos.create, filter.create) reject callers without the matching
+  grant and accept callers in the granted group. Tests the
+  enforcement contract per permission family.
+
+  Pre-L3 (or without --enforce-authorization), every step would
+  succeed for both callers — the expect_failure assertions would
+  fail. This scenario only makes sense with enforcement engaged.
+
+requires: [L0-secret-store-resolves]
+
+steps:
+  # spec.author family — denied caller (mallory: not in any group)
+  - name: mallory-create-service-denied
+    action: newtron
+    method: POST
+    url: /create-service
+    params: {name: svc-mallory, type: routed}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  # spec.author family — allowed caller (alice: spec-team)
+  - name: alice-create-service-allowed
+    action: newtron
+    method: POST
+    url: /create-service
+    params: {name: svc-alice-l3, type: routed}
+    headers:
+      X-Newtron-Caller: alice
+
+  - name: alice-cleans-up-svc
+    action: newtron
+    method: POST
+    url: /delete-service
+    params: {name: svc-alice-l3}
+    headers:
+      X-Newtron-Caller: alice
+
+  # qos.create family — denied caller
+  - name: mallory-create-qos-denied
+    action: newtron
+    method: POST
+    url: /create-qos-policy
+    params: {name: qos-mallory}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  # qos.create family — allowed caller (bob: ops, which has qos.create)
+  - name: bob-create-qos-allowed
+    action: newtron
+    method: POST
+    url: /create-qos-policy
+    params: {name: qos-bob-l3}
+    headers:
+      X-Newtron-Caller: bob
+
+  - name: alice-cleans-up-qos
+    action: newtron
+    method: POST
+    url: /delete-qos-policy
+    params: {name: qos-bob-l3}
+    headers:
+      X-Newtron-Caller: alice
+
+  # filter.create family — denied caller
+  - name: mallory-create-filter-denied
+    action: newtron
+    method: POST
+    url: /create-filter
+    params: {name: filter-mallory, type: ip}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  # filter.create family — allowed caller
+  - name: alice-create-filter-allowed
+    action: newtron
+    method: POST
+    url: /create-filter
+    params: {name: filter-alice-l3, type: ip}
+    headers:
+      X-Newtron-Caller: alice
+
+  - name: alice-cleans-up-filter
+    action: newtron
+    method: POST
+    url: /delete-filter
+    params: {name: filter-alice-l3}
+    headers:
+      X-Newtron-Caller: alice
+
+  # No-identity request — fails closed even on an allowed permission.
+  # Verifies the fail-closed contract from TestAuthorization_EmptyCallerDenied.
+  - name: no-caller-fails-closed
+    action: newtron
+    method: POST
+    url: /create-service
+    params: {name: svc-no-caller, type: routed}
+    expect_failure: true

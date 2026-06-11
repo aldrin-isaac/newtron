@@ -1,0 +1,74 @@
+name: L4-node-mutations-gated
+description: |
+  auth-design.md L4: Node-level mutations gate behind the verb-family
+  permissions. Uses ?mode=topology so the gate fires before any
+  device transport (same pattern as TestAuthorizationL4 in
+  pkg/newtron/api/). Commits in topology mode are in-memory only —
+  the suite never touches a real device.
+
+requires: [L3-spec-mutations-gated]
+
+steps:
+  # vlan.create — denied caller (mallory: no group)
+  - name: mallory-create-vlan-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vlan?mode=topology
+    params: {vlan_id: 100}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  # vlan.create — allowed caller (bob: ops, has vlan.create)
+  - name: bob-create-vlan-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vlan?mode=topology
+    params: {vlan_id: 200}
+    headers:
+      X-Newtron-Caller: bob
+
+  # vrf.create — denied caller
+  - name: mallory-create-vrf-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vrf?mode=topology
+    params: {name: vrf-mallory}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  # vrf.create — allowed caller (bob: ops, has vrf.create)
+  - name: bob-create-vrf-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vrf?mode=topology
+    params: {name: vrf-bob}
+    headers:
+      X-Newtron-Caller: bob
+
+  # acl.create — denied caller
+  - name: mallory-create-acl-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-acl?mode=topology
+    params: {name: acl-mallory, type: ip}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  # acl.create — allowed caller
+  - name: bob-create-acl-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-acl?mode=topology
+    params: {name: acl-bob, type: ip}
+    headers:
+      X-Newtron-Caller: bob
+
+  # Read endpoint — no caller required (reads stay ungated per §3
+  # criterion 2). The same path without auth header succeeds.
+  - name: read-vlans-no-caller-allowed
+    action: newtron
+    method: GET
+    url: /nodes/switch1/vlans?mode=topology
