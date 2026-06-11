@@ -40,8 +40,13 @@ chmod 600 /tmp/1node-vs-auth-secrets.json
 
 ### 2. Start `newt-server` with the full flag set
 
+The L6-audit-verify scenario invokes `bin/newtron` as a subprocess
+from inside `newt-server`. The subprocess inherits the server's
+`$PATH`, so the operator must put `./bin` on PATH before starting
+the server:
+
 ```sh
-bin/newt-server \
+PATH="$(pwd)/bin:$PATH" bin/newt-server \
     --spec-dir newtrun/topologies/1node-vs-auth/specs \
     --net-id 1node-vs-auth \
     --secret-store /tmp/1node-vs-auth-secrets.json \

@@ -23,7 +23,10 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
-    params: {service: transit-1}
+    params:
+      service: transit-1
+      ip_address: 10.1.0.0/31
+      peer_as: 65002
     headers:
       X-Newtron-Caller: alice
 
