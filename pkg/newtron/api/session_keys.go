@@ -76,10 +76,10 @@ func (s *sessionKeyStore) Stop() {
 	s.wg.Wait()
 }
 
-// Mint issues a new session key for username. The returned key is
-// 256 bits of entropy URL-safe base64; ExpiresAt is now+TTL.
-// crypto/rand failure is fatal at process scope — there is no
-// fallback that wouldn't compromise the security property.
+// Mint draws 256 bits from crypto/rand for the key. A rand.Read
+// failure surfaces to the caller rather than panicking or falling
+// back to a weaker source — there is no fallback that wouldn't
+// compromise the security property.
 func (s *sessionKeyStore) Mint(username string) (key string, expiresAt time.Time, err error) {
 	var buf [32]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -94,13 +94,10 @@ func (s *sessionKeyStore) Mint(username string) (key string, expiresAt time.Time
 	return key, expiresAt, nil
 }
 
-// Lookup returns the username for key when the key exists and has
-// not expired. The empty string + false signals "no valid session
-// for this key" — caller maps this to 401.
-//
-// Lookups are read-locked; the sweeper writer-locks. Concurrent
-// reads scale with mu's RLock contention, which is per-bucket in
-// Go's sync.RWMutex — fine for any reasonable request rate.
+// Lookup also enforces the TTL — an entry past ExpiresAt returns
+// false even when the sweeper hasn't reaped it yet, so a slow
+// sweeper cannot enable expired keys. Read-locked; the sweeper
+// writer-locks.
 func (s *sessionKeyStore) Lookup(key string) (string, bool) {
 	if key == "" {
 		return "", false
@@ -117,9 +114,10 @@ func (s *sessionKeyStore) Lookup(key string) (string, bool) {
 	return entry.Username, true
 }
 
-// Revoke removes key from the store unconditionally. Idempotent:
-// revoking a key that doesn't exist is not an error — the operator's
-// intent ("this key must not work") is satisfied either way.
+// Revoke is idempotent. A revoke for a key that doesn't exist still
+// satisfies the operator's intent ("this key must not work"), so the
+// /auth/logout handler can return 204 without information leak about
+// which keys were live.
 func (s *sessionKeyStore) Revoke(key string) {
 	if key == "" {
 		return

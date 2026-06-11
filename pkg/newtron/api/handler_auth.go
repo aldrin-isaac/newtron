@@ -9,9 +9,10 @@ import (
 )
 
 // LoginResponse is the wire shape returned by POST /auth/login on
-// success (auth-design.md L2c). The key is the opaque bearer token
+// success (auth-design.md L2c). The key is the opaque session key
 // the client carries on subsequent requests as
-// `Authorization: Bearer <key>`. ExpiresAt is absolute; using the
+// `Authorization: Bearer <key>` — Bearer is the HTTP scheme, not a
+// second name for the credential. ExpiresAt is absolute; using the
 // key does not extend it. User echoes the PAM-verified username so
 // the client knows which identity its key resolves to without
 // parsing the key itself (the key is opaque).
