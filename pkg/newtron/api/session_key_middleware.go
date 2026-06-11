@@ -40,7 +40,7 @@ func withSessionKey(store *sessionKeyStore) func(http.Handler) http.Handler {
 				return
 			}
 			if key == "" {
-				http.Error(w, "empty bearer token", http.StatusUnauthorized)
+				http.Error(w, "empty session key", http.StatusUnauthorized)
 				return
 			}
 			user, found := store.Lookup(key)
