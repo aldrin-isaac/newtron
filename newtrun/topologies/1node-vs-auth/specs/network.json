@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "description": "Grant table the 1node-vs-auth suite exercises against an --enforce-authorization newtron-server. Mixes the legacy [\"group\"] shorthand and the L5 typed [{groups, where}] form to demonstrate both work end to end.",
+  "super_users": ["root"],
+  "user_groups": {
+    "spec-team": ["alice", "dave"],
+    "ops":       ["bob", "charlie"]
+  },
+  "permissions": {
+    "spec.author":   ["spec-team"],
+    "qos.create":    ["spec-team", "ops"],
+    "qos.delete":    ["spec-team"],
+    "qos.modify":    ["spec-team", "ops"],
+    "filter.create": ["spec-team"],
+    "filter.delete": ["spec-team"],
+    "vlan.create":   ["ops"],
+    "vlan.modify":   ["ops"],
+    "vlan.delete":   ["ops"],
+    "vrf.create":    ["ops"],
+    "vrf.modify":    ["ops"],
+    "vrf.delete":    ["ops"],
+    "acl.create":    ["ops"],
+    "acl.modify":    ["ops"],
+    "acl.delete":    ["ops"],
+    "service.apply": [
+      { "groups": ["spec-team"], "where": { "resource": "transit-*" } },
+      { "groups": ["ops"],       "where": { "resource": "vpn-*" } }
+    ],
+    "service.remove": ["spec-team", "ops"],
+    "device.write":   ["spec-team", "ops"]
+  },
+  "zones": {
+    "amer": {}
+  },
+  "services": {
+    "transit-1": {
+      "description": "Transit peering service — used by the L5 resource-scope scenario",
+      "service_type": "routed",
+      "routing": {
+        "protocol": "bgp",
+        "peer_as": "request"
+      }
+    }
+  }
+}

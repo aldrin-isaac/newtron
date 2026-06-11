@@ -1,0 +1,59 @@
+name: L5-resource-scoping
+description: |
+  auth-design.md L5: a permission grant with where: { resource: "X-*" }
+  matches only when the operation's Context.Resource glob-matches.
+  Network.json grants service.apply to spec-team for resource: "transit-*"
+  and to ops for resource: "vpn-*". Alice (spec-team) can apply
+  transit-named services but is denied on vpn-named ones; bob (ops)
+  is the inverse.
+
+  The service.apply endpoint is Interface-scoped (POST /interfaces/{name}
+  /apply-service). The Interface gate populates Context.Resource from
+  the service argument, which the L5 where matches against.
+
+  ?mode=topology so the in-memory projection takes the binding without
+  device transport.
+
+requires: [L4-node-mutations-gated]
+
+steps:
+  # alice (spec-team, scoped to resource: transit-*) — apply transit-1
+  # is allowed.
+  - name: alice-apply-transit-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
+    params: {service: transit-1}
+    headers:
+      X-Newtron-Caller: alice
+
+  - name: alice-cleanup-transit
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/remove-service?mode=topology
+    headers:
+      X-Newtron-Caller: alice
+
+  # alice — apply a non-transit service is denied by the where clause
+  # (her grant scopes to resource: "transit-*"). The service doesn't
+  # exist in network.json, but the gate fires before the service
+  # lookup — so the failure mode is 403, not 404.
+  - name: alice-apply-vpn-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
+    params: {service: vpn-east}
+    headers:
+      X-Newtron-Caller: alice
+    expect_failure: true
+
+  # bob (ops, scoped to resource: vpn-*) — applying transit-named
+  # service is denied even though service exists.
+  - name: bob-apply-transit-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
+    params: {service: transit-1}
+    headers:
+      X-Newtron-Caller: bob
+    expect_failure: true
