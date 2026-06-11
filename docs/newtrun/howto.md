@@ -1224,6 +1224,42 @@ The `newtron` action covers every operation exposed by newtron-server. The recip
   devices: [switch1]
 ```
 
+**Response-capture (carry a value from one response into a later step):**
+
+A `newtron` step's `capture:` map binds variable names to JQ expressions that run against the (envelope-unwrapped) response body. The captured values land in a scenario-iteration-scoped map on the runner; later steps reference them as `{{captured.NAME}}` in `url`, `params`, `headers`, or `expect.jq`. Same substitution rules as `{{target.X}}` / `{{param.X}}` — URL values are path/query-escaped, JSON params keep their typed value when the field is ENTIRELY one `{{captured.X}}` token.
+
+```yaml
+- name: login
+  action: newtron
+  method: POST
+  url: /auth/login
+  headers:
+    Authorization: "Basic YWxpY2U6Y29ycmVjdC1wYXNzd29yZA=="
+  capture:
+    session_key: .key
+
+- name: use-key
+  action: newtron
+  method: POST
+  url: /create-zone
+  params: {name: zone-bearer-auth}
+  headers:
+    Authorization: "Bearer {{captured.session_key}}"
+
+- name: logout
+  action: newtron
+  method: POST
+  url: /auth/logout
+  headers:
+    Authorization: "Bearer {{captured.session_key}}"
+```
+
+Rules and limits:
+
+- The captured map is **iteration-scoped**: a fresh empty map at the start of every iteration of a parameterized scenario; cross-scenario carry is not supported. A scenario that needs write-then-read on the same value puts both steps in itself.
+- Capture runs only on **successful single-call** newtron steps. The parser rejects `capture:` on `batch:` and `poll:` steps (no single response body to extract from) and on non-`newtron` actions.
+- A `{{captured.NAME}}` reference whose key has not been written yet fails the step with an "undefined captured reference" error — surface ordering bugs at the call site rather than silently substituting an empty string.
+
 ---
 
 ## 12. Data Plane Tests

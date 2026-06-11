@@ -54,6 +54,20 @@ type Runner struct {
 
 	discoveredPlatform string // platform discovered from connected devices
 
+	// captured is the response-capture map scoped to the current
+	// scenario iteration. runScenarioSteps resets it at the start
+	// of each iteration; newtronExecutor populates it from
+	// step.Capture after every successful single-call newtron step;
+	// ExpandStep reads it to resolve {{captured.NAME}} references.
+	//
+	// The map is iteration-scoped (per parameterized iteration when
+	// applicable) rather than scenario- or suite-scoped because the
+	// dependency graph in requires:/after: has parallel branches:
+	// sharing a mutable map across them would create ambiguity about
+	// who wrote which value. A scenario that needs cross-step carry
+	// runs steps in sequence within itself.
+	captured map[string]any
+
 	opts     RunOptions
 	scenario *Scenario
 }
@@ -524,11 +538,17 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 		for _, binding := range iterations {
 			iterFailed := false
 
+			// Fresh per-iteration captured map. Same-iteration
+			// step order in scenario.Steps fixes write-then-read so a
+			// {{captured.NAME}} reference in step N can see what step
+			// N-1 captured.
+			r.captured = map[string]any{}
+
 			for i, step := range scenario.Steps {
 				stepToRun := step
 				var expandErr error
-				if isParameterized {
-					stepToRun, expandErr = ExpandStep(step, binding, effectiveParams)
+				if isParameterized || len(r.captured) > 0 || stepReferencesCaptured(step) {
+					stepToRun, expandErr = ExpandStep(step, binding, effectiveParams, r.captured)
 				}
 				if expandErr != nil {
 					sr := StepResult{

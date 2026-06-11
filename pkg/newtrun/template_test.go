@@ -15,6 +15,7 @@ func TestApplyTemplate_URLContext_PathEscape(t *testing.T) {
 		"/nodes/{{target.device}}/x",
 		map[string]string{"device": "switch1"},
 		nil,
+		nil,
 		ctxURL,
 	)
 	if err != nil {
@@ -34,7 +35,8 @@ func TestApplyTemplateURL_QueryPositionUsesQueryEscape(t *testing.T) {
 		"/search?q={{param.q}}",
 		nil,
 		map[string]any{"q": "a&evil=1"},
-	)
+		nil,
+		)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -49,7 +51,8 @@ func TestApplyTemplateURL_PathPositionStillUsesPathEscape(t *testing.T) {
 		"/nodes/{{target.device}}",
 		map[string]string{"device": "switch1"},
 		nil,
-	)
+		nil,
+		)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -63,7 +66,8 @@ func TestApplyTemplateURL_BothPathAndQuery(t *testing.T) {
 		"/nodes/{{target.device}}/route?filter={{param.f}}",
 		map[string]string{"device": "switch1"},
 		map[string]any{"f": "vrf=red&owner=me"},
-	)
+		nil,
+		)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -83,6 +87,7 @@ func TestApplyTemplate_URLContext_EscapesParamWithSlash(t *testing.T) {
 		"/nodes/{{param.intf}}/x",
 		nil,
 		map[string]any{"intf": "Ethernet0/1"},
+		nil,
 		ctxURL,
 	)
 	if err != nil {
@@ -98,6 +103,7 @@ func TestApplyTemplate_ShellContext_SingleQuoteWraps(t *testing.T) {
 		"show interface {{param.name}}",
 		nil,
 		map[string]any{"name": "Ethernet0"},
+		nil,
 		ctxShell,
 	)
 	if err != nil {
@@ -115,6 +121,7 @@ func TestApplyTemplate_ShellContext_EscapesInternalQuote(t *testing.T) {
 		"echo {{param.x}}",
 		nil,
 		map[string]any{"x": `a'b`},
+		nil,
 		ctxShell,
 	)
 	if err != nil {
@@ -136,7 +143,7 @@ func TestExpandStep_NewtronCLICommandUsesRawContext(t *testing.T) {
 		Action:  ActionNewtronCLI,
 		Command: "service apply Ethernet0 {{param.opt}}",
 	}
-	expanded, err := ExpandStep(step, nil, map[string]any{"opt": "transit"})
+	expanded, err := ExpandStep(step, nil, map[string]any{"opt": "transit"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -150,7 +157,7 @@ func TestExpandStep_HostExecCommandUsesShellContext(t *testing.T) {
 		Action:  ActionHostExec,
 		Command: "echo {{param.msg}}",
 	}
-	expanded, err := ExpandStep(step, nil, map[string]any{"msg": "hello world"})
+	expanded, err := ExpandStep(step, nil, map[string]any{"msg": "hello world"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -166,6 +173,7 @@ func TestApplyTemplate_ShellContext_DefendsAgainstCommandInjection(t *testing.T)
 		"echo {{param.x}}",
 		nil,
 		map[string]any{"x": "; rm -rf /"},
+		nil,
 		ctxShell,
 	)
 	if err != nil {
@@ -184,6 +192,7 @@ func TestApplyTemplate_JQContext_QuotesStrings(t *testing.T) {
 		".admin_status == {{param.status}}",
 		nil,
 		map[string]any{"status": "up"},
+		nil,
 		ctxJQ,
 	)
 	if err != nil {
@@ -199,6 +208,7 @@ func TestApplyTemplate_JQContext_NumericLiteral(t *testing.T) {
 		".mtu == {{param.mtu}}",
 		nil,
 		map[string]any{"mtu": 9100},
+		nil,
 		ctxJQ,
 	)
 	if err != nil {
@@ -214,6 +224,7 @@ func TestApplyTemplate_JQContext_BoolLiteral(t *testing.T) {
 		".enabled == {{param.active}}",
 		nil,
 		map[string]any{"active": true},
+		nil,
 		ctxJQ,
 	)
 	if err != nil {
@@ -233,6 +244,7 @@ func TestApplyTemplate_JQContext_DefendsAgainstStringInjection(t *testing.T) {
 		".admin_status == {{param.status}}",
 		nil,
 		map[string]any{"status": `up" or true == "x`},
+		nil,
 		ctxJQ,
 	)
 	if err != nil {
@@ -248,6 +260,7 @@ func TestApplyTemplate_RawContext_NoEscaping(t *testing.T) {
 		"contains: {{param.x}}",
 		nil,
 		map[string]any{"x": "anything goes"},
+		nil,
 		ctxRaw,
 	)
 	if err != nil {
@@ -263,6 +276,7 @@ func TestApplyTemplate_UndefinedTargetRefError(t *testing.T) {
 		"/nodes/{{target.missing}}/x",
 		map[string]string{},
 		nil,
+		nil,
 		ctxURL,
 	)
 	if err == nil || !strings.Contains(err.Error(), "undefined target") {
@@ -275,6 +289,7 @@ func TestApplyTemplate_UndefinedParamRefError(t *testing.T) {
 		"echo {{param.missing}}",
 		nil,
 		map[string]any{},
+		nil,
 		ctxShell,
 	)
 	if err == nil || !strings.Contains(err.Error(), "undefined param") {
@@ -283,7 +298,7 @@ func TestApplyTemplate_UndefinedParamRefError(t *testing.T) {
 }
 
 func TestApplyTemplate_EmptyStringPassthrough(t *testing.T) {
-	got, err := applyTemplate("", nil, nil, ctxURL)
+	got, err := applyTemplate("", nil, nil, nil, ctxURL)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -296,6 +311,7 @@ func TestApplyTemplate_MultipleSubstitutionsSameString(t *testing.T) {
 	got, err := applyTemplate(
 		"/nodes/{{target.device}}/iface/{{target.interface}}",
 		map[string]string{"device": "s1", "interface": "Eth0"},
+		nil,
 		nil,
 		ctxURL,
 	)
@@ -313,7 +329,7 @@ func TestApplyTemplate_MultipleSubstitutionsSameString(t *testing.T) {
 
 func TestExpandMapAny_FullTokenPreservesIntType(t *testing.T) {
 	in := map[string]any{"mtu": "{{param.mtu}}"}
-	got, err := expandMapAny(in, nil, map[string]any{"mtu": 9100})
+	got, err := expandMapAny(in, nil, map[string]any{"mtu": 9100}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -324,7 +340,7 @@ func TestExpandMapAny_FullTokenPreservesIntType(t *testing.T) {
 
 func TestExpandMapAny_FullTokenPreservesBoolType(t *testing.T) {
 	in := map[string]any{"enabled": "{{param.flag}}"}
-	got, err := expandMapAny(in, nil, map[string]any{"flag": true})
+	got, err := expandMapAny(in, nil, map[string]any{"flag": true}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -335,7 +351,7 @@ func TestExpandMapAny_FullTokenPreservesBoolType(t *testing.T) {
 
 func TestExpandMapAny_InlinedStringStaysString(t *testing.T) {
 	in := map[string]any{"msg": "value is {{param.x}}"}
-	got, err := expandMapAny(in, nil, map[string]any{"x": "up"})
+	got, err := expandMapAny(in, nil, map[string]any{"x": "up"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -350,7 +366,7 @@ func TestExpandMapAny_NestedMapsRecurse(t *testing.T) {
 			"inner": "{{param.x}}",
 		},
 	}
-	got, err := expandMapAny(in, nil, map[string]any{"x": "value"})
+	got, err := expandMapAny(in, nil, map[string]any{"x": "value"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -364,7 +380,7 @@ func TestExpandMapAny_SlicesRecurse(t *testing.T) {
 	in := map[string]any{
 		"list": []any{"{{param.x}}", "static"},
 	}
-	got, err := expandMapAny(in, nil, map[string]any{"x": "value"})
+	got, err := expandMapAny(in, nil, map[string]any{"x": "value"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -376,7 +392,7 @@ func TestExpandMapAny_SlicesRecurse(t *testing.T) {
 
 func TestExpandMapAny_NonStringScalarsPassThrough(t *testing.T) {
 	in := map[string]any{"count": 42, "active": true}
-	got, err := expandMapAny(in, nil, nil)
+	got, err := expandMapAny(in, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -401,7 +417,7 @@ func TestExpandStep_URLAndParamsAndJQ(t *testing.T) {
 	}
 	expanded, err := ExpandStep(step,
 		map[string]string{"device": "s1", "interface": "Eth0"},
-		map[string]any{"admin_status": "up"})
+		map[string]any{"admin_status": "up"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -426,7 +442,7 @@ func TestExpandStep_DoesNotMutateOriginal(t *testing.T) {
 	origURL := step.URL
 	_, err := ExpandStep(step,
 		map[string]string{"device": "s1"},
-		map[string]any{"x": "value"})
+		map[string]any{"x": "value"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -447,7 +463,7 @@ func TestExpandStep_ExpandsBatch(t *testing.T) {
 	}
 	expanded, err := ExpandStep(step,
 		map[string]string{"device": "s1"},
-		map[string]any{"x": "value"})
+		map[string]any{"x": "value"}, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -468,7 +484,7 @@ func TestExpandStep_ExpandsExpectContains(t *testing.T) {
 	}
 	expanded, err := ExpandStep(step,
 		map[string]string{"interface": "Eth0"},
-		nil)
+		nil, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -479,7 +495,7 @@ func TestExpandStep_ExpandsExpectContains(t *testing.T) {
 
 func TestExpandStep_PropagatesError(t *testing.T) {
 	step := Step{URL: "/nodes/{{target.missing}}/x"}
-	_, err := ExpandStep(step, map[string]string{}, nil)
+	_, err := ExpandStep(step, map[string]string{}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "url") {
 		t.Errorf("err = %v, want url-prefixed", err)
 	}

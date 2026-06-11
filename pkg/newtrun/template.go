@@ -36,7 +36,7 @@ import (
 // ipv4/cidr) from the suite's ParameterSpec.Coerce path; the engine
 // uses the Go type to decide how to render.
 
-var templateTokenRe = regexp.MustCompile(`\{\{(target|param)\.([a-zA-Z0-9_]+)\}\}`)
+var templateTokenRe = regexp.MustCompile(`\{\{(target|param|captured)\.([a-zA-Z0-9_]+)\}\}`)
 
 var deviceTokenRe = regexp.MustCompile(`\{\{device\}\}`)
 
@@ -45,7 +45,7 @@ var deviceTokenRe = regexp.MustCompile(`\{\{device\}\}`)
 // string value `"{{param.mtu}}"` in YAML decodes to that literal
 // string; full-token replacement substitutes the typed Go value
 // (e.g., int 9100) so JSON marshal emits `9100`, not `"9100"`.
-var fullTokenRe = regexp.MustCompile(`^\{\{(target|param)\.([a-zA-Z0-9_]+)\}\}$`)
+var fullTokenRe = regexp.MustCompile(`^\{\{(target|param|captured)\.([a-zA-Z0-9_]+)\}\}$`)
 
 // subContext selects the encoding strategy for substituted values.
 type subContext int
@@ -58,19 +58,27 @@ const (
 	ctxRaw                        // free-form text — no escaping
 )
 
-// ExpandStep returns a copy of step with {{target.X}} and {{param.X}}
-// references replaced from the supplied bindings. The original step
-// is not modified — important for Repeat correctness, where each
-// iteration must get a fresh expansion from the same source step.
+// ExpandStep returns a copy of step with {{target.X}}, {{param.X}},
+// and {{captured.X}} references replaced from the supplied bindings.
+// The original step is not modified — important for Repeat
+// correctness, where each iteration must get a fresh expansion from
+// the same source step.
+//
+// target and params come from the suite-level binding (parameterized
+// scenarios); captured comes from the runner's per-iteration response-
+// captured map (any scenario). All three may be nil for steps that
+// don't reference them.
 //
 // Each field is expanded under the substitution context appropriate
 // to its downstream consumer. Substitution errors (undefined token
-// references) abort with a descriptive error; the parser should have
-// caught these at suite-load time.
-func ExpandStep(step Step, target map[string]string, params map[string]any) (Step, error) {
+// references) abort with a descriptive error. Undefined target/param
+// references are caught at suite-load time; undefined captured
+// references can only be diagnosed at runtime because the captured
+// map is populated dynamically as the scenario executes.
+func ExpandStep(step Step, target map[string]string, params map[string]any, captured map[string]any) (Step, error) {
 	expanded := step
 	var err error
-	expanded.URL, err = applyTemplateURL(step.URL, target, params)
+	expanded.URL, err = applyTemplateURL(step.URL, target, params, captured)
 	if err != nil {
 		return expanded, fmt.Errorf("url: %w", err)
 	}
@@ -85,23 +93,33 @@ func ExpandStep(step Step, target map[string]string, params map[string]any) (Ste
 	if step.Action == ActionNewtronCLI {
 		cmdCtx = ctxRaw
 	}
-	expanded.Command, err = applyTemplate(step.Command, target, params, cmdCtx)
+	expanded.Command, err = applyTemplate(step.Command, target, params, captured, cmdCtx)
 	if err != nil {
 		return expanded, fmt.Errorf("command: %w", err)
 	}
-	expanded.Params, err = expandMapAny(step.Params, target, params)
+	expanded.Params, err = expandMapAny(step.Params, target, params, captured)
 	if err != nil {
 		return expanded, fmt.Errorf("params: %w", err)
+	}
+	if len(step.Headers) > 0 {
+		expanded.Headers = make(map[string]string, len(step.Headers))
+		for k, v := range step.Headers {
+			ev, err := applyTemplate(v, target, params, captured, ctxRaw)
+			if err != nil {
+				return expanded, fmt.Errorf("headers[%s]: %w", k, err)
+			}
+			expanded.Headers[k] = ev
+		}
 	}
 	if len(step.Batch) > 0 {
 		expanded.Batch = make([]BatchCall, len(step.Batch))
 		for i, bc := range step.Batch {
 			expanded.Batch[i] = bc
-			expanded.Batch[i].URL, err = applyTemplateURL(bc.URL, target, params)
+			expanded.Batch[i].URL, err = applyTemplateURL(bc.URL, target, params, captured)
 			if err != nil {
 				return expanded, fmt.Errorf("batch[%d].url: %w", i, err)
 			}
-			expanded.Batch[i].Params, err = expandMapAny(bc.Params, target, params)
+			expanded.Batch[i].Params, err = expandMapAny(bc.Params, target, params, captured)
 			if err != nil {
 				return expanded, fmt.Errorf("batch[%d].params: %w", i, err)
 			}
@@ -110,11 +128,11 @@ func ExpandStep(step Step, target map[string]string, params map[string]any) (Ste
 	if step.Expect != nil {
 		expanded.Expect = &ExpectBlock{}
 		*expanded.Expect = *step.Expect
-		expanded.Expect.JQ, err = applyTemplate(step.Expect.JQ, target, params, ctxJQ)
+		expanded.Expect.JQ, err = applyTemplate(step.Expect.JQ, target, params, captured, ctxJQ)
 		if err != nil {
 			return expanded, fmt.Errorf("expect.jq: %w", err)
 		}
-		expanded.Expect.Contains, err = applyTemplate(step.Expect.Contains, target, params, ctxRaw)
+		expanded.Expect.Contains, err = applyTemplate(step.Expect.Contains, target, params, captured, ctxRaw)
 		if err != nil {
 			return expanded, fmt.Errorf("expect.contains: %w", err)
 		}
@@ -130,25 +148,26 @@ func ExpandStep(step Step, target map[string]string, params map[string]any) (Ste
 // "&evil=1" would silently inject extra query parameters when used
 // in a query position, and a literal '+' would be read by the
 // server as a space.
-func applyTemplateURL(s string, target map[string]string, params map[string]any) (string, error) {
+func applyTemplateURL(s string, target map[string]string, params map[string]any, captured map[string]any) (string, error) {
 	qIdx := strings.IndexByte(s, '?')
 	if qIdx < 0 {
-		return applyTemplate(s, target, params, ctxURL)
+		return applyTemplate(s, target, params, captured, ctxURL)
 	}
-	pathPart, err := applyTemplate(s[:qIdx], target, params, ctxURL)
+	pathPart, err := applyTemplate(s[:qIdx], target, params, captured, ctxURL)
 	if err != nil {
 		return "", err
 	}
-	queryPart, err := applyTemplate(s[qIdx:], target, params, ctxURLQuery)
+	queryPart, err := applyTemplate(s[qIdx:], target, params, captured, ctxURLQuery)
 	if err != nil {
 		return "", err
 	}
 	return pathPart + queryPart, nil
 }
 
-// applyTemplate substitutes {{target.X}} / {{param.X}} tokens in s.
-// Each substituted value is encoded for the supplied context.
-func applyTemplate(s string, target map[string]string, params map[string]any, ctx subContext) (string, error) {
+// applyTemplate substitutes {{target.X}}, {{param.X}}, and
+// {{captured.X}} tokens in s. Each substituted value is encoded for
+// the supplied context.
+func applyTemplate(s string, target map[string]string, params map[string]any, captured map[string]any, ctx subContext) (string, error) {
 	if s == "" {
 		return "", nil
 	}
@@ -172,6 +191,13 @@ func applyTemplate(s string, target map[string]string, params map[string]any, ct
 			v, ok := params[name]
 			if !ok {
 				firstErr = fmt.Errorf("undefined param reference %s", m)
+				return m
+			}
+			raw = v
+		case "captured":
+			v, ok := captured[name]
+			if !ok {
+				firstErr = fmt.Errorf("undefined captured reference %s (no prior step captured %q)", m, name)
 				return m
 			}
 			raw = v
@@ -242,17 +268,17 @@ func jsonQuote(s string) string {
 
 // expandMapAny walks a JSON-marshalable map and substitutes templates
 // in every string value. A string value that is ENTIRELY a single
-// {{target.X}} / {{param.X}} token gets the typed Go value (so an
-// int parameter stays an int through json.Marshal); other strings
-// get inline substitution under ctxRaw (the eventual json.Marshal
-// adds JSON escaping). Nested maps and slices recurse.
-func expandMapAny(in map[string]any, target map[string]string, params map[string]any) (map[string]any, error) {
+// {{target.X}} / {{param.X}} / {{captured.X}} token gets the typed
+// Go value (so an int parameter stays an int through json.Marshal);
+// other strings get inline substitution under ctxRaw (the eventual
+// json.Marshal adds JSON escaping). Nested maps and slices recurse.
+func expandMapAny(in map[string]any, target map[string]string, params map[string]any, captured map[string]any) (map[string]any, error) {
 	if in == nil {
 		return nil, nil
 	}
 	out := make(map[string]any, len(in))
 	for k, v := range in {
-		ev, err := expandAny(v, target, params)
+		ev, err := expandAny(v, target, params, captured)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", k, err)
 		}
@@ -261,7 +287,7 @@ func expandMapAny(in map[string]any, target map[string]string, params map[string
 	return out, nil
 }
 
-func expandAny(v any, target map[string]string, params map[string]any) (any, error) {
+func expandAny(v any, target map[string]string, params map[string]any, captured map[string]any) (any, error) {
 	switch t := v.(type) {
 	case string:
 		if m := fullTokenRe.FindStringSubmatch(t); m != nil {
@@ -279,15 +305,21 @@ func expandAny(v any, target map[string]string, params map[string]any) (any, err
 					return nil, fmt.Errorf("undefined param reference %s", t)
 				}
 				return val, nil
+			case "captured":
+				val, ok := captured[name]
+				if !ok {
+					return nil, fmt.Errorf("undefined captured reference %s (no prior step captured %q)", t, name)
+				}
+				return val, nil
 			}
 		}
-		return applyTemplate(t, target, params, ctxRaw)
+		return applyTemplate(t, target, params, captured, ctxRaw)
 	case map[string]any:
-		return expandMapAny(t, target, params)
+		return expandMapAny(t, target, params, captured)
 	case []any:
 		out := make([]any, len(t))
 		for i, item := range t {
-			ev, err := expandAny(item, target, params)
+			ev, err := expandAny(item, target, params, captured)
 			if err != nil {
 				return nil, fmt.Errorf("[%d]: %w", i, err)
 			}
