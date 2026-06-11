@@ -14,7 +14,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-vlan?mode=topology
-    params: {vlan_id: 100}
+    params: {id: 100}
     headers:
       X-Newtron-Caller: mallory
     expect_failure: true
@@ -24,7 +24,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-vlan?mode=topology
-    params: {vlan_id: 200}
+    params: {id: 200}
     headers:
       X-Newtron-Caller: bob
 
@@ -52,7 +52,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
-    params: {name: acl-mallory, type: ip}
+    params: {name: acl-mallory, type: L3, stage: ingress}
     headers:
       X-Newtron-Caller: mallory
     expect_failure: true
@@ -62,7 +62,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
-    params: {name: acl-bob, type: ip}
+    params: {name: acl-bob, type: L3, stage: ingress}
     headers:
       X-Newtron-Caller: bob
 
