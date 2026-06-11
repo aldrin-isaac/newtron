@@ -59,7 +59,14 @@ var auditListCmd = &cobra.Command{
 			filter.StartTime = time.Now().Add(-duration)
 		}
 
-		auditPath := app.settings.GetAuditLogPath(app.specDir)
+		// The audit subcommand skips PersistentPreRunE (no network
+		// registration needed), so app.settings is nil here. Load
+		// settings explicitly to find the audit log path.
+		settings, err := newtron.LoadSettings()
+		if err != nil {
+			return fmt.Errorf("loading settings: %w", err)
+		}
+		auditPath := settings.GetAuditLogPath("")
 		events, err := newtron.QueryAuditLog(auditPath, filter)
 		if err != nil {
 			return fmt.Errorf("querying audit log: %w", err)
@@ -121,9 +128,20 @@ to stderr. Exit 2 = I/O or argument error.
 If no path is provided, the configured audit log path is used.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := app.settings.GetAuditLogPath(app.specDir)
-		if len(args) == 1 {
+		// The audit subcommand skips PersistentPreRunE (no network
+		// registration needed), so app.settings is nil here.
+		// Resolve path explicitly: explicit arg wins, else fall back
+		// to the operator's settings file via LoadUserSettings.
+		var path string
+		switch {
+		case len(args) == 1:
 			path = args[0]
+		default:
+			settings, err := newtron.LoadSettings()
+			if err != nil {
+				return fmt.Errorf("no log path provided and loading settings failed: %w", err)
+			}
+			path = settings.GetAuditLogPath("")
 		}
 		result, err := audit.Verify(path)
 		if err != nil {

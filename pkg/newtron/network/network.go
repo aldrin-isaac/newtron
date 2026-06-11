@@ -167,6 +167,36 @@ func resolvePlatformSecrets(p *spec.PlatformSpecFile, store secret.Store) error 
 	return nil
 }
 
+// resolveProfileSecrets walks a DeviceProfile's SSH credentials and
+// resolves any ${secret:KEY} references in the SSHUser and SSHPass
+// fields. Closes the L0 coverage gap surfaced by 1node-vs-auth: pre-
+// fix, only platform credentials were resolved; profile references
+// reached SSH-tunnel construction untouched and SSH'd with the
+// literal "${secret:KEY}" as the password.
+//
+// Called by Network.loadProfile after the loader's per-profile cache
+// hit/miss path returns, so the in-memory profile cached by the
+// loader carries the resolved value; subsequent cache reads return
+// the resolved bytes without re-resolving. resolve is idempotent —
+// a value with no "${secret:" prefix returns unchanged — so
+// re-running over a cached profile is a no-op.
+func resolveProfileSecrets(profile *spec.DeviceProfile, store secret.Store) error {
+	if profile == nil {
+		return nil
+	}
+	user, err := secret.Resolve(profile.SSHUser, store)
+	if err != nil {
+		return fmt.Errorf("profile ssh_user: %w", err)
+	}
+	pass, err := secret.Resolve(profile.SSHPass, store)
+	if err != nil {
+		return fmt.Errorf("profile ssh_pass: %w", err)
+	}
+	profile.SSHUser = user
+	profile.SSHPass = pass
+	return nil
+}
+
 // TopologyName returns the topology name this Network is associated with.
 func (n *Network) TopologyName() string {
 	return n.topologyName
@@ -1725,9 +1755,23 @@ func (n *Network) isHostDeviceLocked(name string) bool {
 	return platform.IsHost()
 }
 
-// loadProfile loads a device profile from the profiles directory.
+// loadProfile loads a device profile from the profiles directory and
+// resolves any ${secret:KEY} references in its SSH credentials
+// (auth-design.md L0). The loader caches the in-memory profile, so
+// once resolution runs the cached value carries plaintext; later
+// reads return the resolved value without re-resolving. A missing
+// store + a reference in the profile is a hard error from
+// secret.Resolve — operators learn at the first GetProfile call
+// rather than silently SSH'ing with "${secret:...}" as the password.
 func (n *Network) loadProfile(name string) (*spec.DeviceProfile, error) {
-	return n.loader.LoadProfile(name)
+	profile, err := n.loader.LoadProfile(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := resolveProfileSecrets(profile, n.secretStore); err != nil {
+		return nil, fmt.Errorf("profile %q: %w", name, err)
+	}
+	return profile, nil
 }
 
 // resolveProfile applies inheritance to resolve final values.

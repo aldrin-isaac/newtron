@@ -378,13 +378,15 @@ func printVerification(v *newtron.VerificationResult) {
 }
 
 // isSettingsOrHelp checks whether cmd (or any ancestor) is a settings, help,
-// version, or secrets command — none of which need a network registered with
-// the server. The secrets subcommand (auth-design.md L0) operates directly
-// on the operator's secret store file; it never reaches newtron-server.
+// version, secrets, or audit command — none of which need a network
+// registered with the server. The secrets subcommand (auth-design.md L0)
+// operates directly on the operator's secret store file; the audit
+// subcommand (L1 list + L6 verify) reads the JSON-lines audit log file
+// directly. Neither reaches newtron-server.
 func isSettingsOrHelp(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "help", "version", "settings", "secrets":
+		case "help", "version", "settings", "secrets", "audit":
 			return true
 		}
 	}
