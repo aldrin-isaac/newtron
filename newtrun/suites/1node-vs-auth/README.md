@@ -14,6 +14,7 @@ expect.
 | `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `profiles/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
 | `10-L1-audit-log-entries` | L1 | A handful of mutations as different callers; operator inspects the audit log file to see one entry per request with caller=alice/bob in the user field. |
 | `20-L3-spec-mutations-gated` | L3 | Per perm family (spec.author, qos.create, filter.create): denied caller gets 403, allowed caller succeeds. Plus the empty-caller fail-closed check. |
+| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service` (as in this suite), `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. Also pins that the new `withSessionKey` middleware doesn't break header-mode identity: a request with `Authorization: Bearer <anything>` plus `X-Newtron-Caller: alice` still resolves as alice. |
 | `30-L4-node-mutations-gated` | L4 | Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
 | `40-L5-resource-scoping` | L5 | alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
 | `50-L6-audit-verify` | L6 | `bin/newtron audit verify /tmp/1node-vs-auth-audit.jsonl` walks the chain and confirms it's intact end-to-end. |
@@ -27,6 +28,7 @@ These verifications can't fit the current newtrun suite model:
 
 - **L2a inter-service mTLS** — N/A for `newt-server` (single process, no inter-engine network calls).
 - **L2b user-to-service PAM** — requires host PAM configuration (`/etc/pam.d/newtron-server`) and a real OS account; the suite can forge `X-Newtron-Caller` but not real Basic-auth credentials.
+- **L2c session-key round trip** — L2c only engages with L2b configured, and `newt-server` has no `--auth-pam-service` flag today. Even with PAM, the round-trip (`POST /auth/login` → capture key → `POST /create-zone Authorization: Bearer <key>` → `POST /auth/logout` → verify the key is gone) needs response-capture in newtrun, which doesn't exist yet. The `25-L2c-disabled-routes` scenario covers what's testable today; the round-trip is in "Manual verifications" below.
 - **L6 spec-watch** — requires editing `network.json` mid-suite to observe auto-reload. There's no `local-exec` step action today (deferred follow-up).
 - **L6 audit tamper detection** — requires modifying a log entry mid-suite to confirm verify catches it. Same `local-exec` gap.
 
@@ -144,6 +146,42 @@ curl -X POST -H "X-Newtron-Caller: alice" \
     http://localhost:18080/newtron/v1/networks/1node-vs-auth/create-service \
     -d '{"name":"after-revoke","type":"routed"}'
 ```
+
+### L2c session-key round trip
+
+Requires `newtron-server` (not `newt-server`, which has no PAM flag
+today) running with both `--auth-pam-service` and a local OS account
+to test against. Pattern:
+
+```sh
+# 1. Mint a key via PAM-backed login. The Basic-auth credentials are
+#    whatever PAM accepts (local account / LDAP / etc.).
+KEY=$(curl -sS -u alice:correct-password -X POST \
+    http://localhost:18080/newtron/v1/auth/login \
+    | jq -r .key)
+
+# 2. Use the key on a real mutation. No password on the wire — just
+#    the Bearer token + the verified identity it resolves to.
+curl -sS -X POST -H "Authorization: Bearer $KEY" \
+    http://localhost:18080/newtron/v1/networks/1node-vs-auth/create-zone \
+    -d '{"name":"zone-bearer"}'
+
+# 3. Revoke explicitly.
+curl -sS -X POST -H "Authorization: Bearer $KEY" \
+    http://localhost:18080/newtron/v1/networks/1node-vs-auth/auth/logout
+# 204 No Content
+
+# 4. Same key now 401s.
+curl -sS -X POST -H "Authorization: Bearer $KEY" \
+    http://localhost:18080/newtron/v1/networks/1node-vs-auth/create-zone \
+    -d '{"name":"zone-after-logout"}'
+# 401 invalid or expired session key
+```
+
+The audit log carries `verification_source: "pam"` for the login
+event and `verification_source: "session_key"` for every subsequent
+gated request. Operators can join the two by user + time window
+bounded by the key's `expires_at`.
 
 ### L6 tamper detection
 
