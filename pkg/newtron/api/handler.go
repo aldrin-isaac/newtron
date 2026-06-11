@@ -26,6 +26,17 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/reload", s.handleReloadNetwork)
 
 	// ====================================================================
+	// Authentication (auth-design.md L2c)
+	// ====================================================================
+	// Mounted unconditionally — the handlers return 404 when L2c is
+	// disabled (no Authenticator configured) so an enable/disable
+	// flip doesn't require a server restart's worth of route table
+	// reshuffling. The 404 message distinguishes "L2c disabled" from
+	// "wrong URL."
+	mux.HandleFunc("POST /newtron/v1/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /newtron/v1/auth/logout", s.handleAuthLogout)
+
+	// ====================================================================
 	// Network spec reads
 	// ====================================================================
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/services", s.handleListServices)
@@ -188,7 +199,13 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 
 	// Apply middleware chain (outermost → innermost):
-	//   recovery → logger → requestID → pam → caller → audit → timeout → persist → mode → mux
+	//   recovery → logger → requestID → sessionKey → pam → caller → audit → timeout → persist → mode → mux
+	//
+	// sessionKey (auth-design.md L2c) parses Authorization: Bearer
+	// tokens, looks up the session-key store, attaches the verified
+	// username to context, and signals pam to skip its challenge.
+	// Always installed; transparent passthrough when no store is
+	// configured (L2c disabled).
 	//
 	// pam (auth-design.md L2b) sits between requestID and caller so
 	// the verified PAM username is on the context for callerMiddleware
@@ -196,9 +213,9 @@ func (s *Server) buildMux() http.Handler {
 	// Authenticator is configured (L2b disabled), it is a transparent
 	// passthrough that doesn't touch the request.
 	//
-	// caller (auth-design.md L1+L2a+L2b) populates audit.Caller on the
-	// request context before audit reads it. Always installed; effect
-	// gated by which identity sources are configured per the
+	// caller (auth-design.md L1+L2a+L2b+L2c) populates audit.Caller on
+	// the request context before audit reads it. Always installed;
+	// effect gated by which identity sources are configured per the
 	// "every layer enable/disable-able" contract.
 	var handler http.Handler = mux
 	handler = withMode(handler)
@@ -207,6 +224,7 @@ func (s *Server) buildMux() http.Handler {
 	handler = auditMiddleware(handler)
 	handler = callerMiddleware(s.auditCallerHeader)(handler)
 	handler = httputil.PAMMiddleware(s.authenticator)(handler)
+	handler = withSessionKey(s.sessionKeys)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.Recovery(s.logger)(handler)

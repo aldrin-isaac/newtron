@@ -85,6 +85,14 @@ type Server struct {
 	// spec dir; UnregisterNetwork removes it; on settled spec-file
 	// changes the watcher calls back into ReloadNetwork.
 	watcher *netpkg.SpecWatcher
+
+	// sessionKeys is the in-memory session-key store
+	// (auth-design.md L2c). nil when L2c is disabled — either L2b
+	// (PAM) is off, or the operator explicitly suppressed session
+	// keys via --session-key-ttl=0. When set, /auth/login mints
+	// keys against it and withSessionKey middleware resolves
+	// Bearer tokens through it.
+	sessionKeys *sessionKeyStore
 }
 
 
@@ -172,6 +180,15 @@ type Config struct {
 	// cmd/newtron-server.
 	EnforceAuthorization bool
 
+	// SessionKeyTTL sets the absolute lifetime of every server-issued
+	// session key (auth-design.md L2c). Default DefaultSessionKeyTTL
+	// (8h) when zero. Negative or explicit zero (via a sentinel)
+	// disables L2c entirely — /auth/login and /auth/logout return
+	// 404 and Bearer tokens are not recognized. L2c only engages when
+	// L2b (Authenticator) is also configured; there is no credential
+	// to derive the key from without PAM.
+	SessionKeyTTL time.Duration
+
 	// SpecWatch enables the auth-design.md L6 revocation watcher.
 	// When true, the server installs an fsnotify-backed watcher
 	// on every RegisterNetwork's specDir; on settled file changes
@@ -206,6 +223,19 @@ func NewServer(cfg Config) *Server {
 		authenticator:        cfg.Authenticator,
 		enforceAuthorization: cfg.EnforceAuthorization,
 	}
+	// L2c engages only when L2b is configured: without a PAM
+	// authenticator there is no credential to derive a session key
+	// from. SessionKeyTTL < 0 lets an operator explicitly suppress
+	// session keys even when PAM is on (e.g., a deployment that
+	// wants every request to hit PAM directly for audit-shape
+	// reasons).
+	if cfg.Authenticator != nil && cfg.SessionKeyTTL >= 0 {
+		ttl := cfg.SessionKeyTTL
+		if ttl == 0 {
+			ttl = DefaultSessionKeyTTL
+		}
+		s.sessionKeys = newSessionKeyStore(ttl)
+	}
 	if cfg.SpecWatch {
 		w, err := netpkg.NewSpecWatcher(logger, 0, func(id string) error {
 			return s.ReloadNetwork(id)
@@ -227,6 +257,9 @@ func NewServer(cfg Config) *Server {
 		httputil.OnShutdown(func() {
 			if s.watcher != nil {
 				s.watcher.Stop()
+			}
+			if s.sessionKeys != nil {
+				s.sessionKeys.Stop()
 			}
 			s.mu.Lock()
 			defer s.mu.Unlock()

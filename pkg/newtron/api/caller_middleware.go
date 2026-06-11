@@ -68,7 +68,11 @@ func callerMiddleware(headerName string) func(http.Handler) http.Handler {
 //     rejects the request with 401 before this middleware runs —
 //     so when a value is present here, it has already been verified
 //     by the operator's identity backend (pam_unix, pam_sss, etc.).
-//  4. **Self-attested header** (auth-design.md L1) — TCP fallback,
+//  4. **Session key** (auth-design.md L2c) — a PAM-issued bearer
+//     token that resolves to a stored username. Equivalent strength
+//     to L2b within the key's TTL; the original PAM authentication
+//     happened at /auth/login and the token is a cached proof.
+//  5. **Self-attested header** (auth-design.md L1) — TCP fallback,
 //     trustworthy only when the operator's deployment confirms no
 //     untrusted client can reach the listener.
 //
@@ -105,6 +109,12 @@ func resolveCaller(r *http.Request, headerName string) *audit.Caller {
 		return &audit.Caller{
 			Username: u,
 			Source:   audit.VerificationPAM,
+		}
+	}
+	if u := sessionKeyUsernameFromContext(r.Context()); u != "" {
+		return &audit.Caller{
+			Username: u,
+			Source:   audit.VerificationSessionKey,
 		}
 	}
 	if headerName == "" {

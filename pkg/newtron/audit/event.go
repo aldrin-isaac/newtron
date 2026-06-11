@@ -41,6 +41,15 @@ const (
 	// of a verified X.509 client certificate on an mTLS
 	// connection (L2a). Verified.
 	VerificationServiceCertCN VerificationSource = "service_cert_cn"
+
+	// VerificationSessionKey means the User came from a
+	// server-issued opaque session key (L2c). The original
+	// authentication was PAM at /auth/login; this verification
+	// source means "a previously-issued key resolved to this
+	// username in the in-memory session-key store and the key
+	// has not expired or been revoked." Verified — equivalent
+	// strength to VerificationPAM within the key's TTL.
+	VerificationSessionKey VerificationSource = "session_key"
 )
 
 // Event represents an auditable configuration change event.
