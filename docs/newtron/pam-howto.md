@@ -203,12 +203,77 @@ can always tell which path provided the identity by the
   Combine with inter-service mTLS (`--tls-cert`/`--tls-key`/`--tls-ca`)
   for the listener, OR put a TLS-terminating reverse proxy in front, OR
   restrict the listener to loopback / VPN / Unix socket.
-- *Session reuse.* Each request goes through `pam_authenticate`
-  independently — there's no cookie or token. Suitable for CLI /
-  programmatic use; not yet suitable for browser sessions (a future
-  addition could add a PAM-issued short-lived token endpoint).
+- *Session reuse.* `pam_authenticate` runs on every request by
+  default — no cookie, no token. For browser clients and long-running
+  automations this gets expensive. **L2c (session keys)** layers on
+  top: a successful PAM auth at `POST /auth/login` mints an opaque
+  short-lived bearer token the client carries on subsequent calls.
+  See [§7 below](#7-session-keys-l2c) and
+  [`auth-design.md` §L2c](auth-design.md).
 
-## 7. Cross-references
+## 7. Session keys (L2c)
+
+When `--auth-pam-service` is set, two routes auto-mount alongside
+the per-request PAM flow:
+
+```
+POST /newtron/v1/auth/login         (Authorization: Basic …)
+POST /newtron/v1/auth/logout        (Authorization: Bearer …)
+```
+
+`/auth/login` runs PAM exactly as L2b would for any other endpoint;
+on success it returns a JSON body with a random 256-bit opaque key,
+the absolute expiry timestamp, and the verified username:
+
+```sh
+curl -X POST -u alice:correct-password \
+    http://localhost:18080/newtron/v1/auth/login
+# {"key":"…43 chars…","expires_at":"2026-06-11T08:00:00Z","user":"alice"}
+```
+
+The client then uses the key on every subsequent request:
+
+```sh
+curl -H "Authorization: Bearer …" \
+    http://localhost:18080/newtron/v1/networks/...
+```
+
+The key expires after `--session-key-ttl` (default `8h`). Using a
+key does **not** extend its lifetime — the expiry is absolute. To
+revoke immediately, call `/auth/logout`:
+
+```sh
+curl -X POST -H "Authorization: Bearer …" \
+    http://localhost:18080/newtron/v1/auth/logout
+# 204 No Content
+```
+
+Logout is idempotent. Revoking a key that was never issued, or one
+that already expired, still returns 204 — the operator's intent
+("this key must not work") is satisfied either way.
+
+**Server restart invalidates every key.** The store is in-memory by
+design — persistence would introduce a credential file with the
+same protection class as `--secret-store` and is out of scope. A
+restart is operator-visible, so clients re-logging-in after one is
+the expected behavior.
+
+**Tightening revocation.** A user disabled in the directory keeps
+working under any pre-existing key until that key expires or logs
+out, because L2c does not call back into PAM after issuance.
+Operators who need tighter binding lower `--session-key-ttl`. The
+revocation half of L6 (`--spec-watch`) still removes the user's
+*authorization* (grants in `network.json`) on the next reload, so a
+revoked-but-still-logged-in user gets 403 on every gated request
+even while their key is technically still valid.
+
+**Disabling L2c without disabling L2b.** Pass `--session-key-ttl=-1`
+to suppress session keys even when PAM is on. `/auth/login` and
+`/auth/logout` then 404, and every request hits PAM directly. Use
+when audit semantics require "every request authenticated against
+the live directory" — a tradeoff with the per-request cost.
+
+## 8. Cross-references
 
 - [`auth-design.md`](auth-design.md) — L2b in the layered auth plan
 - [`authorization-howto.md`](authorization-howto.md) — L3

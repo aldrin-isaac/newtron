@@ -44,7 +44,8 @@ against, but the verification mechanism differs.
 | **Insider misuse — accidental.** A teammate runs the wrong CLI against the wrong network and changes config they shouldn't have. | User-to-service | L1 (audit log catches), L3 (authorization gates) |
 | **Insider misuse — deliberate.** A current team member with shell access tries to modify resources outside their role. | User-to-service | L3 + L5 (per-resource grants) |
 | **Forensic accountability.** "Who deleted that VLAN at 03:42?" is answerable from the system itself. | User-to-service | L1 |
-| **User impersonation across the wire.** Someone on the network sends requests claiming to be alice. | User-to-service | L2b (PAM for TCP; Unix peer creds for local) |
+| **User impersonation across the wire.** Someone on the network sends requests claiming to be alice. | User-to-service | L2b (PAM for TCP; Unix peer creds for local; L2c session keys derived from L2b) |
+| **Credential reuse across requests.** A long-running automation or browser session has to embed a password in every call, or proxy it through a separate session layer. | User-to-service | L2c (PAM-issued short-lived session keys) |
 | **Service impersonation.** A rogue process pretends to be newtlab-server (or another newtron component) and serves bogus responses, or accepts requests from one engine claiming to be another. | Inter-service | L2a (mTLS) |
 | **Stale grants.** Former team member's permissions linger after they leave. | User-to-service | L6 (revocation) |
 | **Coverage holes.** A new mutation method ships without a `checkPermission` call and bypasses authorization silently. | Both | L4 (coverage closure test) |
@@ -108,6 +109,12 @@ Deployments adopt layers at their own pace. Specifically:
 - **L2b user-to-service PAM:** `--auth-pam-service=NAME` enables;
   absent means TCP listener doesn't authenticate via PAM (caller
   identity stays self-attested via header per L1).
+- **L2c server-issued session keys:** auto-engaged whenever L2b is
+  configured — the `/auth/login` and `/auth/logout` routes only
+  mount when `--auth-pam-service` is set. `--session-key-ttl=DUR`
+  tunes the absolute lifetime of each minted key (default `8h`);
+  no separate enable/disable flag because session keys without PAM
+  have no credential to derive from.
 - **L3 authorization enforcement:** `--enforce-authorization=true`
   invokes `Network.EnableAuthorization` at every `RegisterNetwork` /
   `ReloadNetwork`; default `false` means `checkPermission` stays a
@@ -147,10 +154,11 @@ record**. Concretely, the goal state has these properties — these are the
 criteria a security review must be able to verify:
 
 1. **Verified identity, per surface.** User-to-service requests carry a
-   caller identity verified via Unix socket peer creds (local) or PAM
-   authentication (TCP). Inter-service requests carry an identity
-   verified via mTLS (cert CN). Neither surface accepts self-attested
-   headers as authoritative.
+   caller identity verified via Unix socket peer creds (local), PAM
+   authentication (TCP, fresh credentials), or a PAM-issued session
+   key (TCP, cached PAM proof within its TTL). Inter-service requests
+   carry an identity verified via mTLS (cert CN). Neither surface
+   accepts self-attested headers as authoritative.
 2. **Closed coverage.** Every mutation method in `pkg/newtron/` checks
    permission before acting. Reads stay ungated.
 3. **Per-resource granularity.** Permissions can be scoped to device,
@@ -349,11 +357,12 @@ inter-engine substrate is sound.
 #### L2b — User-to-Service Authentication via PAM
 
 **Goal.** For TCP listeners, the server authenticates remote operators
-against the host's PAM stack. The HTTP middleware extracts credentials
-(HTTP Basic or a short-lived token issued by a PAM-backed login
-endpoint — to be picked during this layer), drives `pam_authenticate`,
-and on success populates the request's verified identity with the
-resulting Unix username. On failure: 401.
+against the host's PAM stack. The HTTP middleware extracts HTTP Basic
+credentials, drives `pam_authenticate`, and on success populates the
+request's verified identity with the resulting Unix username. On
+failure: 401. Token-based session reuse (a PAM-issued short-lived key
+the client carries on subsequent requests instead of re-presenting
+Basic auth) is a separate concern handled in L2c.
 
 PAM is the only identity mechanism in this layer. It already covers the
 realistic deployment-side identity backends (`pam_unix` for local
@@ -388,12 +397,181 @@ mention `pam_ldap`/`pam_sss`/`pam_krb5` for integrated deployments).
 records become trustworthy for TCP operators, matching what the Unix
 socket path already gives.
 
-**Why not OIDC / SAML / bearer tokens here.** PAM is the well-known
-Linux entry point for identity; it composes with whatever the operator
-already runs. Adding a native OIDC/SAML/token mechanism is a feature,
-not a security fix — it'd be additive surface area without closing a
-threat that PAM doesn't already close. Deferred to "if a deployment
-requires it"; explicitly out of scope per §2.2.
+**Why not OIDC / SAML / federated bearer tokens here.** PAM is the
+well-known Linux entry point for identity; it composes with whatever
+the operator already runs. Adding a native OIDC/SAML mechanism is a
+feature, not a security fix — it'd be additive surface area without
+closing a threat that PAM doesn't already close. Deferred to "if a
+deployment requires it"; explicitly out of scope per §2.2. Note that
+*server-issued* short-lived session tokens (L2c) are not federation —
+PAM remains the credential, the token just amortizes the cost of
+re-verifying it on every request.
+
+#### L2c — Server-Issued Session Keys (PAM-Backed)
+
+**Goal.** A successful PAM authentication (L2b) mints a short-lived
+opaque key the client carries on subsequent requests as
+`Authorization: Bearer <key>`. The key resolves to the same verified
+Unix username the original PAM auth produced; downstream identity,
+authorization, and audit layers consume it identically. The key is
+revocable on demand (`POST /auth/logout`) and expires automatically
+after a configurable TTL.
+
+Why this layer exists separately from L2b:
+
+- **Cost.** `pam_authenticate` against `pam_sss` or `pam_krb5` hits a
+  directory or KDC per request. A 60-call orchestration burst costs 60
+  round-trips through the identity stack. The session key amortizes
+  the cost of one PAM call across many requests within its TTL.
+- **Browser ergonomics.** A Web UI cannot prompt for a password before
+  every backend call. With L2c, the UI authenticates once at sign-in,
+  caches the key in a `Secure; HttpOnly; SameSite=Strict` cookie or
+  in-memory store, and presents it on every subsequent call. L2b alone
+  forces either browser-prompted Basic auth on every navigation or a
+  separate proxy-layer session.
+- **Programmatic clients.** A long-running automation embeds a key
+  obtained at start-up rather than a password embedded in env vars or
+  config. Leaked-credential blast radius shrinks from "permanent
+  password until rotated by hand" to "session until logout or TTL
+  expiry."
+
+**Wire shape.**
+
+```
+POST /newtron/v1/auth/login
+Authorization: Basic <base64(user:pass)>
+
+→ 200 OK
+{
+  "key":        "<43-char URL-safe base64, 256 bits of entropy>",
+  "expires_at": "2026-06-11T08:00:00Z",
+  "user":       "alice"
+}
+```
+
+```
+POST /newtron/v1/auth/logout
+Authorization: Bearer <key>
+
+→ 204 No Content
+```
+
+Every other newtron endpoint accepts either `Authorization: Basic …`
+(driving L2b's per-request PAM path) or `Authorization: Bearer …`
+(driving L2c's key-lookup path). A client picks one; mixing is not
+required.
+
+**Verified identity flow.** When a request carries
+`Authorization: Bearer <key>` and the key is present and unexpired in
+the store, the middleware attaches the stored username to the request
+context tagged `VerificationSessionKey`. `callerMiddleware` picks it
+up exactly the way it picks up `VerificationPAM`. L3/L4/L5 gating and
+L1 audit logging behave identically — the user is the user.
+
+**Storage model.** In-memory `map[key]→{user, expires_at}` protected
+by a mutex, with a background sweeper that drops expired entries. No
+disk persistence: a server restart invalidates all keys. This is
+intentional — restarting `newt-server` is operator-visible and
+expected to terminate sessions; persistence would introduce a
+credential file on disk that has to be protected as carefully as the
+secret store. The Web UI / CLI client reconnects with a fresh
+`auth/login`.
+
+**TTL and rotation.** Default TTL is 8 hours, configured via
+`--session-key-ttl`. TTL is *absolute* — using a key does not extend
+its lifetime. A client whose session would outlive the TTL re-logs in
+to mint a new key. This is deliberate: sliding expiration means a
+compromised key with steady use becomes effectively immortal; absolute
+expiration bounds the worst case.
+
+**Revocation paths.**
+
+- **Voluntary.** `POST /auth/logout` removes the key from the store.
+  204 even if the key is already absent (idempotent).
+- **TTL expiry.** Background sweeper runs every minute; expired keys
+  are dropped. Any in-flight request with an expired key gets 401 on
+  the next lookup.
+- **Operator-driven user revocation.** Removing a user from
+  `network.json`'s `user_groups` (L6 spec-watch) revokes the user's
+  *authorization* on the next reload — their cached session key still
+  resolves to a valid identity, but every gated request 403s because
+  the grant table no longer mentions them. To revoke the *key* too,
+  the operator restarts `newt-server` (drops the in-memory store) or
+  removes the user from the OS identity backend (PAM-stack mutation
+  doesn't auto-invalidate already-issued keys, since L2c never calls
+  back into PAM after issuance — accepted limitation; operators
+  needing tighter binding can shorten `--session-key-ttl`).
+
+**Audit semantics.** Three new event shapes:
+
+- `auth.login` success — `verification_source: "pam"` (the
+  authentication that ran was PAM), user populated, operation
+  `auth.login`, `Success: true`. The L1 audit log records the moment
+  a session began.
+- `auth.login` failure — `verification_source: "unknown"`, user
+  populated with the attempted username, `Success: false`, error
+  populated. Reviewers can detect credential-stuffing.
+- Subsequent gated requests under a session key —
+  `verification_source: "session_key"`, user populated from the store
+  entry. Reviewers can join `auth.login` to subsequent operations by
+  matching the user + a time window bounded by `expires_at`.
+- `auth.logout` — `verification_source: "session_key"`, operation
+  `auth.logout`, `Success: true`. End of session marker.
+
+The L6 hash-chain integrity check covers all of these uniformly;
+session events are not special-cased.
+
+**Audit criterion met when this layer lands.** "Can a reviewer match
+every audited operation under a session key to a prior PAM
+authentication?" → yes. The `auth.login` event precedes every
+`session_key`-verified operation under the same user, bounded in time
+by the configured TTL.
+
+**Dependencies.** L0, L1, L2b. Without L2b there is no live
+authenticator to call from `/auth/login`; the routes refuse to mount
+when `--auth-pam-service` is unset.
+
+**Scope of changes.** New endpoint pair (`/auth/login`, `/auth/logout`)
+in `pkg/newtron/api/handler_auth.go`. In-memory session-key store in
+`pkg/newtron/api/session_keys.go`. New middleware
+`withSessionKey` that parses `Authorization: Bearer …` and signals
+the existing PAM middleware to skip Basic-auth challenge when a valid
+key is on the request. `httputil.SkipBasicAuthFromContext` /
+`WithSkipBasicAuth` for the cross-package signal — kept generic so
+the same hook can be reused for any future server-issued credential
+without `httputil` learning newtron-specific concepts. New audit
+verification source `VerificationSessionKey = "session_key"`. New
+flag `--session-key-ttl` on `cmd/newtron-server` and
+`cmd/newt-server` (default `8h`). Operational howto entry in
+`docs/newtron/pam-howto.md` covering the login/logout flow.
+
+**Independent value.** Cuts per-request PAM cost from "directory hit
+every call" to "directory hit per session." Unblocks browser clients
+(Web UI) without introducing a separate proxy-layer session
+mechanism. Programmatic automation gets revocable credentials with a
+bounded lifetime instead of embedded passwords.
+
+**Why this isn't OIDC/SAML.** The token is opaque, server-side, and
+not a federation primitive. There is no claim signing, no JWKS, no
+inter-domain trust. It's a cache of "PAM said this user is real, N
+minutes ago" — the same primitive as a Linux PAM session, just
+exposed through HTTP.
+
+**Limitations accepted at this layer.**
+
+- *No multi-engine session sharing.* A key minted at
+  `/newtron/v1/auth/login` works only against `/newtron/v1/*` routes.
+  If `newtrun` and `newtlab` later need parallel session mechanisms,
+  the store will be promoted to `httputil` and shared. Not in scope
+  here — keeps the blast radius minimal.
+- *No refresh tokens.* Sliding-expiry refresh logic would re-introduce
+  the immortal-token problem `--session-key-ttl` was set up to bound.
+  Operators needing longer sessions raise the TTL; operators needing
+  shorter sessions lower it.
+- *No PAM-side liveness check after issuance.* Once minted, a key is
+  good until logout or TTL. Disabling a user in the directory does
+  not retroactively invalidate their key — only restart or TTL does.
+  Accepted; documented in the howto under "tightening revocation."
 
 ### L3 — Authorization Enforcement (Wire Up the Existing Checker)
 

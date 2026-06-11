@@ -174,6 +174,81 @@ func TestCallerMiddleware_PAMUsernameYieldsVerifiedCaller(t *testing.T) {
 	}
 }
 
+// TestCallerMiddleware_SessionKeyYieldsVerifiedCaller pins the L2c
+// path: when withSessionKey middleware has attached a username to
+// context via a valid Bearer lookup, callerMiddleware reads it and
+// records VerificationSessionKey.
+func TestCallerMiddleware_SessionKeyYieldsVerifiedCaller(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req = req.WithContext(withSessionKeyUsername(req.Context(), "alice"))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller from session-key username; got nil")
+	}
+	if gotCaller.Source != audit.VerificationSessionKey {
+		t.Errorf("Source = %q, want %q", gotCaller.Source, audit.VerificationSessionKey)
+	}
+	if gotCaller.Username != "alice" {
+		t.Errorf("Username = %q, want alice", gotCaller.Username)
+	}
+}
+
+// TestCallerMiddleware_SessionKeyLosesToPAM pins precedence: a
+// request that somehow carries both a PAM username (live verification)
+// and a session-key username (cached verification) takes PAM. In
+// practice the middleware chain never produces both simultaneously,
+// but the precedence rule is documented and must hold.
+func TestCallerMiddleware_SessionKeyLosesToPAM(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req = req.WithContext(httputil.WithPAMUsernameForTest(req.Context(), "alice-pam"))
+	req = req.WithContext(withSessionKeyUsername(req.Context(), "alice-session"))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller; got nil")
+	}
+	if gotCaller.Source != audit.VerificationPAM {
+		t.Errorf("Source = %q, want PAM (live verification beats cached)", gotCaller.Source)
+	}
+	if gotCaller.Username != "alice-pam" {
+		t.Errorf("Username = %q, want alice-pam", gotCaller.Username)
+	}
+}
+
+// TestCallerMiddleware_SessionKeyWinsOverHeader pins that a verified
+// session-key username overrides a self-attested header — same
+// strength contract as PAM vs header.
+func TestCallerMiddleware_SessionKeyWinsOverHeader(t *testing.T) {
+	var gotCaller *audit.Caller
+	handler := callerMiddleware("X-Newtron-Caller")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCaller = audit.CallerFromContext(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/x", nil)
+	req.Header.Set("X-Newtron-Caller", "spoofed-bob")
+	req = req.WithContext(withSessionKeyUsername(req.Context(), "alice"))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotCaller == nil {
+		t.Fatal("expected caller; got nil")
+	}
+	if gotCaller.Source != audit.VerificationSessionKey {
+		t.Errorf("Source = %q, want session_key (must beat self-attested header)",
+			gotCaller.Source)
+	}
+	if gotCaller.Username != "alice" {
+		t.Errorf("Username = %q, want alice (not header spoof)", gotCaller.Username)
+	}
+}
+
 // TestCallerMiddleware_PAMWinsOverHeader pins that a verified PAM
 // username overrides a self-attested header. The header is the
 // fallback path for deployments that didn't configure PAM; once

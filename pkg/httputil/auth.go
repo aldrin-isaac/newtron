@@ -33,6 +33,33 @@ type Authenticator interface {
 // WithPAMUsernameForTest (test mocks).
 type pamUsernameKey struct{}
 
+// skipBasicAuthKey signals "another verified identity is already on
+// this request; PAMMiddleware should not challenge with Basic auth."
+// Set by middleware that performs its own authentication path
+// (auth-design.md L2c session keys are the first consumer). Kept
+// generic so future server-issued credential mechanisms can reuse
+// the hook without httputil learning each one's specifics.
+type skipBasicAuthKey struct{}
+
+// WithSkipBasicAuth marks ctx as "do not challenge with Basic auth
+// downstream." PAMMiddleware checks this before requiring credentials.
+// The decision to skip lives with the upstream middleware that
+// verified the identity through some other path.
+func WithSkipBasicAuth(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipBasicAuthKey{}, true)
+}
+
+// SkipBasicAuthFromContext reports whether an upstream middleware
+// has already attached a verified identity and PAMMiddleware should
+// not re-challenge.
+func SkipBasicAuthFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(skipBasicAuthKey{}).(bool)
+	return v
+}
+
 // PAMUsernameFromContext returns the username verified by
 // PAMMiddleware, or empty when no PAM verification ran for this
 // request (either the L2b middleware was disabled, or the request
@@ -94,6 +121,14 @@ func PAMMiddleware(auth Authenticator) func(http.Handler) http.Handler {
 				return
 			}
 			if ServiceCertCNFromRequest(r) != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Skip when an upstream middleware has attached a
+			// verified identity through another path — L2c session
+			// keys are the first such consumer. Generic so future
+			// server-issued credential mechanisms reuse the hook.
+			if SkipBasicAuthFromContext(r.Context()) {
 				next.ServeHTTP(w, r)
 				return
 			}
