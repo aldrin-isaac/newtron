@@ -17,6 +17,9 @@ expect.
 | `30-L4-node-mutations-gated` | L4 | Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
 | `40-L5-resource-scoping` | L5 | alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
 | `50-L6-audit-verify` | L6 | `bin/newtron audit verify /tmp/1node-vs-auth-audit.jsonl` walks the chain and confirms it's intact end-to-end. |
+| `60-L3-permission-families` | L3 | Handler categories the original suite skips: super_user bypass (root sails through every check), profile/zone/topology mutations (gated on spec.author but routed through different handlers than services). |
+| `70-L4-permission-families` | L4 | Node-mutation perm families the original suite skips: lag.create (create-portchannel), evpn.modify (add-bgp-evpn-peer, prerequisite setup-device included), interface.modify (interface set-property), device.write (setup-device denied for mallory). |
+| `80-L5-dimensions` | L5 | The three `where` dimensions beyond `resource`: **field** (architects scoped to `!permissions,!user_groups,!super_users` matches services but not the grant table itself — the §3 criterion 9 meta-authorization separation), **interface** (intf-isaac scoped to `interface: "Ethernet0"` can bind ACLs on Eth0 but is denied on Eth4), **device** (dev-dora scoped to `device: switch1` is allowed; mallory still denied without any group). |
 
 ## What it deliberately does NOT cover
 
@@ -27,7 +30,13 @@ These verifications can't fit the current newtrun suite model:
 - **L6 spec-watch** — requires editing `network.json` mid-suite to observe auto-reload. There's no `local-exec` step action today (deferred follow-up).
 - **L6 audit tamper detection** — requires modifying a log entry mid-suite to confirm verify catches it. Same `local-exec` gap.
 
-Operators verify these manually with a small shell session; pattern in §5 below.
+Operators verify these manually with a small shell session; pattern below.
+
+## Design observation surfaced by L5 dimensions
+
+`Node.Save()` gates on `device.write`. Any Node-level mutation that triggers a save at the end (the default for most write ops) requires the caller to hold `device.write` regardless of the specific permission the mutation itself gates on. The L5-dimensions scenario uses `?no_save=true` on the `bind-acl` steps so `intf-isaac` — who has `acl.modify` scoped to `interface: "Ethernet0"` but NOT `device.write` — can demonstrate the interface dimension cleanly.
+
+In a production deployment with `--enforce-authorization` engaged, fine-grained per-interface or per-resource grants only let an operator MUTATE; they need `device.write` (broad or scoped) to PERSIST. Whether that's the right design or an artifact of L4 catch-all coverage is its own discussion (cross-cutting auth principle vs. operator ergonomics) — out of scope for this suite, but the pattern is worth knowing about when authoring grants for real deployments.
 
 ## Operator setup
 
