@@ -62,6 +62,13 @@ type Step struct {
 	URL    string      `yaml:"url,omitempty"`    // URL template (e.g., /node/{{device}}/vlan)
 	Poll   *PollBlock  `yaml:"poll,omitempty"`   // polling configuration
 	Batch  []BatchCall `yaml:"batch,omitempty"`  // sequential batch of calls
+	// Headers attaches per-step HTTP headers to outbound newtron
+	// requests — typically the caller identity for an auth-enforced
+	// newtron-server (X-Newtron-Caller: alice) so a scenario can
+	// verify enforcement under different identities. Headers apply
+	// uniformly across a step including any batched sub-calls — one
+	// step = one identity. Empty/nil preserves pre-Headers behavior.
+	Headers map[string]string `yaml:"headers,omitempty"`
 
 	// run-suite (composition: invoke another suite as a step)
 	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved under SuitesBase)

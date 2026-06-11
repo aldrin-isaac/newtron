@@ -572,6 +572,7 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 | `expect` | newtron, newtron-cli, host-exec | Response assertions. See [§10.3](#103-expect-assertions). |
 | `poll` | newtron | Polling — retry until expect passes or timeout expires. |
 | `batch` | newtron | Multiple HTTP calls grouped per device. |
+| `headers` | newtron | Per-step HTTP headers (e.g. `X-Newtron-Caller: alice` to forge a caller identity for auth testing). Applies uniformly across the step including batched sub-calls — one step = one identity. See [§11.5 Per-step headers](#per-step-headers-auth-identity). |
 | `expect_failure` | newtron | Invert pass/fail — assert the call fails. |
 
 ### 10.3 expect assertions
@@ -927,6 +928,36 @@ During polling, HTTP errors are treated as "not ready yet" — the action keeps 
 ```
 
 Batch calls do not support individual `expect` blocks — the batch succeeds if all calls return non-error responses.
+
+#### Per-step headers (auth identity)
+
+`headers:` attaches arbitrary HTTP headers to every outbound request the step makes. The primary use is forging a specific caller identity for auth testing — the value of `X-Newtron-Caller` becomes the verified caller on newtron-server when the L1 self-attested-header identity surface is enabled (see auth-design.md L1 + L3):
+
+```yaml
+# Verify that mallory (not in the spec-team group) is denied the
+# create-service mutation under --enforce-authorization.
+- name: deny-unprivileged-create
+  action: newtron
+  method: POST
+  url: /create-service
+  params: {name: svc-test, type: routed}
+  headers:
+    X-Newtron-Caller: mallory
+  expect_failure: true
+
+# The same call as alice (in spec-team) succeeds.
+- name: allow-privileged-create
+  action: newtron
+  method: POST
+  url: /create-service
+  params: {name: svc-test, type: routed}
+  headers:
+    X-Newtron-Caller: alice
+```
+
+Headers apply uniformly across every call in the step — top-level call, batched sub-calls, polling retries. One step = one identity. Empty/absent `headers:` preserves the runner's default behavior (the runner's own service identity from `--tls-cert` when newtron-server is mTLS-enforced).
+
+For HTTP Basic (auth-design.md L2b PAM), the operator's normal pattern is to run newtrun-server with a service cert and let mTLS carry identity; per-step `Authorization: Basic …` headers also work but mix poorly with mTLS — pick one surface per scenario.
 
 #### jq expressions
 
