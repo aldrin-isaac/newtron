@@ -1,0 +1,119 @@
+name: L5-dimensions
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. This scenario covers the
+  remaining L5 where dimensions:
+
+    - field (meta-authorization §3 criterion 9): architects can
+      author services/profiles/topology but NOT permissions/
+      user_groups/super_users; iam-team is the inverse.
+    - interface: intf-ops scoped to interface=Ethernet0 can bind-acl
+      on Eth0 but NOT on Eth4.
+    - device: device-team scoped to device=switch1 can config-reload
+      switch1; mallory still denied.
+
+  Also exercises L5 pattern shapes: bang exclusion (!field), exact
+  match (interface=Ethernet0), and the multi-value form
+  (permissions,user_groups,super_users).
+
+requires: [L4-node-mutations-gated]
+
+steps:
+  # FIELD dimension — meta-authorization.
+  # arch-anna in architects: scoped to !permissions,!user_groups,!super_users.
+  # Creating a service (field=services) → matches the !-exclusion.
+  - name: architect-creates-service-allowed
+    action: newtron
+    method: POST
+    url: /create-service
+    params: {name: svc-architect, type: routed}
+    headers:
+      X-Newtron-Caller: arch-anna
+
+  - name: architect-cleans-up-service
+    action: newtron
+    method: POST
+    url: /delete-service
+    params: {name: svc-architect}
+    headers:
+      X-Newtron-Caller: arch-anna
+
+  # iam-ian in iam-team: scoped to permissions,user_groups,super_users
+  # (exact OR list). Creating a service (field=services) → NOT in the
+  # include list → denied.
+  - name: iam-creates-service-denied
+    action: newtron
+    method: POST
+    url: /create-service
+    params: {name: svc-iam, type: routed}
+    headers:
+      X-Newtron-Caller: iam-ian
+    expect_failure: true
+
+  # INTERFACE dimension — intf-ops grant on acl.modify scoped to
+  # interface=Ethernet0. First need an ACL to bind.
+  - name: bob-create-acl-for-bind
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-acl?mode=topology
+    params: {name: acl-l5, type: L3, stage: ingress}
+    headers:
+      X-Newtron-Caller: bob
+
+  # intf-isaac scoped to Ethernet0 — bind on Ethernet0 allowed.
+  - name: intf-isaac-binds-on-eth0-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/bind-acl?mode=topology&no_save=true
+    params: {acl: acl-l5, direction: ingress}
+    headers:
+      X-Newtron-Caller: intf-isaac
+
+  - name: intf-isaac-unbinds-on-eth0
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/unbind-acl?mode=topology&no_save=true
+    params: {acl: acl-l5}
+    headers:
+      X-Newtron-Caller: bob
+
+  # intf-isaac trying Ethernet4 → his grant's interface=Ethernet0 doesn't
+  # match. Denied.
+  - name: intf-isaac-binds-on-eth4-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet4/bind-acl?mode=topology&no_save=true
+    params: {acl: acl-l5, direction: ingress}
+    headers:
+      X-Newtron-Caller: intf-isaac
+    expect_failure: true
+
+  - name: bob-cleans-up-acl
+    action: newtron
+    method: POST
+    url: /nodes/switch1/delete-acl?mode=topology
+    params: {name: acl-l5}
+    headers:
+      X-Newtron-Caller: bob
+
+  # DEVICE dimension — dev-dora in device-team scoped to device=switch1
+  # can hit switch1 endpoints; the scope-clause matches. setup-device
+  # is the device.write representative that works in topology mode.
+  - name: dev-dora-setup-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/setup-device?mode=topology
+    params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
+    headers:
+      X-Newtron-Caller: dev-dora
+
+  # mallory still denied regardless of device dimension (she's not in
+  # any group at all, so no grant entry matches).
+  - name: mallory-setup-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/setup-device?mode=topology
+    params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true

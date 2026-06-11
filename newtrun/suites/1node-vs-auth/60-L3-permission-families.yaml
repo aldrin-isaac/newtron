@@ -1,0 +1,105 @@
+name: L3-permission-families
+description: |
+  Coverage expansion: the original 20-L3-spec-mutations-gated scenario
+  only walks the spec.author + qos.create + filter.create families on
+  network.json mutations. This scenario covers the handler categories
+  the original suite skips:
+
+    - super_user bypass (root, in super_users, ignores every check)
+    - profile mutations (create-profile / delete-profile, gated on
+      spec.author with field=profiles)
+    - zone mutations (create-zone / delete-zone, gated on spec.author
+      with field=zones)
+    - topology mutations (add-topology-device, gated on spec.author
+      with field=topology; populates Context.Device too)
+
+requires: [L0-secret-store-resolves]
+
+steps:
+  # super_user bypass — root is in super_users; every check returns nil
+  # without consulting the permissions map. Even a normally-denied action
+  # (a permission the spec doesn't grant to any group) succeeds.
+  - name: root-creates-zone-bypass
+    action: newtron
+    method: POST
+    url: /create-zone
+    params: {name: zone-root-bypass}
+    headers:
+      X-Newtron-Caller: root
+
+  - name: root-deletes-zone-bypass
+    action: newtron
+    method: POST
+    url: /delete-zone
+    params: {name: zone-root-bypass}
+    headers:
+      X-Newtron-Caller: root
+
+  # Profile mutations — mallory denied, alice (spec-team has spec.author)
+  # succeeds. Verifies the spec.author gate reaches handlers beyond
+  # services/qos/filters.
+  - name: mallory-create-profile-denied
+    action: newtron
+    method: POST
+    url: /create-profile
+    params: {name: profile-mallory, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.99", zone: amer, platform: sonic-vs}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  - name: alice-create-profile-allowed
+    action: newtron
+    method: POST
+    url: /create-profile
+    params: {name: profile-alice, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.98", zone: amer, platform: sonic-vs}
+    headers:
+      X-Newtron-Caller: alice
+
+  - name: alice-cleanup-profile
+    action: newtron
+    method: POST
+    url: /delete-profile
+    params: {name: profile-alice}
+    headers:
+      X-Newtron-Caller: alice
+
+  # Zone mutations
+  - name: mallory-create-zone-denied
+    action: newtron
+    method: POST
+    url: /create-zone
+    params: {name: zone-mallory}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true
+
+  - name: alice-create-zone-allowed
+    action: newtron
+    method: POST
+    url: /create-zone
+    params: {name: zone-alice}
+    headers:
+      X-Newtron-Caller: alice
+
+  - name: alice-cleanup-zone
+    action: newtron
+    method: POST
+    url: /delete-zone
+    params: {name: zone-alice}
+    headers:
+      X-Newtron-Caller: alice
+
+  # Topology mutations — exercises the network.go gates (separate from
+  # spec_ops.go gates the original suite hits). Note the device-name
+  # populates Context.Device on the gate, distinct from Context.Resource.
+  - name: mallory-add-topology-device-denied
+    action: newtron
+    method: POST
+    url: /topology/create-node
+    params:
+      name: mallory-switch
+      device:
+        ports: {Ethernet0: {admin_status: "up"}}
+    headers:
+      X-Newtron-Caller: mallory
+    expect_failure: true

@@ -22,6 +22,10 @@
         "Ethernet0": {
           "admin_status": "up",
           "mtu": "9100"
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": "9100"
         }
       }
     }
