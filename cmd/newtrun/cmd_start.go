@@ -26,6 +26,7 @@ func newStartCmd() *cobra.Command {
 		junitPath string
 		monitor   bool
 		noDeploy  bool
+		params    []string
 	)
 
 	cmd := &cobra.Command{
@@ -72,6 +73,25 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				networkID = os.Getenv("NEWTRON_NETWORK_ID")
 			}
 
+			// Parse repeated --param flags into a map. Each entry is
+			// "key=value"; the value is stored verbatim as a string —
+			// newtrun-server's EffectiveParameters() runs the typed
+			// Coerce path (int / bool / enum / ipv4 / cidr) on the
+			// raw string per the suite's ParameterSpec.
+			paramOverrides := make(map[string]any, len(params))
+			for _, kv := range params {
+				eq := strings.IndexByte(kv, '=')
+				if eq < 0 {
+					return fmt.Errorf("--param %q is not in key=value form", kv)
+				}
+				k := kv[:eq]
+				v := kv[eq+1:]
+				if k == "" {
+					return fmt.Errorf("--param %q has empty key", kv)
+				}
+				paramOverrides[k] = v
+			}
+
 			req := api.StartRunRequest{
 				Suite:         suiteName,
 				Scenario:      scenario,
@@ -82,6 +102,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				NewtronServer: serverURL,
 				NetworkID:     networkID,
 				JUnitPath:     junitPath,
+				Parameters:    paramOverrides,
 			}
 
 			started, err := c.StartRun(ctx, req)
@@ -215,6 +236,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 	cmd.Flags().StringVar(&networkID, "network-id", "", "newtron network identifier (env: NEWTRON_NETWORK_ID). Empty by default — newtrun-server derives the id from suite.Topology so concurrent suites don't compete for one 'default' slot (#116).")
 	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
 	cmd.Flags().BoolVar(&noDeploy, "no-deploy", false, "skip topology deployment (for loopback/offline mode)")
+	cmd.Flags().StringArrayVar(&params, "param", nil, "override a suite-level parameter; repeatable, format key=value (e.g. --param alice_basic_auth=$(echo -n alice:pw | base64))")
 	return cmd
 }
 

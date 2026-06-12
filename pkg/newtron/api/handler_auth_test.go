@@ -27,10 +27,19 @@ func TestHandleAuthLogin_Success(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("status %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	var resp LoginResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	// /auth/login uses the {data, error} envelope every other newtron
+	// endpoint uses — decode through it.
+	var envelope struct {
+		Data  LoginResponse `json:"data"`
+		Error string        `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
+	if envelope.Error != "" {
+		t.Fatalf("envelope.Error = %q", envelope.Error)
+	}
+	resp := envelope.Data
 	if resp.User != "alice" {
 		t.Errorf("user = %q, want alice", resp.User)
 	}

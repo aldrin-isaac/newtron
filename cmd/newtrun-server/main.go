@@ -37,6 +37,7 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "PEM-encoded private key for --tls-cert. (auth-design.md L2a)")
 	tlsCA := flag.String("tls-ca", "", "PEM-encoded CA bundle used both to verify incoming peer client certs AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS). (auth-design.md L2a)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM authentication. (auth-design.md L2b)")
+	newtronBasicAuth := flag.String("newtron-basic-auth", "", "user:password the runner uses to mint and refresh an L2c session key against newtron-server (auth-design.md L2c). Required when newtron-server is started with --auth-pam-service — every runner-originated newtron call carries Authorization: Bearer <key> after first login. Empty leaves the runner's newtron client on no-auth, which works only against a newtron-server that does not enforce PAM.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtrun-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -75,6 +76,7 @@ func main() {
 		TLSConfig:        serverTLS,
 		Authenticator:    pamAuth,
 		NewtronClientTLS: clientTLS,
+		NewtronBasicAuth: *newtronBasicAuth,
 	}
 	if *newtlabServer != "" {
 		cfg.NewtlabClient = newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS))

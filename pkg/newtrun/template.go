@@ -341,6 +341,9 @@ func CollectTemplateReferences(step Step) (targets, params []string, hasDevice b
 	r.scan(step.URL)
 	r.scan(step.Command)
 	r.collectFromAny(step.Params)
+	for _, v := range step.Headers {
+		r.scan(v)
+	}
 	for _, bc := range step.Batch {
 		r.scan(bc.URL)
 		r.collectFromAny(bc.Params)
@@ -358,6 +361,12 @@ type refCollector struct {
 	params    []string
 	hasDevice bool
 }
+
+// Headers were added to template expansion alongside captures; the
+// scan must include them so a scenario whose ONLY parameter
+// reference is in a Headers entry (the L2c round-trip's
+// Authorization: Basic {{param.alice_basic_auth}} is the canonical
+// case) still triggers the parameterized-expansion path.
 
 func (r *refCollector) scan(s string) {
 	if s == "" {

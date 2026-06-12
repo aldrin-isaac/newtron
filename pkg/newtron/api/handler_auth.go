@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -59,8 +58,13 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "mint session key: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(LoginResponse{
+	// Use the {data, error} envelope every other newtron endpoint
+	// uses — consumers like newtron-client unwrap to `data`, so a
+	// bare-shape response collapses to nil at the client and breaks
+	// downstream JQ-based extraction (newtrun's response-capture
+	// against `.key`). A curl recipe reads `jq -r .data.key` —
+	// consistent with the rest of the API.
+	httputil.WriteJSON(w, http.StatusOK, LoginResponse{
 		Key:       key,
 		ExpiresAt: expiresAt,
 		User:      user,
