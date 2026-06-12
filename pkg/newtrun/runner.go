@@ -372,6 +372,26 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 			continue
 		}
 
+		// Parameter requirements check: skip when a required suite
+		// parameter is unset or empty. The mechanism is "operator
+		// opted in" — a scenario that needs runtime credentials
+		// (typically secrets the suite cannot ship in the repo)
+		// names them here and skips quietly when the operator did
+		// not supply them at start time.
+		if reason := r.checkRequiredParams(sc); reason != "" {
+			result := &ScenarioResult{
+				Name:       sc.Name,
+				Topology:   r.Topology,
+				Platform:   platform,
+				Status:     StepStatusSkipped,
+				SkipReason: reason,
+			}
+			results = append(results, result)
+			scenarioStatus[sc.Name] = StepStatusSkipped
+			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, i, len(scenarios)) })
+			continue
+		}
+
 		r.progress(func(p ProgressReporter) { p.ScenarioStart(sc.Name, i, len(scenarios)) })
 
 		result, err := run(ctx, sc, platform)
@@ -781,6 +801,51 @@ func checkRequires(sc *Scenario, status map[string]StepStatus) string {
 		}
 		if st != StepStatusPassed {
 			return fmt.Sprintf("requires '%s' which %s", req, statusVerb(st))
+		}
+	}
+	return ""
+}
+
+// checkRequiredParams reports a skip reason when a scenario's
+// requires_params: lists any name that resolves to an empty / zero
+// value in the runner's effective parameter map. Empty list (the
+// default) returns "" — no requirement, no skip.
+//
+// Semantics of "missing": the parameter is absent from the effective
+// map, OR its value is the zero value of its declared type (empty
+// string, 0, false). The intent is "operator opted in", so a
+// parameter the operator left at its default-empty value is treated
+// the same as one they omitted entirely.
+func (r *Runner) checkRequiredParams(sc *Scenario) string {
+	if len(sc.RequiresParams) == 0 {
+		return ""
+	}
+	for _, name := range sc.RequiresParams {
+		v, ok := r.resolvedParameters[name]
+		if !ok {
+			return fmt.Sprintf("requires parameter %q (not set by operator)", name)
+		}
+		switch t := v.(type) {
+		case string:
+			if t == "" {
+				return fmt.Sprintf("requires parameter %q (operator left it empty)", name)
+			}
+		case int:
+			if t == 0 {
+				return fmt.Sprintf("requires parameter %q (operator left it at 0)", name)
+			}
+		case int64:
+			if t == 0 {
+				return fmt.Sprintf("requires parameter %q (operator left it at 0)", name)
+			}
+		case float64:
+			if t == 0 {
+				return fmt.Sprintf("requires parameter %q (operator left it at 0)", name)
+			}
+		case bool:
+			if !t {
+				return fmt.Sprintf("requires parameter %q (operator left it false)", name)
+			}
 		}
 	}
 	return ""

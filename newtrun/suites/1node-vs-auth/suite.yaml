@@ -1,9 +1,22 @@
 name: 1node-vs-auth
 description: |
-  End-to-end exercise of the auth arc (L0+L1+L3+L4+L5+L6) against a
-  newt-server running with the full auth flag set. Requires its own
+  End-to-end exercise of the auth arc (L0+L1+L2c+L3+L4+L5+L6) against
+  a newt-server running with the full auth flag set. Requires its own
   topology dir (newtrun/topologies/1node-vs-auth/) with the grant
   table the scenarios expect. See README.md in this suite for the
   operator setup commands.
 topology: 1node-vs-auth
 platform: sonic-vs
+
+# The L2c round-trip scenario (26-L2c-round-trip) needs PAM-verified
+# credentials at runtime. Operators pass the base64-encoded
+# "user:password" via --param alice_basic_auth=...; the suite stores
+# no plaintext. An empty default is fine because every other scenario
+# uses header-mode identity (X-Newtron-Caller) — only the L2c
+# round-trip touches this param, and the operator running it has
+# already provisioned the PAM stack + the matching OS account per
+# README §"L2c round-trip operator setup".
+parameters:
+  alice_basic_auth:
+    type: string
+    default: ""

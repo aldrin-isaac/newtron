@@ -33,8 +33,20 @@ func (s *Server) buildMux() http.Handler {
 	// flip doesn't require a server restart's worth of route table
 	// reshuffling. The 404 message distinguishes "L2c disabled" from
 	// "wrong URL."
+	//
+	// Two paths for the same handler: the network-scoped form
+	// (/networks/{netID}/auth/login) matches the convention every
+	// other newtron client follows (newtrun's expandURL always
+	// prepends /networks/<id>); the server-scoped form
+	// (/auth/login) is the canonical one because auth identity is
+	// server-wide, not per-network — a caller is who they are
+	// regardless of which network's grant table is evaluating their
+	// permission. The handlers ignore {netID} on the network-scoped
+	// path; the netID is decorative for URL convention only.
 	mux.HandleFunc("POST /newtron/v1/auth/login", s.handleAuthLogin)
 	mux.HandleFunc("POST /newtron/v1/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/logout", s.handleAuthLogout)
 
 	// ====================================================================
 	// Network spec reads

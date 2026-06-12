@@ -37,6 +37,7 @@ type Scenario struct {
 	Requires         []string `yaml:"requires,omitempty"`
 	After            []string `yaml:"after,omitempty"`              // Run after these scenarios (ordering only, no pass/fail gate)
 	RequiresFeatures []string `yaml:"requires_features,omitempty"` // Platform features required (e.g., ["acl", "macvpn"])
+	RequiresParams   []string `yaml:"requires_params,omitempty"`   // Suite-level parameters that must be set to a non-empty/non-zero value at run time; otherwise the scenario is skipped with a descriptive reason
 	Repeat           int      `yaml:"repeat,omitempty"`
 
 	Steps []Step `yaml:"steps"`
