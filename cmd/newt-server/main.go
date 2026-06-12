@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
@@ -61,6 +62,8 @@ func main() {
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime for the newtron engine; denials surface as HTTP 403. Off (default) preserves pre-enforcement behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made. (auth-design.md L3)")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
+	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
+	sessionKeyTTL := flag.Duration("session-key-ttl", newtronapi.DefaultSessionKeyTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -112,6 +115,17 @@ func main() {
 		store = fs
 	}
 
+	// auth-design.md L2b: construct the PAM authenticator when a
+	// service name is configured. Empty disables — TCP requests
+	// pass through the newtron engine's PAMMiddleware unchanged.
+	// auth-design.md L2c: with --auth-pam-service set, the
+	// /auth/login and /auth/logout routes auto-engage; the TTL
+	// flag tunes session-key lifetime.
+	var pamAuth httputil.Authenticator
+	if *authPAMService != "" {
+		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
+	}
+
 	newtronSrv := newtronapi.NewServer(newtronapi.Config{
 		Logger:               logger,
 		IdleTimeout:          *idleTimeout,
@@ -120,6 +134,8 @@ func main() {
 		AuditCallerHeader:    *auditCallerHeader,
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
+		Authenticator:        pamAuth,
+		SessionKeyTTL:        *sessionKeyTTL,
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,
 	})

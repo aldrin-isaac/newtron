@@ -1,0 +1,98 @@
+name: L2c-round-trip
+description: |
+  auth-design.md §L2c end-to-end: POST /auth/login with PAM Basic
+  auth mints a session key; the key carries a mutation that
+  succeeds; POST /auth/logout revokes the key; the same mutation
+  under the revoked key 401s.
+
+  This scenario was not expressible before two upstream changes
+  landed: newtrun gained response-capture (so a YAML step can read
+  .key out of /auth/login's response and reuse it in a later step's
+  Authorization header), and newt-server gained --auth-pam-service
+  (so /auth/login mounts at all).
+
+  Preconditions (see README §"L2c round-trip operator setup"):
+
+    1. PAM service file at /etc/pam.d/newtron-test (or whatever
+       --auth-pam-service points at) configured to authenticate
+       against a real OS backend (pam_unix for local accounts is
+       fine).
+    2. An OS account named "alice" exists with a password the
+       operator knows.
+    3. newt-server is running with --auth-pam-service set.
+    4. The suite is invoked with the alice_basic_auth parameter:
+       --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
+
+  Without these, the round-trip's first step 401s on the Basic auth
+  exchange and the rest of the scenario short-circuits — the failure
+  message names what's missing.
+
+requires: [L0-secret-store-resolves]
+
+# The L2c round-trip needs PAM-verified credentials at runtime; the
+# suite ships no plaintext, so the operator passes alice_basic_auth
+# via --param at start time. Without it the scenario skips quietly
+# instead of failing — operators running the suite in the default
+# header-mode shape (no PAM stack configured) see 10/11 PASS + 1
+# SKIP rather than 10/11 PASS + 1 FAIL, which would otherwise
+# misrepresent suite health.
+requires_params: [alice_basic_auth]
+
+steps:
+  # 1. Mint a session key via PAM-authenticated login. The captured
+  #    value is referenced as {{captured.session_key}} by every
+  #    subsequent step in this scenario.
+  - name: alice-login
+    action: newtron
+    method: POST
+    url: /auth/login
+    headers:
+      Authorization: "Basic {{param.alice_basic_auth}}"
+    capture:
+      session_key: .key
+
+  # 2. Use the session key on a real mutation. No password on the
+  #    wire — just the opaque Bearer token. The mutation must
+  #    succeed: alice is in spec-team, which has spec.author
+  #    (verified by other scenarios in this suite).
+  - name: alice-mutates-under-bearer
+    action: newtron
+    method: POST
+    url: /create-zone
+    params: {name: zone-l2c-roundtrip}
+    headers:
+      Authorization: "Bearer {{captured.session_key}}"
+
+  # 3. Revoke the session key. 204 No Content; the same Bearer is
+  #    no longer valid.
+  - name: alice-logout
+    action: newtron
+    method: POST
+    url: /auth/logout
+    headers:
+      Authorization: "Bearer {{captured.session_key}}"
+
+  # 4. The same Bearer that worked in step 2 must now 401. This is
+  #    the load-bearing assertion of the round-trip — without
+  #    explicit revocation, an L2c session-key implementation that
+  #    only honored TTL would silently fall back to "still valid"
+  #    here and the test would PASS the wrong reason.
+  - name: revoked-bearer-rejected
+    action: newtron
+    method: POST
+    url: /create-zone
+    params: {name: zone-after-logout}
+    headers:
+      Authorization: "Bearer {{captured.session_key}}"
+    expect_failure: true
+
+  # 5. Cleanup: the zone created in step 2 still exists; remove it
+  #    via the header-mode identity path so the scenario leaves no
+  #    trace for the next test run.
+  - name: cleanup-roundtrip-zone
+    action: newtron
+    method: POST
+    url: /delete-zone
+    params: {name: zone-l2c-roundtrip}
+    headers:
+      X-Newtron-Caller: alice

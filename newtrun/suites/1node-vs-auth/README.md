@@ -14,7 +14,8 @@ expect.
 | `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `profiles/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
 | `10-L1-audit-log-entries` | L1 | A handful of mutations as different callers; operator inspects the audit log file to see one entry per request with caller=alice/bob in the user field. |
 | `20-L3-spec-mutations-gated` | L3 | Per perm family (spec.author, qos.create, filter.create): denied caller gets 403, allowed caller succeeds. Plus the empty-caller fail-closed check. |
-| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service` (as in this suite), `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. Also pins that the new `withSessionKey` middleware doesn't break header-mode identity: a request with `Authorization: Bearer <anything>` plus `X-Newtron-Caller: alice` still resolves as alice. |
+| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service`, `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. Also pins that the new `withSessionKey` middleware doesn't break header-mode identity: a request with `Authorization: Bearer <anything>` plus `X-Newtron-Caller: alice` still resolves as alice. |
+| `26-L2c-round-trip` | L2c | The full session-key arc end-to-end: PAM-authenticated `/auth/login` mints a key; a mutation under `Authorization: Bearer <key>` succeeds; `/auth/logout` revokes; the same Bearer on the same mutation 401s. Requires PAM + a real OS account (see §"L2c round-trip operator setup"). Skipped by default — the suite's `alice_basic_auth` parameter is empty unless the operator supplies it. |
 | `30-L4-node-mutations-gated` | L4 | Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
 | `40-L5-resource-scoping` | L5 | alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
 | `50-L6-audit-verify` | L6 | `bin/newtron audit verify /tmp/1node-vs-auth-audit.jsonl` walks the chain and confirms it's intact end-to-end. |
@@ -27,8 +28,7 @@ expect.
 These verifications can't fit the current newtrun suite model:
 
 - **L2a inter-service mTLS** — N/A for `newt-server` (single process, no inter-engine network calls).
-- **L2b user-to-service PAM** — requires host PAM configuration (`/etc/pam.d/newtron-server`) and a real OS account; the suite can forge `X-Newtron-Caller` but not real Basic-auth credentials.
-- **L2c session-key round trip** — L2c only engages with L2b configured, and `newt-server` has no `--auth-pam-service` flag today. Once `newt-server` gains the PAM flag, the round-trip can be expressed as a suite scenario using newtrun's response-capture: `POST /auth/login` captures `.key` as `session_key`, the next mutation step's headers carry `Authorization: Bearer {{captured.session_key}}`, `POST /auth/logout` revokes, and a final mutation with the same captured key asserts 401. The `25-L2c-disabled-routes` scenario covers what's testable today (against the PAM-less `newt-server`); the round-trip is in "Manual verifications" below.
+- **L2b user-to-service PAM** — requires host PAM configuration (`/etc/pam.d/newtron-server`) and a real OS account; the suite can forge `X-Newtron-Caller` but not real Basic-auth credentials. The `26-L2c-round-trip` scenario exercises a PAM-authenticated `/auth/login` and so does cover one L2b flow, but operator setup is required (see below).
 - **L6 spec-watch** — requires editing `network.json` mid-suite to observe auto-reload. There's no `local-exec` step action today (deferred follow-up).
 - **L6 audit tamper detection** — requires modifying a log entry mid-suite to confirm verify catches it. Same `local-exec` gap.
 
@@ -92,6 +92,76 @@ bin/newtrun start 1node-vs-auth --no-deploy
 `--no-deploy` skips the lab deployment — every scenario uses
 `?mode=topology` so no SONiC VM is required.
 
+## L2c round-trip operator setup
+
+The `26-L2c-round-trip` scenario exercises a real PAM-authenticated
+`/auth/login`, so it needs three things the rest of the suite does not:
+
+### 1. PAM service file
+
+Create `/etc/pam.d/newtron-test`:
+
+```
+auth required pam_unix.so
+account required pam_unix.so
+```
+
+(`pam_unix` authenticates against `/etc/passwd` / `/etc/shadow`; for
+LDAP / SSSD / Kerberos see `docs/newtron/pam-howto.md` §2.)
+
+### 2. An OS account the suite knows
+
+The scenario hardcodes the caller name `alice` because the suite's
+`network.json` already grants `alice` membership in `spec-team`.
+Create the account:
+
+```sh
+sudo useradd -m alice
+sudo passwd alice   # set a password you'll pass to the suite
+```
+
+If your environment already has `alice` (or you want a different
+test name), either rename in `26-L2c-round-trip.yaml` consistently
+or add your account name to `user_groups.spec-team` in the suite's
+`network.json`.
+
+### 3. Start `newt-server` with `--auth-pam-service`
+
+Add the L2b/L2c flag to the start command from §2 above:
+
+```sh
+PATH="$(pwd)/bin:$PATH" bin/newt-server \
+    --spec-dir newtrun/topologies/1node-vs-auth/specs \
+    --net-id 1node-vs-auth \
+    --secret-store /tmp/1node-vs-auth-secrets.json \
+    --audit-log /tmp/1node-vs-auth-audit.jsonl \
+    --audit-caller-header X-Newtron-Caller \
+    --auth-pam-service newtron-test \
+    --enforce-authorization \
+    --audit-log-integrity \
+    --spec-watch &
+```
+
+Adjust `--session-key-ttl` if you want a TTL other than the default
+8h.
+
+### 4. Run the suite with `alice_basic_auth` set
+
+The suite parameter `alice_basic_auth` carries the base64-encoded
+`user:password` to the `Authorization: Basic …` header on
+`/auth/login`. No plaintext lives in the repo:
+
+```sh
+bin/newtrun start 1node-vs-auth --no-deploy \
+    --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
+```
+
+If `alice_basic_auth` is left empty (the suite-level default), the
+first step of `26-L2c-round-trip` 401s on the Basic auth exchange
+and the rest of the scenario short-circuits. Every other scenario in
+the suite continues to pass — the L2c round-trip is the only
+consumer of this parameter.
+
 ## Expected outcome
 
 All 6 scenarios pass on first run. If any fail:
@@ -146,42 +216,6 @@ curl -X POST -H "X-Newtron-Caller: alice" \
     http://localhost:18080/newtron/v1/networks/1node-vs-auth/create-service \
     -d '{"name":"after-revoke","type":"routed"}'
 ```
-
-### L2c session-key round trip
-
-Requires `newtron-server` (not `newt-server`, which has no PAM flag
-today) running with both `--auth-pam-service` and a local OS account
-to test against. Pattern:
-
-```sh
-# 1. Mint a key via PAM-backed login. The Basic-auth credentials are
-#    whatever PAM accepts (local account / LDAP / etc.).
-KEY=$(curl -sS -u alice:correct-password -X POST \
-    http://localhost:18080/newtron/v1/auth/login \
-    | jq -r .key)
-
-# 2. Use the key on a real mutation. No password on the wire — just
-#    the Bearer token + the verified identity it resolves to.
-curl -sS -X POST -H "Authorization: Bearer $KEY" \
-    http://localhost:18080/newtron/v1/networks/1node-vs-auth/create-zone \
-    -d '{"name":"zone-bearer"}'
-
-# 3. Revoke explicitly.
-curl -sS -X POST -H "Authorization: Bearer $KEY" \
-    http://localhost:18080/newtron/v1/networks/1node-vs-auth/auth/logout
-# 204 No Content
-
-# 4. Same key now 401s.
-curl -sS -X POST -H "Authorization: Bearer $KEY" \
-    http://localhost:18080/newtron/v1/networks/1node-vs-auth/create-zone \
-    -d '{"name":"zone-after-logout"}'
-# 401 invalid or expired session key
-```
-
-The audit log carries `verification_source: "pam"` for the login
-event and `verification_source: "session_key"` for every subsequent
-gated request. Operators can join the two by user + time window
-bounded by the key's `expires_at`.
 
 ### L6 tamper detection
 
