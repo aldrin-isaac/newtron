@@ -146,7 +146,15 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	if effectiveNetID == "" {
 		effectiveNetID = name
 	}
-	client := newtronclient.New(newtronServer, effectiveNetID)
+	// Honor the per-user session cache so a single `newtron auth
+	// login` carries through every CLI invocation. LoadSession
+	// returns nil for missing / expired caches; WithBearer("") is
+	// a no-op so the existing no-auth path is preserved.
+	var bearerKey string
+	if rec, err := newtronclient.LoadSession(newtronclient.DefaultSessionPath()); err == nil && rec != nil {
+		bearerKey = rec.Key
+	}
+	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey))
 	// Ensure the network is registered on newtron-server so it can
 	// serve specs for this topology. RegisterNetwork is true-idempotent on
 	// matching spec_dir (returns nil); on a real conflict (same network

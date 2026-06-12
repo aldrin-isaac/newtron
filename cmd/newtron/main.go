@@ -189,8 +189,22 @@ Examples:
 			app.networkID = app.settings.GetNetworkID()
 		}
 
-		// Create HTTP client and register network
-		app.client = client.New(app.serverURL, app.networkID)
+		// Create HTTP client. When a valid session is cached at
+		// ~/.newtron/session.json (mode 0600), attach its key as
+		// Authorization: Bearer on every outbound newtron call. An
+		// expired or missing cache is silently ignored — the CLI
+		// proceeds without auth and the server's response (401 or
+		// 403) tells the operator whether the call needed identity.
+		// A malformed cache (bad JSON, bad permissions) is a hard
+		// error so the operator knows to chmod or re-login rather
+		// than silently running with a degraded credential surface.
+		var bearerKey string
+		if rec, err := client.LoadSession(client.DefaultSessionPath()); err != nil {
+			return fmt.Errorf("loading cached session: %w", err)
+		} else if rec != nil {
+			bearerKey = rec.Key
+		}
+		app.client = client.New(app.serverURL, app.networkID, client.WithBearer(bearerKey))
 		if app.loopback {
 			app.client.Mode = api.ModeLoopback
 			app.executeMode = true // loopback is always execute — no device to protect
@@ -386,7 +400,7 @@ func printVerification(v *newtron.VerificationResult) {
 func isSettingsOrHelp(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "help", "version", "settings", "secrets", "audit":
+		case "help", "version", "settings", "secrets", "audit", "auth":
 			return true
 		}
 	}
