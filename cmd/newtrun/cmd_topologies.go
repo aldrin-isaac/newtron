@@ -112,5 +112,13 @@ func newNewtronClient(networkID string) *newtronclient.Client {
 	if url == "" {
 		url = "http://127.0.0.1:18080"
 	}
-	return newtronclient.New(url, networkID)
+	// Honor the per-user session cache the same way the newtron
+	// CLI does — one login serves every command across all three
+	// CLIs. LoadSession returns nil on missing / expired cache;
+	// WithBearer("") is a no-op.
+	var bearerKey string
+	if rec, err := newtronclient.LoadSession(newtronclient.DefaultSessionPath()); err == nil && rec != nil {
+		bearerKey = rec.Key
+	}
+	return newtronclient.New(url, networkID, newtronclient.WithBearer(bearerKey))
 }

@@ -273,6 +273,52 @@ to suppress session keys even when PAM is on. `/auth/login` and
 when audit semantics require "every request authenticated against
 the live directory" — a tradeoff with the per-request cost.
 
+### Per-user CLI session cache
+
+For human operators at terminals, the `newtron`, `newtrun`, and
+`newtlab` CLIs share a per-user session cache at
+`~/.newtron/session.json` (mode `0600`). One `newtron auth login`
+mints a key and persists it; every subsequent CLI invocation reads
+the cache and carries `Authorization: Bearer <key>` automatically.
+
+```sh
+newtron auth login
+# Username (for http://localhost:18080): alice
+# Password:
+# Logged in as alice (server http://localhost:18080); session expires Thu, 12 Jun 2026 02:00:00 PDT.
+# Session cached at /home/alice/.newtron/session.json (mode 0600).
+
+# Now every CLI uses the cached key — no further prompts.
+newtron service list
+newtrun start 2node-vs-primitive
+newtlab status
+
+newtron auth status
+# User:       alice
+# Server:     http://localhost:18080
+# Expires:    Thu, 12 Jun 2026 02:00:00 PDT (in 7h59m)
+# Cached at:  /home/alice/.newtron/session.json
+
+newtron auth logout
+# Logged out.
+```
+
+The cache stores `{server, user, key, expires_at}` — same fields
+the server returns from `/auth/login`. Re-login replaces any
+earlier cached session for the same server. The file mode is
+strictly `0600`; if it ever drifts (e.g. someone `chmod 644`s it),
+`LoadSession` returns an error and the CLI refuses to use the
+credential rather than silently sending a key anyone on the host
+could have tampered with.
+
+**Operator vs. daemon credentials.** This cache is for human
+operators interactively logging in. Daemons that need to
+authenticate as a service identity at startup use the daemon-side
+flag instead — `newtrun-server --newtron-basic-auth=user:pw` —
+so a process with no person at a keyboard can mint its own
+session at boot. Different use cases, different surfaces; both
+land on the same `/auth/login` endpoint server-side.
+
 ## 8. Cross-references
 
 - [`auth-design.md`](auth-design.md) — L2b in the layered auth plan
