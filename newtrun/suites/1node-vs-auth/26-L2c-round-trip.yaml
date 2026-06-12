@@ -58,7 +58,7 @@ steps:
   - name: alice-mutates-under-bearer
     action: newtron
     method: POST
-    url: /create-zone
+    url: /create-zone?mode=topology
     params: {name: zone-l2c-roundtrip}
     headers:
       Authorization: "Bearer {{captured.session_key}}"
@@ -80,7 +80,7 @@ steps:
   - name: revoked-bearer-rejected
     action: newtron
     method: POST
-    url: /create-zone
+    url: /create-zone?mode=topology
     params: {name: zone-after-logout}
     headers:
       Authorization: "Bearer {{captured.session_key}}"
@@ -92,7 +92,7 @@ steps:
   - name: cleanup-roundtrip-zone
     action: newtron
     method: POST
-    url: /delete-zone
+    url: /delete-zone?mode=topology
     params: {name: zone-l2c-roundtrip}
     headers:
-      X-Newtron-Caller: alice
+      Authorization: "Basic {{param.alice_basic_auth}}"

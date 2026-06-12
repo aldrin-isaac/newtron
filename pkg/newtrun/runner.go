@@ -29,6 +29,19 @@ type Runner struct {
 	// identity (typically configured as a super_user in network.json
 	// so the runner has the broad authority test scenarios need).
 	NewtronClientTLS *tls.Config
+
+	// NewtronBasicAuth carries the Basic credentials the runner's
+	// outbound newtron client uses to mint and refresh a session
+	// key (auth-design.md L2c). Format "user:password". When set,
+	// the runner authenticates against PAM at first request and
+	// carries Authorization: Bearer <key> on every subsequent
+	// newtron call. Empty disables session-key auth — the runner
+	// connects without credentials, which is fine against a server
+	// that doesn't enforce PAM but fails closed on a PAM-protected
+	// newtron-server. Populated by cmd/newtrun-server from a
+	// --newtron-basic-auth=user:pw flag.
+	NewtronBasicAuth string
+
 	Client       *client.Client // HTTP client for all SONiC operations
 	NewtlabURL   string         // newtlab-server HTTP address (deploy/destroy/status via HTTP, not in-process)
 	NewtlabClient LabClient    // newtlab HTTP client (satisfied by *pkg/newtlab/client.Client); injected for tests
@@ -451,8 +464,22 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 // authenticate against an mTLS-enforced newtron-server via its peer
 // cert CN (auth-design.md L2a). When NewtronClientTLS is nil, the
 // client falls back to plain HTTP — the L2a disabled state.
+//
+// When r.NewtronBasicAuth is set, the client also installs L2c
+// session-key auth: lazy POST /auth/login on first call, Bearer on
+// every subsequent call, automatic re-login on 401. This lets the
+// runner authenticate against a PAM-protected newtron-server
+// without sending Basic auth on every request.
 func (r *Runner) connectToServer() error {
-	r.Client = client.New(r.ServerURL, r.NetworkID, client.WithTLS(r.NewtronClientTLS))
+	opts := []client.Option{client.WithTLS(r.NewtronClientTLS)}
+	if r.NewtronBasicAuth != "" {
+		user, pass, ok := strings.Cut(r.NewtronBasicAuth, ":")
+		if !ok || user == "" || pass == "" {
+			return &InfraError{Op: "connect", Err: fmt.Errorf("NewtronBasicAuth must be 'user:password', got %q", r.NewtronBasicAuth)}
+		}
+		opts = append(opts, client.WithSession(user, pass))
+	}
+	r.Client = client.New(r.ServerURL, r.NetworkID, opts...)
 
 	info, err := r.Client.GetNetworkInfo()
 	if err != nil {

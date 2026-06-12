@@ -64,6 +64,7 @@ func main() {
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
 	sessionKeyTTL := flag.Duration("session-key-ttl", newtronapi.DefaultSessionKeyTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
+	newtrunNewtronBasicAuth := flag.String("newtrun-newtron-basic-auth", "", "user:password the newtrun engine uses to mint and refresh an L2c session key against the in-process newtron engine (auth-design.md L2c). Required when --auth-pam-service is also set — every newtrun-originated newtron call carries Authorization: Bearer <key> after first login. Empty leaves the newtrun engine's newtron client on no-auth, which works only when the newtron engine does not enforce PAM.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -150,9 +151,10 @@ func main() {
 	// newtrun-server it's cross-process. Either way newtrun's runner
 	// stays a client of newtlab, never a co-writer.
 	newtrunSrv := newtrunapi.NewServer(newtrunapi.Config{
-		SuitesBase:    *suitesBase,
-		Logger:        logger,
-		NewtlabClient: newtlabClient,
+		SuitesBase:       *suitesBase,
+		Logger:           logger,
+		NewtlabClient:    newtlabClient,
+		NewtronBasicAuth: *newtrunNewtronBasicAuth,
 	})
 	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
 	// owns spec files). In the composed binary this is an in-process

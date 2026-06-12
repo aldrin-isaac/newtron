@@ -97,6 +97,25 @@ bin/newtrun start 1node-vs-auth --no-deploy
 The `26-L2c-round-trip` scenario exercises a real PAM-authenticated
 `/auth/login`, so it needs three things the rest of the suite does not:
 
+**Two-mode workflow.** PAM coexists badly with the header-mode
+identity-spoofing the other scenarios use — `--auth-pam-service`
+demands Basic/Bearer on every request, but `L3-spec-mutations-gated`
+and friends rely on `X-Newtron-Caller: mallory` to test denial paths,
+and a Bearer-authenticated runner identity replaces the spoofed
+header at the server's caller-middleware. Operators run the suite in
+two passes:
+
+1. **Header-mode pass (no PAM)** — verifies the L1/L3/L4/L5/L6
+   surfaces. The L2c-round-trip scenario skips automatically because
+   its `requires_params: [alice_basic_auth]` guard is not satisfied.
+2. **PAM-mode pass** — verifies the L2c round-trip. Run with
+   `--auth-pam-service` set on the server and
+   `--newtrun-newtron-basic-auth user:pw` so the runner authenticates
+   itself; pass `--param alice_basic_auth=<base64>` to the CLI.
+   Other scenarios fail under this mode because their spoofed
+   identities are overridden by the runner's session identity — this
+   is expected; operators ignore those results in PAM-mode runs.
+
 ### 1. PAM service file
 
 Create `/etc/pam.d/newtron-test`:
@@ -125,9 +144,7 @@ test name), either rename in `26-L2c-round-trip.yaml` consistently
 or add your account name to `user_groups.spec-team` in the suite's
 `network.json`.
 
-### 3. Start `newt-server` with `--auth-pam-service`
-
-Add the L2b/L2c flag to the start command from §2 above:
+### 3. Start `newt-server` in PAM-only mode
 
 ```sh
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
@@ -135,32 +152,39 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
     --net-id 1node-vs-auth \
     --secret-store /tmp/1node-vs-auth-secrets.json \
     --audit-log /tmp/1node-vs-auth-audit.jsonl \
-    --audit-caller-header X-Newtron-Caller \
     --auth-pam-service newtron-test \
+    --newtrun-newtron-basic-auth alice:thepassword \
     --enforce-authorization \
     --audit-log-integrity \
     --spec-watch &
 ```
 
-Adjust `--session-key-ttl` if you want a TTL other than the default
-8h.
+- `--auth-pam-service` engages L2b PAM + auto-engages L2c session
+  keys at `/auth/login` and `/auth/logout`.
+- `--newtrun-newtron-basic-auth` gives the in-process newtrun engine
+  its own credentials to authenticate against the newtron engine —
+  without it, the runner's internal `GET /networks` probe 401s
+  before any scenario starts.
+- `--audit-caller-header` is **deliberately omitted** — header-mode
+  spoofing fights PAM at the caller-middleware. See the two-mode
+  note at the top of this section.
+- Adjust `--session-key-ttl` if you want a TTL other than the
+  default 8h.
 
-### 4. Run the suite with `alice_basic_auth` set
-
-The suite parameter `alice_basic_auth` carries the base64-encoded
-`user:password` to the `Authorization: Basic …` header on
-`/auth/login`. No plaintext lives in the repo:
+### 4. Run the round-trip with `alice_basic_auth` set
 
 ```sh
 bin/newtrun start 1node-vs-auth --no-deploy \
+    --target L2c-round-trip \
     --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
 ```
 
-If `alice_basic_auth` is left empty (the suite-level default), the
-first step of `26-L2c-round-trip` 401s on the Basic auth exchange
-and the rest of the scenario short-circuits. Every other scenario in
-the suite continues to pass — the L2c round-trip is the only
-consumer of this parameter.
+`--target` runs the dependency chain leading to the named scenario
+(`L0-secret-store-resolves` → `L2c-round-trip`), so the suite reports
+a clean 2/2 PASS instead of pulling in other scenarios that the
+PAM-mode server can't run cleanly. Running the full `1node-vs-auth`
+suite in this mode reports FAIL on the header-mode-spoofing
+scenarios — expected; ignore those results in PAM-mode runs.
 
 ## Expected outcome
 
