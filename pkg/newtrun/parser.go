@@ -1,6 +1,7 @@
 package newtrun
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -23,13 +24,42 @@ func ParseScenario(path string) (*Scenario, error) {
 	return s, nil
 }
 
-// ParseScenarioBytes parses a YAML scenario from a byte buffer and returns
-// a validated Scenario. Used by the inline compose-and-run HTTP endpoint
-// (PR 3) where the scenario is delivered in the request body rather than
-// read from disk.
+// ParseScenarioBytes parses a YAML scenario from a byte buffer and
+// returns a validated Scenario. Used by the inline compose-and-run
+// HTTP endpoint and the PUT scenario-authoring handler — both expect
+// exactly one scenario per call.
+//
+// Uses yaml.NewDecoder rather than yaml.Unmarshal so a multi-document
+// payload surfaces as an explicit error ("expected one scenario, got
+// a stream of N") instead of silently truncating to the first
+// document. Multi-document streams belong on the suite-directory
+// write path (loadScenarioFiles); single-scenario endpoints reject
+// them so an operator who pastes a split-per-identity file body
+// into create-scenario sees the mistake immediately
+// (ai-instructions §13 same concept = same name; DPN §27).
 func ParseScenarioBytes(data []byte) (*Scenario, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var s Scenario
-	if err := yaml.Unmarshal(data, &s); err != nil {
+	if err := dec.Decode(&s); err != nil {
+		if err == io.EOF {
+			return nil, fmt.Errorf("parsing scenario: empty input")
+		}
+		return nil, fmt.Errorf("parsing scenario: %w", err)
+	}
+	// Detect a second document — same wire shape as the suite loader
+	// reads, but explicitly rejected here.
+	var extra Scenario
+	if err := dec.Decode(&extra); err == nil {
+		// More than one doc; count any further to make the error honest.
+		n := 2
+		for {
+			if err := dec.Decode(&extra); err != nil {
+				break
+			}
+			n++
+		}
+		return nil, fmt.Errorf("parsing scenario: expected one scenario, got a stream of %d", n)
+	} else if err != io.EOF {
 		return nil, fmt.Errorf("parsing scenario: %w", err)
 	}
 	applyDefaults(&s)

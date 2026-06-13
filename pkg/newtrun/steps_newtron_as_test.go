@@ -134,10 +134,10 @@ func TestNewtronExecutor_NoAsLeavesClientCredential(t *testing.T) {
 // "Identity forwarding through engines"). The full chain
 // connectToServer reads Runner.OperatorBearer, hands it to
 // client.WithBearer, and the resulting client attaches
-// `Authorization: Bearer operator-key` on a step that doesn't
-// specify `as:`. This is the default-credential layer; the
-// per-step override layer is tested separately above. The
-// inbound-side parse from the /runs request's Authorization
+// `Authorization: Bearer operator-key` on a step that runs
+// under a scenario without `as:`. This is the default-credential
+// layer; the per-scenario override layer is tested separately
+// above. The inbound-side parse from the /runs request's Authorization
 // header is covered by TestOperatorBearer_ExtractsFromAuthorization
 // Header in the api package — those two together pin the chain
 // from inbound request to outbound wire.

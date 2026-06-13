@@ -30,7 +30,10 @@ as: alice
 steps:
   # /auth/login returns 404 because L2b (PAM) is not configured on
   # this server. The session-key store is nil; the handler returns
-  # 404 (not 500, not silent success).
+  # 404 (not 500, not silent success). The scenario's `as: alice`
+  # injects alice's Bearer on this call; that's harmless — the 404
+  # is route-driven, the handler short-circuits before reading
+  # identity.
   - name: auth-login-route-404-when-l2c-disabled
     action: newtron
     method: POST
@@ -38,28 +41,28 @@ steps:
     expect_failure: true
 
   # /auth/logout returns 404 for the same reason. Even with a Bearer
-  # token attached, the handler short-circuits on the nil store.
+  # attached (alice's via scenario.As), the handler short-circuits
+  # on the nil store.
   - name: auth-logout-route-404-when-l2c-disabled
     action: newtron
     method: POST
     url: /auth/logout
     expect_failure: true
 
-  # Sanity: a request carrying Authorization: Bearer + the regular
-  # X-Newtron-Caller header still succeeds via the header-mode path.
-  # sessionkey.Middleware passes through (nil store), so the
-  # Bearer is ignored and caller_middleware reads the header. Proves
-  # the L2c plumbing didn't break header-mode identity.
-  - name: bearer-ignored-when-disabled-caller-header-still-works
+  # Sanity: a regular mutation under L2c-disabled still works.
+  # sessionkey.Middleware passes through (nil store) and the
+  # request's verified Bearer reaches caller_middleware via the
+  # session-key context as usual. Proves the L2c plumbing — store
+  # init, route mount, middleware wire-up — didn't break the
+  # default request path when disabled.
+  - name: zone-create-succeeds-under-l2c-disabled
     action: newtron
     method: POST
     url: /create-zone
-    params: {name: zone-bearer-ignored}
-    headers:
-      Authorization: Bearer this-key-was-never-issued-and-thats-ok
+    params: {name: zone-l2c-disabled-probe}
 
-  - name: cleanup-zone-bearer-ignored
+  - name: cleanup-zone-l2c-disabled-probe
     action: newtron
     method: POST
     url: /delete-zone
-    params: {name: zone-bearer-ignored}
+    params: {name: zone-l2c-disabled-probe}

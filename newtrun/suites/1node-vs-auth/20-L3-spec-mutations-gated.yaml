@@ -39,19 +39,36 @@ steps:
     expect_failure: true
 
 ---
+name: L3-spec-mutations-gated-bob
+description: |
+  auth-design.md L3: spec-mutation endpoints accept callers in the
+  granted group. Bob's portion of this split-per-identity scenario:
+  bob (ops, which has qos.create) is allowed on the qos.create family.
+  Runs before alice's portion so alice (spec-team, broader qos.delete)
+  can clean up bob's record as part of her own scenario.
+
+requires: [L3-spec-mutations-gated-mallory]
+as: bob
+
+steps:
+  # qos.create family — allowed caller (bob: ops, which has qos.create)
+  - name: bob-create-qos-allowed
+    action: newtron
+    method: POST
+    url: /create-qos-policy
+    params: {name: qos-bob-l3}
+
+---
 name: L3-spec-mutations-gated-alice
 description: |
   auth-design.md L3: spec-mutation endpoints accept callers in the
   granted group. Alice's portion of this split-per-identity scenario:
   alice (spec-team) is allowed on spec.author and filter.create families,
-  and cleans up resources. Also covers the no-identity fail-closed
-  contract.
+  and cleans up the resources created by herself and by bob — spec-team
+  is broader than ops on qos.delete. Runs after bob's portion so the
+  qos.delete cleanup finds bob's record present.
 
-  Pre-L3 (or without --enforce-authorization), every step would
-  succeed for both callers — the expect_failure assertions would
-  fail. This scenario only makes sense with enforcement engaged.
-
-requires: [L3-spec-mutations-gated-mallory]
+requires: [L3-spec-mutations-gated-bob]
 as: alice
 
 steps:
@@ -88,35 +105,14 @@ steps:
     url: /delete-filter
     params: {name: filter-alice-l3}
 
-  # No-identity request — fails closed even on an allowed permission.
-  # Verifies the fail-closed contract from TestAuthorization_EmptyCallerDenied.
-  # alice's Bearer is the default credential for the operator; omitting
-  # as: on a step would use it. This step explicitly sends no caller.
-  - name: no-caller-fails-closed
-    action: newtron
-    method: POST
-    url: /create-service
-    params: {name: svc-no-caller, type: routed}
-    expect_failure: true
-
----
-name: L3-spec-mutations-gated-bob
-description: |
-  auth-design.md L3: spec-mutation endpoints accept callers in the
-  granted group. Bob's portion of this split-per-identity scenario:
-  bob (ops, which has qos.create) is allowed on the qos.create family.
-
-  Pre-L3 (or without --enforce-authorization), every step would
-  succeed for both callers — the expect_failure assertions would
-  fail. This scenario only makes sense with enforcement engaged.
-
-requires: [L3-spec-mutations-gated-alice]
-as: bob
-
-steps:
-  # qos.create family — allowed caller (bob: ops, which has qos.create)
-  - name: bob-create-qos-allowed
-    action: newtron
-    method: POST
-    url: /create-qos-policy
-    params: {name: qos-bob-l3}
+  # NOTE: the original suite had a `no-caller-fails-closed` step here that
+  # POSTed without an Authorization header to verify L3's empty-caller
+  # fail-closed contract. That step is gone after PR D because every
+  # outbound newtron call this scenario makes carries alice's Bearer
+  # (forwarded by the runner under scenario-level `as: alice`); there is
+  # no per-step opt-out. The L3 empty-caller contract is covered by
+  # TestAuthorization_EmptyCallerDenied in the unit tests; an integration
+  # suite running under PR-C's operator-Bearer-forward model cannot
+  # express a no-credential request without telling the operator to
+  # submit the run without a session — orthogonal to the per-identity
+  # contract this suite is testing.

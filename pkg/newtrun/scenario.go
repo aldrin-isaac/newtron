@@ -54,12 +54,11 @@ type Scenario struct {
 	// each request carries its own verified caller.
 	//
 	// The named user must have a cached session at the time the
-	// suite was started — the CLI scans every scenario's `as:`
-	// field, loads each user's session from ~/.newtron/sessions/,
-	// and submits the resulting map in StartRunRequest.UserSessions.
-	// A scenario that names a user the operator never logged in as
-	// fails fast at run start with "no session cached for user X;
-	// run `newtron auth login --user X` first".
+	// suite was started — the CLI populates UserSessions with every
+	// cached session from ~/.newtron/sessions/ (over-supplying is
+	// harmless), and a scenario that names a user absent from the
+	// map fails fast at run start with "no session cached for user
+	// X; run `newtron auth login --user X` first".
 	//
 	// Empty (the common case) lets the runner forward the operator's
 	// own Bearer (extracted from the inbound /newtrun/v1/runs

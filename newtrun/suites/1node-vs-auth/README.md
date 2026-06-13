@@ -197,9 +197,10 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
   set, or any other consumer hitting `/newtrun/v1/runs`) carries
   an Authorization Bearer; the runner extracts it from the
   inbound request and attaches it on every outbound newtron call.
-  Per-step `as: <user>` in a scenario switches to that user's
-  cached Bearer for the one step (the multi-user session cache
-  the operator populated via `login-all.sh`).
+  Per-scenario `as: <user>` switches every outbound newtron
+  call that scenario makes to the named user's cached Bearer
+  (the multi-user session cache the operator populated via
+  `login-all.sh`).
 
 ### 4. Pre-cache a session for every test identity
 
