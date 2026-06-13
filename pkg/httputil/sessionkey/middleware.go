@@ -67,10 +67,10 @@ func Middleware(store *Store) func(http.Handler) http.Handler {
 // Exported so consumers outside this package (notably the newtrun
 // runner, which forwards the operator's Bearer on every outbound
 // newtron call per auth-design.md §L2c) parse the same wire shape
-// the Middleware here parses — DPN §27 (single owner) and §13
-// (same concept = same name). The function takes a header value
-// rather than an *http.Request so it stays usable from places
-// where the request isn't in scope.
+// the Middleware here parses — DPN §27 (single owner) and
+// ai-instructions §13 (same concept = same name). The function
+// takes a header value rather than an *http.Request so it stays
+// usable from places where the request isn't in scope.
 func BearerToken(authHeader string) (string, bool) {
 	if authHeader == "" {
 		return "", false
