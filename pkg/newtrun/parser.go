@@ -40,18 +40,7 @@ func ParseScenarioBytes(data []byte) (*Scenario, error) {
 	return &s, nil
 }
 
-// ParseAllScenarios reads all .yaml files in dir (excluding suite.yaml
-// which is the suite manifest, parsed separately by LoadSuite) and
-// returns the parsed scenarios. Suite-level validation (template
-// references against suite-level declarations) does not run here —
-// use LoadSuite when that validation is required.
-func ParseAllScenarios(dir string) ([]*Scenario, error) {
-	scenarios, _, err := loadScenarioFiles(dir)
-	return scenarios, err
-}
-
-// loadScenarioFiles is the underlying walk used by both
-// ParseAllScenarios (test/list paths) and LoadSuite (run path). It
+// loadScenarioFiles is the underlying walk used by LoadSuite (run path). It
 // returns each parsed scenario paired with its source file path so
 // suite-level error messages (e.g. "scenario X sets topology — that
 // belongs in suite.yaml") can name the offending file. Per §28

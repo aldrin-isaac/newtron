@@ -218,7 +218,7 @@ func TestSSEEndpointStreamsBrokerEvents(t *testing.T) {
 
 	// Give the handler a moment to register its subscription, then publish.
 	time.Sleep(100 * time.Millisecond)
-	srv.Broker().Publish("suite-a", Event{
+	srv.broker.Publish("suite-a", Event{
 		Type:    EventScenarioStart,
 		Payload: ScenarioStartPayload{Name: "s1", Index: 0, Total: 1},
 	})

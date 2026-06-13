@@ -270,7 +270,7 @@ func TestInlineDeleteUnreachableUntilTerminal(t *testing.T) {
 	// no newtron-server to connect to, so it fails fast).
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if srv.Registry().Get(runID) == nil {
+		if srv.registry.Get(runID) == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

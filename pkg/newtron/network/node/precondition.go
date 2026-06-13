@@ -85,32 +85,12 @@ func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker {
 	return p
 }
 
-// RequireVLANNotExists checks that a VLAN does not exist by checking the intent DB.
-func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker {
-	if p.node.GetIntent(fmt.Sprintf("vlan|%d", id)) != nil {
-		p.errors = append(p.errors, util.NewPreconditionError(
-			p.operation, p.resource, "VLAN must not exist",
-			fmt.Sprintf("VLAN %d already exists", id)))
-	}
-	return p
-}
-
 // RequireVRFExists checks that a VRF exists by checking the intent DB.
 func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker {
 	if p.node.GetIntent(fmt.Sprintf("vrf|%s", name)) == nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VRF must exist",
 			fmt.Sprintf("VRF '%s' not found - create it first", name)))
-	}
-	return p
-}
-
-// RequireVRFNotExists checks that a VRF does not exist by checking the intent DB.
-func (p *PreconditionChecker) RequireVRFNotExists(name string) *PreconditionChecker {
-	if p.node.GetIntent(fmt.Sprintf("vrf|%s", name)) != nil {
-		p.errors = append(p.errors, util.NewPreconditionError(
-			p.operation, p.resource, "VRF must not exist",
-			fmt.Sprintf("VRF '%s' already exists", name)))
 	}
 	return p
 }
@@ -193,12 +173,3 @@ func (p *PreconditionChecker) Result() error {
 	return util.NewValidationError(msgs...)
 }
 
-// Errors returns all errors
-func (p *PreconditionChecker) Errors() []error {
-	return p.errors
-}
-
-// HasErrors returns true if there are any errors
-func (p *PreconditionChecker) HasErrors() bool {
-	return len(p.errors) > 0
-}

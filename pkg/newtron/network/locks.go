@@ -19,8 +19,7 @@ type lockKey string
 //
 // The zero value is usable — the internal map is created on first call to
 // lock(). Embed lockManager as a value field in a struct that needs per-key
-// locks and the struct's zero value Just Works. newLockManager exists for
-// standalone construction (e.g. unit tests).
+// locks and the struct's zero value Just Works.
 //
 // Callers take the returned mutex with direct Lock / RLock + defer, the
 // same way Network's existing sync.RWMutex fields are used today
@@ -30,10 +29,6 @@ type lockKey string
 type lockManager struct {
 	mu    sync.Mutex
 	locks map[lockKey]*sync.RWMutex
-}
-
-func newLockManager() *lockManager {
-	return &lockManager{locks: make(map[lockKey]*sync.RWMutex)}
 }
 
 // lock returns the *sync.RWMutex for the given key. The same key always

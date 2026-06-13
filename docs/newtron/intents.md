@@ -78,20 +78,20 @@ would leave a stale value from the previous write.
 ## 2. DAG Invariants
 
 The intent DAG enforces eight invariants (I1–I8), defined in
-`intent-dag-architecture.md` §3. Four are relevant to this reference — two
-enforced at runtime (operations fail immediately), two checked by validation:
+`intent-dag-architecture.md` §3. The two runtime-enforced invariants are
+the operations safety net:
 
 | ID | Rule | Enforced by |
 |----|------|-------------|
 | **I4** | Parent existence on creation: all declared parents must exist before a child is created | `writeIntent` — new record path |
 | **I5** | Child absence on deletion: a record with children cannot be deleted | `deleteIntent` — refuses if `len(Children) > 0` |
-| **I2** | Bidirectional consistency: if A lists B as parent, B must list A as child, and vice versa | `ValidateIntentDAG` |
-| **I3** | Referential integrity: all parent/child references point to existing records | `ValidateIntentDAG` |
 
-The remaining four (I1 acyclicity, I6 child-only relationship writes, I7
-parent immutability of children, I8 DAG metadata exclusivity) are structural
-guarantees maintained by `writeIntent`/`deleteIntent` — see the architecture
-doc for their formal definitions.
+The other six (I1 acyclicity, I2 bidirectional consistency, I3 referential
+integrity, I6 child-only relationship writes, I7 parent immutability of
+children, I8 DAG metadata exclusivity) are structural guarantees maintained
+implicitly by the way `writeIntent`/`deleteIntent` register children on
+both sides and refuse dangling references. See the architecture doc for
+their formal definitions.
 
 **Parents are immutable.** Changing an intent's parents requires delete +
 recreate. `writeIntent` returns an error if the resource exists with different
@@ -161,21 +161,6 @@ by the caller in the correct order (children before parents).
 | `Intents()` | All intents (no filter) | Full DAG traversal |
 | `ServiceIntents()` | Intents where `operation == "apply-service"` and `state == "actuated"` | List active service bindings |
 | `Tree()` | Ordered `[]TopologyStep` via `IntentsToSteps` | Intent export for topology persistence |
-
-### 3.4 ValidateIntentDAG
-
-`ValidateIntentDAG(configDB)` is a standalone validation function (not called
-during normal operations). It checks three classes of violations:
-
-1. **Dangling references (I3):** parent or child resource keys that point
-   to non-existent records.
-2. **Bidirectional inconsistency (I2):** A lists B as parent but B does not
-   list A as child, or vice versa.
-3. **Orphans:** BFS from `"device"` root — any record not reachable is an
-   orphan.
-
-Used by tests and CLI diagnostics, not by runtime operations. I4 and I5 are
-the runtime guards.
 
 ## 4. Intent Persistence
 

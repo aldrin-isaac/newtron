@@ -58,8 +58,8 @@ pkg/newtron/network/node/             # Node internals — all operations live h
     precondition.go                   # PreconditionChecker (fluent builder)
 
     # --- Intent lifecycle ---
-    intent_ops.go                     # writeIntent, deleteIntent, renderIntent, ValidateIntentDAG
-    reconstruct.go                    # IntentsToSteps, ReplayStep, ReconstructExpected
+    intent_ops.go                     # writeIntent, deleteIntent, renderIntent
+    reconstruct.go                    # IntentsToSteps, ReplayStep
 
     # --- Operations (intent-wrapping methods that call config generators) ---
     service_ops.go                    # ApplyService, RemoveService, RefreshService
@@ -1376,15 +1376,15 @@ func createVlanConfig(vlanID int, description string) []sonic.Entry {
 **Layer 2 — `op()` wrapper** (in `changeset.go`): Runs preconditions, calls the generator, builds the ChangeSet, calls `render(cs)` to validate and update the projection.
 
 ```go
-cs, err := n.op("create-vlan", "vlan|100", sonic.ChangeTypeAdd,
-    func() error {
-        return n.precondition("create-vlan", "vlan|100").
-            RequireVLANNotExists(100).
-            Result()
+cs, err := n.op(sonic.OpCreateVLAN, vlanResource(100), ChangeAdd,
+    func(pc *PreconditionChecker) {
+        pc.Check(100 >= 1 && 100 <= 4094, "valid VLAN ID",
+            "must be 1-4094, got 100")
     },
-    func() ([]sonic.Entry, error) {
-        return createVlanConfig(100, "servers"), nil
+    func() []sonic.Entry {
+        return createVlanConfig(100, opts)
     },
+    "device.delete-vlan",
 )
 ```
 
@@ -1428,8 +1428,8 @@ Tracing `POST /newtron/v1/networks/default/node/leaf1/create-vlan` with `{"id": 
    fn(ctx) → CreateVLAN(ctx, 100, opts):
      GetIntent("vlan|100") → nil (not yet created)
 
-     op("create-vlan", "vlan|100", ChangeTypeAdd, ...):
-       precondition: RequireVLANNotExists(100) → GetIntent("vlan|100") → nil ✓
+     op(OpCreateVLAN, "vlan|100", ChangeAdd, ...):
+       precondition: Check(100 in 1..4094, "valid VLAN ID") ✓
        gen: createVlanConfig(100, "servers") → [
          {VLAN, "Vlan100", {vlanid: "100", description: "servers"}}
        ]
@@ -1460,9 +1460,8 @@ Tracing `POST /newtron/v1/networks/default/node/leaf1/create-vlan` with `{"id": 
 Fluent builder that validates operation prerequisites against the intent DB. Created by `precondition(operation, resource)` — in actuated mode, `RequireConnected` and `RequireLocked` are automatically added.
 
 ```go
-n.precondition("create-vlan", "vlan|100").
-    RequireVLANNotExists(100).
-    RequireInterfaceNotPortChannelMember("Ethernet0").
+n.precondition("delete-vlan", "vlan|100").
+    RequireVLANExists(100).
     Result()
 ```
 
@@ -1474,8 +1473,8 @@ n.precondition("create-vlan", "vlan|100").
 | `RequireLocked()` | Device lock held |
 | `RequireInterfaceExists(name)` | Interface registered in node |
 | `RequireInterfaceNotPortChannelMember(name)` | No portchannel intent claims this interface |
-| `RequireVLANExists(id)` / `RequireVLANNotExists(id)` | Intent `vlan\|{id}` exists/absent |
-| `RequireVRFExists(name)` / `RequireVRFNotExists(name)` | Intent `vrf\|{name}` exists/absent |
+| `RequireVLANExists(id)` | Intent `vlan\|{id}` exists (for delete/modify) |
+| `RequireVRFExists(name)` | Intent `vrf\|{name}` exists (for delete/modify) |
 | `RequirePortChannelExists(name)` / `RequirePortChannelNotExists(name)` | Intent for portchannel exists/absent |
 | `RequireVTEPConfigured()` | Intent `vtep` exists (VXLAN tunnel set up) |
 | `RequireACLTableExists(name)` / `RequireACLTableNotExists(name)` | Intent for ACL table exists/absent |
@@ -1499,15 +1498,10 @@ Intent records form a directed acyclic graph via `_parents` and `_children` fiel
 |------|------------|
 | I4: Parent must exist before child creation | `writeIntent` checks each parent via `GetIntent` |
 | I5: Children must be deleted before parent | `deleteIntent` checks `_children` field |
-| Bidirectional consistency | `ValidateIntentDAG` checks `_parents` ↔ `_children` bidirectional links |
 
-**Validation** (exported):
-
-```go
-func ValidateIntentDAG(configDB *sonic.ConfigDB) []DAGViolation
-```
-
-Checks bidirectional consistency, referential integrity, and orphan detection (BFS from `"device"` root).
+Bidirectional consistency, referential integrity, and orphan absence are
+all implicit consequences of `writeIntent`/`deleteIntent`'s discipline
+about registering children on both sides and refusing dangling references.
 
 ### 6.6 Reconstruct: IntentsToSteps and ReplayStep
 
@@ -1538,7 +1532,9 @@ These two functions are the bridge between intent records and config methods. Th
 | `/interfaces/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
 | `/interfaces/{name}/apply-qos` | `iface.ApplyQoS(ctx, policy, spec)` |
 
-**`ReconstructExpected(ctx, sp, name, profile, resolved, intents, ports) (*Node, error)`** — Creates an abstract Node, registers ports, calls `IntentsToSteps` + `ReplayStep` in order. Returns the node whose projection IS the expected device state. Used by `Drift` and `RebuildProjection`.
+`RebuildProjection` (in `node.go`) and `InitFromDeviceIntent` (in
+`node_actuated.go`) call `IntentsToSteps + ReplayStep` directly against
+the Node's own configDB — that is the live "intent → projection" path.
 
 **`IntentToStep(resource, fields) TopologyStep`** — Converts a single intent record back to a step. Uses `intentParamsToStepParams` to map flat intent field names back to structured step params (handles special cases: `setup-device` RR params, `apply-service` field renames, `create-portchannel` member list serialization).
 

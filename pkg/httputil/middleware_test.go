@@ -9,10 +9,8 @@ import (
 	"testing"
 )
 
-func TestRequestIDSetsHeaderAndContext(t *testing.T) {
-	var gotID uint64
+func TestRequestIDSetsHeader(t *testing.T) {
 	h := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotID = RequestIDFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -20,11 +18,7 @@ func TestRequestIDSetsHeaderAndContext(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
 	h.ServeHTTP(rec, req)
 
-	if gotID == 0 {
-		t.Error("RequestIDFromContext = 0, want non-zero")
-	}
-	header := rec.Header().Get("X-Request-ID")
-	if header == "" {
+	if rec.Header().Get("X-Request-ID") == "" {
 		t.Error("X-Request-ID header not set")
 	}
 }

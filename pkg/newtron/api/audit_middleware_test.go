@@ -41,13 +41,6 @@ func (c *captureLogger) Close() error { return nil }
 func withCaptureLogger(t *testing.T) *captureLogger {
 	t.Helper()
 	cap := &captureLogger{}
-	// Save the existing default logger (whatever it is — almost
-	// certainly nil) and restore on cleanup so test order doesn't
-	// affect other audit-dependent tests.
-	prev := audit.Query
-	_ = prev // not strictly needed; SetDefaultLogger is what we
-	// must reset. There's no GetDefaultLogger — restore to nil,
-	// which is the default test state.
 	audit.SetDefaultLogger(cap)
 	t.Cleanup(func() { audit.SetDefaultLogger(nil) })
 	return cap

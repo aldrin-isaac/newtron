@@ -211,29 +211,6 @@ func TestIsValidIPv4CIDR(t *testing.T) {
 	}
 }
 
-func TestValidateASN(t *testing.T) {
-	tests := []struct {
-		name    string
-		asn     int
-		wantErr bool
-	}{
-		{"valid 2-byte ASN", 65000, false},
-		{"valid 4-byte ASN", 4200000000, false},
-		{"valid min", 1, false},
-		{"invalid zero", 0, true},
-		{"invalid negative", -1, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateASN(tt.asn)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateASN(%d) error = %v, wantErr %v", tt.asn, err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestValidateMTU(t *testing.T) {
 	tests := []struct {
 		name    string

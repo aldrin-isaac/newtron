@@ -72,16 +72,6 @@ func IsValidIPv4CIDR(cidr string) bool {
 	return ip != nil && ip.To4() != nil
 }
 
-const maxASN = 4294967295 // max uint32 — 4-byte ASN range
-
-// ValidateASN checks if an AS number is valid (1 to 4294967295).
-func ValidateASN(asn int) error {
-	if asn < 1 || asn > maxASN {
-		return fmt.Errorf("AS number must be between 1 and %d, got %d", maxASN, asn)
-	}
-	return nil
-}
-
 // ValidateMTU checks if MTU is within valid range
 func ValidateMTU(mtu int) error {
 	if mtu < 68 || mtu > 9216 {

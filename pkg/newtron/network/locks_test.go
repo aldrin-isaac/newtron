@@ -20,7 +20,7 @@ const (
 // two callers asking for the "services" lock would each get a different
 // mutex and serialization would disappear.
 func TestLockManager_SameKeyReturnsSameLock(t *testing.T) {
-	lm := newLockManager()
+	lm := &lockManager{}
 	a1 := lm.lock(keyTestA)
 	a2 := lm.lock(keyTestA)
 	if a1 != a2 {
@@ -33,7 +33,7 @@ func TestLockManager_SameKeyReturnsSameLock(t *testing.T) {
 // per-key parallelism (the whole point of the manager) would collapse —
 // every key would alias to one mutex.
 func TestLockManager_DistinctKeysGetDistinctLocks(t *testing.T) {
-	lm := newLockManager()
+	lm := &lockManager{}
 	a := lm.lock(keyTestA)
 	b := lm.lock(keyTestB)
 	if a == b {
@@ -47,7 +47,7 @@ func TestLockManager_DistinctKeysGetDistinctLocks(t *testing.T) {
 // catches the corruption case; the equality assertion catches the case
 // where lookups serialize correctly but emit different locks.
 func TestLockManager_ConcurrentLookupsAreSafe(t *testing.T) {
-	lm := newLockManager()
+	lm := &lockManager{}
 	const N = 64
 	var wg sync.WaitGroup
 	wg.Add(N)
@@ -72,7 +72,7 @@ func TestLockManager_ConcurrentLookupsAreSafe(t *testing.T) {
 // that); testing that lockManager.lock returns a usable RWMutex rather
 // than something weird.
 func TestLockManager_KeyedLockIsAUsableRWMutex(t *testing.T) {
-	lm := newLockManager()
+	lm := &lockManager{}
 	l := lm.lock(keyTestA)
 	l.Lock()
 

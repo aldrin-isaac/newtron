@@ -139,12 +139,10 @@ const (
 	FieldRules           = "rules"
 )
 
-// Intent is the internal domain model for a desired-state record bound to
-// a device resource. See DESIGN_PRINCIPLES_NEWTRON §39 for the full model.
-//
-// This is the internal (node-accessible) type. The public API type
-// (pkg/newtron.Intent) mirrors this with domain vocabulary for external
-// consumers. Conversions happen at the API boundary.
+// Intent is the domain model for a desired-state record bound to a
+// device resource. See DESIGN_PRINCIPLES_NEWTRON §39 for the full model.
+// The public-API view of intent state is IntentTreeNode in
+// pkg/newtron/types.go — a flattened DAG-display projection.
 type Intent struct {
 	// Identity
 	Resource  string `json:"resource"`            // binding point: "interface|Ethernet0", "vlan|100", "device"
@@ -304,32 +302,6 @@ func parseCSV(s string) []string {
 		return nil
 	}
 	return result
-}
-
-// AddToCSV appends an item to a CSV string if not already present.
-func AddToCSV(csv, item string) string {
-	items := parseCSV(csv)
-	for _, existing := range items {
-		if existing == item {
-			return csv // already present
-		}
-	}
-	if csv == "" {
-		return item
-	}
-	return csv + "," + item
-}
-
-// RemoveFromCSV removes an item from a CSV string.
-func RemoveFromCSV(csv, item string) string {
-	items := parseCSV(csv)
-	result := make([]string, 0, len(items))
-	for _, existing := range items {
-		if existing != item {
-			result = append(result, existing)
-		}
-	}
-	return strings.Join(result, ",")
 }
 
 // PortEntry represents a physical port configuration
@@ -895,7 +867,9 @@ func (db *ConfigDB) ExportEntries() []Entry {
 }
 
 // ExportPorts returns the PORT table as raw map[string]map[string]string.
-// Used by drift detection to seed ReconstructExpected with port metadata.
+// Used by projection-rebuild paths (RebuildProjection,
+// InitFromDeviceIntent) to seed an abstract Node with port metadata
+// before replaying intent records.
 func (db *ConfigDB) ExportPorts() map[string]map[string]string {
 	result := make(map[string]map[string]string, len(db.Port))
 	for name, entry := range db.Port {

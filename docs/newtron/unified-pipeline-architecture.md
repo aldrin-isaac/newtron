@@ -404,7 +404,7 @@ single mechanism that keeps the projection in sync with the intent DB.
 ### `op()` internals
 
 1. **Precondition check** — reads the intent DB to verify assumptions.
-   Domain checks (`RequireVLANExists`, `RequireVRFNotExists`,
+   Domain checks (`RequireVLANExists`, `RequireVRFExists`,
    `RequireVTEPConfigured`) check `n.GetIntent(resource)`, not the
    projection. Shared-resource checks (reference counting, membership)
    also scan intents. All operational decisions read the intent DB

@@ -48,7 +48,7 @@ pkg/newtrun/                  # Engine (HTTP-agnostic orchestration core)
   steps_run_suite.go          # ActionRunSuite: child Runner + depth-counter context
   deploy.go                   # Deploy/Ensure/Destroy via newtlab
   state.go                    # RunState, ScenarioState, StepState; SuiteStatusFromOutcome
-  progress.go                 # ProgressReporter (7 callbacks), consoleProgress, StateReporter
+  progress.go                 # ProgressReporter (7 callbacks), StateReporter
   errors.go                   # InfraError, StepError, PauseError
   report.go                   # ScenarioResult, StepResult, ReportGenerator (markdown + JUnit)
 
@@ -400,15 +400,7 @@ func ParseScenarioBytes(data []byte) (*Scenario, error)
 
 The bytes-in variant. Used by `PUT /newtrun/v1/suites/{suite}/scenarios/{name}` to validate the request body before any disk write — the server is the single point that knows the accept set.
 
-### 4.3 ParseAllScenarios
-
-```go
-func ParseAllScenarios(dir string) ([]*Scenario, error)
-```
-
-Reads every `*.yaml` file in `dir` other than `suite.yaml` (which is the manifest, parsed separately by `LoadSuite`) and returns the list. Suite-level validation does not run here — callers needing that must use `LoadSuite`. Used by tests and by `GET /newtrun/v1/suites/{suite}/scenarios` (via `LoadSuite` for the summary path).
-
-### 4.4 Validation rules
+### 4.3 Validation rules
 
 Per-action requirements enforced by `validateStepFields` (the `stepValidations` table in `parser.go`):
 
@@ -426,7 +418,7 @@ Cross-step rules in `ValidateDependencyGraph`:
 - No cycles.
 - Returns the scenarios in topological order.
 
-### 4.5 HasRequires + ComputeTargetChain
+### 4.4 HasRequires + ComputeTargetChain
 
 ```go
 func HasRequires(scenarios []*Scenario) bool
@@ -693,9 +685,13 @@ Seven callbacks invoked by the Runner. Implementations:
 
 | Implementation | Purpose |
 |----------------|---------|
-| `consoleProgress` | Terminal output for direct `Run()` invocations (no server). |
 | `StateReporter` | Persists `RunState` to disk after every callback; chainable. |
 | `HTTPReporter` ([§8.3](#83-httpreporter)) | Publishes events to the `EventBroker`; chainable. |
+
+Terminal output for `newtrun start` lives client-side in
+`cmd/newtrun/cmd_start.go`'s `renderEvent`, which prints one line per
+SSE event from the server's `HTTPReporter` — there is no in-process
+terminal reporter in the `pkg/newtrun` library.
 
 ### 7.2 StateReporter
 

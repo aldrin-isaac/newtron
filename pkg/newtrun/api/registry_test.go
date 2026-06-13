@@ -47,19 +47,6 @@ func TestRegistrySameKeyRejected(t *testing.T) {
 	}
 }
 
-func TestRegistryDifferentKeysCoexist(t *testing.T) {
-	r := NewRunRegistry()
-	if _, err := r.Acquire("suite-a"); err != nil {
-		t.Fatalf("Acquire(suite-a): %v", err)
-	}
-	if _, err := r.Acquire("suite-b"); err != nil {
-		t.Errorf("Acquire(suite-b) should succeed alongside suite-a; got: %v", err)
-	}
-	if got := len(r.Keys()); got != 2 {
-		t.Errorf("Keys len: got %d, want 2", got)
-	}
-}
-
 func TestRegistryReleaseClosesDone(t *testing.T) {
 	r := NewRunRegistry()
 	entry, _ := r.Acquire("suite-a")

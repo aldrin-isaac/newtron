@@ -72,9 +72,6 @@ func TestValidationBuilder(t *testing.T) {
 		v.Add(true, "this should not appear")
 		v.Add(true, "neither should this")
 
-		if v.HasErrors() {
-			t.Error("Should not have errors when all conditions are true")
-		}
 		if err := v.Build(); err != nil {
 			t.Errorf("Build() should return nil when no errors: %v", err)
 		}
@@ -85,12 +82,7 @@ func TestValidationBuilder(t *testing.T) {
 		v.Add(false, "first error")
 		v.Add(true, "this passes")
 		v.Add(false, "second error")
-		v.AddError("unconditional error")
 		v.AddErrorf("formatted error: %d", 42)
-
-		if !v.HasErrors() {
-			t.Error("Should have errors")
-		}
 
 		err := v.Build()
 		if err == nil {
@@ -101,8 +93,8 @@ func TestValidationBuilder(t *testing.T) {
 		if !ok {
 			t.Fatalf("Expected *ValidationError, got %T", err)
 		}
-		if len(validationErr.Errors) != 4 {
-			t.Errorf("Expected 4 errors, got %d", len(validationErr.Errors))
+		if len(validationErr.Errors) != 3 {
+			t.Errorf("Expected 3 errors, got %d", len(validationErr.Errors))
 		}
 	})
 

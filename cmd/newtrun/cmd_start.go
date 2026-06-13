@@ -350,10 +350,10 @@ func parseDuration(s string) time.Duration {
 	return 0
 }
 
-// renderEvent prints a one-line summary of each event in a form similar
-// to the existing consoleProgress (--verbose) output. Status tracking
-// for the exit code is done via atomic flags so concurrent renders are
-// safe.
+// renderEvent prints a one-line summary of each event in the SSE
+// stream — a per-step, per-scenario terminal view for an operator
+// watching `newtrun start`. Status tracking for the exit code is
+// done via atomic flags so concurrent renders are safe.
 func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
 	// The event payload was decoded as map[string]any by the client.
 	// Re-marshal to inspect typed fields.
