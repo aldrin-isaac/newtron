@@ -90,11 +90,14 @@ type Step struct {
 	Poll   *PollBlock  `yaml:"poll,omitempty"`   // polling configuration
 	Batch  []BatchCall `yaml:"batch,omitempty"`  // sequential batch of calls
 	// Headers attaches per-step HTTP headers to outbound newtron
-	// requests — typically the caller identity for an auth-enforced
-	// newtron-server (X-Newtron-Caller: alice) so a scenario can
-	// verify enforcement under different identities. Headers apply
-	// uniformly across a step including any batched sub-calls — one
-	// step = one identity. Empty/nil preserves pre-Headers behavior.
+	// requests. Under PR D the canonical "different identity" path
+	// is splitting scenarios with `as:`; Headers is reserved for
+	// per-step overrides that don't fit that model — e.g., the
+	// 25-L2c-disabled-routes scenario sends X-Newtron-Caller per
+	// step to exercise the header-mode fallback when the
+	// session-key store is nil. Headers apply uniformly across a
+	// step including any batched sub-calls — one step = one
+	// header set. Empty/nil preserves pre-Headers behavior.
 	Headers map[string]string `yaml:"headers,omitempty"`
 
 	// Capture extracts values from the response body of a successful

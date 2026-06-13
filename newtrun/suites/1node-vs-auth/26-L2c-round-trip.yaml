@@ -32,10 +32,9 @@ requires: [L0-secret-store-resolves]
 # The L2c round-trip needs PAM-verified credentials at runtime; the
 # suite ships no plaintext, so the operator passes alice_basic_auth
 # via --param at start time. Without it the scenario skips quietly
-# instead of failing — operators running the suite in the default
-# header-mode shape (no PAM stack configured) see 10/11 PASS + 1
-# SKIP rather than 10/11 PASS + 1 FAIL, which would otherwise
-# misrepresent suite health.
+# instead of failing — an operator who isn't exercising the
+# round-trip sees this scenario reported as SKIP rather than FAIL,
+# which would otherwise misrepresent suite health.
 requires_params: [alice_basic_auth]
 
 steps:

@@ -54,55 +54,32 @@ In a production deployment with `--enforce-authorization` engaged, fine-grained 
 
 ## Operator setup
 
-### 1. Place the secret store on disk
+The canonical setup runs `newt-server` in PAM mode and pre-caches
+one session per identity the suite's scenarios reference. Every
+L1+ scenario uses `as: <user>` at scenario scope (PR D) — the
+runner attaches that user's cached Bearer on every outbound
+newtron call. PAM is the only way to mint those Bearers, so the
+operator setup walks PAM service-file + OS account provisioning.
 
-```sh
-cp newtrun/topologies/1node-vs-auth/specs/secrets.json /tmp/1node-vs-auth-secrets.json
-chmod 600 /tmp/1node-vs-auth-secrets.json
-```
+Under PR D `--audit-caller-header` is **not** required for the
+main suite — only `25-L2c-disabled-routes` sends X-Newtron-Caller
+explicitly, and that scenario sets the header per-step. Every
+other scenario authenticates via Bearer.
 
-### 2. Start `newt-server` with the full flag set
+Walk the steps in [§"L2c round-trip operator setup"](#l2c-round-trip-operator-setup)
+below to:
 
-The L6-audit-verify scenario invokes `bin/newtron` as a subprocess
-from inside `newt-server`. The subprocess inherits the server's
-`$PATH`, so the operator must put `./bin` on PATH before starting
-the server:
+1. Place the secret store on disk.
+2. Configure the PAM service file at `/etc/pam.d/newtron-test`.
+3. Provision the OS accounts the suite knows.
+4. Start `newt-server` with `--auth-pam-service` set.
+5. Pre-cache one session per identity via `login-all.sh`.
+6. Run the suite with the L2c round-trip parameter.
 
-```sh
-PATH="$(pwd)/bin:$PATH" bin/newt-server \
-    --spec-dir newtrun/topologies/1node-vs-auth/specs \
-    --net-id 1node-vs-auth \
-    --secret-store /tmp/1node-vs-auth-secrets.json \
-    --audit-log /tmp/1node-vs-auth-audit.jsonl \
-    --audit-caller-header X-Newtron-Caller \
-    --enforce-authorization \
-    --audit-log-integrity \
-    --spec-watch &
-```
-
-Flag-by-flag:
-
-- `--secret-store` engages L0 `${secret:KEY}` resolution.
-- `--audit-log` writes audit events to the named file (L1).
-- `--audit-caller-header` accepts the `X-Newtron-Caller` HTTP header as
-  the caller identity (L1 self-attested). Required for the suite —
-  every mutation step sends this header.
-- `--enforce-authorization` engages L3 + L4 gating. Without it, every
-  step would 200 regardless of caller; the `expect_failure: true`
-  assertions would all flip.
-- `--audit-log-integrity` hash-chains every audit event so L6's
-  `audit verify` has something to verify (L6).
-- `--spec-watch` enables file-change-driven reload (L6 revocation half).
-  Not exercised by suite scenarios; required for manual revoke testing.
-
-### 3. Run the suite
-
-```sh
-bin/newtrun start 1node-vs-auth --no-deploy
-```
-
-`--no-deploy` skips the lab deployment — every scenario uses
-`?mode=topology` so no SONiC VM is required.
+Despite the section name, the same setup runs the entire suite,
+not just the L2c round-trip — the param flag is empty by default,
+which skips the round-trip scenario quietly while every other
+scenario authenticates via the cached Bearers.
 
 ## L2c round-trip operator setup
 
