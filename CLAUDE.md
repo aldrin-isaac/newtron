@@ -214,7 +214,8 @@ Key implementation entry points:
 
 A reader should guess where a feature is implemented by looking at file names.
 `topology.go` = orchestration (never inline CONFIG_DB keys). Each `*_ops.go` = sole
-table owner. `service_gen.go` = service-to-entries translation via owning `*_ops.go`.
+table owner. Service application (`ApplyService` in `service_ops.go`) delegates
+to the owning `*_ops.go` files for the per-table entries it needs.
 
 ## Verb-First Naming
 
@@ -462,7 +463,7 @@ compatibility (§41).
 
 **Never break a feature that was previously working.**
 
-Before making any change to `service_gen.go`, `*_ops.go`, or any shared code path:
+Before making any change to `service_ops.go`, `*_ops.go`, or any shared code path:
 1. List which service types and test scenarios exercise that code path
 2. Verify that changes to the broken path do not affect the working paths
 3. Run `go test ./...` after every change and confirm all previously passing tests still pass

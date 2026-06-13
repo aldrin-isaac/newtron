@@ -157,8 +157,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// (not a separate operation) so they appear in dry-run preview and apply
 	// atomically with the service entries.
 	//
-	// For non-default VRFs, generateServiceEntries handles BGP_GLOBALS_AF via
-	// the VRF creation path. This only covers the default VRF case.
+	// For non-default VRFs, BGP_GLOBALS_AF is written by the VRF creation
+	// path (see vrf_config.go). This branch only covers the default VRF.
 	hasBGPRouting := svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP
 	needsBGPEnsure := hasBGPRouting && !isOverlay && !n.BGPConfigured()
 	if needsBGPEnsure {

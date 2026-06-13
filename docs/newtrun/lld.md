@@ -48,7 +48,7 @@ pkg/newtrun/                  # Engine (HTTP-agnostic orchestration core)
   steps_run_suite.go          # ActionRunSuite: child Runner + depth-counter context
   deploy.go                   # Deploy/Ensure/Destroy via newtlab
   state.go                    # RunState, ScenarioState, StepState; SuiteStatusFromOutcome
-  progress.go                 # ProgressReporter (7 callbacks), consoleProgress, StateReporter
+  progress.go                 # ProgressReporter (7 callbacks), StateReporter
   errors.go                   # InfraError, StepError, PauseError
   report.go                   # ScenarioResult, StepResult, ReportGenerator (markdown + JUnit)
 
@@ -693,9 +693,13 @@ Seven callbacks invoked by the Runner. Implementations:
 
 | Implementation | Purpose |
 |----------------|---------|
-| `consoleProgress` | Terminal output for direct `Run()` invocations (no server). |
 | `StateReporter` | Persists `RunState` to disk after every callback; chainable. |
 | `HTTPReporter` ([§8.3](#83-httpreporter)) | Publishes events to the `EventBroker`; chainable. |
+
+Terminal output for `newtrun start` lives client-side in
+`cmd/newtrun/cmd_start.go`'s `renderEvent`, which prints one line per
+SSE event from the server's `HTTPReporter` — there is no in-process
+terminal reporter in the `pkg/newtrun` library.
 
 ### 7.2 StateReporter
 

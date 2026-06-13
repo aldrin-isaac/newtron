@@ -2047,15 +2047,15 @@ the feature surrounding it — reads, helpers, types, existence checks.
 All code for a feature belongs in one file. `GetVLAN` and `VLANInfo`
 belong in `vlan_ops.go` just as much as `CreateVLAN` does.
 
-Four file roles enforce the boundary:
+Three file roles enforce the boundary:
 
 - **`composite.go`** = delivery mechanics only (§10). No CONFIG_DB
   table or key format knowledge.
 - **`topology.go`** = provisioning orchestration (§1). Calls config
   functions but never constructs CONFIG_DB keys inline.
-- **Each `*_ops.go`** = sole owner of its feature.
-- **`service_gen.go`** = service-to-entries translation. Calls config
-  functions from owning `*_ops.go` files and merges their output.
+- **Each `*_ops.go`** = sole owner of its feature. `service_ops.go`
+  in particular hosts `ApplyService`/`RemoveService`, which delegate
+  to each owning `*_ops.go` for the per-table entries they need.
 
 **If you want to understand a feature, read one file. If you want to
 change a table format, change one file.**
@@ -2722,10 +2722,10 @@ investigating daemon logs at 2 AM.
 
 §27 says one file owns each table. But composite operations like
 `ApplyService` touch a dozen tables. Composites don't own tables — they
-*call* the owning functions and merge the results. `service_gen.go`
-calls `createVlanConfig()`, `createVrfConfig()`, `i.bindVrf()`. It
-never constructs a VLAN entry inline. The ownership is preserved through
-composition, not violated by it.
+*call* the owning functions and merge the results. `ApplyService` in
+`service_ops.go` calls `createVlanConfig()`, `createVrfConfig()`,
+`i.bindVrf()`. It never constructs a VLAN entry inline. The ownership
+is preserved through composition, not violated by it.
 
 ### Mechanical reversal vs domain reversal
 

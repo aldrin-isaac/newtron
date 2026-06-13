@@ -3,7 +3,6 @@ package cli
 
 import (
 	"os"
-	"strings"
 )
 
 // colorEnabled is false when NO_COLOR env var is set (per no-color.org).
@@ -49,12 +48,3 @@ func Dim(s string) string {
 	return "\033[2m" + s + "\033[0m"
 }
 
-// DotPad pads name with dots to the given width.
-// Example: DotPad("boot-ssh", 30) → "boot-ssh ......................"
-func DotPad(name string, width int) string {
-	if width <= 0 || len(name) >= width-1 {
-		return name
-	}
-	dots := width - len(name) - 1
-	return name + " " + strings.Repeat(".", dots)
-}

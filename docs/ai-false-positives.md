@@ -183,8 +183,8 @@ using 3 targeted agents (one per dimension) found all 7 violations.
 | `TeardownVTEP` | evpn_ops.go | Missing `render(cs)` |
 | `RemoveBGPGlobals` | bgp_ops.go | Missing `render(cs)` |
 | `RemoveIP` | interface_ops.go | Missing `render(cs)` |
-| `generateServiceEntries` (ingress ACL) | service_ops.go | Intent stored `{rules}` only; reconstruction needs `name`, `type`, `stage`, `ports`, `description` |
-| `generateServiceEntries` (egress ACL) | service_ops.go | Same as above |
+| `generateServiceEntries` (ingress ACL) — since removed | service_ops.go | Intent stored `{rules}` only; reconstruction needs `name`, `type`, `stage`, `ports`, `description` |
+| `generateServiceEntries` (egress ACL) — since removed | service_ops.go | Same as above |
 
 **Assumption**: If a function reads intents instead of the projection, it
 conforms to the architecture. This is one of three requirements. The

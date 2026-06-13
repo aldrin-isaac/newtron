@@ -17,9 +17,9 @@ import (
 // name (matches the GET /api/runs/{suite}/events path parameter). For inline
 // runs introduced in PR 3, the RunKey is the run's UUID.
 //
-// The decorator pattern from StateReporter applies here too: HTTPReporter is
-// typically wrapped around the existing StateReporter + consoleProgress chain
-// so events flow to all three sinks (state file, terminal, HTTP).
+// The decorator pattern from StateReporter applies here too: HTTPReporter
+// is typically the outer wrap around a StateReporter (state-file sink) so
+// events flow to both the state file and the SSE broker.
 type HTTPReporter struct {
 	Broker *httputil.Broker[Event]
 	RunKey string

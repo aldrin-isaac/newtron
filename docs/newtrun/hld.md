@@ -133,7 +133,7 @@ newtron/
 │   ├── deploy.go                 # Deploy/Ensure/Destroy via newtlab
 │   ├── state.go                  # RunState, ScenarioState, StepState (with DeviceOps)
 │   │                             #   suite + _inline namespaces; LoadAnyRunState
-│   ├── progress.go               # ProgressReporter (7 callbacks), consoleProgress, StateReporter
+│   ├── progress.go               # ProgressReporter (7 callbacks), StateReporter
 │   ├── errors.go                 # InfraError, StepError, PauseError
 │   └── report.go                 # ScenarioResult, StepResult, ReportGenerator
 │

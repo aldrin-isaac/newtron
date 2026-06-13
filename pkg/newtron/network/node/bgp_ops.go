@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -421,4 +422,65 @@ func (n *Node) ConfigureRouteReflector(ctx context.Context, opts RouteReflectorO
 	util.WithDevice(n.name).Infof("Configured route reflector (cluster=%s, %d clients, %d peers)",
 		opts.ClusterID, len(opts.Clients), len(opts.Peers))
 	return cs, nil
+}
+
+// generateBGPPeeringConfig resolves BGP peer parameters from a service spec
+// and caller-provided values, then delegates to CreateBGPNeighborConfig for
+// entry construction. Used by ApplyService when the service has BGP routing
+// configured (see service_ops.go).
+func generateBGPPeeringConfig(svc *spec.ServiceSpec, ipAddress string,
+	optsPeerAS int, params map[string]string, underlayASN int,
+	peerGroup string, vrfName string) ([]sonic.Entry, error) {
+	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
+		return nil, nil
+	}
+
+	routing := svc.Routing
+
+	// Derive peer IP from interface IP
+	var peerIP string
+	if ipAddress != "" {
+		var err error
+		peerIP, err = util.DeriveNeighborIP(ipAddress)
+		if err != nil {
+			return nil, fmt.Errorf("could not derive BGP peer IP: %w", err)
+		}
+	}
+	if peerIP == "" {
+		return nil, fmt.Errorf("BGP routing requires an IP address")
+	}
+
+	// Determine peer AS — from service spec, topology params, or CLI opts
+	var peerAS int
+	if routing.PeerAS == spec.PeerASRequest {
+		if peerASStr, ok := params["peer_as"]; ok {
+			fmt.Sscanf(peerASStr, "%d", &peerAS)
+		}
+		if peerAS == 0 {
+			peerAS = optsPeerAS
+		}
+		if peerAS == 0 {
+			return nil, fmt.Errorf("service requires peer_as parameter")
+		}
+	} else if routing.PeerAS != "" {
+		fmt.Sscanf(routing.PeerAS, "%d", &peerAS)
+	}
+	if peerAS == 0 {
+		return nil, fmt.Errorf("could not determine BGP peer AS for service routing")
+	}
+
+	// All-eBGP design: UnderlayASN is required
+	if underlayASN == 0 {
+		return nil, fmt.Errorf("device has no AS number configured (underlay_asn required)")
+	}
+
+	localIP, _ := util.SplitIPMask(ipAddress)
+
+	return CreateBGPNeighborConfig(peerIP, peerAS, localIP, BGPNeighborOpts{
+		VRF:          vrfName,
+		ActivateIPv4: true,
+		RRClient:     params["route_reflector_client"] == "true",
+		NextHopSelf:  params["next_hop_self"] == "true",
+		PeerGroup:    peerGroup,
+	}), nil
 }
