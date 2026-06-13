@@ -29,13 +29,12 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("POST /newtlab/v1/labs/{lab}/bridges/{host}/stats", s.handlePushBridgeStats)
 	mux.HandleFunc("GET /newtlab/v1/labs/{lab}/bridges/stats", s.handleGetBridgeStats)
 
-	// auth-design.md L2b: PAMMiddleware enforces TCP user
-	// authentication when an Authenticator is configured. When
-	// cfg.Authenticator is nil (default), the middleware is a
-	// passthrough — pre-L2b behavior preserved.
+	// Identity middleware (L2b PAM, L2c session-key Bearer) lives at
+	// the server boundary in cmd/newt-server, not in the standalone
+	// newtlab-server. Standalone is HTTP-only on loopback for dev
+	// iteration.
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)
-	handler = httputil.PAMMiddleware(s.cfg.Authenticator)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Recovery(s.logger)(handler)
 	return handler

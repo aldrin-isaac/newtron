@@ -102,7 +102,7 @@ func (a *sessionAuth) refresh(ctx context.Context) (string, error) {
 // a.mu held in write mode. Returns the new key (and stores it in
 // a.key on success) or an error.
 func (a *sessionAuth) loginLocked(ctx context.Context) (string, error) {
-	loginURL := strings.TrimRight(a.baseURL, "/") + "/newtron/v1/auth/login"
+	loginURL := strings.TrimRight(a.baseURL, "/") + "/newt-server/v1/auth/login"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("build login request: %w", err)

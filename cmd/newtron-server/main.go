@@ -18,9 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aldrin-isaac/newtron/pkg/httputil"
-	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
-	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
@@ -41,11 +38,6 @@ func main() {
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution — plaintext spec values keep working; references in spec become hard errors. (auth-design.md L0)")
-	tlsCert := flag.String("tls-cert", "", "PEM-encoded TLS certificate for the TCP listener (both this server's identity to peers AND its client cert when calling newtlab-server). Empty disables TLS — plain HTTP. (auth-design.md L2a)")
-	tlsKey := flag.String("tls-key", "", "PEM-encoded private key for --tls-cert. (auth-design.md L2a)")
-	tlsCA := flag.String("tls-ca", "", "PEM-encoded CA bundle used both to verify incoming peer client certs (mTLS on the listener) AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS); inter-service trust is undefined. (auth-design.md L2a)")
-	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds and mTLS cert CN still work where configured. (auth-design.md L2b)")
-	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime: every spec/profile mutation checks the verified caller against the spec's grant table; denials return HTTP 403 with a typed AuthorizationError payload. Off (default) preserves pre-enforcement behavior — checks are no-ops; verified identity is still recorded in the audit log when configured. (auth-design.md L3)")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior — operators POST /networks/<id>/reload to make changes observable. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain (Event.ID = SHA256(prev_hash || canonical_json), Event.PrevHash = previous entry's ID) so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty — pre-integrity behavior. Requires --audit-log to be set. (auth-design.md L6)")
@@ -57,19 +49,10 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
-	// auth-design.md L2a: load TLS config once; reuse for both
-	// directions. The same cert/key acts as this server's identity
-	// to incoming peers AND as its client cert when dialing
-	// newtlab-server. nil from either Load means the corresponding
-	// path is empty — the L2a disabled state on that direction.
-	serverTLS, err := httputil.LoadServerTLSConfig(*tlsCert, *tlsKey, *tlsCA)
-	if err != nil {
-		logger.Fatalf("server TLS: %v", err)
-	}
-	clientTLS, err := httputil.LoadClientTLSConfig(*tlsCert, *tlsKey, *tlsCA)
-	if err != nil {
-		logger.Fatalf("client TLS: %v", err)
-	}
+	// Standalone newtron-server is a loopback dev tool with no
+	// encryption or authentication: TLS, PAM, and session-key
+	// handling live at cmd/newt-server's outer boundary. Use
+	// newt-server for production / aggregated deployments.
 
 	// cmd is the composition layer: it knows which engine provides
 	// the port-resolver implementation. newtron's api package sees
@@ -78,7 +61,7 @@ func main() {
 	var portResolver api.PortResolver
 	if *newtlabServer != "" {
 		portResolver = newtlabclient.NewPortResolver(
-			newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS)),
+			newtlabclient.New(*newtlabServer),
 		)
 	}
 
@@ -116,14 +99,6 @@ func main() {
 		store = fs
 	}
 
-	// auth-design.md L2b: install the PAM authenticator when a
-	// service name is configured. Empty disables — TCP requests
-	// pass through PAMMiddleware unchanged.
-	var pamAuth httputil.Authenticator
-	if *authPAMService != "" {
-		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
-	}
-
 	srv := api.NewServer(api.Config{
 		Logger:               logger,
 		IdleTimeout:          *idleTimeout,
@@ -132,9 +107,6 @@ func main() {
 		AuditCallerHeader:    *auditCallerHeader,
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
-		TLSConfig:            serverTLS,
-		Authenticator:        pamAuth,
-		SessionKeyTTL:        *sessionKeyTTL,
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,
 	})

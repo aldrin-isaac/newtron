@@ -213,13 +213,20 @@ can always tell which path provided the identity by the
 
 ## 7. Session keys (L2c)
 
-When `--auth-pam-service` is set, two routes auto-mount alongside
-the per-request PAM flow:
+When `--auth-pam-service` is set on `cmd/newt-server`, two routes
+live at the server boundary alongside the per-request PAM flow:
 
 ```
-POST /newtron/v1/auth/login         (Authorization: Basic …)
-POST /newtron/v1/auth/logout        (Authorization: Bearer …)
+POST /newt-server/v1/auth/login         (Authorization: Basic …)
+POST /newt-server/v1/auth/logout        (Authorization: Bearer …)
 ```
+
+These are server-wide, not engine-scoped — one key works against
+every engine mounted on this newt-server (`/newtron/v1/*`,
+`/newtrun/v1/*`, `/newtlab/v1/*`). The standalone server binaries
+(`newtron-server`, `newtrun-server`, `newtlab-server`) do not mount
+these routes; they are loopback dev tools with no encryption or
+authentication.
 
 `/auth/login` runs PAM exactly as L2b would for any other endpoint;
 on success it returns a JSON body with a random 256-bit opaque key,
@@ -227,7 +234,7 @@ the absolute expiry timestamp, and the verified username:
 
 ```sh
 curl -X POST -u alice:correct-password \
-    http://localhost:18080/newtron/v1/auth/login
+    http://localhost:18080/newt-server/v1/auth/login
 # {"key":"…43 chars…","expires_at":"2026-06-11T08:00:00Z","user":"alice"}
 ```
 
@@ -244,7 +251,7 @@ revoke immediately, call `/auth/logout`:
 
 ```sh
 curl -X POST -H "Authorization: Bearer …" \
-    http://localhost:18080/newtron/v1/auth/logout
+    http://localhost:18080/newt-server/v1/auth/logout
 # 204 No Content
 ```
 
@@ -333,7 +340,7 @@ land on the same `/auth/login` endpoint server-side.
   (`store.go`), Bearer middleware + identity context-key
   (`middleware.go`), and the `/auth/login` + `/auth/logout`
   HTTP handlers (`handlers.go`). The package is engine-neutral;
-  a binding `cmd/` mounts it at the outer chain.
+  `cmd/newt-server` mounts it at the outer chain.
 - `pkg/newtron/api/caller_middleware.go` — caller-identity
   priority chain that reads PAM (L2b) and session-key (L2c)
   usernames off the request context and tags the audit caller

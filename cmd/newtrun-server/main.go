@@ -20,8 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aldrin-isaac/newtron/pkg/httputil"
-	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
@@ -33,11 +31,6 @@ func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories")
 	newtlabServer := flag.String("newtlab-server", "http://127.0.0.1:18080", "newtlab-server base URL; deploy/destroy/status route through this HTTP surface (§27 — newtlab owns LabState). Empty disables newtlab calls (CLI-only / real-hardware deployments).")
-	tlsCert := flag.String("tls-cert", "", "PEM-encoded TLS certificate for the TCP listener (also used as client cert when calling newtlab-server). Empty disables TLS — plain HTTP. (auth-design.md L2a)")
-	tlsKey := flag.String("tls-key", "", "PEM-encoded private key for --tls-cert. (auth-design.md L2a)")
-	tlsCA := flag.String("tls-ca", "", "PEM-encoded CA bundle used both to verify incoming peer client certs AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS). (auth-design.md L2a)")
-	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM authentication. (auth-design.md L2b)")
-	newtronBasicAuth := flag.String("newtron-basic-auth", "", "user:password the runner uses to mint and refresh an L2c session key against newtron-server (auth-design.md L2c). Required when newtron-server is started with --auth-pam-service — every runner-originated newtron call carries Authorization: Bearer <key> after first login. Empty leaves the runner's newtron client on no-auth, which works only against a newtron-server that does not enforce PAM.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtrun-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -46,24 +39,10 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
-	// auth-design.md L2a: server cert + identical client cert
-	// (typical service-mesh pattern). nil from either Load means the
-	// corresponding flag set was empty — L2a disabled on that
-	// direction.
-	serverTLS, err := httputil.LoadServerTLSConfig(*tlsCert, *tlsKey, *tlsCA)
-	if err != nil {
-		logger.Fatalf("server TLS: %v", err)
-	}
-	clientTLS, err := httputil.LoadClientTLSConfig(*tlsCert, *tlsKey, *tlsCA)
-	if err != nil {
-		logger.Fatalf("client TLS: %v", err)
-	}
-
-	// auth-design.md L2b: install PAM authenticator when configured.
-	var pamAuth httputil.Authenticator
-	if *authPAMService != "" {
-		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
-	}
+	// Standalone newtrun-server is a loopback dev tool with no
+	// encryption or authentication: TLS, PAM, and session-key
+	// handling live at cmd/newt-server's outer boundary. Use
+	// newt-server for production / aggregated deployments.
 
 	// Compose the newtlab HTTP client at the entry point — newtrun's
 	// api package sees only the LabClient contract (pkg/newtrun.
@@ -71,15 +50,11 @@ func main() {
 	// Empty --newtlab-server leaves the client nil; Runner.Run rejects
 	// deploy in that case with a clear error.
 	cfg := api.Config{
-		SuitesBase:       *suitesBase,
-		Logger:           logger,
-		TLSConfig:        serverTLS,
-		Authenticator:    pamAuth,
-		NewtronClientTLS: clientTLS,
-		NewtronBasicAuth: *newtronBasicAuth,
+		SuitesBase: *suitesBase,
+		Logger:     logger,
 	}
 	if *newtlabServer != "" {
-		cfg.NewtlabClient = newtlabclient.New(*newtlabServer, newtlabclient.WithTLS(clientTLS))
+		cfg.NewtlabClient = newtlabclient.New(*newtlabServer)
 	}
 	srv := api.NewServer(cfg)
 

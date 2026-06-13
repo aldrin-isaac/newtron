@@ -64,7 +64,7 @@ func main() {
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
-	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
+	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newt-server/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
 	newtrunNewtronBasicAuth := flag.String("newtrun-newtron-basic-auth", "", "user:password the newtrun engine uses to mint and refresh an L2c session key against the in-process newtron engine (auth-design.md L2c). Required when --auth-pam-service is also set — every newtrun-originated newtron call carries Authorization: Bearer <key> after first login. Empty leaves the newtrun engine's newtron client on no-auth, which works only when the newtron engine does not enforce PAM.")
 	flag.Parse()
 
@@ -136,8 +136,6 @@ func main() {
 		AuditCallerHeader:    *auditCallerHeader,
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
-		Authenticator:        pamAuth,
-		SessionKeyTTL:        *sessionKeyTTL,
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,
 	})
@@ -176,9 +174,25 @@ func main() {
 		OrchestratorURL: newtronURL,
 	})
 
+	// auth-design.md L2c: build the server-wide session-key store
+	// when L2b (PAM) is also configured. Without an authenticator
+	// there is no credential to derive a session key from, and
+	// /auth/login refuses to mount. SessionKeyTTL < 0 lets an
+	// operator suppress L2c even when PAM is on.
+	var sessionKeys *sessionkey.Store
+	if pamAuth != nil && *sessionKeyTTL >= 0 {
+		ttl := *sessionKeyTTL
+		if ttl == 0 {
+			ttl = sessionkey.DefaultTTL
+		}
+		sessionKeys = sessionkey.NewStore(ttl)
+	}
+
 	// Compose the route tree. Each engine's Handler() already returns
 	// a fully-wired mux + middleware chain serving its own /<name>/v1/
 	// routes, so we mount on the bare prefix without path rewriting.
+	// /newt-server/v1/auth/{login,logout} live at the server boundary
+	// (auth-design.md L2c) — they are not engine concerns.
 	mux := http.NewServeMux()
 	mux.Handle("/newtron/v1/", newtronSrv.Handler())
 	mux.Handle("/newtrun/v1/", newtrunSrv.Handler())
@@ -189,8 +203,21 @@ func main() {
 			"version": version.Version,
 		})
 	})
+	mux.HandleFunc("POST /newt-server/v1/auth/login", sessionkey.LoginHandler(sessionKeys))
+	mux.HandleFunc("POST /newt-server/v1/auth/logout", sessionkey.LogoutHandler(sessionKeys))
 
-	srv := httputil.NewServer(mux, logger,
+	// auth-design.md L2b + L2c: outer identity middleware sits
+	// between requestID and the engine muxes. sessionkey.Middleware
+	// recognizes Authorization: Bearer first; on success it skips
+	// the PAM Basic challenge for the same request. PAMMiddleware
+	// then verifies any Basic credentials. Both layers attach the
+	// verified username to the request context; the engines'
+	// callerMiddleware reads it without caring which layer set it.
+	var handler http.Handler = mux
+	handler = httputil.PAMMiddleware(pamAuth)(handler)
+	handler = sessionkey.Middleware(sessionKeys)(handler)
+
+	srv := httputil.NewServer(handler, logger,
 		httputil.ServerLabel("newt-server"),
 		// SSE-friendly: no per-request write deadline — long-lived
 		// SSE streams from newtrun (run events) and newtlab (deploy
@@ -202,6 +229,11 @@ func main() {
 		httputil.OnShutdown(func() { _ = newtlabSrv.Stop(context.Background()) }),
 		httputil.OnShutdown(func() { _ = newtrunSrv.Stop(context.Background()) }),
 		httputil.OnShutdown(func() { _ = newtronSrv.Stop(context.Background()) }),
+		httputil.OnShutdown(func() {
+			if sessionKeys != nil {
+				sessionKeys.Stop()
+			}
+		}),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

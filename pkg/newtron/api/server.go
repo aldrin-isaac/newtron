@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
-	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
@@ -71,11 +70,6 @@ type Server struct {
 	// spec behavior.
 	secretStore secret.Store
 
-	// authenticator is the user-to-service Authenticator for TCP
-	// requests (auth-design.md L2b). Installed in the handler chain
-	// via PAMMiddleware. nil → L2b disabled.
-	authenticator httputil.Authenticator
-
 	// enforceAuthorization (auth-design.md L3) drives
 	// EnableAuthorization on every RegisterNetwork / ReloadNetwork
 	// path. false → checkPermission stays inert; pre-L3 behavior.
@@ -86,13 +80,6 @@ type Server struct {
 	// spec dir; UnregisterNetwork removes it; on settled spec-file
 	// changes the watcher calls back into ReloadNetwork.
 	watcher *netpkg.SpecWatcher
-
-	// sessionKeys is the L2c in-memory session-key store
-	// (auth-design.md §L2c). nil when L2c is disabled — either L2b
-	// (PAM) is off, or the operator explicitly suppressed session
-	// keys via --session-key-ttl=0. /auth/login mints into it;
-	// sessionkey.Middleware resolves Bearer tokens through it.
-	sessionKeys *sessionkey.Store
 }
 
 
@@ -160,16 +147,6 @@ type Config struct {
 	// nil keeps the default plain-HTTP listener — the disabled state.
 	TLSConfig *tls.Config
 
-	// Authenticator enables user-to-service authentication on the
-	// TCP listener via HTTP Basic + PAM (auth-design.md L2b). When
-	// non-nil, TCP requests without verified Unix peer creds or
-	// mTLS peer cert must present credentials the Authenticator
-	// accepts; otherwise → 401. Composed in by cmd/newtron-server
-	// from a --auth-pam-service=NAME flag wrapping a
-	// pamauth.PAMAuthenticator. nil disables — the L2b disabled
-	// state; pre-L2b behavior preserved.
-	Authenticator httputil.Authenticator
-
 	// EnforceAuthorization turns the 26 inert checkPermission calls
 	// into live gates (auth-design.md L3). When true, every
 	// registered network has EnableAuthorization called after
@@ -179,15 +156,6 @@ type Config struct {
 	// contract. Composed in from --enforce-authorization on
 	// cmd/newtron-server.
 	EnforceAuthorization bool
-
-	// SessionKeyTTL sets the absolute lifetime of every server-issued
-	// session key (auth-design.md L2c). Default sessionkey.DefaultTTL
-	// (8h) when zero. Negative or explicit zero (via a sentinel)
-	// disables L2c entirely — /auth/login and /auth/logout return
-	// 404 and Bearer tokens are not recognized. L2c only engages when
-	// L2b (Authenticator) is also configured; there is no credential
-	// to derive the key from without PAM.
-	SessionKeyTTL time.Duration
 
 	// SpecWatch enables the auth-design.md L6 revocation watcher.
 	// When true, the server installs an fsnotify-backed watcher
@@ -220,21 +188,7 @@ func NewServer(cfg Config) *Server {
 		scaffoldRoot:         cfg.ScaffoldRoot,
 		auditCallerHeader:    cfg.AuditCallerHeader,
 		secretStore:          cfg.SecretStore,
-		authenticator:        cfg.Authenticator,
 		enforceAuthorization: cfg.EnforceAuthorization,
-	}
-	// L2c engages only when L2b is configured: without a PAM
-	// authenticator there is no credential to derive a session key
-	// from. SessionKeyTTL < 0 lets an operator explicitly suppress
-	// session keys even when PAM is on (e.g., a deployment that
-	// wants every request to hit PAM directly for audit-shape
-	// reasons).
-	if cfg.Authenticator != nil && cfg.SessionKeyTTL >= 0 {
-		ttl := cfg.SessionKeyTTL
-		if ttl == 0 {
-			ttl = sessionkey.DefaultTTL
-		}
-		s.sessionKeys = sessionkey.NewStore(ttl)
 	}
 	if cfg.SpecWatch {
 		w, err := netpkg.NewSpecWatcher(logger, 0, func(id string) error {
@@ -257,9 +211,6 @@ func NewServer(cfg Config) *Server {
 		httputil.OnShutdown(func() {
 			if s.watcher != nil {
 				s.watcher.Stop()
-			}
-			if s.sessionKeys != nil {
-				s.sessionKeys.Stop()
 			}
 			s.mu.Lock()
 			defer s.mu.Unlock()

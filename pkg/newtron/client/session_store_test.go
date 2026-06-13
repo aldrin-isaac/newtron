@@ -262,7 +262,7 @@ func TestWithBearer_RespectsCallerAuthorization(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "net-1", WithBearer("cached-key"))
-	if _, err := c.RawRequest("POST", "/newtron/v1/auth/login", nil,
+	if _, err := c.RawRequest("POST", "/newt-server/v1/auth/login", nil,
 		WithHeader("Authorization", "Basic YWxpY2U6cHc=")); err != nil {
 		t.Fatalf("RawRequest: %v", err)
 	}

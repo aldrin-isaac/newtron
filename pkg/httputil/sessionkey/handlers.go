@@ -29,9 +29,15 @@ type LoginResponse struct {
 //
 // Middleware runs upstream of PAMMiddleware in the chain (it has
 // to — successful Bearer lookups must short-circuit PAM's Basic
-// challenge). A /auth/login request has no Bearer header by
-// definition, so Middleware passes through and PAM authenticates.
-// LoginHandler then reads the PAM-verified username.
+// challenge). A well-formed /auth/login request carries Basic
+// credentials, not a Bearer; Middleware then passes through and
+// PAM authenticates. A client that mistakenly sends a stale Bearer
+// to /auth/login takes one of two paths: a valid Bearer
+// short-circuits PAM (no PAM username on context → this handler
+// returns 500 because the chain didn't run the layer that would
+// have populated it), an invalid Bearer is rejected by Middleware
+// with 401 before reaching this handler. Both fail loudly rather
+// than silently re-minting under an unintended identity.
 //
 // Flow:
 //
