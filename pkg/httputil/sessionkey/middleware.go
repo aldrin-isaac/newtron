@@ -37,7 +37,7 @@ func Middleware(store *Store) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key, ok := bearerToken(r)
+			key, ok := BearerToken(r.Header.Get("Authorization"))
 			if !ok {
 				next.ServeHTTP(w, r)
 				return
@@ -58,27 +58,28 @@ func Middleware(store *Store) func(http.Handler) http.Handler {
 	}
 }
 
-// bearerToken extracts the token from `Authorization: Bearer <key>`.
-// Returns (token, true) when the scheme is exactly "Bearer"
-// case-insensitively, (empty, false) otherwise. Whitespace around
-// the token is trimmed so a request with a trailing space doesn't
-// 401.
+// BearerToken extracts the token from an `Authorization: Bearer
+// <key>` header value. Returns (token, true) when the scheme is
+// exactly "Bearer" case-insensitively, (empty, false) otherwise.
+// Whitespace around the token is trimmed so a header with a
+// trailing space doesn't 401.
 //
-// Package-private. Reused by handlers.go's LogoutHandler for the
-// same Bearer-header parse. Not promoted to httputil because every
-// consumer of the session-key Bearer is inside this package — a
-// cmd/ that mounts only Middleware uses bearerToken transitively
-// through Middleware's own call.
-func bearerToken(r *http.Request) (string, bool) {
-	h := r.Header.Get("Authorization")
-	if h == "" {
+// Exported so consumers outside this package (notably the newtrun
+// runner, which forwards the operator's Bearer on every outbound
+// newtron call per auth-design.md §L2c) parse the same wire shape
+// the Middleware here parses — DPN §27 (single owner) and §13
+// (same concept = same name). The function takes a header value
+// rather than an *http.Request so it stays usable from places
+// where the request isn't in scope.
+func BearerToken(authHeader string) (string, bool) {
+	if authHeader == "" {
 		return "", false
 	}
 	const prefix = "Bearer "
-	if len(h) < len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+	if len(authHeader) < len(prefix) || !strings.EqualFold(authHeader[:len(prefix)], prefix) {
 		return "", false
 	}
-	return strings.TrimSpace(h[len(prefix):]), true
+	return strings.TrimSpace(authHeader[len(prefix):]), true
 }
 
 // sessionUsernameKey is the request-context key under which a
