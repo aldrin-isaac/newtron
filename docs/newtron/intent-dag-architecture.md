@@ -1037,9 +1037,13 @@ be deleted, or the parent may need to be recreated.
 
 ### 11.4 Health Check Implementation
 
-A `ValidateIntentDAG(configDB)` function iterates all NEWTRON_INTENT records,
-checks all three conditions above, and returns a list of violations. This
-runs as part of device health checks and can be invoked manually.
+There is no standalone `ValidateIntentDAG` health check in the current
+implementation — the runtime guards I4 (parent existence on write) and
+I5 (no delete with children) ensure operations cannot create the
+violations described above in the first place. A diagnostic command
+that scans for retroactive violations is reserved for future operator
+tooling; the same DAG-walk logic is straightforward to re-derive when
+that need arises.
 
 ## 12. CLI: `newtron intent tree`
 

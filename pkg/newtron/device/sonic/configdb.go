@@ -867,7 +867,9 @@ func (db *ConfigDB) ExportEntries() []Entry {
 }
 
 // ExportPorts returns the PORT table as raw map[string]map[string]string.
-// Used by drift detection to seed ReconstructExpected with port metadata.
+// Used by projection-rebuild paths (RebuildProjection,
+// InitFromDeviceIntent) to seed an abstract Node with port metadata
+// before replaying intent records.
 func (db *ConfigDB) ExportPorts() map[string]map[string]string {
 	result := make(map[string]map[string]string, len(db.Port))
 	for name, entry := range db.Port {

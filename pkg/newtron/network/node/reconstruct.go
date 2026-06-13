@@ -522,35 +522,6 @@ func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
 }
 
 // ============================================================================
-// Reconstruction
-// ============================================================================
-
-// ReconstructExpected creates an abstract Node from NEWTRON_INTENT records,
-// replaying them as topology steps. The resulting Node has the expected
-// CONFIG_DB state that should match the actual device if no drift occurred.
-func ReconstructExpected(ctx context.Context, sp SpecProvider,
-	name string, profile *spec.DeviceProfile,
-	resolved *spec.ResolvedProfile,
-	intents map[string]map[string]string,
-	ports map[string]map[string]string) (*Node, error) {
-
-	// Reconstruction never connects to a device — pass empty topology and
-	// nil newtlab. The resulting Node is used for drift comparison only.
-	n := NewAbstract(sp, name, profile, resolved, "", nil)
-	for portName, fields := range ports {
-		n.RegisterPort(portName, fields)
-	}
-
-	steps := IntentsToSteps(intents)
-	for _, step := range steps {
-		if err := ReplayStep(ctx, n, step); err != nil {
-			return nil, fmt.Errorf("reconstruct %s: %w", step.URL, err)
-		}
-	}
-	return n, nil
-}
-
-// ============================================================================
 // Parameter extraction helpers for map[string]any
 // ============================================================================
 

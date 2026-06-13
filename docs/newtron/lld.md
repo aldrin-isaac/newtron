@@ -58,8 +58,8 @@ pkg/newtron/network/node/             # Node internals — all operations live h
     precondition.go                   # PreconditionChecker (fluent builder)
 
     # --- Intent lifecycle ---
-    intent_ops.go                     # writeIntent, deleteIntent, renderIntent, ValidateIntentDAG
-    reconstruct.go                    # IntentsToSteps, ReplayStep, ReconstructExpected
+    intent_ops.go                     # writeIntent, deleteIntent, renderIntent
+    reconstruct.go                    # IntentsToSteps, ReplayStep
 
     # --- Operations (intent-wrapping methods that call config generators) ---
     service_ops.go                    # ApplyService, RemoveService, RefreshService
@@ -1498,15 +1498,10 @@ Intent records form a directed acyclic graph via `_parents` and `_children` fiel
 |------|------------|
 | I4: Parent must exist before child creation | `writeIntent` checks each parent via `GetIntent` |
 | I5: Children must be deleted before parent | `deleteIntent` checks `_children` field |
-| Bidirectional consistency | `ValidateIntentDAG` checks `_parents` ↔ `_children` bidirectional links |
 
-**Validation** (exported):
-
-```go
-func ValidateIntentDAG(configDB *sonic.ConfigDB) []DAGViolation
-```
-
-Checks bidirectional consistency, referential integrity, and orphan detection (BFS from `"device"` root).
+Bidirectional consistency, referential integrity, and orphan absence are
+all implicit consequences of `writeIntent`/`deleteIntent`'s discipline
+about registering children on both sides and refusing dangling references.
 
 ### 6.6 Reconstruct: IntentsToSteps and ReplayStep
 
@@ -1537,7 +1532,9 @@ These two functions are the bridge between intent records and config methods. Th
 | `/interfaces/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
 | `/interfaces/{name}/apply-qos` | `iface.ApplyQoS(ctx, policy, spec)` |
 
-**`ReconstructExpected(ctx, sp, name, profile, resolved, intents, ports) (*Node, error)`** — Creates an abstract Node, registers ports, calls `IntentsToSteps` + `ReplayStep` in order. Returns the node whose projection IS the expected device state. Used by `Drift` and `RebuildProjection`.
+`RebuildProjection` (in `node.go`) and `InitFromDeviceIntent` (in
+`node_actuated.go`) call `IntentsToSteps + ReplayStep` directly against
+the Node's own configDB — that is the live "intent → projection" path.
 
 **`IntentToStep(resource, fields) TopologyStep`** — Converts a single intent record back to a step. Uses `intentParamsToStepParams` to map flat intent field names back to structured step params (handles special cases: `setup-device` RR params, `apply-service` field renames, `create-portchannel` member list serialization).
 
