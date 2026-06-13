@@ -147,11 +147,13 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 		effectiveNetID = name
 	}
 	// Honor the per-user session cache so a single `newtron auth
-	// login` carries through every CLI invocation. LoadSession
-	// returns nil for missing / expired caches; WithBearer("") is
-	// a no-op so the existing no-auth path is preserved.
+	// login` carries through every CLI invocation. LoadCLISession
+	// resolves --user / NEWTRON_USER against the multi-user cache
+	// and returns nil for missing / expired / ambiguous caches;
+	// WithBearer("") is a no-op so the existing no-auth path is
+	// preserved.
 	var bearerKey string
-	if rec, err := newtronclient.LoadSession(newtronclient.DefaultSessionPath()); err == nil && rec != nil {
+	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), newtronServer); err == nil && rec != nil {
 		bearerKey = rec.Key
 	}
 	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey))

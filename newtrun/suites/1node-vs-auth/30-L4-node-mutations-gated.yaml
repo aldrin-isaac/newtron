@@ -15,8 +15,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-vlan?mode=topology
     params: {id: 100}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   # vlan.create — allowed caller (bob: ops, has vlan.create)
@@ -25,8 +24,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-vlan?mode=topology
     params: {id: 200}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # vrf.create — denied caller
   - name: mallory-create-vrf-denied
@@ -34,8 +32,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
     params: {name: vrf-mallory}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   # vrf.create — allowed caller (bob: ops, has vrf.create)
@@ -44,8 +41,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
     params: {name: vrf-bob}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # acl.create — denied caller
   - name: mallory-create-acl-denied
@@ -53,8 +49,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-mallory, type: L3, stage: ingress}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   # acl.create — allowed caller
@@ -63,8 +58,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-bob, type: L3, stage: ingress}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # Read endpoint — no caller required (reads stay ungated per §3
   # criterion 2). The same path without auth header succeeds.

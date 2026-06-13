@@ -20,8 +20,7 @@ steps:
     method: POST
     url: /create-qos-policy
     params: {name: qos-test-l1-alice}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # As bob — ops group has qos.create grant; same shape, different
   # user field in the audit log.
@@ -30,8 +29,7 @@ steps:
     method: POST
     url: /create-qos-policy
     params: {name: qos-test-l1-bob}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # Cleanup. spec-team has qos.delete; bob's policy created above
   # gets deleted by alice (spec-team is broader than ops here).
@@ -40,13 +38,11 @@ steps:
     method: POST
     url: /delete-qos-policy
     params: {name: qos-test-l1-alice}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   - name: alice-deletes-qos-policy-b
     action: newtron
     method: POST
     url: /delete-qos-policy
     params: {name: qos-test-l1-bob}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice

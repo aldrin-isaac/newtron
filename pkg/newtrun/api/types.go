@@ -354,6 +354,17 @@ type StartRunRequest struct {
 	// rejected with 400 on mismatch. Omit a key to inherit the
 	// default. Used by parameterized scenarios.
 	Parameters map[string]any `json:"parameters,omitempty"`
+
+	// UserSessions maps a username to the operator-supplied Bearer
+	// session key the runner should attach when a step's `as: <user>`
+	// field names that user. Populated by the CLI from the operator's
+	// per-user session cache (~/.newtron/sessions/) at run-submit
+	// time — the runner doesn't have access to the operator's
+	// filesystem and cannot mint sessions on its own. A scenario
+	// step that names a user absent from this map fails at execution
+	// with "no session for user X — run `newtron auth login --user X`
+	// first". Empty when no scenario uses `as:`.
+	UserSessions map[string]string `json:"user_sessions,omitempty"`
 }
 
 // StartRunResponse is the body returned by POST /api/runs.

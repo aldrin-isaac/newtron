@@ -39,13 +39,13 @@ func (e *newtronExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 	// One-shot mode: per-device parallel execution.
 	if hasDeviceTemplate(step.URL) {
 		return r.executeForDevices(step, func(name string) (string, error) {
-			msg, _, err := e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
+			msg, _, err := e.doCall(r, step, method, step.URL, step.Params, name, step.Headers, step.Expect)
 			return msg, err
 		})
 	}
 
 	// No {{device}} template — network-scoped call (no device parallelism).
-	msg, raw, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
+	msg, raw, err := e.doCall(r, step, method, step.URL, step.Params, "", step.Headers, step.Expect)
 	if err != nil {
 		return &StepOutput{Result: &StepResult{
 			Status:  StepStatusFailed,
@@ -92,7 +92,7 @@ func (e *newtronExecutor) executeBatch(ctx context.Context, r *Runner, step *Ste
 				if method == "" {
 					method = "GET"
 				}
-				_, _, err := e.doCall(r, method, call.URL, call.Params, name, step.Headers, nil)
+				_, _, err := e.doCall(r, step, method, call.URL, call.Params, name, step.Headers, nil)
 				if err != nil {
 					return "", fmt.Errorf("batch[%d] %s %s: %s", i, method, call.URL, err)
 				}
@@ -107,7 +107,7 @@ func (e *newtronExecutor) executeBatch(ctx context.Context, r *Runner, step *Ste
 		if method == "" {
 			method = "GET"
 		}
-		_, _, err := e.doCall(r, method, call.URL, call.Params, "", step.Headers, nil)
+		_, _, err := e.doCall(r, step, method, call.URL, call.Params, "", step.Headers, nil)
 		if err != nil {
 			return &StepOutput{Result: &StepResult{
 				Status:  StepStatusFailed,
@@ -138,7 +138,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 		pollStep.Expect = &pollExpect
 
 		return r.pollForDevices(ctx, &pollStep, func(name string) (bool, string, error) {
-			msg, _, err := e.doCall(r, method, step.URL, step.Params, name, step.Headers, step.Expect)
+			msg, _, err := e.doCall(r, step, method, step.URL, step.Params, name, step.Headers, step.Expect)
 			if err != nil {
 				// For polling, errors mean "not ready yet" — keep polling.
 				return false, err.Error(), nil
@@ -150,7 +150,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 	// No device template — poll a network-scoped endpoint.
 	var lastMsg string
 	err := pollUntil(ctx, step.Poll.Timeout, step.Poll.Interval, func() (bool, error) {
-		msg, _, err := e.doCall(r, method, step.URL, step.Params, "", step.Headers, step.Expect)
+		msg, _, err := e.doCall(r, step, method, step.URL, step.Params, "", step.Headers, step.Expect)
 		if err != nil {
 			lastMsg = err.Error()
 			return false, nil
@@ -176,7 +176,7 @@ func (e *newtronExecutor) executePoll(ctx context.Context, r *Runner, step *Step
 // Execute can run response-capture against it. Step-level headers
 // are applied uniformly across every call from a step (including
 // each call in a batch) so one step = one caller identity.
-func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, headers map[string]string, expect *ExpectBlock) (string, json.RawMessage, error) {
+func (e *newtronExecutor) doCall(r *Runner, step *Step, method, urlTemplate string, params map[string]any, device string, headers map[string]string, expect *ExpectBlock) (string, json.RawMessage, error) {
 	path := expandURL(urlTemplate, r.Client.NetworkID(), device)
 
 	// Build body for POST/PUT/DELETE — only if params are provided.
@@ -185,9 +185,22 @@ func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params m
 		body = params
 	}
 
-	opts := make([]client.RequestOption, 0, len(headers))
+	opts := make([]client.RequestOption, 0, len(headers)+1)
 	for k, v := range headers {
 		opts = append(opts, client.WithHeader(k, v))
+	}
+	// Step.As selects the cached-session user whose Bearer the
+	// runner attaches to this request. Only set when the step
+	// explicitly opted into per-step impersonation; absent
+	// step.As leaves whatever credential r.Client was built with
+	// (daemon-side --newtron-basic-auth, mTLS cert CN, or none)
+	// in charge.
+	if step != nil && step.As != "" {
+		key, ok := r.UserSessions[step.As]
+		if !ok || key == "" {
+			return "", nil, fmt.Errorf("step requires identity %q but no session was supplied — run `newtron auth login --user %s` before starting the suite", step.As, step.As)
+		}
+		opts = append(opts, client.WithHeader("Authorization", "Bearer "+key))
 	}
 
 	data, err := r.Client.RawRequest(method, path, body, opts...)

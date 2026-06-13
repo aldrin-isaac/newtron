@@ -164,6 +164,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	runner.NetworkID = networkID
 	runner.NewtronClientTLS = s.cfg.NewtronClientTLS
 	runner.NewtronBasicAuth = s.cfg.NewtronBasicAuth
+	runner.UserSessions = req.UserSessions
 	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 

@@ -18,8 +18,7 @@ steps:
     method: POST
     url: /create-service
     params: {name: svc-mallory, type: routed}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   # spec.author family — allowed caller (alice: spec-team)
@@ -28,16 +27,14 @@ steps:
     method: POST
     url: /create-service
     params: {name: svc-alice-l3, type: routed}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   - name: alice-cleans-up-svc
     action: newtron
     method: POST
     url: /delete-service
     params: {name: svc-alice-l3}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # qos.create family — denied caller
   - name: mallory-create-qos-denied
@@ -45,8 +42,7 @@ steps:
     method: POST
     url: /create-qos-policy
     params: {name: qos-mallory}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   # qos.create family — allowed caller (bob: ops, which has qos.create)
@@ -55,16 +51,14 @@ steps:
     method: POST
     url: /create-qos-policy
     params: {name: qos-bob-l3}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   - name: alice-cleans-up-qos
     action: newtron
     method: POST
     url: /delete-qos-policy
     params: {name: qos-bob-l3}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # filter.create family — denied caller
   - name: mallory-create-filter-denied
@@ -72,8 +66,7 @@ steps:
     method: POST
     url: /create-filter
     params: {name: filter-mallory, type: ip}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   # filter.create family — allowed caller
@@ -82,16 +75,14 @@ steps:
     method: POST
     url: /create-filter
     params: {name: filter-alice-l3, type: ip}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   - name: alice-cleans-up-filter
     action: newtron
     method: POST
     url: /delete-filter
     params: {name: filter-alice-l3}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # No-identity request — fails closed even on an allowed permission.
   # Verifies the fail-closed contract from TestAuthorization_EmptyCallerDenied.

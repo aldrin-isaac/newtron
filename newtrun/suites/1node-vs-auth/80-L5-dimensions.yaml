@@ -27,16 +27,14 @@ steps:
     method: POST
     url: /create-service
     params: {name: svc-architect, type: routed}
-    headers:
-      X-Newtron-Caller: arch-anna
+    as: arch-anna
 
   - name: architect-cleans-up-service
     action: newtron
     method: POST
     url: /delete-service
     params: {name: svc-architect}
-    headers:
-      X-Newtron-Caller: arch-anna
+    as: arch-anna
 
   # iam-ian in iam-team: scoped to permissions,user_groups,super_users
   # (exact OR list). Creating a service (field=services) → NOT in the
@@ -46,8 +44,7 @@ steps:
     method: POST
     url: /create-service
     params: {name: svc-iam, type: routed}
-    headers:
-      X-Newtron-Caller: iam-ian
+    as: iam-ian
     expect_failure: true
 
   # INTERFACE dimension — intf-ops grant on acl.modify scoped to
@@ -57,8 +54,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-l5, type: L3, stage: ingress}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # intf-isaac scoped to Ethernet0 — bind on Ethernet0 allowed.
   - name: intf-isaac-binds-on-eth0-allowed
@@ -66,16 +62,14 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/bind-acl?mode=topology&no_save=true
     params: {acl: acl-l5, direction: ingress}
-    headers:
-      X-Newtron-Caller: intf-isaac
+    as: intf-isaac
 
   - name: intf-isaac-unbinds-on-eth0
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/unbind-acl?mode=topology&no_save=true
     params: {acl: acl-l5}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # intf-isaac trying Ethernet4 → his grant's interface=Ethernet0 doesn't
   # match. Denied.
@@ -84,8 +78,7 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet4/bind-acl?mode=topology&no_save=true
     params: {acl: acl-l5, direction: ingress}
-    headers:
-      X-Newtron-Caller: intf-isaac
+    as: intf-isaac
     expect_failure: true
 
   - name: bob-cleans-up-acl
@@ -93,8 +86,7 @@ steps:
     method: POST
     url: /nodes/switch1/delete-acl?mode=topology
     params: {name: acl-l5}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # DEVICE dimension — dev-dora in device-team scoped to device=switch1
   # can hit switch1 endpoints; the scope-clause matches. setup-device
@@ -104,8 +96,7 @@ steps:
     method: POST
     url: /nodes/switch1/setup-device?mode=topology
     params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    headers:
-      X-Newtron-Caller: dev-dora
+    as: dev-dora
 
   # mallory still denied regardless of device dimension (she's not in
   # any group at all, so no grant entry matches).
@@ -114,6 +105,5 @@ steps:
     method: POST
     url: /nodes/switch1/setup-device?mode=topology
     params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true

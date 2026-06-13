@@ -97,24 +97,26 @@ bin/newtrun start 1node-vs-auth --no-deploy
 The `26-L2c-round-trip` scenario exercises a real PAM-authenticated
 `/auth/login`, so it needs three things the rest of the suite does not:
 
-**Two-mode workflow.** PAM coexists badly with the header-mode
-identity-spoofing the other scenarios use — `--auth-pam-service`
-demands Basic/Bearer on every request, but `L3-spec-mutations-gated`
-and friends rely on `X-Newtron-Caller: mallory` to test denial paths,
-and a Bearer-authenticated runner identity replaces the spoofed
-header at the server's caller-middleware. Operators run the suite in
-two passes:
+**Single-mode workflow.** Per-step identity uses the runner's
+multi-user session cache (`as: <user>` on each step picks up the
+Bearer the operator pre-cached via `newtron auth login --user <user>`).
+The full suite runs cleanly in PAM-only mode in one server
+invocation; no header-mode/PAM-mode split is needed.
 
-1. **Header-mode pass (no PAM)** — verifies the L1/L3/L4/L5/L6
-   surfaces. The L2c-round-trip scenario skips automatically because
-   its `requires_params: [alice_basic_auth]` guard is not satisfied.
-2. **PAM-mode pass** — verifies the L2c round-trip. Run with
-   `--auth-pam-service` set on the server and
-   `--newtrun-newtron-basic-auth user:pw` so the runner authenticates
-   itself; pass `--param alice_basic_auth=<base64>` to the CLI.
-   Other scenarios fail under this mode because their spoofed
-   identities are overridden by the runner's session identity — this
-   is expected; operators ignore those results in PAM-mode runs.
+Three pieces wire this together:
+
+1. `--auth-pam-service` on the server enables PAM verification at
+   `/auth/login`.
+2. `--newtrun-newtron-basic-auth <user>:<pw>` gives the runner its
+   own identity for its startup probes (`GET /networks` etc.) before
+   any scenario starts.
+3. `login-all.sh` (in this suite directory) is a small helper that
+   logs in as every identity any scenario references via `as:`,
+   pre-caching one Bearer per user in `~/.newtron/sessions/`.
+
+Re-run `login-all.sh` after every newt-server restart — the
+server-side session-key store is in-memory by design, so cached
+Bearers go stale across restarts.
 
 ### 1. PAM service file
 
@@ -128,21 +130,33 @@ account required pam_unix.so
 (`pam_unix` authenticates against `/etc/passwd` / `/etc/shadow`; for
 LDAP / SSSD / Kerberos see `docs/newtron/pam-howto.md` §2.)
 
-### 2. An OS account the suite knows
+### 2. OS accounts the suite knows
 
-The scenario hardcodes the caller name `alice` because the suite's
-`network.json` already grants `alice` membership in `spec-team`.
-Create the account:
+Every identity any scenario references via `as:` needs a real OS /
+directory account the PAM stack can authenticate. The suite's
+`network.json` grants are keyed by these names:
+
+- `alice`, `dave` (spec-team)
+- `bob`, `charlie` (ops)
+- `arch-anna` (architects)
+- `iam-ian` (iam-team)
+- `intf-isaac` (intf-ops)
+- `dev-dora` (device-team)
+- `mallory` (no group — used for denial-path tests)
+- `root` (super_user — bypasses every check)
+
+Create them:
 
 ```sh
-sudo useradd -m alice
-sudo passwd alice   # set a password you'll pass to the suite
+for u in alice dave bob charlie arch-anna iam-ian intf-isaac dev-dora mallory; do
+    sudo useradd -m -s /usr/sbin/nologin "$u"
+done
+# pam_permit ignores passwords, so any string works
 ```
 
-If your environment already has `alice` (or you want a different
-test name), either rename in `26-L2c-round-trip.yaml` consistently
-or add your account name to `user_groups.spec-team` in the suite's
-`network.json`.
+If using `pam_unix` instead of `pam_permit`, set a known password on
+each account and pass it to `login-all.sh` via
+`NEWTRON_TEST_PASSWORD=mypassword sh login-all.sh`.
 
 ### 3. Start `newt-server` in PAM-only mode
 
@@ -162,16 +176,42 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
 - `--auth-pam-service` engages L2b PAM + auto-engages L2c session
   keys at `/auth/login` and `/auth/logout`.
 - `--newtrun-newtron-basic-auth` gives the in-process newtrun engine
-  its own credentials to authenticate against the newtron engine —
-  without it, the runner's internal `GET /networks` probe 401s
-  before any scenario starts.
-- `--audit-caller-header` is **deliberately omitted** — header-mode
-  spoofing fights PAM at the caller-middleware. See the two-mode
-  note at the top of this section.
+  its own credentials for its startup probes — without it, the
+  runner's `GET /networks` 401s before any scenario starts. The
+  per-step `as: <user>` impersonation that the L1/L3/L4/L5 scenarios
+  use is independent of this flag.
+- `--audit-caller-header` is **deliberately omitted** — every
+  identity is now a real PAM-verified session, no self-attested
+  header path needed.
 - Adjust `--session-key-ttl` if you want a TTL other than the
   default 8h.
 
-### 4. Run the round-trip with `alice_basic_auth` set
+### 4. Pre-cache a session for every test identity
+
+```sh
+sh newtrun/suites/1node-vs-auth/login-all.sh
+```
+
+The helper logs in as alice, bob, mallory, and the rest of the cast,
+producing one cache file per identity in `~/.newtron/sessions/`.
+Override the password via `NEWTRON_TEST_PASSWORD=… sh login-all.sh`
+if your PAM stack expects something other than the script's default.
+
+**Re-run after every newt-server restart.** The server-side
+session-key store is in-memory by design — restarts wipe it, and
+cached Bearers go stale immediately. The next run will fail with
+401s until the cache is refreshed.
+
+### 5. Run the suite
+
+```sh
+bin/newtrun start 1node-vs-auth --no-deploy \
+    --network-id 1node-vs-auth \
+    --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
+```
+
+All 11 scenarios pass in one server invocation. The `--target` form
+still works to run a dependency chain:
 
 ```sh
 bin/newtrun start 1node-vs-auth --no-deploy \
@@ -179,16 +219,14 @@ bin/newtrun start 1node-vs-auth --no-deploy \
     --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
 ```
 
-`--target` runs the dependency chain leading to the named scenario
-(`L0-secret-store-resolves` → `L2c-round-trip`), so the suite reports
-a clean 2/2 PASS instead of pulling in other scenarios that the
-PAM-mode server can't run cleanly. Running the full `1node-vs-auth`
-suite in this mode reports FAIL on the header-mode-spoofing
-scenarios — expected; ignore those results in PAM-mode runs.
+`--target` runs the dependency chain leading to the named scenario.
+The full suite now passes 11/11 in PAM mode (per-step `as: <user>`
+impersonation replaced the header-mode spoofing the scenarios used
+before).
 
 ## Expected outcome
 
-All 6 scenarios pass on first run. If any fail:
+All 11 scenarios pass on first run. If any fail:
 
 - L3/L4 scenarios failing for an *allowed* caller → check
   `network.json` grants and operator's `--enforce-authorization` flag.

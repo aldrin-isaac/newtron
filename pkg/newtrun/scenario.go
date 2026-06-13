@@ -71,6 +71,29 @@ type Step struct {
 	// step = one identity. Empty/nil preserves pre-Headers behavior.
 	Headers map[string]string `yaml:"headers,omitempty"`
 
+	// As names the cached-session user whose Bearer the runner
+	// attaches to this step's outbound newtron call. Used by
+	// authorization-testing scenarios that need verified per-step
+	// identity (mallory denied; alice allowed) — the alternative
+	// to spoofing via X-Newtron-Caller, which only works under
+	// header-mode and breaks under PAM/Bearer where session_key
+	// auth beats self-attested header in the caller-middleware
+	// priority chain.
+	//
+	// The named user must have a cached session at the time the
+	// suite was started — the CLI scans every step's `as:` field,
+	// loads each user's session from ~/.newtron/sessions/, and
+	// submits the resulting map in StartRunRequest.UserSessions.
+	// A step that names a user the operator never logged in as
+	// fails fast at run start with "no session cached for user X;
+	// run `newtron auth login --user X` first".
+	//
+	// Empty (the common case) lets the runner use whatever
+	// credential its outbound-newtron-client is already
+	// configured with — daemon-side --newtron-basic-auth, the
+	// operator's NEWTRON_USER, or no credential at all.
+	As string `yaml:"as,omitempty"`
+
 	// Capture extracts values from the response body of a successful
 	// newtron HTTP call and binds them to scenario-scoped variable
 	// names. Each map value is a JQ expression run against the

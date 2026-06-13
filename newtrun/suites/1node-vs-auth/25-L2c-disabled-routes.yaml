@@ -54,8 +54,8 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-bearer-ignored}
+    as: alice
     headers:
-      X-Newtron-Caller: alice
       Authorization: Bearer this-key-was-never-issued-and-thats-ok
 
   - name: cleanup-zone-bearer-ignored
@@ -63,5 +63,4 @@ steps:
     method: POST
     url: /delete-zone
     params: {name: zone-bearer-ignored}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
