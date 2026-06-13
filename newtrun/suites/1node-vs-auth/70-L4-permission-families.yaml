@@ -20,8 +20,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-portchannel?mode=topology
     params: {name: PortChannel10}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   - name: bob-create-portchannel-allowed
@@ -29,8 +28,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-portchannel?mode=topology
     params: {name: PortChannel20}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # evpn.modify — add a loopback BGP EVPN peer. The grant on evpn.modify
   # is held by ops; mallory denied.
@@ -41,16 +39,14 @@ steps:
     method: POST
     url: /nodes/switch1/setup-device?mode=topology
     params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   - name: mallory-add-bgp-evpn-peer-denied
     action: newtron
     method: POST
     url: /nodes/switch1/add-bgp-evpn-peer?mode=topology
     params: {neighbor_ip: "10.0.0.2", remote_as: 65002, description: peer-mallory}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   - name: bob-add-bgp-evpn-peer-allowed
@@ -58,8 +54,7 @@ steps:
     method: POST
     url: /nodes/switch1/add-bgp-evpn-peer?mode=topology
     params: {neighbor_ip: "10.0.0.3", remote_as: 65003, description: peer-bob}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
 
   # interface.modify — Interface.gate populates Context.Interface; the
   # gate then checks against interface.modify (both spec-team and ops
@@ -69,8 +64,7 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/set-property?mode=topology
     params: {property: mtu, value: "9100"}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   - name: alice-set-property-allowed
@@ -78,8 +72,7 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/set-property?mode=topology
     params: {property: mtu, value: "9100"}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # device.write — operational verbs gate on the catch-all. Both
   # spec-team and ops have it. setup-device is the device.write
@@ -93,6 +86,5 @@ steps:
     method: POST
     url: /nodes/switch1/setup-device?mode=topology
     params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true

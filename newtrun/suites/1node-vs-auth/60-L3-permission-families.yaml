@@ -24,16 +24,14 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-root-bypass}
-    headers:
-      X-Newtron-Caller: root
+    as: root
 
   - name: root-deletes-zone-bypass
     action: newtron
     method: POST
     url: /delete-zone
     params: {name: zone-root-bypass}
-    headers:
-      X-Newtron-Caller: root
+    as: root
 
   # Profile mutations — mallory denied, alice (spec-team has spec.author)
   # succeeds. Verifies the spec.author gate reaches handlers beyond
@@ -43,8 +41,7 @@ steps:
     method: POST
     url: /create-profile
     params: {name: profile-mallory, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.99", zone: amer, platform: sonic-vs}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   - name: alice-create-profile-allowed
@@ -52,16 +49,14 @@ steps:
     method: POST
     url: /create-profile
     params: {name: profile-alice, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.98", zone: amer, platform: sonic-vs}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   - name: alice-cleanup-profile
     action: newtron
     method: POST
     url: /delete-profile
     params: {name: profile-alice}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # Zone mutations
   - name: mallory-create-zone-denied
@@ -69,8 +64,7 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-mallory}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true
 
   - name: alice-create-zone-allowed
@@ -78,16 +72,14 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-alice}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   - name: alice-cleanup-zone
     action: newtron
     method: POST
     url: /delete-zone
     params: {name: zone-alice}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # Topology mutations — exercises the network.go gates (separate from
   # spec_ops.go gates the original suite hits). Note the device-name
@@ -100,6 +92,5 @@ steps:
       name: mallory-switch
       device:
         ports: {Ethernet0: {admin_status: "up"}}
-    headers:
-      X-Newtron-Caller: mallory
+    as: mallory
     expect_failure: true

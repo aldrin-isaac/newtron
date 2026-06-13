@@ -53,7 +53,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 // TestSaveSession_FileMode pins that the written file has mode
 // 0600 — a credential file readable by anyone on the host would
 // violate the auth-design.md §L2c protection guarantee that the
-// cache is "as carefully protected as the secret store."
+// cache is "protected as carefully as the secret store."
 func TestSaveSession_FileMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	if err := SaveSession(path, freshRecord(t)); err != nil {
@@ -298,18 +298,166 @@ func TestLoadSession_FollowsSymlinks(t *testing.T) {
 	}
 }
 
-// TestDefaultSessionPath_UsesNewtronRoot pins the convention
-// that the session file lives in ~/.newtron/ alongside the
-// existing settings.json. One root for all newtron client-side
-// state; file modes (0600 vs 0644) distinguish secret from non-
-// secret.
-func TestDefaultSessionPath_UsesNewtronRoot(t *testing.T) {
-	got := DefaultSessionPath()
+// TestSessionsDir_UsesNewtronRoot pins the convention that
+// cached session files live under ~/.newtron/sessions/ alongside
+// the existing settings.json — one root for all newtron client-
+// side state per user account.
+func TestSessionsDir_UsesNewtronRoot(t *testing.T) {
+	got := SessionsDir()
 	if !strings.Contains(got, ".newtron") {
-		t.Errorf("DefaultSessionPath() = %q, want one containing .newtron", got)
+		t.Errorf("SessionsDir() = %q, want one containing .newtron", got)
 	}
-	if !strings.HasSuffix(got, "session.json") {
-		t.Errorf("DefaultSessionPath() = %q, want one ending in session.json", got)
+	if !strings.HasSuffix(got, "sessions") {
+		t.Errorf("SessionsDir() = %q, want one ending in sessions", got)
+	}
+}
+
+// TestSessionPath_EncodesUserAndServer pins the filename
+// encoding: <user>@<host>.json with scheme/colon/slash normalized
+// so concurrent multi-user multi-server caches don't collide.
+func TestSessionPath_EncodesUserAndServer(t *testing.T) {
+	cases := []struct {
+		user, server, wantFile string
+	}{
+		{"alice", "http://127.0.0.1:18080", "alice@127.0.0.1_18080.json"},
+		{"bob", "https://newtron.example:443", "bob@newtron.example_443.json"},
+		{"mallory", "127.0.0.1:18080", "mallory@127.0.0.1_18080.json"},
+		{"intf-isaac", "http://h:p/prefix", "intf-isaac@h_p_prefix.json"},
+	}
+	for _, c := range cases {
+		got := SessionPath(c.user, c.server)
+		if filepath.Base(got) != c.wantFile {
+			t.Errorf("SessionPath(%q, %q) basename = %q, want %q",
+				c.user, c.server, filepath.Base(got), c.wantFile)
+		}
+	}
+}
+
+// TestLoadSessionFor_RoundTrip pins the user-keyed convenience
+// wrappers: SaveSessionFor + LoadSessionFor produce the same
+// record without the caller managing paths.
+func TestLoadSessionFor_RoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	want := freshRecord(t)
+	if err := SaveSessionFor(want); err != nil {
+		t.Fatalf("SaveSessionFor: %v", err)
+	}
+	got, err := LoadSessionFor(want.User, want.Server)
+	if err != nil {
+		t.Fatalf("LoadSessionFor: %v", err)
+	}
+	if got == nil || got.Key != want.Key {
+		t.Errorf("got %+v, want a record with key %s", got, want.Key)
+	}
+}
+
+// TestSaveSessionFor_RejectsMissingUser pins the contract that
+// the (user, server) pair are required — these are what derive
+// the cache file path; saving without them would dump the record
+// at sessions/@.json which is meaningless and noisy.
+func TestSaveSessionFor_RejectsMissingUser(t *testing.T) {
+	rec := &SessionRecord{Server: "x", Key: "k", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := SaveSessionFor(rec); err == nil {
+		t.Error("expected error on empty User; got nil")
+	}
+	rec2 := &SessionRecord{User: "alice", Key: "k", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := SaveSessionFor(rec2); err == nil {
+		t.Error("expected error on empty Server; got nil")
+	}
+}
+
+// TestListSessions_EnumeratesValidOnly pins the contract that
+// ListSessions returns only well-formed, unexpired, properly-
+// permitted records. Garbage files (other JSONs, expired records,
+// chmod-644 records) are skipped silently.
+func TestListSessions_EnumeratesValidOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Two valid sessions:
+	alice := &SessionRecord{User: "alice", Server: "http://h:1", Key: "ka", ExpiresAt: time.Now().Add(time.Hour)}
+	bob := &SessionRecord{User: "bob", Server: "http://h:1", Key: "kb", ExpiresAt: time.Now().Add(time.Hour)}
+	for _, r := range []*SessionRecord{alice, bob} {
+		if err := SaveSessionFor(r); err != nil {
+			t.Fatalf("SaveSessionFor: %v", err)
+		}
+	}
+	// One expired:
+	expired := &SessionRecord{User: "old", Server: "http://h:1", Key: "kx", ExpiresAt: time.Now().Add(-time.Hour)}
+	if err := SaveSessionFor(expired); err != nil {
+		t.Fatalf("SaveSessionFor expired: %v", err)
+	}
+	// One stray non-session JSON file:
+	stray := filepath.Join(SessionsDir(), "stray.json")
+	if err := os.WriteFile(stray, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("WriteFile stray: %v", err)
+	}
+
+	got, _, err := ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	users := map[string]bool{}
+	for _, r := range got {
+		users[r.User] = true
+	}
+	if !users["alice"] || !users["bob"] {
+		t.Errorf("missing valid sessions; got users %v", users)
+	}
+	if users["old"] {
+		t.Error("ListSessions included an expired session")
+	}
+}
+
+// TestListSessions_SurfacesInsecurePermissions pins the §L2c
+// protection-guarantee path: a tampered (chmod-644) cache file
+// must NOT be silently dropped from `auth status` output —
+// silently hiding it would also hide the very signal the mode
+// check exists to surface, allowing a leaked Bearer to disappear
+// from the operator's view. The file appears in the problems
+// list with ErrInsecurePermissions, the valid sessions list
+// excludes it.
+func TestListSessions_SurfacesInsecurePermissions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	good := &SessionRecord{User: "alice", Server: "http://h:1", Key: "ka", ExpiresAt: time.Now().Add(time.Hour)}
+	bad := &SessionRecord{User: "bob", Server: "http://h:1", Key: "kb", ExpiresAt: time.Now().Add(time.Hour)}
+	for _, r := range []*SessionRecord{good, bad} {
+		if err := SaveSessionFor(r); err != nil {
+			t.Fatalf("SaveSessionFor: %v", err)
+		}
+	}
+	// Tamper with bob's file mode after the save.
+	if err := os.Chmod(SessionPath("bob", "http://h:1"), 0o644); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+
+	valid, problems, err := ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(valid) != 1 || valid[0].User != "alice" {
+		t.Errorf("valid sessions = %v, want one alice", valid)
+	}
+	if len(problems) != 1 {
+		t.Fatalf("problems = %d, want 1", len(problems))
+	}
+	if !errors.Is(problems[0].Err, ErrInsecurePermissions) {
+		t.Errorf("problem.Err = %v, want ErrInsecurePermissions", problems[0].Err)
+	}
+	if !strings.Contains(problems[0].Path, "bob") {
+		t.Errorf("problem.Path = %q, want one mentioning bob", problems[0].Path)
+	}
+}
+
+// TestListSessions_MissingDirIsEmpty pins the "operator has
+// never logged in" path: SessionsDir doesn't exist → empty slice,
+// no error.
+func TestListSessions_MissingDirIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	got, _, err := ListSessions()
+	if err != nil {
+		t.Errorf("err = %v, want nil for missing dir", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d records, want 0", len(got))
 	}
 }
 

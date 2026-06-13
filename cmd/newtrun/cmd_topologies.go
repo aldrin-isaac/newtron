@@ -114,10 +114,11 @@ func newNewtronClient(networkID string) *newtronclient.Client {
 	}
 	// Honor the per-user session cache the same way the newtron
 	// CLI does — one login serves every command across all three
-	// CLIs. LoadSession returns nil on missing / expired cache;
-	// WithBearer("") is a no-op.
+	// CLIs. LoadCLISession resolves --user / NEWTRON_USER against
+	// the multi-user cache and returns nil on missing / expired /
+	// ambiguous cache; WithBearer("") is a no-op.
 	var bearerKey string
-	if rec, err := newtronclient.LoadSession(newtronclient.DefaultSessionPath()); err == nil && rec != nil {
+	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), url); err == nil && rec != nil {
 		bearerKey = rec.Key
 	}
 	return newtronclient.New(url, networkID, newtronclient.WithBearer(bearerKey))

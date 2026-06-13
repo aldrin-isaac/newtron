@@ -20,7 +20,8 @@ import (
 // `newtron auth login` / `newtron auth logout` / `newtron auth status`.
 // Implements the operator-side of the L2c session-key arc: one
 // interactive login per user per machine, the resulting Bearer
-// cached in ~/.newtron/session.json, every subsequent newtron /
+// cached in ~/.newtron/sessions/<user>@<host>.json (one file per
+// (user, server) pair), every subsequent newtron /
 // newtrun / newtlab invocation reuses it without re-prompting.
 //
 // auth-design.md §L2c "Programmatic clients" sentence explicitly
@@ -42,7 +43,7 @@ and newtlab CLIs read on every invocation. One login mints a key
 that survives shell sessions; logout revokes it both server-side
 and on disk.
 
-  newtron auth login     # prompt, POST /auth/login, save to ~/.newtron/session.json
+  newtron auth login     # prompt, POST /auth/login, save to ~/.newtron/sessions/<user>@<host>.json
   newtron auth logout    # POST /auth/logout, delete the cache file
   newtron auth status    # show the cached user / server / expiry
 
@@ -57,7 +58,7 @@ var authLoginCmd = &cobra.Command{
 	Short: "Mint a session key via POST /auth/login and cache it on disk",
 	Long: `Prompt for a username and password, send them to newtron-server's
 /auth/login endpoint via HTTP Basic auth, and write the returned
-session key to ~/.newtron/session.json (mode 0600).
+session key to ~/.newtron/sessions/<user>@<host>.json (mode 0600).
 
 Subsequent newtron / newtrun / newtlab invocations read the cache
 and carry Authorization: Bearer <key> on every outbound HTTP call
@@ -76,7 +77,8 @@ var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Revoke the cached session key (server-side and on disk)",
 	Long: `Read the cached session key, POST /auth/logout to the server it
-was minted against, and delete ~/.newtron/session.json.
+was minted against, and delete the cached file under
+~/.newtron/sessions/.
 
 If the server is unreachable, the local file is still deleted —
 the operator's intent ("my key should no longer work from this
@@ -110,6 +112,7 @@ var authLoginUser string
 func init() {
 	authCmd.AddCommand(authLoginCmd, authLogoutCmd, authStatusCmd)
 	authLoginCmd.Flags().StringVarP(&authLoginUser, "user", "u", "", "username to log in as (skips the username prompt)")
+	authLogoutCmd.Flags().StringVarP(&authLoginUser, "user", "u", "", "log out a specific cached user; required when multiple sessions are cached for the same server")
 	rootCmd.AddCommand(authCmd)
 }
 
@@ -145,22 +148,27 @@ func runAuthLogin(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	path := client.DefaultSessionPath()
-	if err := client.SaveSession(path, rec); err != nil {
+	if err := client.SaveSessionFor(rec); err != nil {
 		return fmt.Errorf("saving session: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Logged in as %s (server %s); session expires %s.\n",
 		rec.User, rec.Server, rec.ExpiresAt.Local().Format(time.RFC1123))
-	fmt.Fprintf(os.Stderr, "Session cached at %s (mode 0600).\n", path)
+	fmt.Fprintf(os.Stderr, "Session cached at %s (mode 0600).\n", client.SessionPath(rec.User, rec.Server))
 	return nil
 }
 
 // runAuthLogout revokes server-side then deletes the local cache.
 // Server unreachability does not block local deletion (the
 // operator's "log me out from this machine" intent is unconditional).
+//
+// Which session to log out is resolved via LoadCLISession: --user
+// X picks that user's cache; with no flag, the single cached
+// session is logged out, or all-cached-from-server when there are
+// multiple but only one matches the named server. Multiple
+// ambiguous sessions force the operator to disambiguate with
+// --user so we never log out the wrong identity.
 func runAuthLogout(cmd *cobra.Command, _ []string) error {
-	path := client.DefaultSessionPath()
-	rec, err := client.LoadSession(path)
+	rec, err := client.LoadCLISession(authLoginUser, app.serverURL)
 	if err != nil {
 		return fmt.Errorf("reading session: %w", err)
 	}
@@ -171,32 +179,48 @@ func runAuthLogout(cmd *cobra.Command, _ []string) error {
 	if err := postAuthLogout(rec.Server, rec.Key); err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: server-side revoke failed (%v); deleting local cache anyway.\n", err)
 	}
-	if err := client.DeleteSession(path); err != nil {
+	if err := client.DeleteSessionFor(rec.User, rec.Server); err != nil {
 		return fmt.Errorf("deleting session file: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "Logged out.")
+	fmt.Fprintf(os.Stderr, "Logged out %s@%s.\n", rec.User, rec.Server)
 	return nil
 }
 
-// runAuthStatus prints the cached session record or reports none.
-// Exit code 1 on the no-session path so shell scripts can branch
-// on "$( newtron auth status >/dev/null; echo $? )".
+// runAuthStatus prints every cached session record or reports
+// none. Exit code 1 on the no-session path so shell scripts can
+// branch on "$( newtron auth status >/dev/null; echo $? )".
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
-	path := client.DefaultSessionPath()
-	rec, err := client.LoadSession(path)
+	all, problems, err := client.ListSessions()
 	if err != nil {
-		return fmt.Errorf("reading session: %w", err)
+		return fmt.Errorf("listing sessions: %w", err)
 	}
-	if rec == nil {
-		fmt.Fprintln(os.Stderr, "No cached session.")
+	for _, p := range problems {
+		// Surface cache-file problems even when other sessions
+		// loaded cleanly — most importantly the insecure-permissions
+		// case where a Bearer may already have leaked. Operator
+		// inspects + chmods or re-logs in.
+		fmt.Fprintf(os.Stderr, "WARNING: %s: %v\n", p.Path, p.Err)
+	}
+	if len(all) == 0 {
+		if len(problems) == 0 {
+			fmt.Fprintln(os.Stderr, "No cached sessions.")
+		}
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "User:       %s\n", rec.User)
-	fmt.Fprintf(os.Stderr, "Server:     %s\n", rec.Server)
-	fmt.Fprintf(os.Stderr, "Expires:    %s (in %s)\n",
-		rec.ExpiresAt.Local().Format(time.RFC1123),
-		time.Until(rec.ExpiresAt).Round(time.Second))
-	fmt.Fprintf(os.Stderr, "Cached at:  %s\n", path)
+	if len(problems) > 0 {
+		fmt.Fprintln(os.Stderr)
+	}
+	for i, rec := range all {
+		if i > 0 {
+			fmt.Fprintln(os.Stderr)
+		}
+		fmt.Fprintf(os.Stderr, "User:       %s\n", rec.User)
+		fmt.Fprintf(os.Stderr, "Server:     %s\n", rec.Server)
+		fmt.Fprintf(os.Stderr, "Expires:    %s (in %s)\n",
+			rec.ExpiresAt.Local().Format(time.RFC1123),
+			time.Until(rec.ExpiresAt).Round(time.Second))
+		fmt.Fprintf(os.Stderr, "Cached at:  %s\n", client.SessionPath(rec.User, rec.Server))
+	}
 	return nil
 }
 
@@ -282,21 +306,33 @@ func promptLine(w io.Writer, prompt string) (string, error) {
 	return line, nil
 }
 
-// promptPassword reads a password from the controlling terminal
-// with echo disabled — the bytes never appear in the user's
-// terminal or in shell-snapshot scrollback. Uses x/term.
+// promptPassword reads a password — interactively from the tty
+// when stdin is a terminal (echo disabled via x/term), or one
+// line from stdin when stdin is not a tty (scripted operator
+// setup, e.g. a CI script that pre-populates the session cache
+// for the 1node-vs-auth test suite via `printf '%s\n' "$pw" |
+// newtron auth login --user alice`).
 //
-// Returns "" + nil error when stdin is not a terminal (a piped-in
-// stdin, e.g. `echo pw | newtron auth login`); the caller surfaces
-// the empty-password error to the operator. The non-terminal case
-// is intentionally not supported — scripting login is the
-// daemon-flag path, not this command.
+// The non-tty path intentionally trims a trailing newline only —
+// any leading whitespace or other shell garbage in the piped
+// input is the operator's problem. Operators who pipe whitespace-
+// padded passwords get a no-match-against-PAM failure, which is
+// the right surface error for "your shell quoting is broken."
 func promptPassword(w io.Writer, prompt string) (string, error) {
-	fmt.Fprint(w, prompt)
-	pw, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Fprintln(w)
-	if err != nil {
+	if term.IsTerminal(int(syscall.Stdin)) {
+		fmt.Fprint(w, prompt)
+		pw, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Fprintln(w)
+		if err != nil {
+			return "", err
+		}
+		return string(pw), nil
+	}
+	// stdin is not a tty — read one line. No prompt is printed
+	// (it would be invisible to the script feeding stdin).
+	var line string
+	if _, err := fmt.Fscanln(os.Stdin, &line); err != nil && line == "" {
 		return "", err
 	}
-	return string(pw), nil
+	return line, nil
 }

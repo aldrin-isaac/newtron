@@ -190,7 +190,7 @@ Examples:
 		}
 
 		// Create HTTP client. When a valid session is cached at
-		// ~/.newtron/session.json (mode 0600), attach its key as
+		// ~/.newtron/sessions/<user>@<host>.json (mode 0600), attach its key as
 		// Authorization: Bearer on every outbound newtron call. An
 		// expired or missing cache is silently ignored — the CLI
 		// proceeds without auth and the server's response (401 or
@@ -199,7 +199,7 @@ Examples:
 		// error so the operator knows to chmod or re-login rather
 		// than silently running with a degraded credential surface.
 		var bearerKey string
-		if rec, err := client.LoadSession(client.DefaultSessionPath()); err != nil {
+		if rec, err := client.LoadCLISession(os.Getenv("NEWTRON_USER"), app.serverURL); err != nil {
 			return fmt.Errorf("loading cached session: %w", err)
 		} else if rec != nil {
 			bearerKey = rec.Key

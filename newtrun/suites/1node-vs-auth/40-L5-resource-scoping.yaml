@@ -27,15 +27,13 @@ steps:
       service: transit-1
       ip_address: 10.1.0.0/31
       peer_as: 65002
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   - name: alice-cleanup-transit
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/remove-service?mode=topology
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
 
   # alice — apply a non-transit service is denied by the where clause
   # (her grant scopes to resource: "transit-*"). The service doesn't
@@ -46,8 +44,7 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
     params: {service: vpn-east}
-    headers:
-      X-Newtron-Caller: alice
+    as: alice
     expect_failure: true
 
   # bob (ops, scoped to resource: vpn-*) — applying transit-named
@@ -57,6 +54,5 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
     params: {service: transit-1}
-    headers:
-      X-Newtron-Caller: bob
+    as: bob
     expect_failure: true

@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
@@ -92,6 +93,25 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				paramOverrides[k] = v
 			}
 
+			// Pull every cached session into UserSessions so any
+			// scenario step with `as: <user>` can authenticate as
+			// that user. The runner ignores entries no step uses,
+			// so over-supplying is harmless. Under-supplying is
+			// what fails — a step's `as: mallory` against a map
+			// without mallory becomes a clear "no session" error.
+			userSessions := make(map[string]string)
+			if sessions, _, err := newtronclient.ListSessions(); err == nil {
+				for _, rec := range sessions {
+					if _, dup := userSessions[rec.User]; dup {
+						// Multiple servers can cache the same user — prefer the
+						// first one. Operators running suites against a single
+						// server normally see one entry per user.
+						continue
+					}
+					userSessions[rec.User] = rec.Key
+				}
+			}
+
 			req := api.StartRunRequest{
 				Suite:         suiteName,
 				Scenario:      scenario,
@@ -103,6 +123,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				NetworkID:     networkID,
 				JUnitPath:     junitPath,
 				Parameters:    paramOverrides,
+				UserSessions:  userSessions,
 			}
 
 			started, err := c.StartRun(ctx, req)

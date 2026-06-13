@@ -92,8 +92,8 @@ func WithTLS(tlsCfg *tls.Config) Option {
 // WithBearer attaches a static Authorization: Bearer <key> header
 // to every outbound request (auth-design.md L2c). Used by the
 // newtron / newtrun / newtlab CLIs after `newtron auth login` has
-// minted a key and persisted it to ~/.newtron/session.json; the
-// CLI's client construction reads the cache via LoadSession and
+// minted a key and persisted it under ~/.newtron/sessions/; the
+// CLI's client construction reads the cache via LoadCLISession and
 // passes the key here.
 //
 // Different from WithSession: WithBearer is purely static — it
