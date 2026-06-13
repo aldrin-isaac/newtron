@@ -81,17 +81,17 @@ func bearerToken(r *http.Request) (string, bool) {
 	return strings.TrimSpace(h[len(prefix):]), true
 }
 
-// usernameContextKey is the request-context key under which a
+// sessionUsernameKey is the request-context key under which a
 // session-key-verified username is attached by Middleware.
 // Unexported — UsernameFromContext is the only public reader; no
 // downstream code should peek at the raw key.
-type usernameContextKey struct{}
+type sessionUsernameKey struct{}
 
 // withUsername attaches a session-key-verified username to ctx.
 // Used only by Middleware on a successful Bearer lookup; never
 // set by handler code.
 func withUsername(ctx context.Context, u string) context.Context {
-	return context.WithValue(ctx, usernameContextKey{}, u)
+	return context.WithValue(ctx, sessionUsernameKey{}, u)
 }
 
 // UsernameFromContext returns the username verified by a session-
@@ -103,7 +103,7 @@ func UsernameFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	u, _ := ctx.Value(usernameContextKey{}).(string)
+	u, _ := ctx.Value(sessionUsernameKey{}).(string)
 	return u
 }
 
