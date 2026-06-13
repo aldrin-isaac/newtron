@@ -63,7 +63,6 @@ type Config struct {
 	// HTTP — the L2a disabled state on that direction. Composed in
 	// by cmd/newtrun-server alongside NewtlabClient.
 	NewtronClientTLS *tls.Config
-
 }
 
 // Server is the newtrun HTTP server. The HTTP listener lifecycle
