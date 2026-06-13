@@ -483,3 +483,36 @@ func init() {
 	// actually completing; they only need the lifecycle entry/exit points.
 	_ = strings.NewReader // silence unused if all tests are removed
 }
+
+// TestOperatorBearer_ExtractsFromAuthorizationHeader pins the
+// inbound-side of the engine-composition refactor (PR C) operator-
+// Bearer-forward flow (auth-design.md §L2c "Identity forwarding
+// through engines"). The /newtrun/v1/runs handler reads the
+// operator's session key out of the Authorization header so the
+// runner can forward it on every outbound newtron call.
+func TestOperatorBearer_ExtractsFromAuthorizationHeader(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{"absent", "", ""},
+		{"bearer present", "Bearer abc123", "abc123"},
+		{"bearer case insensitive", "bearer abc123", "abc123"},
+		{"bearer with trailing space", "Bearer  abc123  ", "abc123"},
+		{"basic ignored", "Basic YWxpY2U6cHc=", ""},
+		{"token scheme ignored", "Token abc123", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/runs", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			got := operatorBearer(req)
+			if got != tc.want {
+				t.Errorf("operatorBearer(%q) = %q, want %q", tc.header, got, tc.want)
+			}
+		})
+	}
+}

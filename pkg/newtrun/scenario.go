@@ -88,10 +88,11 @@ type Step struct {
 	// fails fast at run start with "no session cached for user X;
 	// run `newtron auth login --user X` first".
 	//
-	// Empty (the common case) lets the runner use whatever
-	// credential its outbound-newtron-client is already
-	// configured with — daemon-side --newtron-basic-auth, the
-	// operator's NEWTRON_USER, or no credential at all.
+	// Empty (the common case) lets the runner use the operator's
+	// own Bearer (extracted from the inbound /newtrun/v1/runs
+	// request's Authorization header and forwarded on every
+	// outbound newtron call), or no credential at all when the
+	// run was triggered without one.
 	As string `yaml:"as,omitempty"`
 
 	// Capture extracts values from the response body of a successful

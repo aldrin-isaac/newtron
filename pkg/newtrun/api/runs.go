@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -157,13 +158,17 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	}
 	httpReporter := NewHTTPReporter(s.broker, suiteKey, stateReporter)
 
-	// Construct the runner.
+	// Construct the runner. The operator's Bearer (extracted from
+	// the incoming request's Authorization header) flows through to
+	// every outbound newtron call as the default credential
+	// (auth-design.md §L2c). Empty when the request carries no
+	// Bearer (loopback dev mode against a server with no auth).
 	runner := newtrun.NewRunner(suiteDir)
 	runner.SuitesBase = s.cfg.SuitesBase
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
 	runner.NewtronClientTLS = s.cfg.NewtronClientTLS
-	runner.NewtronBasicAuth = s.cfg.NewtronBasicAuth
+	runner.OperatorBearer = operatorBearer(r)
 	runner.UserSessions = req.UserSessions
 	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
@@ -298,6 +303,19 @@ func isDirectory(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// operatorBearer extracts the L2c session key from the inbound
+// request's Authorization header so the runner can forward it on
+// every outbound newtron call (auth-design.md §L2c "Identity
+// forwarding through engines"). Returns empty for non-Bearer or missing
+// headers, which is the no-credential path that is correct
+// against a server with no auth boundary. Parsing delegates to
+// sessionkey.BearerToken so the wire shape stays defined in one
+// place (DPN §27 single owner).
+func operatorBearer(r *http.Request) string {
+	key, _ := sessionkey.BearerToken(r.Header.Get("Authorization"))
+	return key
+}
+
 // handleStartInlineRun accepts a scenario YAML in the request body, validates
 // it against the inline safety policy, and spawns a server-side run keyed by
 // a freshly-allocated UUID. The UUID is namespaced separately from the suite
@@ -410,6 +428,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	// default. Inline is NoDeploy=true, so the network is expected to
 	// already be registered under whatever id the operator chose.
 	runner.NetworkID = resolveNetworkID(req.NetworkID, "", s.cfg.NetworkID)
+	runner.OperatorBearer = operatorBearer(r)
 	runner.NewtlabClient = s.cfg.NewtlabClient
 	runner.Progress = httpReporter
 

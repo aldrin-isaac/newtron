@@ -103,16 +103,17 @@ Bearer the operator pre-cached via `newtron auth login --user <user>`).
 The full suite runs cleanly in PAM-only mode in one server
 invocation; no header-mode/PAM-mode split is needed.
 
-Three pieces wire this together:
+Two pieces wire this together:
 
 1. `--auth-pam-service` on the server enables PAM verification at
    `/auth/login`.
-2. `--newtrun-newtron-basic-auth <user>:<pw>` gives the runner its
-   own identity for its startup probes (`GET /networks` etc.) before
-   any scenario starts.
-3. `login-all.sh` (in this suite directory) is a small helper that
+2. `login-all.sh` (in this suite directory) is a small helper that
    logs in as every identity any scenario references via `as:`,
-   pre-caching one Bearer per user in `~/.newtron/sessions/`.
+   pre-caching one Bearer per user in `~/.newtron/sessions/`. The
+   operator submitting the run is one of those identities; the
+   runner forwards their Bearer as the default credential and
+   per-step `as:` switches to whichever cached user the scenario
+   names.
 
 Re-run `login-all.sh` after every newt-server restart — the
 server-side session-key store is in-memory by design, so cached
@@ -167,24 +168,26 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
     --secret-store /tmp/1node-vs-auth-secrets.json \
     --audit-log /tmp/1node-vs-auth-audit.jsonl \
     --auth-pam-service newtron-test \
-    --newtrun-newtron-basic-auth alice:thepassword \
     --enforce-authorization \
     --audit-log-integrity \
     --spec-watch &
 ```
 
 - `--auth-pam-service` engages L2b PAM + auto-engages L2c session
-  keys at `/auth/login` and `/auth/logout`.
-- `--newtrun-newtron-basic-auth` gives the in-process newtrun engine
-  its own credentials for its startup probes — without it, the
-  runner's `GET /networks` 401s before any scenario starts. The
-  per-step `as: <user>` impersonation that the L1/L3/L4/L5 scenarios
-  use is independent of this flag.
+  keys at `/newt-server/v1/auth/login` and `/newt-server/v1/auth/logout`.
 - `--audit-caller-header` is **deliberately omitted** — every
   identity is now a real PAM-verified session, no self-attested
   header path needed.
 - Adjust `--session-key-ttl` if you want a TTL other than the
   default 8h.
+- The runner's identity is the operator's identity. Whoever
+  submits the run (`bin/newtrun start ...` with `NEWTRON_USER`
+  set, or any other consumer hitting `/newtrun/v1/runs`) carries
+  an Authorization Bearer; the runner extracts it from the
+  inbound request and attaches it on every outbound newtron call.
+  Per-step `as: <user>` in a scenario switches to that user's
+  cached Bearer for the one step (the multi-user session cache
+  the operator populated via `login-all.sh`).
 
 ### 4. Pre-cache a session for every test identity
 

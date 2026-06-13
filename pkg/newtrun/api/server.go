@@ -63,17 +63,6 @@ type Config struct {
 	// HTTP — the L2a disabled state on that direction. Composed in
 	// by cmd/newtrun-server alongside NewtlabClient.
 	NewtronClientTLS *tls.Config
-
-	// NewtronBasicAuth carries the Basic credentials the runner's
-	// outbound newtron client uses to mint and refresh a session
-	// key (auth-design.md L2c). Format "user:password". When set,
-	// the runner authenticates against PAM at first request and
-	// carries Authorization: Bearer <key> on every subsequent
-	// newtron call. Required against a newtron-server started
-	// with --auth-pam-service; ignored when that flag is unset.
-	// Composed in by cmd/newtrun-server from a
-	// --newtron-basic-auth=user:pw flag.
-	NewtronBasicAuth string
 }
 
 // Server is the newtrun HTTP server. The HTTP listener lifecycle

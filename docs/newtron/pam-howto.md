@@ -318,13 +318,18 @@ strictly `0600`; if it ever drifts (e.g. someone `chmod 644`s it),
 credential rather than silently sending a key anyone on the host
 could have tampered with.
 
-**Operator vs. daemon credentials.** This cache is for human
-operators interactively logging in. Daemons that need to
-authenticate as a service identity at startup use the daemon-side
-flag instead — `newtrun-server --newtron-basic-auth=user:pw` —
-so a process with no person at a keyboard can mint its own
-session at boot. Different use cases, different surfaces; both
-land on the same `/auth/login` endpoint server-side.
+**Identity flows through the request.** When a CLI like
+`newtrun start` posts to `/newtrun/v1/runs`, it carries the
+operator's Bearer (from `~/.newtron/sessions/`). The runner
+extracts the Bearer from the inbound Authorization header and
+attaches it on every outbound newtron call — the operator's
+identity is the runner's identity. Per-step `as: <user>` in a
+scenario switches to the named user's cached Bearer (the
+operator pre-cached it via `newtron auth login --user <user>`).
+Scripted automation submits a run the same way: POST to
+`/newt-server/v1/auth/login` with HTTP Basic, persist the key,
+post to `/newtrun/v1/runs` with that key on the Authorization
+header.
 
 ## 8. Cross-references
 

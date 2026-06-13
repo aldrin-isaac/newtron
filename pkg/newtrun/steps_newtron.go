@@ -192,9 +192,11 @@ func (e *newtronExecutor) doCall(r *Runner, step *Step, method, urlTemplate stri
 	// Step.As selects the cached-session user whose Bearer the
 	// runner attaches to this request. Only set when the step
 	// explicitly opted into per-step impersonation; absent
-	// step.As leaves whatever credential r.Client was built with
-	// (daemon-side --newtron-basic-auth, mTLS cert CN, or none)
-	// in charge.
+	// step.As leaves the operator's own Bearer (the default
+	// credential the runner forwards on every newtron call,
+	// extracted from the inbound /runs request) — or no
+	// credential at all when the run was triggered without one
+	// — in charge.
 	if step != nil && step.As != "" {
 		key, ok := r.UserSessions[step.As]
 		if !ok || key == "" {

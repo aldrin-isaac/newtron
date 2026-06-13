@@ -214,16 +214,12 @@ func TestBearerToken_SchemeMatching(t *testing.T) {
 		{"Token abc", "", false},
 	}
 	for _, tc := range cases {
-		req := httptest.NewRequest("GET", "/", nil)
-		if tc.header != "" {
-			req.Header.Set("Authorization", tc.header)
-		}
-		tok, ok := bearerToken(req)
+		tok, ok := BearerToken(tc.header)
 		if ok != tc.ok {
-			t.Errorf("bearerToken(%q) ok = %v, want %v", tc.header, ok, tc.ok)
+			t.Errorf("BearerToken(%q) ok = %v, want %v", tc.header, ok, tc.ok)
 		}
 		if tok != tc.token {
-			t.Errorf("bearerToken(%q) token = %q, want %q", tc.header, tok, tc.token)
+			t.Errorf("BearerToken(%q) token = %q, want %q", tc.header, tok, tc.token)
 		}
 	}
 }

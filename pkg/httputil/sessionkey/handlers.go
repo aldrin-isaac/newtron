@@ -102,7 +102,7 @@ func LogoutHandler(store *Store) http.HandlerFunc {
 			http.Error(w, "session keys not enabled", http.StatusNotFound)
 			return
 		}
-		key, ok := bearerToken(r)
+		key, ok := BearerToken(r.Header.Get("Authorization"))
 		if !ok {
 			http.Error(w, "Authorization: Bearer required", http.StatusUnauthorized)
 			return

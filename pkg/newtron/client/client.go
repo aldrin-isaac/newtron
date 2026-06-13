@@ -90,24 +90,26 @@ func WithTLS(tlsCfg *tls.Config) Option {
 }
 
 // WithBearer attaches a static Authorization: Bearer <key> header
-// to every outbound request (auth-design.md L2c). Used by the
-// newtron / newtrun / newtlab CLIs after `newtron auth login` has
-// minted a key and persisted it under ~/.newtron/sessions/; the
-// CLI's client construction reads the cache via LoadCLISession and
-// passes the key here.
+// to every outbound request whose Authorization header isn't
+// already set (auth-design.md §L2c). Two consumers:
 //
-// Different from WithSession: WithBearer is purely static — it
-// does NOT call /auth/login on first use and does NOT auto-refresh
-// on 401. The caller (typically a CLI) catches 401 responses and
-// surfaces a "session expired; run `newtron auth login` again"
-// message. This matches the human-operator UX (interactive re-
-// authentication) and keeps WithBearer free of the credential-
-// material WithSession needs.
+//   - The newtron / newtrun / newtlab CLIs after
+//     `newtron auth login` has minted a key and persisted it under
+//     ~/.newtron/sessions/. The CLI reads the cache via
+//     LoadCLISession and passes the key here.
+//   - The newtrun runner, which forwards the session key it
+//     extracted from the operator's inbound /newtrun/v1/runs
+//     request on its own outbound newtron calls (auth-design.md
+//     §L2c "Identity forwarding through engines").
 //
-// Calls to /auth/login and /auth/logout are NOT intercepted: the
-// caller's own Authorization header (Basic at login; Bearer at
-// logout — possibly a different key than the cached one) passes
-// through unchanged.
+// Purely static — no /auth/login wire call, no auto-refresh on
+// 401. The caller catches 401 responses and surfaces a "session
+// expired; run `newtron auth login` again" message, matching the
+// human-operator UX. Calls to /auth/login and /auth/logout pass
+// through unchanged: the round-tripper respects a caller-set
+// Authorization header so the auth endpoints can carry their own
+// credentials (Basic at login; Bearer at logout — possibly a
+// different, soon-to-be-revoked key than this one).
 //
 // Empty key is a no-op — the transport is left as-is, no Bearer
 // is attached. Useful for the "operator hasn't logged in yet"

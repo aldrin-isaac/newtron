@@ -30,17 +30,20 @@ type Runner struct {
 	// so the runner has the broad authority test scenarios need).
 	NewtronClientTLS *tls.Config
 
-	// NewtronBasicAuth carries the Basic credentials the runner's
-	// outbound newtron client uses to mint and refresh a session
-	// key (auth-design.md L2c). Format "user:password". When set,
-	// the runner authenticates against PAM at first request and
-	// carries Authorization: Bearer <key> on every subsequent
-	// newtron call. Empty disables session-key auth — the runner
-	// connects without credentials, which is fine against a server
-	// that doesn't enforce PAM but fails closed on a PAM-protected
-	// newtron-server. Populated by cmd/newtrun-server from a
-	// --newtron-basic-auth=user:pw flag.
-	NewtronBasicAuth string
+	// OperatorBearer is the L2c session key extracted from the
+	// Authorization: Bearer header of the HTTP request that
+	// triggered this run (auth-design.md §L2c). The runner forwards
+	// it as the default credential on every outbound newtron call,
+	// so the operator's identity — verified once by newt-server's
+	// outer auth middleware on the inbound request — flows through
+	// the runner unchanged. Empty when the run was triggered without
+	// a Bearer (cmd/newtrun-server standalone, or cmd/newt-server
+	// without --auth-pam-service) — in that case outbound newtron
+	// calls carry no Authorization header, which is fine against a
+	// newtron engine that doesn't enforce identity. Per-step
+	// `as: <user>` overrides this default per request via the
+	// UserSessions map.
+	OperatorBearer string
 
 	// UserSessions maps a username to the Bearer session key
 	// supplied by the operator's CLI at run-start time. Used by
@@ -476,19 +479,18 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 // cert CN (auth-design.md L2a). When NewtronClientTLS is nil, the
 // client falls back to plain HTTP — the L2a disabled state.
 //
-// When r.NewtronBasicAuth is set, the client also installs L2c
-// session-key auth: lazy POST /auth/login on first call, Bearer on
-// every subsequent call, automatic re-login on 401. This lets the
-// runner authenticate against a PAM-protected newtron-server
-// without sending Basic auth on every request.
+// When r.OperatorBearer is set (typical: a session key extracted
+// from the incoming /newtrun/v1/runs request's Authorization
+// header), the client attaches Authorization: Bearer <key> on
+// every outbound newtron call that doesn't already carry one. The
+// operator's identity, verified once by newt-server's outer auth
+// middleware on the inbound request, flows through the runner
+// unchanged. Per-step `as: <user>` overrides the default per
+// request via the UserSessions map (see steps_newtron.go).
 func (r *Runner) connectToServer() error {
-	opts := []client.Option{client.WithTLS(r.NewtronClientTLS)}
-	if r.NewtronBasicAuth != "" {
-		user, pass, ok := strings.Cut(r.NewtronBasicAuth, ":")
-		if !ok || user == "" || pass == "" {
-			return &InfraError{Op: "connect", Err: fmt.Errorf("NewtronBasicAuth must be 'user:password', got %q", r.NewtronBasicAuth)}
-		}
-		opts = append(opts, client.WithSession(user, pass))
+	opts := []client.Option{
+		client.WithTLS(r.NewtronClientTLS),
+		client.WithBearer(r.OperatorBearer),
 	}
 	r.Client = client.New(r.ServerURL, r.NetworkID, opts...)
 

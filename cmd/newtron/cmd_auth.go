@@ -65,10 +65,11 @@ and carry Authorization: Bearer <key> on every outbound HTTP call
 — no further password prompts until logout or expiry.
 
 The --user flag skips the username prompt; the password is always
-read interactively (no echo). Operators who need scripted login —
-typically a daemon's startup — should use the daemon-side
---newtron-basic-auth flag on newtrun-server instead; this command
-is for human operators at terminals.`,
+read interactively (no echo). This command is for human operators at
+terminals. Scripted callers can POST directly to
+/newt-server/v1/auth/login with HTTP Basic and persist the returned
+key wherever they need it (the cache layout under ~/.newtron/sessions/
+is documented in docs/newtron/pam-howto.md).`,
 	Args: cobra.NoArgs,
 	RunE: runAuthLogin,
 }
