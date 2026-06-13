@@ -53,13 +53,6 @@ type Config struct {
 	// nil keeps the default plain-HTTP listener — the disabled state.
 	TLSConfig *tls.Config
 
-	// Authenticator enables user-to-service authentication on the
-	// TCP listener via HTTP Basic + PAM (auth-design.md L2b). nil
-	// disables — the L2b disabled state. Composed in by cmd/newtrun-
-	// server from a --auth-pam-service=NAME flag wrapping a
-	// pamauth.PAMAuthenticator.
-	Authenticator httputil.Authenticator
-
 	// NewtronClientTLS is the TLS config the runner uses on its
 	// outbound calls to newtron-server during a run
 	// (auth-design.md L2a). The companion to TLSConfig above —
@@ -182,12 +175,12 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("PUT /newtrun/v1/suites/{suite}/scenarios/{name}", s.handlePutScenario)
 	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
-	// auth-design.md L2b: PAMMiddleware enforces TCP user
-	// authentication when cfg.Authenticator is configured. nil →
-	// passthrough (L2b disabled state).
+	// Identity middleware (L2b PAM, L2c session-key Bearer) lives
+	// at the server boundary in cmd/newt-server, not in the
+	// standalone newtrun-server. Standalone is HTTP-only on
+	// loopback for dev iteration.
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)
-	handler = httputil.PAMMiddleware(s.cfg.Authenticator)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Recovery(s.logger)(handler)
 	return handler

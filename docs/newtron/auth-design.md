@@ -438,7 +438,7 @@ Why this layer exists separately from L2b:
 **Wire shape.**
 
 ```
-POST /newtron/v1/auth/login
+POST /newt-server/v1/auth/login
 Authorization: Basic <base64(user:pass)>
 
 → 200 OK
@@ -450,7 +450,7 @@ Authorization: Basic <base64(user:pass)>
 ```
 
 ```
-POST /newtron/v1/auth/logout
+POST /newt-server/v1/auth/logout
 Authorization: Bearer <key>
 
 → 204 No Content
@@ -528,27 +528,43 @@ authentication?" → yes. The `auth.login` event precedes every
 by the configured TTL.
 
 **Dependencies.** L0, L1, L2b. Without L2b there is no live
-authenticator to call from `/auth/login`; the routes refuse to mount
-when `--auth-pam-service` is unset.
+authenticator to call from `/auth/login`; the routes are mounted
+unconditionally but their handlers return 404 when L2c is disabled
+(no `--auth-pam-service` configured, or `--session-key-ttl` set
+negative). The 404 distinguishes "L2c disabled" from "wrong URL"
+without requiring a server restart's worth of route-table
+reshuffling on an enable/disable flip.
 
-**Scope of changes.** New transport-level package
-`pkg/httputil/sessionkey/` owning the in-memory store
-(`store.go`), the Bearer-recognition middleware + identity
-context-key (`middleware.go`), and the `/auth/login` + `/auth/logout`
-HTTP handlers (`handlers.go`). The package lives under `pkg/httputil/`
+**Scope of changes.** Transport-level package
+`pkg/httputil/sessionkey/` owns the in-memory store (`store.go`),
+the Bearer-recognition middleware + identity context-key
+(`middleware.go`), and the `/auth/login` + `/auth/logout` HTTP
+handlers (`handlers.go`). The package lives under `pkg/httputil/`
 rather than under any engine because authentication is a property
-of the server boundary (a binding `cmd/`'s outer middleware chain),
-not of any individual engine. `pkg/newtron/api` consumes the
-package via `sessionkey.NewStore`, `sessionkey.Middleware`,
-`sessionkey.LoginHandler`, `sessionkey.LogoutHandler`,
-`sessionkey.UsernameFromContext`. `httputil.SkipBasicAuthFromContext` /
-`WithSkipBasicAuth` for the cross-package signal between the
-Bearer middleware and the PAM middleware — kept generic so the
-same hook can be reused for any future server-issued credential
-without `httputil` learning newtron-specific concepts. New audit
-verification source `VerificationSessionKey = "session_key"`. New
-flag `--session-key-ttl` on `cmd/newtron-server` and
-`cmd/newt-server` (default `8h`). Operational howto entry in
+of the server boundary, not of any individual engine.
+
+Composition site: `cmd/newt-server` mounts the Store, the
+Bearer/PAM middleware chain, and the routes
+`POST /newt-server/v1/auth/login` + `/auth/logout` at the outer
+layer wrapping every engine mux. The standalone server binaries
+(`cmd/newtron-server`, `cmd/newtrun-server`, `cmd/newtlab-server`)
+have no identity middleware — they are loopback dev tools with no
+encryption and no authentication; use `cmd/newt-server` for any
+deployment that needs L2b/L2c. Engines see the verified username
+through `sessionkey.UsernameFromContext` (L2c) or
+`httputil.PAMUsernameFromContext` (L2b) on the request context;
+`pkg/newtron/api/caller_middleware.go` reads either source the
+same way and populates `audit.Caller` with the correct
+verification source.
+
+`httputil.SkipBasicAuthFromContext` / `WithSkipBasicAuth` is the
+cross-package signal between the Bearer middleware and the PAM
+middleware — kept generic so the same hook can be reused for any
+future server-issued credential without `httputil` learning
+newtron-specific concepts. New audit verification source
+`VerificationSessionKey = "session_key"`. Flags
+`--auth-pam-service` (L2b) and `--session-key-ttl` (L2c, default
+`8h`) live on `cmd/newt-server`. Operational howto entry in
 `docs/newtron/pam-howto.md` covering the login/logout flow.
 
 **Independent value.** Cuts per-request PAM cost from "directory hit
@@ -565,14 +581,14 @@ exposed through HTTP.
 
 **Limitations accepted at this layer.**
 
-- *No multi-engine session sharing today.* The store, middleware,
-  and handlers live in `pkg/httputil/sessionkey/` and are engine-
-  neutral, but only the newtron engine mounts them so far — a key
-  minted at `/newtron/v1/auth/login` works against `/newtron/v1/*`
-  routes. Mounting the same Middleware + handlers on newtrun's or
-  newtlab's outer chain is mechanical when those engines need it;
-  the store is already factored as a shared transport-level
-  primitive (no second instance of the pattern to extract).
+- *One auth scope across all engines.* The store, middleware, and
+  handlers live at `cmd/newt-server`'s outer boundary
+  (`POST /newt-server/v1/auth/login` + `/auth/logout`) and wrap
+  every engine mux uniformly. A single key minted there is valid
+  against every engine's routes — `/newtron/v1/*`, `/newtrun/v1/*`,
+  `/newtlab/v1/*` — in the same process. The token has no scope
+  narrower than "this server"; per-engine restrictions are
+  authorization concerns (L3), not authentication.
 - *No refresh tokens.* Sliding-expiry refresh logic would re-introduce
   the immortal-token problem `--session-key-ttl` was set up to bound.
   Operators needing longer sessions raise the TTL; operators needing

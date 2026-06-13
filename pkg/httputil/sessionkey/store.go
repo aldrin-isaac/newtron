@@ -6,21 +6,21 @@
 //
 // The package lives under pkg/httputil/ rather than under any
 // engine because authentication is a property of the server
-// boundary — a binding cmd/'s outer middleware chain (e.g.
-// cmd/newt-server) — not of any individual engine. A cmd that
-// embeds multiple engines mounts one Middleware + one login/logout
-// pair at the outer layer; engines downstream read the verified
-// username via UsernameFromContext without each composing their
-// own auth state.
+// boundary — the outer middleware chain of the server binary that
+// composes engines, e.g. cmd/newt-server — not of any individual
+// engine. A server binary that embeds multiple engines mounts one
+// Middleware + one login/logout pair at the outer layer; engines
+// downstream read the verified username via UsernameFromContext
+// without each composing their own auth state.
 //
-// Composition contract. A binding cmd builds:
+// Composition contract. The composing server binary
+// (cmd/newt-server) builds:
 //
 //   - one *Store via NewStore — process-wide L2c state
 //   - one Middleware(store) wrapper, mounted in the outer chain
 //     ahead of any PAM Basic-auth middleware
 //   - the LoginHandler(store) and LogoutHandler(store) endpoints,
-//     mounted on routes the cmd chooses (typically
-//     /<server-prefix>/v1/auth/login + /auth/logout)
+//     mounted at /newt-server/v1/auth/login + /auth/logout
 //
 // Downstream readers (engine handlers, audit middleware,
 // authorization gates) consume UsernameFromContext to attribute
@@ -43,9 +43,9 @@ import (
 
 // DefaultTTL is the absolute lifetime of a session key minted at
 // /auth/login when the operator has not set --session-key-ttl on
-// the binding cmd binary. Eight hours is a typical operator-shift
-// window — long enough to cover continuous use, short enough that
-// a leaked key's blast radius is bounded.
+// the composing server binary. Eight hours is a typical operator-
+// shift window — long enough to cover continuous use, short enough
+// that a leaked key's blast radius is bounded.
 const DefaultTTL = 8 * time.Hour
 
 // Store holds in-memory mappings from opaque server-issued keys to

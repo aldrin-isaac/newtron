@@ -51,12 +51,6 @@ type Config struct {
 	// nil keeps the default plain-HTTP listener — the disabled state.
 	TLSConfig *tls.Config
 
-	// Authenticator enables user-to-service authentication on the
-	// TCP listener via HTTP Basic + PAM (auth-design.md L2b). nil
-	// disables — the L2b disabled state. Composed in by cmd/newtlab-
-	// server from a --auth-pam-service=NAME flag wrapping a
-	// pamauth.PAMAuthenticator.
-	Authenticator httputil.Authenticator
 }
 
 // Server is the newtlab HTTP server. The HTTP listener lifecycle

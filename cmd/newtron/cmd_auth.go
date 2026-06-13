@@ -231,7 +231,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 // fight the cache-priming use case. Logs the raw error.
 func minAuthLogin(server, user, pass string) (*client.SessionRecord, error) {
 	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(server, "/")+"/newtron/v1/auth/login",
+		strings.TrimRight(server, "/")+"/newt-server/v1/auth/login",
 		bytes.NewReader(nil))
 	if err != nil {
 		return nil, fmt.Errorf("building login request: %w", err)
@@ -276,7 +276,7 @@ func minAuthLogin(server, user, pass string) (*client.SessionRecord, error) {
 // errors propagate so the caller can warn the operator.
 func postAuthLogout(server, key string) error {
 	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(server, "/")+"/newtron/v1/auth/logout",
+		strings.TrimRight(server, "/")+"/newt-server/v1/auth/logout",
 		bytes.NewReader(nil))
 	if err != nil {
 		return fmt.Errorf("building logout request: %w", err)

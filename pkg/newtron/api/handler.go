@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
-	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
@@ -26,30 +25,14 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/unregister", s.handleUnregisterNetwork)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/reload", s.handleReloadNetwork)
 
-	// ====================================================================
-	// Authentication (auth-design.md L2c)
-	// ====================================================================
-	// Mounted unconditionally — the handlers return 404 when L2c is
-	// disabled (no Authenticator configured) so an enable/disable
-	// flip doesn't require a server restart's worth of route table
-	// reshuffling. The 404 message distinguishes "L2c disabled" from
-	// "wrong URL."
-	//
-	// Two paths for the same handler: the network-scoped form
-	// (/networks/{netID}/auth/login) matches the convention every
-	// other newtron client follows (newtrun's expandURL always
-	// prepends /networks/<id>); the server-scoped form
-	// (/auth/login) is the canonical one because auth identity is
-	// server-wide, not per-network — a caller is who they are
-	// regardless of which network's grant table is evaluating their
-	// permission. The handlers ignore {netID} on the network-scoped
-	// path; the netID is decorative for URL convention only.
-	loginHandler := sessionkey.LoginHandler(s.sessionKeys)
-	logoutHandler := sessionkey.LogoutHandler(s.sessionKeys)
-	mux.HandleFunc("POST /newtron/v1/auth/login", loginHandler)
-	mux.HandleFunc("POST /newtron/v1/auth/logout", logoutHandler)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/login", loginHandler)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/logout", logoutHandler)
+	// Auth routes (POST /newt-server/v1/auth/login, POST
+	// /newt-server/v1/auth/logout) live at the server boundary in
+	// cmd/newt-server, not in the newtron engine. Identity reaches
+	// downstream handlers via the request context, populated by
+	// outer middleware (sessionkey.Middleware for L2c Bearer tokens,
+	// httputil.PAMMiddleware for L2b Basic auth). callerMiddleware
+	// reads the verified username from context regardless of which
+	// outer layer attached it.
 
 	// ====================================================================
 	// Network spec reads
@@ -214,32 +197,22 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 
 	// Apply middleware chain (outermost → innermost):
-	//   recovery → logger → requestID → sessionKey → pam → caller → audit → timeout → persist → mode → mux
+	//   recovery → logger → requestID → caller → audit → timeout → persist → mode → mux
 	//
-	// sessionKey (auth-design.md L2c) parses Authorization: Bearer
-	// tokens, looks up the session-key store, attaches the verified
-	// username to context, and signals pam to skip its challenge.
-	// Always installed; transparent passthrough when no store is
-	// configured (L2c disabled).
-	//
-	// pam (auth-design.md L2b) sits between requestID and caller so
-	// the verified PAM username is on the context for callerMiddleware
-	// to pick up. PAMMiddleware is always installed; when no
-	// Authenticator is configured (L2b disabled), it is a transparent
-	// passthrough that doesn't touch the request.
-	//
-	// caller (auth-design.md L1+L2a+L2b+L2c) populates audit.Caller on
-	// the request context before audit reads it. Always installed;
-	// effect gated by which identity sources are configured per the
-	// "every layer enable/disable-able" contract.
+	// Identity middleware (sessionkey.Middleware for L2c Bearer,
+	// httputil.PAMMiddleware for L2b Basic) lives at the server
+	// boundary in cmd/newt-server, NOT here. The standalone
+	// newtron-server has no identity middleware — it is a dev tool
+	// reachable on loopback. Either way, callerMiddleware reads the
+	// verified username off the request context regardless of who
+	// attached it (or attaches the self-attested
+	// X-Newtron-Caller header value when no outer layer ran).
 	var handler http.Handler = mux
 	handler = withMode(handler)
 	handler = withPersist(handler)
 	handler = httputil.Timeout(5 * time.Minute)(handler)
 	handler = auditMiddleware(handler)
 	handler = callerMiddleware(s.auditCallerHeader)(handler)
-	handler = httputil.PAMMiddleware(s.authenticator)(handler)
-	handler = sessionkey.Middleware(s.sessionKeys)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.Recovery(s.logger)(handler)
