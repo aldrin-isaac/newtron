@@ -329,5 +329,11 @@ land on the same `/auth/login` endpoint server-side.
   L2a + L2b for the full transport-authentication picture)
 - `pkg/httputil/auth.go` — `Authenticator` interface + `PAMMiddleware`
 - `pkg/httputil/pamauth/authenticator.go` — cgo-backed `PAMAuthenticator`
-- `pkg/newtron/api/caller_middleware.go` — PAM username
-  priority + audit caller binding
+- `pkg/httputil/sessionkey/` — L2c in-memory key store
+  (`store.go`), Bearer middleware + identity context-key
+  (`middleware.go`), and the `/auth/login` + `/auth/logout`
+  HTTP handlers (`handlers.go`). The package is engine-neutral;
+  a binding `cmd/` mounts it at the outer chain.
+- `pkg/newtron/api/caller_middleware.go` — caller-identity
+  priority chain that reads PAM (L2b) and session-key (L2c)
+  usernames off the request context and tags the audit caller
