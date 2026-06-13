@@ -100,7 +100,7 @@ func WithTLS(tlsCfg *tls.Config) Option {
 //   - The newtrun runner, which forwards the session key it
 //     extracted from the operator's inbound /newtrun/v1/runs
 //     request on its own outbound newtron calls (auth-design.md
-//     §L2c "Verified identity flow").
+//     §L2c "Identity forwarding through engines").
 //
 // Purely static — no /auth/login wire call, no auto-refresh on
 // 401. The caller catches 401 responses and surfaces a "session

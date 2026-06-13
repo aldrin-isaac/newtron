@@ -305,8 +305,8 @@ func isDirectory(path string) bool {
 
 // operatorBearer extracts the L2c session key from the inbound
 // request's Authorization header so the runner can forward it on
-// every outbound newtron call (auth-design.md §L2c "Verified
-// identity flow"). Returns empty for non-Bearer or missing
+// every outbound newtron call (auth-design.md §L2c "Identity
+// forwarding through engines"). Returns empty for non-Bearer or missing
 // headers, which is the no-credential path that is correct
 // against a server with no auth boundary. Parsing delegates to
 // sessionkey.BearerToken so the wire shape stays defined in one
