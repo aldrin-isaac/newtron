@@ -1,4 +1,4 @@
-package api
+package sessionkey
 
 import (
 	"net/http"
@@ -10,17 +10,17 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 )
 
-// TestWithSessionKey_NilStorePassthrough pins the L2c-disabled
+// TestMiddleware_NilStorePassthrough pins the L2c-disabled
 // contract: when no store is configured the middleware is a
 // transparent passthrough that doesn't touch the request.
-func TestWithSessionKey_NilStorePassthrough(t *testing.T) {
+func TestMiddleware_NilStorePassthrough(t *testing.T) {
 	called := false
-	h := withSessionKey(nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := Middleware(nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
 		if httputil.SkipBasicAuthFromContext(r.Context()) {
 			t.Error("nil-store passthrough must not set skip-Basic-auth")
 		}
-		if u := sessionKeyUsernameFromContext(r.Context()); u != "" {
+		if u := UsernameFromContext(r.Context()); u != "" {
 			t.Errorf("nil-store passthrough must not set username, got %q", u)
 		}
 	}))
@@ -35,15 +35,15 @@ func TestWithSessionKey_NilStorePassthrough(t *testing.T) {
 	}
 }
 
-// TestWithSessionKey_NoAuthHeaderPassthrough pins that a request
+// TestMiddleware_NoAuthHeaderPassthrough pins that a request
 // without any Authorization header passes through cleanly — that's
 // the PAM-Basic-auth path which the next middleware handles.
-func TestWithSessionKey_NoAuthHeaderPassthrough(t *testing.T) {
-	store := newSessionKeyStore(time.Hour)
+func TestMiddleware_NoAuthHeaderPassthrough(t *testing.T) {
+	store := NewStore(time.Hour)
 	defer store.Stop()
 
 	called := false
-	h := withSessionKey(store)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := Middleware(store)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
 		if httputil.SkipBasicAuthFromContext(r.Context()) {
 			t.Error("no-Authorization passthrough must not set skip-Basic-auth")
@@ -59,15 +59,15 @@ func TestWithSessionKey_NoAuthHeaderPassthrough(t *testing.T) {
 	}
 }
 
-// TestWithSessionKey_BasicAuthPassthrough pins that an Authorization
+// TestMiddleware_BasicAuthPassthrough pins that an Authorization
 // header with a non-Bearer scheme (e.g. Basic) passes through to
 // the next middleware untouched. L2c only triggers on Bearer.
-func TestWithSessionKey_BasicAuthPassthrough(t *testing.T) {
-	store := newSessionKeyStore(time.Hour)
+func TestMiddleware_BasicAuthPassthrough(t *testing.T) {
+	store := NewStore(time.Hour)
 	defer store.Stop()
 
 	called := false
-	h := withSessionKey(store)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := Middleware(store)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
 	}))
 
@@ -84,11 +84,11 @@ func TestWithSessionKey_BasicAuthPassthrough(t *testing.T) {
 	}
 }
 
-// TestWithSessionKey_ValidBearer pins the happy L2c path: a valid
+// TestMiddleware_ValidBearer pins the happy L2c path: a valid
 // Bearer token attaches the verified username AND signals PAM to
 // skip its challenge.
-func TestWithSessionKey_ValidBearer(t *testing.T) {
-	store := newSessionKeyStore(time.Hour)
+func TestMiddleware_ValidBearer(t *testing.T) {
+	store := NewStore(time.Hour)
 	defer store.Stop()
 	key, _, err := store.Mint("alice")
 	if err != nil {
@@ -96,9 +96,9 @@ func TestWithSessionKey_ValidBearer(t *testing.T) {
 	}
 
 	called := false
-	h := withSessionKey(store)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := Middleware(store)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		called = true
-		if u := sessionKeyUsernameFromContext(r.Context()); u != "alice" {
+		if u := UsernameFromContext(r.Context()); u != "alice" {
 			t.Errorf("username on context = %q, want alice", u)
 		}
 		if !httputil.SkipBasicAuthFromContext(r.Context()) {
@@ -119,15 +119,15 @@ func TestWithSessionKey_ValidBearer(t *testing.T) {
 	}
 }
 
-// TestWithSessionKey_InvalidBearer pins that an unknown key 401s
+// TestMiddleware_InvalidBearer pins that an unknown key 401s
 // before the downstream handler runs. This is L2c rejecting; PAM
 // would never see the request.
-func TestWithSessionKey_InvalidBearer(t *testing.T) {
-	store := newSessionKeyStore(time.Hour)
+func TestMiddleware_InvalidBearer(t *testing.T) {
+	store := NewStore(time.Hour)
 	defer store.Stop()
 
 	called := false
-	h := withSessionKey(store)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+	h := Middleware(store)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		called = true
 	}))
 
@@ -147,11 +147,11 @@ func TestWithSessionKey_InvalidBearer(t *testing.T) {
 	}
 }
 
-// TestWithSessionKey_ExpiredBearer pins that an expired key 401s
+// TestMiddleware_ExpiredBearer pins that an expired key 401s
 // even if the sweeper hasn't run yet. The Lookup-time check ensures
 // the TTL is enforced on every request.
-func TestWithSessionKey_ExpiredBearer(t *testing.T) {
-	store := newSessionKeyStore(time.Hour)
+func TestMiddleware_ExpiredBearer(t *testing.T) {
+	store := NewStore(time.Hour)
 	defer store.Stop()
 	base := time.Now()
 	store.now = func() time.Time { return base }
@@ -162,7 +162,7 @@ func TestWithSessionKey_ExpiredBearer(t *testing.T) {
 	// Advance past expiry.
 	store.now = func() time.Time { return base.Add(2 * time.Hour) }
 
-	h := withSessionKey(store)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+	h := Middleware(store)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("downstream handler ran for expired Bearer")
 	}))
 
@@ -176,14 +176,14 @@ func TestWithSessionKey_ExpiredBearer(t *testing.T) {
 	}
 }
 
-// TestWithSessionKey_EmptyBearer pins that `Authorization: Bearer ` (no key)
+// TestMiddleware_EmptyBearer pins that `Authorization: Bearer ` (no key)
 // is rejected with 401. A client that tried to use L2c but presented
 // nothing must not silently fall through to PAM Basic auth.
-func TestWithSessionKey_EmptyBearer(t *testing.T) {
-	store := newSessionKeyStore(time.Hour)
+func TestMiddleware_EmptyBearer(t *testing.T) {
+	store := NewStore(time.Hour)
 	defer store.Stop()
 
-	h := withSessionKey(store)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+	h := Middleware(store)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("downstream handler ran for empty Bearer")
 	}))
 

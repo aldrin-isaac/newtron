@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
@@ -43,10 +44,12 @@ func (s *Server) buildMux() http.Handler {
 	// regardless of which network's grant table is evaluating their
 	// permission. The handlers ignore {netID} on the network-scoped
 	// path; the netID is decorative for URL convention only.
-	mux.HandleFunc("POST /newtron/v1/auth/login", s.handleAuthLogin)
-	mux.HandleFunc("POST /newtron/v1/auth/logout", s.handleAuthLogout)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/login", s.handleAuthLogin)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/logout", s.handleAuthLogout)
+	loginHandler := sessionkey.LoginHandler(s.sessionKeys)
+	logoutHandler := sessionkey.LogoutHandler(s.sessionKeys)
+	mux.HandleFunc("POST /newtron/v1/auth/login", loginHandler)
+	mux.HandleFunc("POST /newtron/v1/auth/logout", logoutHandler)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/login", loginHandler)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/auth/logout", logoutHandler)
 
 	// ====================================================================
 	// Network spec reads
@@ -236,7 +239,7 @@ func (s *Server) buildMux() http.Handler {
 	handler = auditMiddleware(handler)
 	handler = callerMiddleware(s.auditCallerHeader)(handler)
 	handler = httputil.PAMMiddleware(s.authenticator)(handler)
-	handler = withSessionKey(s.sessionKeys)(handler)
+	handler = sessionkey.Middleware(s.sessionKeys)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.Recovery(s.logger)(handler)

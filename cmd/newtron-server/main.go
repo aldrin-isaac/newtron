@@ -20,6 +20,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
@@ -44,7 +45,7 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "PEM-encoded private key for --tls-cert. (auth-design.md L2a)")
 	tlsCA := flag.String("tls-ca", "", "PEM-encoded CA bundle used both to verify incoming peer client certs (mTLS on the listener) AND to verify newtlab-server's cert when calling it. Empty: TLS-only (no mTLS); inter-service trust is undefined. (auth-design.md L2a)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds and mTLS cert CN still work where configured. (auth-design.md L2b)")
-	sessionKeyTTL := flag.Duration("session-key-ttl", api.DefaultSessionKeyTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
+	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime: every spec/profile mutation checks the verified caller against the spec's grant table; denials return HTTP 403 with a typed AuthorizationError payload. Off (default) preserves pre-enforcement behavior — checks are no-ops; verified identity is still recorded in the audit log when configured. (auth-design.md L3)")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior — operators POST /networks/<id>/reload to make changes observable. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain (Event.ID = SHA256(prev_hash || canonical_json), Event.PrevHash = previous entry's ID) so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty — pre-integrity behavior. Requires --audit-log to be set. (auth-design.md L6)")
