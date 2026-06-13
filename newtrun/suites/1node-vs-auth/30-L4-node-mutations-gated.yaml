@@ -70,9 +70,10 @@ steps:
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-bob, type: L3, stage: ingress}
 
-  # Read endpoint — no caller required (reads stay ungated per §3
-  # criterion 2). The same path without auth header succeeds.
-  - name: read-vlans-no-caller-allowed
+  # Read endpoint — ungated per §3 criterion 2. The runner attaches
+  # bob's Bearer (scenario-level as:); succeeds because reads don't
+  # gate on permissions, not because the caller is bob in particular.
+  - name: read-vlans-allowed
     action: newtron
     method: GET
     url: /nodes/switch1/vlans?mode=topology

@@ -49,20 +49,31 @@ steps:
     url: /auth/logout
     expect_failure: true
 
-  # Sanity: a regular mutation under L2c-disabled still works.
-  # sessionkey.Middleware passes through (nil store) and the
-  # request's verified Bearer reaches caller_middleware via the
-  # session-key context as usual. Proves the L2c plumbing — store
-  # init, route mount, middleware wire-up — didn't break the
-  # default request path when disabled.
+  # Sanity: a regular mutation works under L2c-disabled. When the
+  # session-key store is nil, sessionkey.Middleware is a transparent
+  # passthrough — it neither verifies the Bearer nor sets a
+  # username on context. caller_middleware then falls back to the
+  # configured identity sources for this deployment (Unix peer
+  # creds when --unix-socket is set, X-Newtron-Caller header when
+  # --audit-caller-header is set, mTLS cert CN when configured).
+  # The README §2 startup wires --audit-caller-header X-Newtron-
+  # Caller, so the scenario sends that header explicitly; alice
+  # is in spec-team, which has spec.author. The step proves the
+  # L2c plumbing (store init, route mount, middleware wire-up)
+  # doesn't break the default header-mode request path when
+  # disabled.
   - name: zone-create-succeeds-under-l2c-disabled
     action: newtron
     method: POST
     url: /create-zone
     params: {name: zone-l2c-disabled-probe}
+    headers:
+      X-Newtron-Caller: alice
 
   - name: cleanup-zone-l2c-disabled-probe
     action: newtron
     method: POST
     url: /delete-zone
     params: {name: zone-l2c-disabled-probe}
+    headers:
+      X-Newtron-Caller: alice

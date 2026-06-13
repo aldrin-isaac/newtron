@@ -107,26 +107,37 @@ steps:
     expect_failure: true
 
 ---
-name: L5-dimensions-dev-dora
+name: L5-dimensions-bob-cleanup
 description: |
-  Coverage expansion: the original 40-L5-resource-scoping scenario
-  only exercises the resource dimension. Dev-dora's portion of this
-  split-per-identity scenario covers the device dimension: dev-dora in
-  device-team is scoped to device=switch1 and can hit switch1 endpoints.
-  Also cleans up the ACL fixture from the intf-isaac scenario.
+  Bob cleans up the ACL fixture intf-isaac unbound. Bob (ops) is
+  the only identity in this suite with `acl.delete`; dev-dora
+  (device-team) and mallory (no group) don't qualify. Runs between
+  intf-isaac and dev-dora so the dev-dora scenario starts with a
+  clean ACL_TABLE state.
 
 requires: [L5-dimensions-intf-isaac]
-as: dev-dora
+as: bob
 
 steps:
-  # ACL fixture cleanup (bob created it; dev-dora as device-team also
-  # has the requisite node write permissions for switch1).
-  - name: dev-dora-cleans-up-acl
+  - name: bob-cleans-up-acl
     action: newtron
     method: POST
     url: /nodes/switch1/delete-acl?mode=topology
     params: {name: acl-l5}
 
+---
+name: L5-dimensions-dev-dora
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. Dev-dora's portion of this
+  split-per-identity scenario covers the device dimension: dev-dora
+  in device-team is scoped to device=switch1 and can hit switch1
+  endpoints.
+
+requires: [L5-dimensions-bob-cleanup]
+as: dev-dora
+
+steps:
   # DEVICE dimension — dev-dora in device-team scoped to device=switch1
   # can hit switch1 endpoints; the scope-clause matches. setup-device
   # is the device.write representative that works in topology mode.

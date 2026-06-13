@@ -95,7 +95,13 @@ type Runner struct {
 	// runs steps in sequence within itself.
 	captured map[string]any
 
-	opts     RunOptions
+	opts RunOptions
+
+	// scenario is the currently-executing scenario, set by the
+	// iterateScenarios loop at the start of each scenario iteration
+	// and read by newtronExecutor.doCall for scenario.As. Sequential
+	// only — scenarios run one at a time per runner, so no goroutine
+	// reader races the writer.
 	scenario *Scenario
 }
 

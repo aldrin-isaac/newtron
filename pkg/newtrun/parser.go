@@ -36,7 +36,7 @@ func ParseScenario(path string) (*Scenario, error) {
 // write path (loadScenarioFiles); single-scenario endpoints reject
 // them so an operator who pastes a split-per-identity file body
 // into create-scenario sees the mistake immediately
-// (ai-instructions §13 same concept = same name; DPN §27).
+// (ai-instructions §13 same concept = same name).
 func ParseScenarioBytes(data []byte) (*Scenario, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var s Scenario

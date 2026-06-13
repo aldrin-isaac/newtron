@@ -25,15 +25,15 @@ each original scenario.
 |---|---|---|
 | `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `profiles/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
 | `10-L1-audit-log-entries` | L1 | Split into `-bob` + `-alice`: bob's ops group creates a QoS policy, then alice's spec-team creates her own and cleans up both. The audit log gains one entry per request with caller=alice/bob in the user field for the operator's post-suite inspection. |
-| `20-L3-spec-mutations-gated` | L3 | Split into `-mallory` + `-alice` + `-bob`. Per perm family (spec.author, qos.create, filter.create): denied caller (mallory) gets 403, allowed callers (alice/bob) succeed. Plus the empty-caller fail-closed check. |
-| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service`, `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. Also pins that the new `sessionkey.Middleware` doesn't break header-mode identity: a request with `Authorization: Bearer <anything>` plus `X-Newtron-Caller: alice` still resolves as alice. |
+| `20-L3-spec-mutations-gated` | L3 | Split into `-mallory` + `-bob` + `-alice` (bob's qos.create result is cleaned up by alice's broader qos.delete grant — bob runs first). Per perm family (spec.author, qos.create, filter.create): denied caller (mallory) gets 403, allowed callers (alice/bob) succeed. |
+| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service`, `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. A follow-up `create-zone` + cleanup with `X-Newtron-Caller: alice` proves the L2c plumbing (store init, route mount, middleware wire-up) is a transparent passthrough on the default request path when disabled. |
 | `26-L2c-round-trip` | L2c | The full session-key arc end-to-end: PAM-authenticated `/auth/login` mints a key; a mutation under `Authorization: Bearer <key>` succeeds; `/auth/logout` revokes; the same Bearer on the same mutation 401s. Requires PAM + a real OS account (see §"L2c round-trip operator setup"). Skipped by default — the suite's `alice_basic_auth` parameter is empty unless the operator supplies it. |
 | `30-L4-node-mutations-gated` | L4 | Split into `-mallory` + `-bob`. Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
 | `40-L5-resource-scoping` | L5 | Split into `-alice` + `-bob`. alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
 | `50-L6-audit-verify` | L6 | `bin/newtron audit verify /tmp/1node-vs-auth-audit.jsonl` walks the chain and confirms it's intact end-to-end. |
 | `60-L3-permission-families` | L3 | Split into `-root` + `-mallory` + `-alice`. Handler categories the original suite skips: super_user bypass (root sails through every check), profile/zone/topology mutations (gated on spec.author but routed through different handlers than services). |
 | `70-L4-permission-families` | L4 | Split into `-mallory` + `-bob` + `-alice`. Node-mutation perm families: lag.create (create-portchannel), evpn.modify (add-bgp-evpn-peer, prerequisite setup-device included), interface.modify (interface set-property), device.write (setup-device denied for mallory). |
-| `80-L5-dimensions` | L5 | Split into `-arch-anna` + `-iam-ian` + `-bob` + `-intf-isaac` + `-dev-dora` + `-mallory`. The three `where` dimensions beyond `resource`: **field** (architects scoped to `!permissions,!user_groups,!super_users` matches services but not the grant table itself — the §3 criterion 9 meta-authorization separation), **interface** (intf-isaac scoped to `interface: "Ethernet0"` can bind ACLs on Eth0 but is denied on Eth4), **device** (dev-dora scoped to `device: switch1` is allowed; mallory still denied without any group). |
+| `80-L5-dimensions` | L5 | Split into `-arch-anna` + `-iam-ian` + `-bob` + `-intf-isaac` + `-bob-cleanup` + `-dev-dora` + `-mallory` (bob is the only identity in the suite with `acl.delete`, so a bob-scoped cleanup scenario runs between intf-isaac and dev-dora). The three `where` dimensions beyond `resource`: **field** (architects scoped to `!permissions,!user_groups,!super_users` matches services but not the grant table itself — the §3 criterion 9 meta-authorization separation), **interface** (intf-isaac scoped to `interface: "Ethernet0"` can bind ACLs on Eth0 but is denied on Eth4), **device** (dev-dora scoped to `device: switch1` is allowed; mallory still denied without any group). |
 
 ## What it deliberately does NOT cover
 
@@ -109,11 +109,12 @@ bin/newtrun start 1node-vs-auth --no-deploy
 The `26-L2c-round-trip` scenario exercises a real PAM-authenticated
 `/auth/login`, so it needs three things the rest of the suite does not:
 
-**Single-mode workflow.** Per-step identity uses the runner's
-multi-user session cache (`as: <user>` on each step picks up the
-Bearer the operator pre-cached via `newtron auth login --user <user>`).
-The full suite runs cleanly in PAM-only mode in one server
-invocation; no header-mode/PAM-mode split is needed.
+**Single-mode workflow.** Per-scenario identity uses the runner's
+multi-user session cache (`as: <user>` at scenario scope picks up
+the Bearer the operator pre-cached via
+`newtron auth login --user <user>`). The full suite runs cleanly
+in PAM-only mode in one server invocation; no header-mode/PAM-mode
+split is needed.
 
 Two pieces wire this together:
 
@@ -226,7 +227,7 @@ bin/newtrun start 1node-vs-auth --no-deploy \
     --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
 ```
 
-All 11 scenarios pass in one server invocation. The `--target` form
+All scenarios pass in one server invocation. The `--target` form
 still works to run a dependency chain:
 
 ```sh
@@ -242,7 +243,7 @@ before).
 
 ## Expected outcome
 
-All 11 scenarios pass on first run. If any fail:
+All scenarios pass on first run. If any fail:
 
 - L3/L4 scenarios failing for an *allowed* caller → check
   `network.json` grants and operator's `--enforce-authorization` flag.

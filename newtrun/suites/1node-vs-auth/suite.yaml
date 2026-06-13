@@ -9,13 +9,15 @@ topology: 1node-vs-auth
 platform: sonic-vs
 
 # The L2c round-trip scenario (26-L2c-round-trip) needs PAM-verified
-# credentials at runtime. Operators pass the base64-encoded
-# "user:password" via --param alice_basic_auth=...; the suite stores
-# no plaintext. An empty default is fine because every other scenario
-# uses header-mode identity (X-Newtron-Caller) — only the L2c
-# round-trip touches this param, and the operator running it has
-# already provisioned the PAM stack + the matching OS account per
-# README §"L2c round-trip operator setup".
+# credentials at runtime to exercise the live /auth/login mint.
+# Operators pass the base64-encoded "user:password" via --param
+# alice_basic_auth=...; the suite stores no plaintext. An empty
+# default is fine because every other scenario authenticates via
+# the operator's pre-cached Bearer (PR C operator-Bearer-forward
+# + PR D scenario-level `as:`) — only the L2c round-trip touches
+# this param, and the operator running it has already provisioned
+# the PAM stack + the matching OS account per README §"L2c
+# round-trip operator setup".
 parameters:
   alice_basic_auth:
     type: string
