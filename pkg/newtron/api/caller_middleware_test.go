@@ -176,7 +176,7 @@ func TestCallerMiddleware_PAMUsernameYieldsVerifiedCaller(t *testing.T) {
 }
 
 // TestCallerMiddleware_SessionKeyYieldsVerifiedCaller pins the L2c
-// path: when withSessionKey middleware has attached a username to
+// path: when sessionkey.Middleware has attached a username to
 // context via a valid Bearer lookup, callerMiddleware reads it and
 // records VerificationSessionKey.
 func TestCallerMiddleware_SessionKeyYieldsVerifiedCaller(t *testing.T) {

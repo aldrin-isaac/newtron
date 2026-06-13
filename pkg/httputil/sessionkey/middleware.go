@@ -1,6 +1,7 @@
 package sessionkey
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -28,7 +29,7 @@ import (
 //
 // When store is nil the middleware is a transparent passthrough —
 // L2c disabled. Mirrors the PAMMiddleware nil-passthrough contract
-// for the auth-design.md §2.4 "every layer enable/disable-able"
+// for the auth-design.md §L2c "every layer enable/disable-able"
 // guarantee.
 func Middleware(store *Store) func(http.Handler) http.Handler {
 	if store == nil {
@@ -63,10 +64,11 @@ func Middleware(store *Store) func(http.Handler) http.Handler {
 // the token is trimmed so a request with a trailing space doesn't
 // 401.
 //
-// Exported via the unexported name and used by handlers.go (logout)
-// for the same Bearer-header parse. Keeping it package-private
-// rather than re-exposing on httputil — every consumer of the
-// session-key Bearer is inside this package.
+// Package-private. Reused by handlers.go's LogoutHandler for the
+// same Bearer-header parse. Not promoted to httputil because every
+// consumer of the session-key Bearer is inside this package — a
+// cmd/ that mounts only Middleware uses bearerToken transitively
+// through Middleware's own call.
 func bearerToken(r *http.Request) (string, bool) {
 	h := r.Header.Get("Authorization")
 	if h == "" {
@@ -77,4 +79,41 @@ func bearerToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(h[len(prefix):]), true
+}
+
+// usernameContextKey is the request-context key under which a
+// session-key-verified username is attached by Middleware.
+// Unexported — UsernameFromContext is the only public reader; no
+// downstream code should peek at the raw key.
+type usernameContextKey struct{}
+
+// withUsername attaches a session-key-verified username to ctx.
+// Used only by Middleware on a successful Bearer lookup; never
+// set by handler code.
+func withUsername(ctx context.Context, u string) context.Context {
+	return context.WithValue(ctx, usernameContextKey{}, u)
+}
+
+// UsernameFromContext returns the username verified by a session-
+// key Bearer lookup on this request, or empty when no such lookup
+// ran or the lookup failed. Read by downstream caller-extraction
+// middleware (e.g. newtron's callerMiddleware) to populate the
+// audit.Caller with verification_source=session_key.
+func UsernameFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	u, _ := ctx.Value(usernameContextKey{}).(string)
+	return u
+}
+
+// WithUsernameForTest attaches u to ctx using the same internal
+// key UsernameFromContext reads. Test-only: production code
+// receives the verified session-key username through Middleware's
+// successful Lookup path. Exposed so tests in sibling packages
+// (e.g. newtron's callerMiddleware tests) can simulate "the
+// session-key middleware resolved this Bearer to this username"
+// without standing up a store.
+func WithUsernameForTest(ctx context.Context, u string) context.Context {
+	return withUsername(ctx, u)
 }

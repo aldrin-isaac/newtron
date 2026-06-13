@@ -27,6 +27,12 @@ type LoginResponse struct {
 // PAMMiddleware upstream so the verified username is on the
 // request context by the time control reaches the handler.
 //
+// Middleware runs upstream of PAMMiddleware in the chain (it has
+// to — successful Bearer lookups must short-circuit PAM's Basic
+// challenge). A /auth/login request has no Bearer header by
+// definition, so Middleware passes through and PAM authenticates.
+// LoginHandler then reads the PAM-verified username.
+//
 // Flow:
 //
 //  1. Reach this handler only after PAMMiddleware accepted Basic
