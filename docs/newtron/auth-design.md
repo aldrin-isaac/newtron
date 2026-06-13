@@ -468,6 +468,32 @@ context tagged `VerificationSessionKey`. `callerMiddleware` picks it
 up exactly the way it picks up `VerificationPAM`. L3/L4/L5 gating and
 L1 audit logging behave identically — the user is the user.
 
+**Identity forwarding through engines.** When the operator's
+inbound request reaches an engine that itself makes outbound
+HTTP calls to a sibling engine, the engine forwards the same
+Bearer rather than minting its own. Today this matters for the
+newtrun runner: every `POST /newtrun/v1/runs` carries the
+operator's Bearer; `pkg/newtrun/api/runs.go` extracts the key via
+`sessionkey.BearerToken` and assigns it to
+`Runner.OperatorBearer`; the runner's outbound newtron client
+attaches `Authorization: Bearer <key>` on every call via
+`pkg/newtron/client.WithBearer`. The composed `newt-server`
+outer middleware verifies the same key again on the in-process
+loopback, attaches the same username to the request context, and
+the newtron engine's `callerMiddleware` tags `audit.Caller`
+identically. The operator's identity is the runner's identity;
+the runner has no daemon-side credential of its own.
+
+Per-step `as: <user>` in a scenario overrides this default per
+request via the multi-user session cache (`Runner.UserSessions`)
+populated by the CLI at start-run time. The scenario engine
+attaches `Authorization: Bearer <other-user-key>` as a
+per-request header that the `bearerRoundTripper` respects,
+short-circuiting the default Bearer for that one call. This is
+how the 1node-vs-auth suite drives authorization-by-identity
+tests (alice allowed, mallory denied) without dropping back to
+self-attested headers.
+
 **Storage model.** In-memory `map[key]→{user, expires_at}` protected
 by a mutex, with a background sweeper that drops expired entries. No
 disk persistence: a server restart invalidates all keys. This is
@@ -566,6 +592,16 @@ newtron-specific concepts. New audit verification source
 `--auth-pam-service` (L2b) and `--session-key-ttl` (L2c, default
 `8h`) live on `cmd/newt-server`. Operational howto entry in
 `docs/newtron/pam-howto.md` covering the login/logout flow.
+
+Identity-forwarding surface: `sessionkey.BearerToken(authHeader)
+(token, ok)` is the single parser of the wire shape — used by
+`sessionkey.Middleware` on the inbound side and by
+`pkg/newtrun/api/runs.go:operatorBearer` to populate
+`pkg/newtrun.Runner.OperatorBearer` on the outbound side.
+`pkg/newtron/client.WithBearer(key)` is the outbound attach
+point; the underlying `bearerRoundTripper` respects any
+caller-set Authorization header so per-step `as: <user>`
+overrides compose cleanly with the default-Bearer layer.
 
 **Independent value.** Cuts per-request PAM cost from "directory hit
 every call" to "directory hit per session." Unblocks browser clients

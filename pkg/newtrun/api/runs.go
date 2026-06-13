@@ -316,7 +316,6 @@ func operatorBearer(r *http.Request) string {
 	return key
 }
 
-
 // handleStartInlineRun accepts a scenario YAML in the request body, validates
 // it against the inline safety policy, and spawns a server-side run keyed by
 // a freshly-allocated UUID. The UUID is namespaced separately from the suite

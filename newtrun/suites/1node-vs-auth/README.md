@@ -180,11 +180,14 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
   header path needed.
 - Adjust `--session-key-ttl` if you want a TTL other than the
   default 8h.
-- The runner no longer needs daemon-side credentials. Whoever
-  submits the run (`bin/newtrun start ...` with `NEWTRON_USER` set,
-  or any other consumer hitting `/newtrun/v1/runs`) carries an
-  Authorization Bearer that the runner forwards on every newtron
-  call. The runner's identity IS the operator's.
+- The runner's identity is the operator's identity. Whoever
+  submits the run (`bin/newtrun start ...` with `NEWTRON_USER`
+  set, or any other consumer hitting `/newtrun/v1/runs`) carries
+  an Authorization Bearer; the runner extracts it from the
+  inbound request and attaches it on every outbound newtron call.
+  Per-step `as: <user>` in a scenario switches to that user's
+  cached Bearer for the one step (the multi-user session cache
+  the operator populated via `login-all.sh`).
 
 ### 4. Pre-cache a session for every test identity
 

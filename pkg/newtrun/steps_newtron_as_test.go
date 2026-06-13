@@ -126,3 +126,47 @@ func TestNewtronExecutor_NoAsLeavesClientCredential(t *testing.T) {
 		t.Errorf("Authorization header = %q, want empty for step without as:", got)
 	}
 }
+
+// TestNewtronExecutor_NoAsForwardsOperatorBearer pins the
+// engine-composition refactor (PR C) operator-Bearer-forward
+// flow (auth-design.md §L2c "Identity forwarding through
+// engines"). A runner whose newtron client was built with
+// WithBearer("operator-key") — the production setup after
+// pkg/newtrun/api/runs.go assigns the inbound request's Bearer
+// to runner.OperatorBearer — must attach
+// `Authorization: Bearer operator-key` on a step that doesn't
+// specify `as:`. This is the default-credential layer; the
+// per-step override layer is tested separately above.
+func TestNewtronExecutor_NoAsForwardsOperatorBearer(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		gotAuth string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"data":null}`))
+	}))
+	defer srv.Close()
+
+	r := &Runner{
+		Client: client.New(srv.URL, "net-1", client.WithBearer("operator-key")),
+	}
+	step := &Step{
+		Action: ActionNewtron,
+		Method: "POST",
+		URL:    "/create-vlan",
+	}
+	exec := &newtronExecutor{}
+	output := exec.Execute(t.Context(), r, step)
+	if output.Result.Status != StepStatusPassed {
+		t.Fatalf("status = %v, message = %q", output.Result.Status, output.Result.Message)
+	}
+	mu.Lock()
+	got := gotAuth
+	mu.Unlock()
+	if got != "Bearer operator-key" {
+		t.Errorf("Authorization header = %q, want %q", got, "Bearer operator-key")
+	}
+}
