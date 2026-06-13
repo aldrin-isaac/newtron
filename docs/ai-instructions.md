@@ -97,6 +97,17 @@ hard "no, this is not a hack" is acceptable.
   names, comments, documentation, and string literals. Zero occurrences is
   the only acceptable result. Every surviving instance of the old term is a
   lie about the system's design.
+- **Verify code-path relocations cross-doc, not just in-diff.** When code
+  moves between packages or files, a stale-name grep only catches docs that
+  named the old symbol. It misses docs that enumerate code paths by
+  *parent directory* without ever naming the moved symbol (e.g., a
+  "Cross-references" section that listed `pkg/foo/auth.go` and
+  `pkg/foo/bar.go` but not the new `pkg/baz/`). After every code-path
+  relocation, additionally `grep docs/` for the old package path AND for
+  every parent directory of the new path; audit every hit for completeness
+  against the post-relocation reality. The file in the diff getting
+  updated is necessary but not sufficient — sibling docs that touch the
+  same surface are part of the rename.
 
 ---
 
