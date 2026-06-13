@@ -103,7 +103,8 @@ type ValidationBuilder struct {
 	errors []string
 }
 
-// Add adds an error message if condition is false
+// Add adds an error message if condition is false. Used by the
+// spec loader to express required-field checks as a fluent chain.
 func (v *ValidationBuilder) Add(condition bool, message string) *ValidationBuilder {
 	if !condition {
 		v.errors = append(v.errors, message)
@@ -111,21 +112,10 @@ func (v *ValidationBuilder) Add(condition bool, message string) *ValidationBuild
 	return v
 }
 
-// AddError adds an error message unconditionally
-func (v *ValidationBuilder) AddError(message string) *ValidationBuilder {
-	v.errors = append(v.errors, message)
-	return v
-}
-
 // AddErrorf adds a formatted error message
 func (v *ValidationBuilder) AddErrorf(format string, args ...interface{}) *ValidationBuilder {
 	v.errors = append(v.errors, fmt.Sprintf(format, args...))
 	return v
-}
-
-// HasErrors returns true if there are validation errors
-func (v *ValidationBuilder) HasErrors() bool {
-	return len(v.errors) > 0
 }
 
 // Build returns the validation error or nil if no errors

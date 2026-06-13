@@ -2086,7 +2086,10 @@ Operations call these functions and wrap the result:
 ```go
 func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, error) {
     return n.op("create-vlan", vlanName, ChangeAdd,
-        func(pc *PreconditionChecker) { pc.RequireVLANNotExists(vlanID) },
+        func(pc *PreconditionChecker) {
+            pc.Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID",
+                fmt.Sprintf("must be 1-4094, got %d", vlanID))
+        },
         func() []sonic.Entry { return createVlanConfig(vlanID, opts) },
     )
 }

@@ -17,34 +17,16 @@ import (
 // correlate a single hop.
 var requestID atomic.Uint64
 
-// contextKey is a private type for request-scoped values to avoid
-// collisions with keys defined in other packages.
-type contextKey string
-
-// reqIDKey holds the request ID in the request context. Exported via
-// RequestIDFromContext so handlers can include the ID in their own
-// logs if they want.
-const reqIDKey contextKey = "request_id"
-
-// RequestID adds a monotonically-increasing request ID to the request
-// context and to the X-Request-ID response header. Use it as the
-// outermost middleware so every other layer can read the ID.
+// RequestID adds a monotonically-increasing request ID to the
+// X-Request-ID response header. Use it as the outermost middleware
+// so the header is set on every response, including those from
+// later middleware that short-circuits with an error.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestID.Add(1)
-		ctx := context.WithValue(r.Context(), reqIDKey, id)
 		w.Header().Set("X-Request-ID", strconv.FormatUint(id, 10))
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r)
 	})
-}
-
-// RequestIDFromContext returns the request ID set by RequestID, or 0
-// if the middleware did not run.
-func RequestIDFromContext(ctx context.Context) uint64 {
-	if id, ok := ctx.Value(reqIDKey).(uint64); ok {
-		return id
-	}
-	return 0
 }
 
 // Logger logs every request after it completes. Method, path, status,

@@ -1,7 +1,6 @@
 package newtrun
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -114,24 +113,6 @@ func TestLoadAnyRunStateChecksBothNamespaces(t *testing.T) {
 	}
 	if got, _ := LoadAnyRunState("nope"); got != nil {
 		t.Errorf("LoadAnyRunState(nope): got %+v, want nil", got)
-	}
-}
-
-func TestRemoveInlineRunState(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	state := &RunState{Suite: "to-remove", Status: SuiteStatusComplete}
-	if err := SaveInlineRunState(state); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if err := RemoveInlineRunState("to-remove"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-
-	dir, _ := InlineStateDir("to-remove")
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("inline dir still present after Remove: %v", err)
 	}
 }
 

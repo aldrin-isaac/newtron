@@ -8,7 +8,7 @@
 // Persistence: <suites-base>/<suite>/<name>.yaml. Writes go through a
 // same-directory tempfile + rename, which is atomic on POSIX
 // filesystems — a partially-written scenario can never be observed by
-// a concurrent ParseAllScenarios.
+// a concurrent suite-loader read.
 package api
 
 import (
@@ -57,8 +57,8 @@ func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 //
 // Atomicity: the new content is written to a same-directory tempfile
 // and renamed into place. rename(2) is atomic on POSIX so concurrent
-// readers (ParseAllScenarios, GET requests) never observe a
-// partially-written scenario.
+// readers (suite-loader, GET requests) never observe a partially-
+// written scenario.
 //
 // File naming: a fresh scenario lands at <name>.yaml. An update to an
 // existing scenario keeps its original on-disk name (preserving any

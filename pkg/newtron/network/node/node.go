@@ -1357,20 +1357,3 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	return nil
 }
 
-// ============================================================================
-// Test Helpers
-// ============================================================================
-
-// NewTestNode creates a Node with pre-configured ConfigDB state for testing.
-// This is intended for use by external test packages (e.g., operations_test)
-// that need to construct Devices without connecting to real SONiC hardware.
-func NewTestNode(name string, configDB *sonic.ConfigDB, connected, locked bool) *Node {
-	return &Node{
-		name:       name,
-		configDB:   configDB,
-		connected:  connected,
-		locked:     locked,
-		interfaces: make(map[string]*Interface),
-		resolved:   &spec.ResolvedProfile{DeviceName: name},
-	}
-}

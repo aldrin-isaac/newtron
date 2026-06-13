@@ -15,13 +15,7 @@ func TestRegistryAcquireReleaseRoundTrip(t *testing.T) {
 	if ctx == nil {
 		t.Fatal("Acquire returned nil context")
 	}
-	if got := r.ActiveCount(); got != 1 {
-		t.Errorf("ActiveCount after Acquire = %d, want 1", got)
-	}
 	release()
-	if got := r.ActiveCount(); got != 0 {
-		t.Errorf("ActiveCount after release = %d, want 0", got)
-	}
 }
 
 func TestRegistryRejectsConcurrentDeployOfSameTopology(t *testing.T) {
@@ -57,9 +51,6 @@ func TestRegistryAllowsConcurrentDeploysOfDifferentTopologies(t *testing.T) {
 		t.Fatalf("Acquire topo-b: %v", err)
 	}
 	defer r2()
-	if got := r.ActiveCount(); got != 2 {
-		t.Errorf("ActiveCount = %d, want 2", got)
-	}
 }
 
 func TestRegistryReleaseTwiceIsSafe(t *testing.T) {
@@ -70,9 +61,6 @@ func TestRegistryReleaseTwiceIsSafe(t *testing.T) {
 	}
 	release()
 	release() // must not panic or affect a re-acquired entry
-	if got := r.ActiveCount(); got != 0 {
-		t.Errorf("ActiveCount = %d, want 0", got)
-	}
 }
 
 func TestRegistryCancelAllSignalsAllInFlightContexts(t *testing.T) {

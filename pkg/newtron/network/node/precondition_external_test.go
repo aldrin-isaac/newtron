@@ -10,7 +10,7 @@ import (
 
 // testNode creates a minimal Node for precondition testing.
 func testNode(configDB *sonic.ConfigDB, connected, locked bool) *node.Node {
-	return node.NewTestNode("test-leaf", configDB, connected, locked)
+	return node.NewNodeForTest("test-leaf", configDB, connected, locked)
 }
 
 // emptyConfigDB creates a ConfigDB with all maps initialized to empty.
@@ -97,20 +97,10 @@ func TestPreconditionChecker_ChainedChecks_AllPass(t *testing.T) {
 
 func TestPreconditionChecker_ChainedChecks_MultipleFailures(t *testing.T) {
 	dev := testNode(emptyConfigDB(), false, false)
-	checker := node.NewPreconditionChecker(dev, "test-op", "test-res").
+	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireConnected().
-		RequireLocked()
-
-	if !checker.HasErrors() {
-		t.Error("HasErrors should be true")
-	}
-
-	errs := checker.Errors()
-	if len(errs) != 2 {
-		t.Errorf("expected 2 errors, got %d", len(errs))
-	}
-
-	err := checker.Result()
+		RequireLocked().
+		Result()
 	if err == nil {
 		t.Error("Result should return error for multiple failures")
 	}
@@ -138,30 +128,6 @@ func TestPreconditionChecker_RequireVLANExists_Fail(t *testing.T) {
 		Result()
 	if err == nil {
 		t.Error("RequireVLANExists should fail for missing VLAN")
-	}
-}
-
-func TestPreconditionChecker_RequireVLANNotExists_Pass(t *testing.T) {
-	dev := testNode(emptyConfigDB(), true, false)
-	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireVLANNotExists(100).
-		Result()
-	if err != nil {
-		t.Errorf("RequireVLANNotExists should pass: %v", err)
-	}
-}
-
-func TestPreconditionChecker_RequireVLANNotExists_Fail(t *testing.T) {
-	// Preconditions check the intent DB — populate it to simulate an existing VLAN.
-	db := emptyConfigDB()
-	db.NewtronIntent["vlan|100"] = map[string]string{"op": "create-vlan", "vlan_id": "100"}
-	dev := testNode(db, true, false)
-
-	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireVLANNotExists(100).
-		Result()
-	if err == nil {
-		t.Error("RequireVLANNotExists should fail for existing VLAN")
 	}
 }
 
@@ -296,19 +262,8 @@ func TestPreconditionChecker_CustomCheck(t *testing.T) {
 
 func TestPreconditionChecker_NoErrors(t *testing.T) {
 	dev := testNode(emptyConfigDB(), true, true)
-	checker := node.NewPreconditionChecker(dev, "test-op", "test-res")
-
-	if checker.HasErrors() {
-		t.Error("new checker should not have errors")
-	}
-
-	err := checker.Result()
+	err := node.NewPreconditionChecker(dev, "test-op", "test-res").Result()
 	if err != nil {
 		t.Errorf("Result should be nil with no checks: %v", err)
-	}
-
-	errs := checker.Errors()
-	if len(errs) != 0 {
-		t.Errorf("Errors should be empty: %v", errs)
 	}
 }

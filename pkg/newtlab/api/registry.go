@@ -103,9 +103,3 @@ func (r *DeployRegistry) CancelAll(maxWait time.Duration) {
 	}
 }
 
-// ActiveCount returns the number of in-flight deploys.
-func (r *DeployRegistry) ActiveCount() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.entries)
-}

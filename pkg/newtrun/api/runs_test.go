@@ -77,7 +77,7 @@ func TestStartRunSameSuiteRejected409(t *testing.T) {
 
 	// Pre-acquire the suite key directly via the registry so we don't have
 	// to invoke a real scenario run.
-	_, err := srv.Registry().Acquire("blocked-suite")
+	_, err := srv.registry.Acquire("blocked-suite")
 	if err != nil {
 		t.Fatalf("pre-Acquire: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestStartRunReturns202AndRegistersEntry(t *testing.T) {
 	// Give the goroutine a moment to register; then verify registry tracks it.
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if srv.Registry().Get("blocked-suite") != nil {
+		if srv.registry.Get("blocked-suite") != nil {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -285,10 +285,10 @@ func TestStopRunCallsRegistryCancel(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	entry, _ := srv.Registry().Acquire("cancel-target")
+	entry, _ := srv.registry.Acquire("cancel-target")
 	canceled := false
 	entry.Cancel = func() { canceled = true }
-	defer srv.Registry().Release("cancel-target", &RunResult{})
+	defer srv.registry.Release("cancel-target", &RunResult{})
 
 	resp, err := http.Post(ts.URL+"/newtrun/v1/runs/cancel-target/stop", "application/json", nil)
 	if err != nil {
@@ -309,8 +309,8 @@ func TestDeleteRunRejectsActiveRun(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
-	_, _ = srv.Registry().Acquire("active")
-	defer srv.Registry().Release("active", &RunResult{})
+	_, _ = srv.registry.Acquire("active")
+	defer srv.registry.Release("active", &RunResult{})
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/newtrun/v1/runs/active", nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -363,8 +363,8 @@ func TestPauseRunWritesPausingStatus(t *testing.T) {
 
 	// An active run must exist in the registry for the pause endpoint to
 	// accept it; a state file must exist for it to update.
-	_, _ = srv.Registry().Acquire("paused-target")
-	defer srv.Registry().Release("paused-target", &RunResult{})
+	_, _ = srv.registry.Acquire("paused-target")
+	defer srv.registry.Release("paused-target", &RunResult{})
 
 	state := &newtrun.RunState{Suite: "paused-target", Status: newtrun.SuiteStatusRunning}
 	if err := newtrun.SaveRunState(state); err != nil {
@@ -390,14 +390,14 @@ func TestServerStopCancelsInFlightRuns(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
 
-	entry, _ := srv.Registry().Acquire("running")
+	entry, _ := srv.registry.Acquire("running")
 	canceled := make(chan struct{})
 	entry.Cancel = func() { close(canceled) }
 
 	// Simulate the run goroutine completing after cancellation.
 	go func() {
 		<-canceled
-		srv.Registry().Release("running", &RunResult{})
+		srv.registry.Release("running", &RunResult{})
 	}()
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -139,16 +139,6 @@ func NewServer(cfg Config) *Server {
 	return s
 }
 
-// Broker exposes the server's event broker.
-func (s *Server) Broker() *httputil.Broker[Event] {
-	return s.broker
-}
-
-// Registry exposes the run registry.
-func (s *Server) Registry() *RunRegistry {
-	return s.registry
-}
-
 // Handler returns the fully-wired http.Handler. Used by external CLI
 // E2E tests to mount the real server into an httptest.Server without
 // spawning a subprocess.

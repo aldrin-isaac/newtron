@@ -485,6 +485,10 @@ func TestSchema_KnownTables(t *testing.T) {
 	}
 
 	// Verify critical tables are present
+	tableSet := make(map[string]bool, len(tables))
+	for _, t2 := range tables {
+		tableSet[t2] = true
+	}
 	required := []string{
 		"VLAN", "VLAN_MEMBER", "VLAN_INTERFACE", "VRF", "INTERFACE",
 		"BGP_GLOBALS", "BGP_NEIGHBOR", "BGP_NEIGHBOR_AF",
@@ -493,7 +497,7 @@ func TestSchema_KnownTables(t *testing.T) {
 		"NEWTRON_INTENT", "ROUTE_MAP", "PREFIX_SET",
 	}
 	for _, r := range required {
-		if !IsKnownTable(r) {
+		if !tableSet[r] {
 			t.Errorf("required table %s missing from schema", r)
 		}
 	}

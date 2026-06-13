@@ -100,18 +100,6 @@ func (r *RunRegistry) Get(key string) *RegistryEntry {
 	return r.entries[key]
 }
 
-// Keys returns the keys of all in-flight runs. Used by graceful shutdown
-// to cancel everything.
-func (r *RunRegistry) Keys() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	keys := make([]string, 0, len(r.entries))
-	for k := range r.entries {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // CancelAll cancels every in-flight run and waits up to the given timeout
 // for each to drain. Used by Server.Stop for graceful shutdown.
 func (r *RunRegistry) CancelAll(timeout time.Duration) {

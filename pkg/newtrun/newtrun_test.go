@@ -126,40 +126,6 @@ steps:
 	}
 }
 
-func TestParseAllScenarios(t *testing.T) {
-	dir := t.TempDir()
-
-	// Write two scenario files
-	for _, name := range []string{"a.yaml", "b.yaml"} {
-		content := `
-name: ` + name + `
-description: test
-topology: 2node-ngdp
-platform: sonic-vs
-steps:
-  - name: wait
-    action: wait
-    duration: 1s
-`
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Non-yaml file should be ignored
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("ignore me"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	scenarios, err := ParseAllScenarios(dir)
-	if err != nil {
-		t.Fatalf("ParseAllScenarios error: %v", err)
-	}
-	if len(scenarios) != 2 {
-		t.Errorf("len(scenarios) = %d, want 2", len(scenarios))
-	}
-}
-
 // ============================================================================
 // Validator Tests
 // ============================================================================
@@ -440,85 +406,6 @@ func TestValidateDependencyGraph_SelfRequires(t *testing.T) {
 // ============================================================================
 // Dependency Graph from YAML Tests
 // ============================================================================
-
-func TestParseAndSortScenariosWithRequires(t *testing.T) {
-	dir := t.TempDir()
-
-	writeScenario(t, dir, "01-a.yaml", `
-name: a
-description: first
-topology: 2node-ngdp
-platform: sonic-vpp
-steps:
-  - name: wait
-    action: wait
-    duration: 1s
-`)
-	writeScenario(t, dir, "02-b.yaml", `
-name: b
-description: second
-topology: 2node-ngdp
-platform: sonic-vpp
-requires: [a]
-steps:
-  - name: wait
-    action: wait
-    duration: 1s
-`)
-
-	scenarios, err := ParseAllScenarios(dir)
-	if err != nil {
-		t.Fatalf("ParseAllScenarios error: %v", err)
-	}
-	sorted, err := ValidateDependencyGraph(scenarios)
-	if err != nil {
-		t.Fatalf("ValidateDependencyGraph error: %v", err)
-	}
-	if len(sorted) != 2 {
-		t.Fatalf("expected 2 scenarios, got %d", len(sorted))
-	}
-	if sorted[0].Name != "a" {
-		t.Errorf("first scenario should be 'a', got %q", sorted[0].Name)
-	}
-	if sorted[1].Name != "b" {
-		t.Errorf("second scenario should be 'b', got %q", sorted[1].Name)
-	}
-}
-
-func TestParseScenariosWithCycleError(t *testing.T) {
-	dir := t.TempDir()
-
-	writeScenario(t, dir, "a.yaml", `
-name: a
-description: first
-topology: 2node-ngdp
-platform: sonic-vpp
-requires: [b]
-steps:
-  - name: wait
-    action: wait
-    duration: 1s
-`)
-	writeScenario(t, dir, "b.yaml", `
-name: b
-description: second
-topology: 2node-ngdp
-platform: sonic-vpp
-requires: [a]
-steps:
-  - name: wait
-    action: wait
-    duration: 1s
-`)
-
-	scenarios, err := ParseAllScenarios(dir)
-	if err != nil {
-		t.Fatalf("ParseAllScenarios error: %v", err)
-	}
-	if _, err := ValidateDependencyGraph(scenarios); err == nil {
-		t.Fatal("expected cycle error")
-	}
-}
 
 // ============================================================================
 // Target Chain Tests

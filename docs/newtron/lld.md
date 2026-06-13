@@ -1376,15 +1376,15 @@ func createVlanConfig(vlanID int, description string) []sonic.Entry {
 **Layer 2 — `op()` wrapper** (in `changeset.go`): Runs preconditions, calls the generator, builds the ChangeSet, calls `render(cs)` to validate and update the projection.
 
 ```go
-cs, err := n.op("create-vlan", "vlan|100", sonic.ChangeTypeAdd,
-    func() error {
-        return n.precondition("create-vlan", "vlan|100").
-            RequireVLANNotExists(100).
-            Result()
+cs, err := n.op(sonic.OpCreateVLAN, vlanResource(100), ChangeAdd,
+    func(pc *PreconditionChecker) {
+        pc.Check(100 >= 1 && 100 <= 4094, "valid VLAN ID",
+            "must be 1-4094, got 100")
     },
-    func() ([]sonic.Entry, error) {
-        return createVlanConfig(100, "servers"), nil
+    func() []sonic.Entry {
+        return createVlanConfig(100, opts)
     },
+    "device.delete-vlan",
 )
 ```
 
@@ -1428,8 +1428,8 @@ Tracing `POST /newtron/v1/networks/default/node/leaf1/create-vlan` with `{"id": 
    fn(ctx) → CreateVLAN(ctx, 100, opts):
      GetIntent("vlan|100") → nil (not yet created)
 
-     op("create-vlan", "vlan|100", ChangeTypeAdd, ...):
-       precondition: RequireVLANNotExists(100) → GetIntent("vlan|100") → nil ✓
+     op(OpCreateVLAN, "vlan|100", ChangeAdd, ...):
+       precondition: Check(100 in 1..4094, "valid VLAN ID") ✓
        gen: createVlanConfig(100, "servers") → [
          {VLAN, "Vlan100", {vlanid: "100", description: "servers"}}
        ]
@@ -1460,9 +1460,8 @@ Tracing `POST /newtron/v1/networks/default/node/leaf1/create-vlan` with `{"id": 
 Fluent builder that validates operation prerequisites against the intent DB. Created by `precondition(operation, resource)` — in actuated mode, `RequireConnected` and `RequireLocked` are automatically added.
 
 ```go
-n.precondition("create-vlan", "vlan|100").
-    RequireVLANNotExists(100).
-    RequireInterfaceNotPortChannelMember("Ethernet0").
+n.precondition("delete-vlan", "vlan|100").
+    RequireVLANExists(100).
     Result()
 ```
 
@@ -1474,8 +1473,8 @@ n.precondition("create-vlan", "vlan|100").
 | `RequireLocked()` | Device lock held |
 | `RequireInterfaceExists(name)` | Interface registered in node |
 | `RequireInterfaceNotPortChannelMember(name)` | No portchannel intent claims this interface |
-| `RequireVLANExists(id)` / `RequireVLANNotExists(id)` | Intent `vlan\|{id}` exists/absent |
-| `RequireVRFExists(name)` / `RequireVRFNotExists(name)` | Intent `vrf\|{name}` exists/absent |
+| `RequireVLANExists(id)` | Intent `vlan\|{id}` exists (for delete/modify) |
+| `RequireVRFExists(name)` | Intent `vrf\|{name}` exists (for delete/modify) |
 | `RequirePortChannelExists(name)` / `RequirePortChannelNotExists(name)` | Intent for portchannel exists/absent |
 | `RequireVTEPConfigured()` | Intent `vtep` exists (VXLAN tunnel set up) |
 | `RequireACLTableExists(name)` / `RequireACLTableNotExists(name)` | Intent for ACL table exists/absent |

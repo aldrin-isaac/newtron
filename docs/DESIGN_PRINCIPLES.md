@@ -2155,7 +2155,7 @@ Operations call these functions and wrap the result:
 ```
 function Node.CreateVLAN(vlanID, ...):
     return this.op("create-vlan", vlanName, ChangeAdd,
-        preconditions: { RequireVLANNotExists(vlanID) },
+        preconditions: { Check(vlanID in 1..4094, "valid VLAN ID") },
         generator:     { return createVlanConfig(vlanID, opts) },
     )
 ```

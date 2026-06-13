@@ -270,15 +270,6 @@ func LoadInlineRunState(id string) (*RunState, error) {
 	return loadStateAt(dir)
 }
 
-// RemoveInlineRunState deletes the inline-run state directory.
-func RemoveInlineRunState(id string) error {
-	dir, err := InlineStateDir(id)
-	if err != nil {
-		return err
-	}
-	return os.RemoveAll(dir)
-}
-
 // LoadAnyRunState looks for a run state under the inline namespace first,
 // then the suite namespace. Returns whichever is found. Callers use this
 // when they don't know whether the ID is a suite name or an inline UUID

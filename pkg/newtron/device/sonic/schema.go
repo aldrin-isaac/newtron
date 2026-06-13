@@ -604,29 +604,6 @@ func tcToQueueMapFields() map[string]FieldConstraint {
 	return fields
 }
 
-// ValidateChange checks a single ConfigChange against the schema.
-// Delete operations validate key format only. Add/Modify validate key + fields.
-// Returns nil if the table is not in the schema (unknown tables are rejected
-// by ValidateChangeSet, not here).
-func ValidateChange(c ConfigChange) error {
-	schema, ok := Schema[c.Table]
-	if !ok {
-		return nil
-	}
-
-	if c.Type == ChangeTypeDelete {
-		// Deletes only need key format validation
-		if schema.KeyPattern != "" {
-			if matched, _ := regexp.MatchString(schema.KeyPattern, c.Key); !matched {
-				return fmt.Errorf("%s|%s: invalid key format (must match %s)", c.Table, c.Key, schema.KeyPattern)
-			}
-		}
-		return nil
-	}
-
-	return schema.ValidateEntry(c.Table, c.Key, c.Fields)
-}
-
 // ValidateChanges checks a slice of ConfigChanges against the schema.
 // Returns all violations as a single ValidationError, or nil if valid.
 // Unknown tables cause a validation error. Unknown fields cause a validation error.
@@ -696,12 +673,6 @@ func init() {
 			}
 		}
 	}
-}
-
-// IsKnownTable returns true if the table has a schema entry.
-func IsKnownTable(table string) bool {
-	_, ok := Schema[table]
-	return ok
 }
 
 // KnownTables returns all table names with schema entries, sorted.
