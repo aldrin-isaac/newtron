@@ -2,44 +2,12 @@ package util
 
 import "strings"
 
-// SplitCommaSeparated splits a comma-separated string and trims whitespace from each element.
-// Empty input returns nil.
-func SplitCommaSeparated(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}
-
 // CapitalizeFirst returns s with the first letter uppercased.
 func CapitalizeFirst(s string) string {
 	if s == "" {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-// AddToCSV adds a value to a comma-separated list if not already present.
-// Returns the value itself if the list is empty.
-func AddToCSV(list, value string) string {
-	if list == "" {
-		return value
-	}
-	parts := strings.Split(list, ",")
-	for _, p := range parts {
-		if strings.TrimSpace(p) == value {
-			return list // Already in list
-		}
-	}
-	return list + "," + value
 }
 
 // RemoveFromCSV removes a value from a comma-separated list.

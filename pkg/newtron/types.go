@@ -786,78 +786,6 @@ type RoutePolicyRuleEntry struct {
 // Intent Types — Unified Intent Model (§39)
 // ============================================================================
 
-// IntentState represents the lifecycle state of an intent.
-type IntentState string
-
-const (
-	// IntentUnrealized means the intent has been declared but not yet
-	// applied to the device. Topology imports create unrealized intents.
-	IntentUnrealized IntentState = "unrealized"
-
-	// IntentInFlight means actuation has begun — CONFIG_DB writes are
-	// in progress. If the process crashes in this state, the intent is
-	// a zombie (crash recovery via rollback or force-complete).
-	IntentInFlight IntentState = "in-flight"
-
-	// IntentActuated means all operations completed successfully and
-	// the intent is fully realized on the device.
-	IntentActuated IntentState = "actuated"
-)
-
-// Intent is the fundamental unit of the domain model. It binds a desired
-// state to a device resource — an interface, a subsystem (BGP, EVPN), or
-// a device-wide concern (loopback, baseline).
-//
-// An intent is a composite of primitives: ApplyService expands into
-// CreateVLAN + CreateVRF + AddBGPPeer + ... Each primitive is tracked
-// in the Operations list for crash recovery and rollback.
-//
-// The same Intent type is used in all contexts:
-//   - Abstract nodes (offline): populated from topology.json imports
-//   - Connected nodes (online): loaded from CONFIG_DB on connect
-//   - Both: updated on mutations, exportable to file/API
-//
-// Params carry resolved values sufficient for both teardown and
-// reconstruction (§37). The reverse path never re-resolves specs —
-// it works from Params alone.
-type Intent struct {
-	// Identity — what resource this intent is bound to and what it does.
-	// Resource is the binding point: "Ethernet0", "bgp", "evpn", "loopback".
-	// Operation is the composite: "apply-service", "setup-evpn", "configure-bgp".
-	// Name references the spec that parameterizes the operation (e.g., "transit").
-	// Empty Name means the operation needs no spec reference.
-	Resource  string `json:"resource"`
-	Operation string `json:"operation"`
-	Name      string `json:"name,omitempty"`
-
-	// Lifecycle
-	State   IntentState `json:"state"`
-	Holder  string      `json:"holder,omitempty"`  // who created/is actuating
-	Created time.Time   `json:"created,omitempty"` // when actuation started
-
-	// Audit — set when actuation completes.
-	AppliedAt *time.Time `json:"applied_at,omitempty"`
-	AppliedBy string     `json:"applied_by,omitempty"`
-
-	// DAG structure — parent/child relationships encoding structural deps.
-	Parents  []string `json:"parents,omitempty"`
-	Children []string `json:"children,omitempty"`
-
-	// Resolved parameters — concrete values for reconstruction + teardown.
-	// What the operation resolved to when applied. Self-sufficient: the
-	// reverse operation and drift reconstruction can work from Params alone
-	// without re-resolving specs (§37).
-	Params map[string]string `json:"params,omitempty"`
-
-	// Composite operations — the expanded primitive list.
-	// Written before actuation begins (crash-safe from that point).
-	// Each primitive tracks completion status for partial rollback.
-	Phase           string            `json:"phase,omitempty"`           // "" (applying) or "rolling_back"
-	RollbackHolder  string            `json:"rollback_holder,omitempty"` // who is rolling back
-	RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
-	Operations      []IntentOperation `json:"operations,omitempty"`
-}
-
 // IntentTreeNode represents a node in the intent DAG tree display.
 // Used by the intent tree CLI command and API endpoint (§12).
 type IntentTreeNode struct {
@@ -866,34 +794,6 @@ type IntentTreeNode struct {
 	Params    map[string]string `json:"params,omitempty"`
 	Children  []IntentTreeNode  `json:"children,omitempty"`
 	Leaf      bool              `json:"leaf,omitempty"` // multi-parent: rendered as leaf under this parent
-}
-
-// IntentOperation represents a single primitive within a composite intent.
-// Each operation tracks its own lifecycle (started/completed/reversed)
-// for crash recovery — if the process dies mid-actuation, retry skips
-// already-completed operations and continues where it left off.
-type IntentOperation struct {
-	Name      string            `json:"name"`
-	Params    map[string]string `json:"params,omitempty"`
-	ReverseOp string            `json:"reverse_op,omitempty"`
-	Started   *time.Time        `json:"started,omitempty"`
-	Completed *time.Time        `json:"completed,omitempty"`
-	Reversed  *time.Time        `json:"reversed,omitempty"`
-}
-
-// IsService returns true if this intent represents a service binding.
-func (i *Intent) IsService() bool {
-	return i.Operation == sonic.OpApplyService
-}
-
-// IsInFlight returns true if this intent is currently being actuated.
-func (i *Intent) IsInFlight() bool {
-	return i.State == IntentInFlight
-}
-
-// IsActuated returns true if this intent has been fully realized on the device.
-func (i *Intent) IsActuated() bool {
-	return i.State == IntentActuated
 }
 
 // ============================================================================

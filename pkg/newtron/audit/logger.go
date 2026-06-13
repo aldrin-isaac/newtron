@@ -302,15 +302,6 @@ func getDefaultLogger() Logger {
 	return v.(loggerHolder).logger
 }
 
-// Query queries events from the default logger
-func Query(filter Filter) ([]*Event, error) {
-	l := getDefaultLogger()
-	if l == nil {
-		return []*Event{}, nil
-	}
-	return l.Query(filter)
-}
-
 // Log writes event to the default logger. Silent no-op when no
 // default logger is configured (auth-design.md L1 disabled state).
 // This is the load-bearing emission path used by the api package's

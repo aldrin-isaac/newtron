@@ -234,52 +234,6 @@ func TestFileLogger_QueryNonExistent(t *testing.T) {
 	}
 }
 
-func TestDefaultLogger(t *testing.T) {
-	// Clear default logger
-	SetDefaultLogger(nil)
-
-	// Query with no default should return empty
-	results, err := Query(Filter{})
-	if err != nil {
-		t.Errorf("Query with nil default should not error: %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("Expected 0 results, got %d", len(results))
-	}
-
-	// Set up a logger
-	tmpDir, err := os.MkdirTemp("", "audit-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	logPath := filepath.Join(tmpDir, "audit.log")
-	logger, err := NewFileLogger(logPath, RotationConfig{})
-	if err != nil {
-		t.Fatalf("NewFileLogger failed: %v", err)
-	}
-	defer logger.Close()
-
-	SetDefaultLogger(logger)
-
-	// Now log and query should work via default logger
-	if err := logger.Log(testEvent("alice", "leaf1", "test").withSuccess()); err != nil {
-		t.Errorf("Log failed: %v", err)
-	}
-
-	results, err = Query(Filter{})
-	if err != nil {
-		t.Errorf("Query failed: %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("Expected 1 result, got %d", len(results))
-	}
-
-	// Clean up
-	SetDefaultLogger(nil)
-}
-
 func TestFileLogger_LogRotation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "audit-rotation-test-*")
 	if err != nil {
