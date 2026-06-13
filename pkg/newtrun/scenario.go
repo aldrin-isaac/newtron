@@ -92,12 +92,11 @@ type Step struct {
 	// Headers attaches per-step HTTP headers to outbound newtron
 	// requests. Under PR D the canonical "different identity" path
 	// is splitting scenarios with `as:`; Headers is reserved for
-	// per-step overrides that don't fit that model — e.g., the
-	// 25-L2c-disabled-routes scenario sends X-Newtron-Caller per
-	// step to exercise the header-mode fallback when the
-	// session-key store is nil. Headers apply uniformly across a
-	// step including any batched sub-calls — one step = one
-	// header set. Empty/nil preserves pre-Headers behavior.
+	// non-identity per-step overrides (e.g., X-Newtron-Op-Tag for
+	// audit-correlation, custom content negotiation). Headers
+	// apply uniformly across a step including any batched
+	// sub-calls — one step = one header set. Empty/nil preserves
+	// pre-Headers behavior.
 	Headers map[string]string `yaml:"headers,omitempty"`
 
 	// Capture extracts values from the response body of a successful

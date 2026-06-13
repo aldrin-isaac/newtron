@@ -686,6 +686,108 @@ steps:
 	}
 }
 
+// TestParseScenarioBytes_RejectsMultiDoc pins the multi-document
+// rejection contract on the single-scenario endpoints (inline
+// compose-and-run + PUT scenario-authoring). A multi-doc payload
+// to either is an explicit error rather than silent truncation
+// to the first document.
+func TestParseScenarioBytes_RejectsMultiDoc(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "two documents",
+			yaml: `
+name: a
+description: first
+topology: t
+platform: p
+steps:
+  - name: noop
+    action: wait
+    duration: 1ms
+---
+name: b
+description: second
+topology: t
+platform: p
+steps:
+  - name: noop
+    action: wait
+    duration: 1ms
+`,
+			want: "expected one scenario, got a stream of 2",
+		},
+		{
+			name: "three documents",
+			yaml: `
+name: a
+description: first
+topology: t
+platform: p
+steps:
+  - name: noop
+    action: wait
+    duration: 1ms
+---
+name: b
+description: second
+topology: t
+platform: p
+steps:
+  - name: noop
+    action: wait
+    duration: 1ms
+---
+name: c
+description: third
+topology: t
+platform: p
+steps:
+  - name: noop
+    action: wait
+    duration: 1ms
+`,
+			want: "expected one scenario, got a stream of 3",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseScenarioBytes([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("ParseScenarioBytes accepted a multi-doc stream; want rejection")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+// TestParseScenarioBytes_SingleDocPasses pins the single-document
+// happy path so the multi-doc rejection above doesn't regress into
+// a single-doc rejection.
+func TestParseScenarioBytes_SingleDocPasses(t *testing.T) {
+	s, err := ParseScenarioBytes([]byte(`
+name: solo
+description: single doc
+topology: t
+platform: p
+steps:
+  - name: noop
+    action: wait
+    duration: 1ms
+`))
+	if err != nil {
+		t.Fatalf("ParseScenarioBytes(single doc) error: %v", err)
+	}
+	if s.Name != "solo" {
+		t.Errorf("Name = %q, want %q", s.Name, "solo")
+	}
+}
+
 func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
 	results := []*ScenarioResult{
 		{

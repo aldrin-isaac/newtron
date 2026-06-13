@@ -56,7 +56,9 @@ description: |
   Coverage expansion: the original 40-L5-resource-scoping scenario
   only exercises the resource dimension. Bob's portion of this
   split-per-identity scenario: bob (ops, has acl.create) creates the
-  ACL fixture used by intf-isaac's bind tests, then cleans it up after.
+  ACL fixture used by intf-isaac's bind tests. Cleanup runs in
+  L5-dimensions-bob-cleanup after intf-isaac's portion (bob is the
+  only suite identity with acl.delete; see that scenario).
 
 requires: [L5-dimensions-iam-ian]
 as: bob

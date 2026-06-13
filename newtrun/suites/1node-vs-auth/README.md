@@ -26,7 +26,6 @@ each original scenario.
 | `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `profiles/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
 | `10-L1-audit-log-entries` | L1 | Split into `-bob` + `-alice`: bob's ops group creates a QoS policy, then alice's spec-team creates her own and cleans up both. The audit log gains one entry per request with caller=alice/bob in the user field for the operator's post-suite inspection. |
 | `20-L3-spec-mutations-gated` | L3 | Split into `-mallory` + `-bob` + `-alice` (bob's qos.create result is cleaned up by alice's broader qos.delete grant — bob runs first). Per perm family (spec.author, qos.create, filter.create): denied caller (mallory) gets 403, allowed callers (alice/bob) succeed. |
-| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service`, `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. A follow-up `create-zone` + cleanup with `X-Newtron-Caller: alice` proves the L2c plumbing (store init, route mount, middleware wire-up) is a transparent passthrough on the default request path when disabled. |
 | `26-L2c-round-trip` | L2c | The full session-key arc end-to-end: PAM-authenticated `/auth/login` mints a key; a mutation under `Authorization: Bearer <key>` succeeds; `/auth/logout` revokes; the same Bearer on the same mutation 401s. Requires PAM + a real OS account (see §"L2c round-trip operator setup"). Skipped by default — the suite's `alice_basic_auth` parameter is empty unless the operator supplies it. |
 | `30-L4-node-mutations-gated` | L4 | Split into `-mallory` + `-bob`. Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
 | `40-L5-resource-scoping` | L5 | Split into `-alice` + `-bob`. alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
@@ -61,10 +60,15 @@ runner attaches that user's cached Bearer on every outbound
 newtron call. PAM is the only way to mint those Bearers, so the
 operator setup walks PAM service-file + OS account provisioning.
 
-Under PR D `--audit-caller-header` is **not** required for the
-main suite — only `25-L2c-disabled-routes` sends X-Newtron-Caller
-explicitly, and that scenario sets the header per-step. Every
-other scenario authenticates via Bearer.
+Under PR D every scenario authenticates via Bearer — the
+operator's own (forwarded by the runner from the inbound /runs
+request) or a `scenario.As` override. `--audit-caller-header` is
+not required; the header-mode identity surface from L1 is
+exercised by unit tests (`pkg/newtron/api/caller_middleware_test.go`)
+rather than by an integration scenario, because PR-C/D's
+operator-Bearer-forward model makes a no-Bearer request
+expressible only by running the suite under an unauthenticated
+server, which the canonical setup does not.
 
 Walk the steps in [§"L2c round-trip operator setup"](#l2c-round-trip-operator-setup)
 below to:
