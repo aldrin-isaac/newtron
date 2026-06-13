@@ -189,18 +189,18 @@ func (e *newtronExecutor) doCall(r *Runner, step *Step, method, urlTemplate stri
 	for k, v := range headers {
 		opts = append(opts, client.WithHeader(k, v))
 	}
-	// Step.As selects the cached-session user whose Bearer the
-	// runner attaches to this request. Only set when the step
-	// explicitly opted into per-step impersonation; absent
-	// step.As leaves the operator's own Bearer (the default
+	// Scenario.As selects the cached-session user whose Bearer
+	// the runner attaches to every outbound newtron call this
+	// scenario makes (one scenario, one identity). Absent
+	// scenario.As leaves the operator's own Bearer (the default
 	// credential the runner forwards on every newtron call,
 	// extracted from the inbound /runs request) — or no
 	// credential at all when the run was triggered without one
 	// — in charge.
-	if step != nil && step.As != "" {
-		key, ok := r.UserSessions[step.As]
+	if r.scenario != nil && r.scenario.As != "" {
+		key, ok := r.UserSessions[r.scenario.As]
 		if !ok || key == "" {
-			return "", nil, fmt.Errorf("step requires identity %q but no session was supplied — run `newtron auth login --user %s` before starting the suite", step.As, step.As)
+			return "", nil, fmt.Errorf("scenario requires identity %q but no session was supplied — run `newtron auth login --user %s` before starting the suite", r.scenario.As, r.scenario.As)
 		}
 		opts = append(opts, client.WithHeader("Authorization", "Bearer "+key))
 	}

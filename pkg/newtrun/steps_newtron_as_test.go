@@ -10,9 +10,10 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
-// TestNewtronExecutor_AsAttachesBearer pins the per-step
-// impersonation contract: when step.As names a user, the runner
-// reads UserSessions[user] and attaches Authorization: Bearer.
+// TestNewtronExecutor_AsAttachesBearer pins the per-scenario
+// impersonation contract: when scenario.As names a user, the
+// runner reads UserSessions[user] and attaches the named user's
+// Bearer on every outbound newtron call this scenario makes.
 // The faux server records the header it sees so the test can
 // confirm the right key landed on the wire.
 func TestNewtronExecutor_AsAttachesBearer(t *testing.T) {
@@ -31,13 +32,13 @@ func TestNewtronExecutor_AsAttachesBearer(t *testing.T) {
 	r := &Runner{
 		Client:       client.New(srv.URL, "net-1"),
 		UserSessions: map[string]string{"mallory": "mallory-bearer-key"},
+		scenario:     &Scenario{Name: "as-mallory", As: "mallory"},
 	}
 	step := &Step{
 		Action: ActionNewtron,
 		Method: "POST",
 		URL:    "/create-vlan",
 		Params: map[string]any{"id": 100},
-		As:     "mallory",
 	}
 	exec := &newtronExecutor{}
 	output := exec.Execute(t.Context(), r, step)
@@ -53,10 +54,10 @@ func TestNewtronExecutor_AsAttachesBearer(t *testing.T) {
 }
 
 // TestNewtronExecutor_AsMissingSessionFailsFast pins the
-// fail-fast contract: a step that names a user without a cached
-// session in UserSessions returns a clear error mentioning the
-// `newtron auth login` remediation. Operators see the missing
-// identity at the first affected step, not after the suite
+// fail-fast contract: a scenario that names a user without a
+// cached session in UserSessions returns a clear error mentioning
+// the `newtron auth login` remediation. Operators see the missing
+// identity at the first affected scenario, not after the suite
 // completed silently misbehaving.
 func TestNewtronExecutor_AsMissingSessionFailsFast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -67,12 +68,12 @@ func TestNewtronExecutor_AsMissingSessionFailsFast(t *testing.T) {
 	r := &Runner{
 		Client:       client.New(srv.URL, "net-1"),
 		UserSessions: map[string]string{}, // empty
+		scenario:     &Scenario{Name: "as-mallory", As: "mallory"},
 	}
 	step := &Step{
 		Action: ActionNewtron,
 		Method: "POST",
 		URL:    "/create-vlan",
-		As:     "mallory",
 	}
 	exec := &newtronExecutor{}
 	output := exec.Execute(t.Context(), r, step)

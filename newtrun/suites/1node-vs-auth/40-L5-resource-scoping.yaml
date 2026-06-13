@@ -1,11 +1,10 @@
-name: L5-resource-scoping
+name: L5-resource-scoping-alice
 description: |
   auth-design.md L5: a permission grant with where: { resource: "X-*" }
-  matches only when the operation's Context.Resource glob-matches.
-  Network.json grants service.apply to spec-team for resource: "transit-*"
-  and to ops for resource: "vpn-*". Alice (spec-team) can apply
-  transit-named services but is denied on vpn-named ones; bob (ops)
-  is the inverse.
+  matches only when the operation's Context.Resource glob-matches. Alice's
+  portion of this split-per-identity scenario: alice (spec-team) has a
+  grant scoped to resource: "transit-*"; she can apply transit-named
+  services but is denied on vpn-named ones.
 
   The service.apply endpoint is Interface-scoped (POST /interfaces/{name}
   /apply-service). The Interface gate populates Context.Resource from
@@ -14,7 +13,8 @@ description: |
   ?mode=topology so the in-memory projection takes the binding without
   device transport.
 
-requires: [L4-node-mutations-gated]
+requires: [L4-node-mutations-gated-bob, L4-node-mutations-gated-mallory]
+as: alice
 
 steps:
   # alice (spec-team, scoped to resource: transit-*) — apply transit-1
@@ -27,13 +27,11 @@ steps:
       service: transit-1
       ip_address: 10.1.0.0/31
       peer_as: 65002
-    as: alice
 
   - name: alice-cleanup-transit
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/remove-service?mode=topology
-    as: alice
 
   # alice — apply a non-transit service is denied by the where clause
   # (her grant scopes to resource: "transit-*"). The service doesn't
@@ -44,9 +42,24 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
     params: {service: vpn-east}
-    as: alice
     expect_failure: true
 
+---
+name: L5-resource-scoping-bob
+description: |
+  auth-design.md L5: a permission grant with where: { resource: "X-*" }
+  matches only when the operation's Context.Resource glob-matches. Bob's
+  portion of this split-per-identity scenario: bob (ops) has a grant
+  scoped to resource: "vpn-*"; he is denied on transit-named services
+  even though the service exists.
+
+  ?mode=topology so the in-memory projection takes the binding without
+  device transport.
+
+requires: [L5-resource-scoping-alice]
+as: bob
+
+steps:
   # bob (ops, scoped to resource: vpn-*) — applying transit-named
   # service is denied even though service exists.
   - name: bob-apply-transit-denied
@@ -54,5 +67,4 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
     params: {service: transit-1}
-    as: bob
     expect_failure: true

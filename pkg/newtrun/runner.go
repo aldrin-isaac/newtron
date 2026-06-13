@@ -47,11 +47,11 @@ type Runner struct {
 
 	// UserSessions maps a username to the Bearer session key
 	// supplied by the operator's CLI at run-start time. Used by
-	// per-step `as: <user>` impersonation in scenarios that test
-	// authorization-by-identity (mallory denied, alice allowed).
-	// Populated by the newtrun-server's StartRun handler from
-	// StartRunRequest.UserSessions; the CLI scans the suite for
-	// `as:` references and loads each user's session from
+	// per-scenario `as: <user>` impersonation in scenarios that
+	// test authorization-by-identity (mallory denied, alice
+	// allowed). Populated by the newtrun-server's StartRun handler
+	// from StartRunRequest.UserSessions; the CLI scans the suite
+	// for `as:` references and loads each user's session from
 	// ~/.newtron/sessions/ before submitting. Empty when no
 	// scenario uses `as:`.
 	UserSessions map[string]string

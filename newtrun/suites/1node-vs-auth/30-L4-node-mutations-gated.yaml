@@ -1,12 +1,14 @@
-name: L4-node-mutations-gated
+name: L4-node-mutations-gated-mallory
 description: |
   auth-design.md L4: Node-level mutations gate behind the verb-family
-  permissions. Uses ?mode=topology so the gate fires before any
-  device transport (same pattern as TestAuthorizationL4 in
-  pkg/newtron/api/). Commits in topology mode are in-memory only —
-  the suite never touches a real device.
+  permissions. Mallory's portion of this split-per-identity scenario:
+  mallory (no group) is denied on vlan.create, vrf.create, and acl.create.
+  Uses ?mode=topology so the gate fires before any device transport.
+  Commits in topology mode are in-memory only — the suite never touches
+  a real device.
 
-requires: [L3-spec-mutations-gated]
+requires: [L3-spec-mutations-gated-alice, L3-spec-mutations-gated-bob, L3-spec-mutations-gated-mallory]
+as: mallory
 
 steps:
   # vlan.create — denied caller (mallory: no group)
@@ -15,16 +17,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-vlan?mode=topology
     params: {id: 100}
-    as: mallory
     expect_failure: true
-
-  # vlan.create — allowed caller (bob: ops, has vlan.create)
-  - name: bob-create-vlan-allowed
-    action: newtron
-    method: POST
-    url: /nodes/switch1/create-vlan?mode=topology
-    params: {id: 200}
-    as: bob
 
   # vrf.create — denied caller
   - name: mallory-create-vrf-denied
@@ -32,16 +25,7 @@ steps:
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
     params: {name: vrf-mallory}
-    as: mallory
     expect_failure: true
-
-  # vrf.create — allowed caller (bob: ops, has vrf.create)
-  - name: bob-create-vrf-allowed
-    action: newtron
-    method: POST
-    url: /nodes/switch1/create-vrf?mode=topology
-    params: {name: vrf-bob}
-    as: bob
 
   # acl.create — denied caller
   - name: mallory-create-acl-denied
@@ -49,8 +33,35 @@ steps:
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-mallory, type: L3, stage: ingress}
-    as: mallory
     expect_failure: true
+
+---
+name: L4-node-mutations-gated-bob
+description: |
+  auth-design.md L4: Node-level mutations gate behind the verb-family
+  permissions. Bob's portion of this split-per-identity scenario:
+  bob (ops, has vlan.create, vrf.create, acl.create) is allowed on all
+  three families. Also includes the ungated read endpoint (reads stay
+  ungated per §3 criterion 2). Uses ?mode=topology; commits are
+  in-memory only.
+
+requires: [L4-node-mutations-gated-mallory]
+as: bob
+
+steps:
+  # vlan.create — allowed caller (bob: ops, has vlan.create)
+  - name: bob-create-vlan-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vlan?mode=topology
+    params: {id: 200}
+
+  # vrf.create — allowed caller (bob: ops, has vrf.create)
+  - name: bob-create-vrf-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vrf?mode=topology
+    params: {name: vrf-bob}
 
   # acl.create — allowed caller
   - name: bob-create-acl-allowed
@@ -58,7 +69,6 @@ steps:
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-bob, type: L3, stage: ingress}
-    as: bob
 
   # Read endpoint — no caller required (reads stay ungated per §3
   # criterion 2). The same path without auth header succeeds.

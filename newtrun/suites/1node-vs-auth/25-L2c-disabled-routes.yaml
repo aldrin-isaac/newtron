@@ -25,6 +25,7 @@ description: |
   would get confusing 200s with empty bodies.
 
 requires: [L0-secret-store-resolves]
+as: alice
 
 steps:
   # /auth/login returns 404 because L2b (PAM) is not configured on
@@ -54,7 +55,6 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-bearer-ignored}
-    as: alice
     headers:
       Authorization: Bearer this-key-was-never-issued-and-thats-ok
 
@@ -63,4 +63,3 @@ steps:
     method: POST
     url: /delete-zone
     params: {name: zone-bearer-ignored}
-    as: alice

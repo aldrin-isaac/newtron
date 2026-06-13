@@ -32,13 +32,40 @@ import (
 type Scenario struct {
 	Name             string   `yaml:"name"`
 	Description      string   `yaml:"description"`
-	Topology         string   `yaml:"topology,omitempty"`        // suite-level field; LoadSuite rejects scenarios that set it
-	Platform         string   `yaml:"platform,omitempty"`        // suite-level field; LoadSuite rejects scenarios that set it
+	Topology         string   `yaml:"topology,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
+	Platform         string   `yaml:"platform,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
 	Requires         []string `yaml:"requires,omitempty"`
-	After            []string `yaml:"after,omitempty"`              // Run after these scenarios (ordering only, no pass/fail gate)
+	After            []string `yaml:"after,omitempty"`             // Run after these scenarios (ordering only, no pass/fail gate)
 	RequiresFeatures []string `yaml:"requires_features,omitempty"` // Platform features required (e.g., ["acl", "macvpn"])
 	RequiresParams   []string `yaml:"requires_params,omitempty"`   // Suite-level parameters that must be set to a non-empty/non-zero value at run time; otherwise the scenario is skipped with a descriptive reason
 	Repeat           int      `yaml:"repeat,omitempty"`
+
+	// As names the cached-session user whose Bearer the runner
+	// attaches to every outbound newtron call this scenario makes
+	// (auth-design.md §L2c "Identity forwarding through engines").
+	// One scenario, one identity — authorization-testing scenarios
+	// that need verified per-identity flows (mallory denied; alice
+	// allowed) author one scenario per identity and connect them
+	// via requires:. The alternative — per-step impersonation —
+	// was rejected by design ("per scenario re-login not per step
+	// 'as' masquerading"): a scenario that interleaves identities
+	// reads as a single workflow under one operator, which is
+	// architecturally false in an auth-enforced deployment where
+	// each request carries its own verified caller.
+	//
+	// The named user must have a cached session at the time the
+	// suite was started — the CLI scans every scenario's `as:`
+	// field, loads each user's session from ~/.newtron/sessions/,
+	// and submits the resulting map in StartRunRequest.UserSessions.
+	// A scenario that names a user the operator never logged in as
+	// fails fast at run start with "no session cached for user X;
+	// run `newtron auth login --user X` first".
+	//
+	// Empty (the common case) lets the runner forward the operator's
+	// own Bearer (extracted from the inbound /newtrun/v1/runs
+	// request) on every outbound newtron call, or no credential at
+	// all when the run was triggered without one.
+	As string `yaml:"as,omitempty"`
 
 	Steps []Step `yaml:"steps"`
 }
@@ -70,30 +97,6 @@ type Step struct {
 	// uniformly across a step including any batched sub-calls — one
 	// step = one identity. Empty/nil preserves pre-Headers behavior.
 	Headers map[string]string `yaml:"headers,omitempty"`
-
-	// As names the cached-session user whose Bearer the runner
-	// attaches to this step's outbound newtron call. Used by
-	// authorization-testing scenarios that need verified per-step
-	// identity (mallory denied; alice allowed) — the alternative
-	// to spoofing via X-Newtron-Caller, which only works under
-	// header-mode and breaks under PAM/Bearer where session_key
-	// auth beats self-attested header in the caller-middleware
-	// priority chain.
-	//
-	// The named user must have a cached session at the time the
-	// suite was started — the CLI scans every step's `as:` field,
-	// loads each user's session from ~/.newtron/sessions/, and
-	// submits the resulting map in StartRunRequest.UserSessions.
-	// A step that names a user the operator never logged in as
-	// fails fast at run start with "no session cached for user X;
-	// run `newtron auth login --user X` first".
-	//
-	// Empty (the common case) lets the runner use the operator's
-	// own Bearer (extracted from the inbound /newtrun/v1/runs
-	// request's Authorization header and forwarded on every
-	// outbound newtron call), or no credential at all when the
-	// run was triggered without one.
-	As string `yaml:"as,omitempty"`
 
 	// Capture extracts values from the response body of a successful
 	// newtron HTTP call and binds them to scenario-scoped variable
