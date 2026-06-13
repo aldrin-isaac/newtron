@@ -39,9 +39,9 @@ type LoginResponse struct {
 //     auth and attached the verified username to context.
 //  2. Read the verified username via httputil.PAMUsernameFromContext.
 //  3. Mint a key in the store.
-//  4. Return JSON via the standard {data, error} envelope so
-//     consumers like newtron-client and newtrun's response-capture
-//     read it the same way every other endpoint's payload reads.
+//  4. Return JSON via httputil.WriteJSON so the response uses the
+//     project's standard {data, error} envelope — every HTTP
+//     client unwraps it the same way.
 //
 // Failure modes:
 //

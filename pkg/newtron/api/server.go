@@ -87,15 +87,11 @@ type Server struct {
 	// changes the watcher calls back into ReloadNetwork.
 	watcher *netpkg.SpecWatcher
 
-	// sessionKeys is the in-memory session-key store
-	// (auth-design.md L2c). nil when L2c is disabled — either L2b
+	// sessionKeys is the L2c in-memory session-key store
+	// (auth-design.md §L2c). nil when L2c is disabled — either L2b
 	// (PAM) is off, or the operator explicitly suppressed session
-	// keys via --session-key-ttl=0. When set, /auth/login mints
-	// keys against it and sessionkey.Middleware resolves Bearer
-	// tokens through it. The store + middleware + handlers all
-	// live in pkg/httputil/sessionkey now (PR A of the
-	// engine-composition refactor) — pkg/newtron/api consumes the
-	// package as a unit rather than owning the auth state.
+	// keys via --session-key-ttl=0. /auth/login mints into it;
+	// sessionkey.Middleware resolves Bearer tokens through it.
 	sessionKeys *sessionkey.Store
 }
 
