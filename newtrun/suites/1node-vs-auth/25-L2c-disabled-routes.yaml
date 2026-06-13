@@ -46,7 +46,7 @@ steps:
 
   # Sanity: a request carrying Authorization: Bearer + the regular
   # X-Newtron-Caller header still succeeds via the header-mode path.
-  # withSessionKey middleware passes through (nil store), so the
+  # sessionkey.Middleware passes through (nil store), so the
   # Bearer is ignored and caller_middleware reads the header. Proves
   # the L2c plumbing didn't break header-mode identity.
   - name: bearer-ignored-when-disabled-caller-header-still-works

@@ -1,14 +1,14 @@
-package api
+package sessionkey
 
 import (
 	"testing"
 	"time"
 )
 
-// TestSessionKeyStore_MintLookupRevoke pins the happy path: a minted
+// TestStore_MintLookupRevoke pins the happy path: a minted
 // key is found by Lookup, a revoked key isn't (auth-design.md L2c).
-func TestSessionKeyStore_MintLookupRevoke(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_MintLookupRevoke(t *testing.T) {
+	s := NewStore(time.Hour)
 	defer s.Stop()
 
 	key, expiresAt, err := s.Mint("alice")
@@ -36,12 +36,12 @@ func TestSessionKeyStore_MintLookupRevoke(t *testing.T) {
 	}
 }
 
-// TestSessionKeyStore_LookupExpired pins that an expired key fails
+// TestStore_LookupExpired pins that an expired key fails
 // Lookup even when the sweeper hasn't run yet. The TTL property is
 // enforced at Lookup time, not just at sweep time — a slow sweeper
 // must not enable expired keys.
-func TestSessionKeyStore_LookupExpired(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_LookupExpired(t *testing.T) {
+	s := NewStore(time.Hour)
 	defer s.Stop()
 
 	// Pin "now" so we can manipulate clock without sleeping.
@@ -61,10 +61,10 @@ func TestSessionKeyStore_LookupExpired(t *testing.T) {
 	}
 }
 
-// TestSessionKeyStore_LookupUnknownKey pins that a key that was
+// TestStore_LookupUnknownKey pins that a key that was
 // never minted fails Lookup (401-able).
-func TestSessionKeyStore_LookupUnknownKey(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_LookupUnknownKey(t *testing.T) {
+	s := NewStore(time.Hour)
 	defer s.Stop()
 
 	if _, ok := s.Lookup("never-minted"); ok {
@@ -75,11 +75,11 @@ func TestSessionKeyStore_LookupUnknownKey(t *testing.T) {
 	}
 }
 
-// TestSessionKeyStore_RevokeIdempotent pins that revoking a key
+// TestStore_RevokeIdempotent pins that revoking a key
 // twice (or revoking a never-minted key) is not an error. Matches
 // the /auth/logout idempotency property.
-func TestSessionKeyStore_RevokeIdempotent(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_RevokeIdempotent(t *testing.T) {
+	s := NewStore(time.Hour)
 	defer s.Stop()
 
 	key, _, err := s.Mint("alice")
@@ -93,11 +93,11 @@ func TestSessionKeyStore_RevokeIdempotent(t *testing.T) {
 	// Reaches here without panicking → pass.
 }
 
-// TestSessionKeyStore_Sweep pins that the sweeper drops expired
+// TestStore_Sweep pins that the sweeper drops expired
 // entries. Tested by calling sweep directly with manipulated now()
 // so the test doesn't have to wait for the minute ticker.
-func TestSessionKeyStore_Sweep(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_Sweep(t *testing.T) {
+	s := NewStore(time.Hour)
 	defer s.Stop()
 
 	base := time.Now()
@@ -127,11 +127,11 @@ func TestSessionKeyStore_Sweep(t *testing.T) {
 	}
 }
 
-// TestSessionKeyStore_MintIsUnique pins that two Mints for the same
+// TestStore_MintIsUnique pins that two Mints for the same
 // user produce different keys — keys are random 256-bit values, not
 // derived from the username.
-func TestSessionKeyStore_MintIsUnique(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_MintIsUnique(t *testing.T) {
+	s := NewStore(time.Hour)
 	defer s.Stop()
 
 	k1, _, err := s.Mint("alice")
@@ -147,12 +147,12 @@ func TestSessionKeyStore_MintIsUnique(t *testing.T) {
 	}
 }
 
-// TestSessionKeyStore_StopIdempotent pins that Stop can be called
+// TestStore_StopIdempotent pins that Stop can be called
 // more than once without panicking. The Server's OnShutdown calls
 // Stop; tests may also call Stop in their cleanup; the two must not
 // collide.
-func TestSessionKeyStore_StopIdempotent(t *testing.T) {
-	s := newSessionKeyStore(time.Hour)
+func TestStore_StopIdempotent(t *testing.T) {
+	s := NewStore(time.Hour)
 	s.Stop()
 	s.Stop() // second Stop must be safe
 }

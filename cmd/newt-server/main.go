@@ -34,6 +34,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/httputil/pamauth"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
@@ -63,7 +64,7 @@ func main() {
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
-	sessionKeyTTL := flag.Duration("session-key-ttl", newtronapi.DefaultSessionKeyTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
+	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newtron/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
 	newtrunNewtronBasicAuth := flag.String("newtrun-newtron-basic-auth", "", "user:password the newtrun engine uses to mint and refresh an L2c session key against the in-process newtron engine (auth-design.md L2c). Required when --auth-pam-service is also set — every newtrun-originated newtron call carries Authorization: Bearer <key> after first login. Empty leaves the newtrun engine's newtron client on no-auth, which works only when the newtron engine does not enforce PAM.")
 	flag.Parse()
 

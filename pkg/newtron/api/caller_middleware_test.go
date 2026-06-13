@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
@@ -175,7 +176,7 @@ func TestCallerMiddleware_PAMUsernameYieldsVerifiedCaller(t *testing.T) {
 }
 
 // TestCallerMiddleware_SessionKeyYieldsVerifiedCaller pins the L2c
-// path: when withSessionKey middleware has attached a username to
+// path: when sessionkey.Middleware has attached a username to
 // context via a valid Bearer lookup, callerMiddleware reads it and
 // records VerificationSessionKey.
 func TestCallerMiddleware_SessionKeyYieldsVerifiedCaller(t *testing.T) {
@@ -184,7 +185,7 @@ func TestCallerMiddleware_SessionKeyYieldsVerifiedCaller(t *testing.T) {
 		gotCaller = audit.CallerFromContext(r.Context())
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
-	req = req.WithContext(withSessionKeyUsername(req.Context(), "alice"))
+	req = req.WithContext(sessionkey.WithUsernameForTest(req.Context(), "alice"))
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	if gotCaller == nil {
@@ -210,7 +211,7 @@ func TestCallerMiddleware_SessionKeyLosesToPAM(t *testing.T) {
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
 	req = req.WithContext(httputil.WithPAMUsernameForTest(req.Context(), "alice-pam"))
-	req = req.WithContext(withSessionKeyUsername(req.Context(), "alice-session"))
+	req = req.WithContext(sessionkey.WithUsernameForTest(req.Context(), "alice-session"))
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	if gotCaller == nil {
@@ -234,7 +235,7 @@ func TestCallerMiddleware_SessionKeyWinsOverHeader(t *testing.T) {
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
 	req.Header.Set("X-Newtron-Caller", "spoofed-bob")
-	req = req.WithContext(withSessionKeyUsername(req.Context(), "alice"))
+	req = req.WithContext(sessionkey.WithUsernameForTest(req.Context(), "alice"))
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	if gotCaller == nil {

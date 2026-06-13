@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
@@ -86,13 +87,12 @@ type Server struct {
 	// changes the watcher calls back into ReloadNetwork.
 	watcher *netpkg.SpecWatcher
 
-	// sessionKeys is the in-memory session-key store
-	// (auth-design.md L2c). nil when L2c is disabled — either L2b
+	// sessionKeys is the L2c in-memory session-key store
+	// (auth-design.md §L2c). nil when L2c is disabled — either L2b
 	// (PAM) is off, or the operator explicitly suppressed session
-	// keys via --session-key-ttl=0. When set, /auth/login mints
-	// keys against it and withSessionKey middleware resolves
-	// Bearer tokens through it.
-	sessionKeys *sessionKeyStore
+	// keys via --session-key-ttl=0. /auth/login mints into it;
+	// sessionkey.Middleware resolves Bearer tokens through it.
+	sessionKeys *sessionkey.Store
 }
 
 
@@ -181,7 +181,7 @@ type Config struct {
 	EnforceAuthorization bool
 
 	// SessionKeyTTL sets the absolute lifetime of every server-issued
-	// session key (auth-design.md L2c). Default DefaultSessionKeyTTL
+	// session key (auth-design.md L2c). Default sessionkey.DefaultTTL
 	// (8h) when zero. Negative or explicit zero (via a sentinel)
 	// disables L2c entirely — /auth/login and /auth/logout return
 	// 404 and Bearer tokens are not recognized. L2c only engages when
@@ -232,9 +232,9 @@ func NewServer(cfg Config) *Server {
 	if cfg.Authenticator != nil && cfg.SessionKeyTTL >= 0 {
 		ttl := cfg.SessionKeyTTL
 		if ttl == 0 {
-			ttl = DefaultSessionKeyTTL
+			ttl = sessionkey.DefaultTTL
 		}
-		s.sessionKeys = newSessionKeyStore(ttl)
+		s.sessionKeys = sessionkey.NewStore(ttl)
 	}
 	if cfg.SpecWatch {
 		w, err := netpkg.NewSpecWatcher(logger, 0, func(id string) error {

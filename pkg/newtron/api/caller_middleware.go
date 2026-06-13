@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/httputil/sessionkey"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
@@ -111,7 +112,7 @@ func resolveCaller(r *http.Request, headerName string) *audit.Caller {
 			Source:   audit.VerificationPAM,
 		}
 	}
-	if u := sessionKeyUsernameFromContext(r.Context()); u != "" {
+	if u := sessionkey.UsernameFromContext(r.Context()); u != "" {
 		return &audit.Caller{
 			Username: u,
 			Source:   audit.VerificationSessionKey,

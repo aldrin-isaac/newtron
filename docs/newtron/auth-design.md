@@ -531,14 +531,20 @@ by the configured TTL.
 authenticator to call from `/auth/login`; the routes refuse to mount
 when `--auth-pam-service` is unset.
 
-**Scope of changes.** New endpoint pair (`/auth/login`, `/auth/logout`)
-in `pkg/newtron/api/handler_auth.go`. In-memory session-key store in
-`pkg/newtron/api/session_keys.go`. New middleware
-`withSessionKey` that parses `Authorization: Bearer …` and signals
-the existing PAM middleware to skip Basic-auth challenge when a valid
-key is on the request. `httputil.SkipBasicAuthFromContext` /
-`WithSkipBasicAuth` for the cross-package signal — kept generic so
-the same hook can be reused for any future server-issued credential
+**Scope of changes.** New transport-level package
+`pkg/httputil/sessionkey/` owning the in-memory store
+(`store.go`), the Bearer-recognition middleware + identity
+context-key (`middleware.go`), and the `/auth/login` + `/auth/logout`
+HTTP handlers (`handlers.go`). The package lives under `pkg/httputil/`
+rather than under any engine because authentication is a property
+of the server boundary (a binding `cmd/`'s outer middleware chain),
+not of any individual engine. `pkg/newtron/api` consumes the
+package via `sessionkey.NewStore`, `sessionkey.Middleware`,
+`sessionkey.LoginHandler`, `sessionkey.LogoutHandler`,
+`sessionkey.UsernameFromContext`. `httputil.SkipBasicAuthFromContext` /
+`WithSkipBasicAuth` for the cross-package signal between the
+Bearer middleware and the PAM middleware — kept generic so the
+same hook can be reused for any future server-issued credential
 without `httputil` learning newtron-specific concepts. New audit
 verification source `VerificationSessionKey = "session_key"`. New
 flag `--session-key-ttl` on `cmd/newtron-server` and
@@ -559,11 +565,14 @@ exposed through HTTP.
 
 **Limitations accepted at this layer.**
 
-- *No multi-engine session sharing.* A key minted at
-  `/newtron/v1/auth/login` works only against `/newtron/v1/*` routes.
-  If `newtrun` and `newtlab` later need parallel session mechanisms,
-  the store will be promoted to `httputil` and shared. Not in scope
-  here — keeps the blast radius minimal.
+- *No multi-engine session sharing today.* The store, middleware,
+  and handlers live in `pkg/httputil/sessionkey/` and are engine-
+  neutral, but only the newtron engine mounts them so far — a key
+  minted at `/newtron/v1/auth/login` works against `/newtron/v1/*`
+  routes. Mounting the same Middleware + handlers on newtrun's or
+  newtlab's outer chain is mechanical when those engines need it;
+  the store is already factored as a shared transport-level
+  primitive (no second instance of the pattern to extract).
 - *No refresh tokens.* Sliding-expiry refresh logic would re-introduce
   the immortal-token problem `--session-key-ttl` was set up to bound.
   Operators needing longer sessions raise the TTL; operators needing
