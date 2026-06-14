@@ -108,6 +108,20 @@ hard "no, this is not a hack" is acceptable.
   against the post-relocation reality. The file in the diff getting
   updated is necessary but not sufficient — sibling docs that touch the
   same surface are part of the rename.
+- **Concept renames need synonym enumeration, not just verbatim grep.**
+  When the renamed term has no shared substring with its replacement
+  (e.g., "inter-service" → "operator-to-server", "shadow" →
+  "projection"), the verbatim grep above misses every paragraph that
+  re-stated the old concept under a different lexical form ("between
+  services", "engine-to-engine calls", "service-to-service identities").
+  Before declaring a concept rename complete, enumerate at least three
+  lexical variations the old concept could appear under — the old name,
+  the old framing as an adjective, the old framing as a verb phrase —
+  and grep each across every surface where the concept could be named
+  (every documentation root, every prose-containing directory in the
+  project, not just `docs/`). The cost is small; the alternative is the
+  audit-round whack-a-mole where each subsequent reviewer finds a
+  surviving synonym in a different paragraph.
 
 ---
 
@@ -152,6 +166,15 @@ explicitly list which dimensions were checked and verify none were omitted.
 A single-pass audit that checks "conformance" as a monolithic property will
 gravitate toward the most visible dimension and miss the others. When an audit
 reports all-pass, the first question is: "what dimensions did I NOT check?"
+
+**The audit is recursive.** After committing a fix that cites principle P,
+re-audit the diff itself against P before opening review. The fix can
+reintroduce the same violation in different prose — a §40 historical-
+narration fix that adds new historical narration, a §13 same-concept-same-
+name fix that introduces a new naming conflict, a §5 no-dead-names fix
+that leaves a fresh synonym alive. Run the same check on the fix that you
+ran on the original code. The discipline is recursive, not one-pass: every
+fix is itself subject to the principle it cited.
 
 ---
 
@@ -258,6 +281,16 @@ Tests must genuinely prove the thesis, not be crafted to pass.
 - Test alternative paths — if there's rollback AND clear, test both
 - Verify side effects and non-effects
 - Don't paper over gaps — if a check excludes certain cases, document why
+- **The test's docstring claims must map onto its setup primitives.** If a
+  test docstring names a chain of components (A → B → C → wire), the test
+  must instantiate at least one production wire-up step from that chain —
+  call the production initializer, construct objects through the production
+  factory, exercise the real composition. A test that claims chain
+  coverage but synthesizes the post-composition state directly tests only
+  its own scaffolding; the chain it names is unverified. Either the
+  docstring narrows to what the test actually covers, or the setup widens
+  to match the docstring's claim. Mismatch between the two is a lie in the
+  test suite that future readers will trust.
 
 ---
 

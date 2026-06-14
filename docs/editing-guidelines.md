@@ -684,6 +684,16 @@ correct; a downstream usage was not.
 occurrence #3 means something different from occurrence #27, the document has a
 silent contradiction.
 
+**Cross-doc mechanical procedure:** When a concept is renamed across the
+whole project (not just within one document), the grep above misses
+paragraphs that re-state the old concept under a synonym (e.g., "between
+services", "engine-to-engine calls", "service-to-service identities" after
+renaming "inter-service" → "operator-to-server"). The mechanical
+counterpart to this editorial discipline lives in
+[`ai-instructions.md` §5](ai-instructions.md#5-clean-code-honest-names--impl)
+under "Concept renames need synonym enumeration, not just verbatim grep."
+Apply both when the rename crosses the project boundary.
+
 ## 42. Terminology Changes Must Be Scoped to Purpose — ALL
 
 A terminology change in one document does not automatically propagate to all
