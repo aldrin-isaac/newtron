@@ -50,9 +50,15 @@ constructs:
 
 The two middlewares wrap the entire composed mux uniformly so the
 verified username (from L2c Bearer or L2b PAM Basic) reaches every
-engine's request context. Each engine's `caller_middleware` reads
-the context value and tags `audit.Caller` with the right
-verification source.
+engine's request context. The newtron engine's `callerMiddleware`
+(`pkg/newtron/api/caller_middleware.go`) reads the context value and
+tags `audit.Caller` with the verification source for newtron's
+mutation audit log. The newtrun and newtlab engines don't tag
+audit callers today — their handlers operate on opaque test-run
+state and lab-state objects rather than spec resources gated by
+the L3 authorization layer; identity reaches them through the
+same context but is not currently emitted to a per-engine audit
+log.
 
 The runner (newtrun engine) extracts the inbound Bearer from the
 `/newtrun/v1/runs` request's Authorization header and attaches it on

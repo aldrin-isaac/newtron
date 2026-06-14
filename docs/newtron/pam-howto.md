@@ -336,7 +336,7 @@ header.
 - [`authorization-howto.md`](authorization-howto.md) — L3
   authorization enforcement (the next layer in the arc)
 - [`hld.md`](hld.md) §9 — operator-facing security framing
-- [`mtls-howto.md`](mtls-howto.md) — L2a inter-service mTLS (pair
+- [`mtls-howto.md`](mtls-howto.md) — L2a listener-side TLS (pair
   L2a + L2b for the full transport-authentication picture)
 - `pkg/httputil/auth.go` — `Authenticator` interface + `PAMMiddleware`
 - `pkg/httputil/pamauth/authenticator.go` — cgo-backed `PAMAuthenticator`

@@ -1,8 +1,8 @@
-# Inter-Service mTLS — Operational HOWTO
+# Listener-Side TLS (Operator-to-Server) — Operational HOWTO
 
-## Status: partial — see [auth-design.md §L2a](auth-design.md#l2a--inter-service-mtls) for design rationale.
+## Status: partial — see [auth-design.md §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) for design rationale.
 
-The L2a inter-service mTLS feature has two halves:
+The L2a TLS feature has two halves:
 
 1. **Identity-extraction infrastructure (shipped).** `pkg/httputil` extracts the verified peer cert CN from a TLS handshake and exposes it via `ServiceCertCNFromRequest` / `ServiceCertCNFromContext`. The newtron caller middleware (`pkg/newtron/api/caller_middleware.go`) reads it ahead of PAM and Unix peer creds. The audit verification source `service_cert_cn` records the cert CN as the caller identity.
 
@@ -37,7 +37,7 @@ Even without listener-side TLS, the priority slot ahead of PAM is exercised by `
 
 ## Cross-references
 
-- [`auth-design.md` §L2a](auth-design.md#l2a--inter-service-mtls) — design rationale + threat model.
+- [`auth-design.md` §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) — design rationale + threat model.
 - [`pkg/httputil/conn_creds.go`](../../pkg/httputil/conn_creds.go) — the `ServiceCertCN` type and context plumbing.
 - [`pkg/newtron/api/caller_middleware.go`](../../pkg/newtron/api/caller_middleware.go) — the caller-priority chain that places service cert CN ahead of PAM.
 - [`pam-howto.md`](pam-howto.md) — L2b user-to-service PAM (today's user-identity path).

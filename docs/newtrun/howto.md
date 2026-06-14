@@ -955,9 +955,9 @@ Batch calls do not support individual `expect` blocks — the batch succeeds if 
     X-Newtron-Caller: alice
 ```
 
-Headers apply uniformly across every call in the step — top-level call, batched sub-calls, polling retries. One step = one header set. Empty/absent `headers:` preserves the runner's default behavior (the operator's Bearer is forwarded automatically per PR C; per-scenario `as: <user>` overrides it per PR D).
+Headers apply uniformly across every call in the step — top-level call, batched sub-calls, polling retries. One step = one header set. Empty/absent `headers:` preserves the runner's default behavior: the operator's Bearer (extracted by `pkg/newtrun/api/runs.go: operatorBearer` from the inbound `/runs` request's Authorization header) is attached automatically; per-scenario `as: <user>` overrides it for every call the scenario makes.
 
-Per-scenario identity (`as: <user>`) is the canonical way to test authorization-by-identity in a scenario. Per-step `headers:` is reserved for non-identity overrides — Bearers minted at runtime in a multi-step flow (e.g. capture from `/auth/login`, attach on the next step), or custom headers the suite author wants to send. See [`auth-design.md` §L2c](../newtron/auth-design.md) for the inbound/outbound identity flow.
+Per-scenario identity (`as: <user>`) is the canonical way to test authorization-by-identity in a scenario. Per-step `headers:` is reserved for non-identity overrides — Bearers minted at runtime in a multi-step flow (e.g. capture from `/auth/login`, attach on the next step), or custom headers the suite author wants to send. See [`auth-design.md` §L2c](../newtron/auth-design.md#l2c--server-issued-session-keys-pam-backed) for the inbound/outbound identity flow.
 
 #### jq expressions
 
