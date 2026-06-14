@@ -292,7 +292,33 @@ and recovery role. Treat the `super_users` list itself as a
 field-scoped resource that only the IAM team can edit via the example
 above.
 
-## 8. Revoking access
+## 8. Inspecting the active grant table
+
+`network.json` on disk is the source of truth, but a reload between
+edits and the next operator question can put the live table out of
+sync with the file briefly. To read what the auth checker is
+actually enforcing right now:
+
+```sh
+curl -s http://newt-server/newtron/v1/networks/default/authorization | jq .data
+```
+
+The response is the same three fields (`user_groups`,
+`permissions`, `super_users`) `network.json` carries, in the same
+wire form — shorthand `["group", ...]` when a grant has no scope,
+typed `[{"groups": [...], "where": {...}}]` when it does. An
+operator can copy a `permissions` block from the response directly
+into `network.json` and the loader will accept it unchanged. See
+[api.md GET /authorization](api.md#get-newtronv1networksnetidauthorization)
+for the full type reference.
+
+The endpoint is intentionally ungated. It returns the same
+information shell access to `network.json` already gives, and the
+mutation surface that edits the table is itself gated on
+`spec.author` (with L5's `where: {field: "..."}` clauses scoping
+meta-authorization separately — §7 above).
+
+## 9. Revoking access
 
 The authorization enforcer reads the grant table when
 `EnableAuthorization` is called. Two flows revoke access after
@@ -327,7 +353,7 @@ The watcher also fires on changes to the `profiles/` subdirectory,
 catching device-profile JSON rotations as part of the same revoke
 flow.
 
-## 9. Audit log integrity
+## 10. Audit log integrity
 
 With `--audit-log` set, every mutation and every authorization
 decision appends to a JSON-lines file. With `--audit-log-integrity`
@@ -379,7 +405,7 @@ fields. The verifier skips those entries and resumes the chain
 expectation once it sees a non-empty `ID`. Operators can switch on
 integrity mid-stream without invalidating the historical log.
 
-## 10. Failure modes
+## 11. Failure modes
 
 | Symptom | Cause | Fix |
 |---|---|---|

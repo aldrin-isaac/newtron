@@ -70,6 +70,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/profiles/{name}", s.handleShowProfile)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/zones", s.handleListZones)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/zones/{name}", s.handleShowZone)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/authorization", s.handleGetAuthorization)
 
 	// ====================================================================
 	// Network spec writes (RPC-style: verb in URL, POST for all writes)

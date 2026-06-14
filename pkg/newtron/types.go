@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -605,6 +606,30 @@ type SetupDeviceOpts struct {
 // ZoneDetail is the API view of a zone definition.
 type ZoneDetail struct {
 	Name string `json:"name"`
+}
+
+// AuthorizationDetail is the API view of the network's authorization
+// table — the user_groups, permissions, and super_users an operator
+// authors in network.json and that newtron's authorization checker
+// consumes at every mutation (auth-design.md §L3). The three fields
+// mirror NetworkSpecFile.{UserGroups, Permissions, SuperUsers}
+// directly (DPN §46 — wire shape mirrors canonical types). One
+// endpoint returns all three because they form one cohesive object
+// authored together, applied together on
+// --enforce-authorization + reload, and consumed together by the
+// checker (DPN §27).
+//
+// Permissions values are emitted in whichever wire form their
+// custom MarshalJSON chooses: the legacy ["group", ...] shorthand
+// when every grant has an empty `where` clause, the typed
+// [{groups, where}] form when any grant carries a scope. The wire
+// shape matches what an operator would see in network.json for the
+// same data, so a "who has what" inspector mounted on this
+// endpoint reads byte-for-byte like the spec file.
+type AuthorizationDetail struct {
+	UserGroups  map[string][]string                  `json:"user_groups"`
+	Permissions map[string]spec.PermissionGrants     `json:"permissions"`
+	SuperUsers  []string                             `json:"super_users"`
 }
 
 // CreateDeviceProfileRequest is the request for creating a device profile.
