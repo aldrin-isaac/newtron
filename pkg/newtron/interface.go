@@ -125,9 +125,14 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 }
 
 // RemoveBGPPeer removes a direct BGP peer from this interface.
-// The neighbor IP is read from the intent record.
+// The neighbor IP is recovered from the intent record before gating
+// so `where: {resource: "<peer-ip>"}` clauses scope this reverse op
+// symmetrically with AddBGPPeer (DPN §15; #163). If no peer is
+// bound, gateResource sees Resource="" and the internal call
+// returns the "no BGP peer intent" error after authorization runs.
 func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
-	if err := i.gate(ctx, auth.PermVRFModify, ""); err != nil {
+	peerIP := i.internal.DirectBGPPeerIP()
+	if err := i.gate(ctx, auth.PermVRFModify, peerIP); err != nil {
 		return err
 	}
 	cs, err := i.internal.RemoveBGPPeer(ctx)
@@ -215,9 +220,13 @@ func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
 	return nil
 }
 
-// RemoveQoS removes QoS configuration from this interface.
+// RemoveQoS removes QoS configuration from this interface. Recovers
+// the bound policy name from the intent record before gating so
+// `where: {resource: "<policy>"}` clauses scope this reverse op
+// symmetrically with ApplyQoS (DPN §15; #163).
 func (i *Interface) RemoveQoS(ctx context.Context) error {
-	if err := i.gate(ctx, auth.PermQoSModify, ""); err != nil {
+	policy := i.internal.QoSPolicyName()
+	if err := i.gate(ctx, auth.PermQoSModify, policy); err != nil {
 		return err
 	}
 	cs, err := i.internal.RemoveQoS(ctx)
