@@ -33,7 +33,7 @@ Reviewers will tell mTLS-authenticated callers apart from PAM-authenticated ones
 
 ## What the cert-CN priority does today
 
-Even without listener-side TLS, the priority slot ahead of PAM is exercised by tests (`pkg/newtron/api/caller_middleware_test.go: WithServiceCertCNForTest`) so that when the listener side lands, the integration is mechanical — drop the `*tls.Config` into `httputil.NewServer(...)` and the rest works.
+Even without listener-side TLS, the priority slot ahead of PAM is exercised by `TestCallerMiddleware_ServiceCertCNYieldsVerifiedCaller` and `TestCallerMiddleware_ServiceCertCNWinsOverEverything` in `pkg/newtron/api/caller_middleware_test.go` (both use the `httputil.WithServiceCertCNForTest` helper) so that when the listener side lands, the integration is mechanical — drop the `*tls.Config` into `httputil.NewServer(...)` and the rest works.
 
 ## Cross-references
 

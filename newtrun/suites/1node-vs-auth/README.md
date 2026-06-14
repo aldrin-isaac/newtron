@@ -258,7 +258,11 @@ curl -u alice:correct-password -X POST http://localhost:18080/newtron/v1/network
 
 With `--spec-watch` set, edit `network.json` to remove alice from
 spec-team, save, and within ~1 second a fresh request as alice gets
-403:
+403. The canonical PAM-only setup above (§3) omits
+`--audit-caller-header` because every identity is real PAM-verified;
+for this manual verification, restart newt-server with
+`--audit-caller-header X-Newtron-Caller` alongside `--spec-watch`
+so the curl examples below carry verified-by-header identity:
 
 ```sh
 # Before edit: 201

@@ -1,34 +1,32 @@
 # User-to-Service PAM — Operational HOWTO
 
 The PAM feature (auth-design.md L2b) authenticates remote operators
-calling newtron / newtlab / newtrun engines over TCP. Each engine
-runs the request through HTTP Basic + the host's PAM stack via
-`pam_authenticate` + `pam_acct_mgmt`. On success the operator's
-Unix username flows into `audit.Caller` with
-`verification_source: "pam"`. On failure: HTTP 401.
+calling `bin/newt-server` over TCP. newt-server runs each request
+through HTTP Basic + the host's PAM stack via `pam_authenticate` +
+`pam_acct_mgmt`. On success the operator's Unix username flows into
+`audit.Caller` with `verification_source: "pam"`. On failure:
+HTTP 401.
 
-PAM authentication pairs symmetrically with inter-service mTLS
-(auth-design.md L2a): together they close both transport-authentication
-surfaces. Once both layers are active, every request reaching an engine
-carries a verified identity — operator (PAM-verified) or peer engine
-(cert CN).
+`cmd/newt-server` is the only binary in this project that runs PAM
+authentication. The three standalone server binaries
+(`newtron-server`, `newtrun-server`, `newtlab-server`) are loopback
+dev tools with no encryption and no authentication; use newt-server
+for any deployment that needs verified identity.
 
 ## 1. When to use PAM authentication
 
-PAM authentication applies whenever an engine accepts TCP requests from
-operators. The composed `newt-server` binary, the three standalone engine
-binaries, and any topology that exposes a non-loopback listener all
-benefit:
+PAM authentication applies whenever `bin/newt-server` accepts TCP
+requests from operators:
 
 | Listener type | PAM authentication applies? |
 |---|---|
 | Plain TCP (loopback or non-loopback) | **Yes** — without it, any process reaching the listener can act as any user. |
 | Unix socket (auth-design.md L1) | **No** — kernel peer creds already identify the caller; the middleware skips PAM. |
-| mTLS (auth-design.md L2a) | **No** — the verified peer cert CN identifies the caller; the middleware skips PAM. |
+| mTLS (auth-design.md L2a; the listener-side wiring on `cmd/newt-server` is not yet implemented) | **No** when wired — the verified peer cert CN would identify the caller and the middleware would skip PAM. |
 
 The middleware skips automatically — no separate configuration
-required. Operators just set `--auth-pam-service=NAME` on the TCP
-side and PAM authentication activates for that surface.
+required. Operators set `--auth-pam-service=NAME` on `cmd/newt-server`
+and PAM authentication activates for the TCP listener.
 
 **Enable/disable per auth-design.md §2.4:** `--auth-pam-service` defaults
 empty; with no flag set, TCP requests pass through unauthenticated
@@ -119,9 +117,14 @@ unchanged.
 Operators authenticate via HTTP Basic. From a CLI:
 
 ```sh
-curl -u alice https://newtron-host:18080/newt-server/v1/health
+curl -u alice http://newtron-host:18080/newt-server/v1/health
 Enter host password for user 'alice':
 ```
+
+(The example uses plain HTTP because listener-side TLS isn't wired
+into `cmd/newt-server` yet — see [`mtls-howto.md`](mtls-howto.md).
+If newt-server sits behind a TLS-terminating reverse proxy, hit
+`https://newtron-host/newt-server/v1/health` against the proxy.)
 
 A correct password yields `{"status":"ok",...}`. A wrong password
 yields:
@@ -152,12 +155,15 @@ PAM authentication composes with the other identity sources:
 | Unix socket | `SO_PEERCRED` (L1) — PAM is skipped |
 | mTLS-protected TCP | Verified peer cert CN (L2a) — PAM is skipped |
 | Plain TCP with HTTP Basic | PAM-verified Unix username (L2b) |
-| Plain TCP without Basic auth | 401 from PAMMiddleware before any handler runs |
+| Plain TCP with `Authorization: Bearer <key>` | Username resolved by the L2c session-key store; PAM is skipped (the original `/auth/login` was PAM-authenticated) |
+| Plain TCP without Basic auth or Bearer | 401 from PAMMiddleware before any handler runs |
 
-The priority order is fixed in the caller middleware: cert CN > peer
-creds > PAM > self-attested header. A reviewer reading the audit log
-can always tell which path provided the identity by the
-`verification_source` field.
+The priority order is fixed in `pkg/newtron/api/caller_middleware.go`:
+cert CN > Unix peer creds > PAM > session-key Bearer > self-attested
+header. A reviewer reading the audit log can always tell which path
+provided the identity by the `verification_source` field
+(`service_cert_cn`, `unix_peer_creds`, `pam`, `session_key`,
+`self_attested_header`).
 
 ## 6. Threat model — what PAM authentication addresses, what it doesn't
 
@@ -274,17 +280,18 @@ the live directory" — a tradeoff with the per-request cost.
 ### Per-user CLI session cache
 
 For human operators at terminals, the `newtron`, `newtrun`, and
-`newtlab` CLIs share a per-user session cache at
-`~/.newtron/session.json` (mode `0600`). One `newtron auth login`
-mints a key and persists it; every subsequent CLI invocation reads
-the cache and carries `Authorization: Bearer <key>` automatically.
+`newtlab` CLIs share a per-user session cache under
+`~/.newtron/sessions/` — one file per (user, server) pair, named
+`<user>@<host>.json` (mode `0600`). One `newtron auth login` mints
+a key and persists it; every subsequent CLI invocation reads the
+cache and carries `Authorization: Bearer <key>` automatically.
 
 ```sh
 newtron auth login
 # Username (for http://localhost:18080): alice
 # Password:
 # Logged in as alice (server http://localhost:18080); session expires Thu, 12 Jun 2026 02:00:00 PDT.
-# Session cached at /home/alice/.newtron/session.json (mode 0600).
+# Session cached at /home/alice/.newtron/sessions/alice@localhost.json (mode 0600).
 
 # Now every CLI uses the cached key — no further prompts.
 newtron service list
@@ -295,17 +302,17 @@ newtron auth status
 # User:       alice
 # Server:     http://localhost:18080
 # Expires:    Thu, 12 Jun 2026 02:00:00 PDT (in 7h59m)
-# Cached at:  /home/alice/.newtron/session.json
+# Cached at:  /home/alice/.newtron/sessions/alice@localhost.json
 
 newtron auth logout
 # Logged out.
 ```
 
-The cache stores `{server, user, key, expires_at}` — same fields
-the server returns from `/auth/login`. Re-login replaces any
-earlier cached session for the same server. The file mode is
-strictly `0600`; if it ever drifts (e.g. someone `chmod 644`s it),
-`LoadSession` returns an error and the CLI refuses to use the
+The cache stores `{server, user, key, expires_at}` per file — same
+fields the server returns from `/auth/login`. Re-login replaces the
+existing cached session for the same (user, server) pair.
+The file mode is strictly `0600`; if it ever drifts (e.g. someone
+`chmod 644`s it), `LoadSession` returns an error and the CLI refuses to use the
 credential rather than silently sending a key anyone on the host
 could have tampered with.
 

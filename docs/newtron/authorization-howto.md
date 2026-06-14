@@ -123,10 +123,11 @@ bin/newt-server \
 
 The five flags above engage the mutation audit log with header identity
 (auth-design.md L1) and authorization enforcement (auth-design.md L3).
-For production deployments add `--unix-socket`,
-`--tls-cert`/`--tls-key`/`--tls-ca` (auth-design.md L2a), and
-`--auth-pam-service` (auth-design.md L2b) so the identity surfaces are
-verified rather than self-attested.
+For production deployments add `--unix-socket` and `--auth-pam-service`
+(auth-design.md L2b) so the identity surfaces are verified rather than
+self-attested. Listener-side TLS (auth-design.md L2a) is not yet wired
+into any binary; operators terminate TLS at a reverse proxy in front
+of `cmd/newt-server` — see [`mtls-howto.md`](mtls-howto.md).
 
 ## 4. Verify
 
