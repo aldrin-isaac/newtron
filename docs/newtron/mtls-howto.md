@@ -15,7 +15,7 @@ The L2a TLS feature has two halves:
 | Production / external-traffic-facing newt-server | Terminate TLS at a reverse proxy (nginx, caddy, envoy) in front of `bin/newt-server`. The proxy holds the cert + key; `newt-server` listens on loopback or a Unix socket behind it. |
 | Composed `bin/newt-server` only — single host, single port | mTLS between engines is a no-op (engines share one process; their cross-calls are Go function calls through `http.ServeHTTP`). External TLS termination at a proxy is the right hammer. |
 | Three standalone binaries on one host | Loopback dev mode — no TLS by design (the binaries are dev tools). |
-| Three standalone binaries on separate hosts | Not a supported deployment shape post-PR-B. The standalone binaries are loopback-default. Use `bin/newt-server` for production. |
+| Three standalone binaries on separate hosts | Not a supported deployment shape. The standalone binaries are loopback-default dev tools; use `bin/newt-server` for production / multi-host deployments. |
 
 ## Audit log shape when L2a-listener-wiring lands
 
