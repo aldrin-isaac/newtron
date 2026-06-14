@@ -481,7 +481,7 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) error {
 // BindIPVPN binds a VRF to an IP-VPN definition.
 // Resolves the IPVPN spec by name from the node's SpecProvider.
 func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
-	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+	if err := n.gate(ctx, auth.PermVRFBind, vrf); err != nil {
 		return err
 	}
 	cs, err := n.internal.BindIPVPN(ctx, vrf, util.NormalizeName(ipvpnName))
@@ -491,7 +491,7 @@ func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
 
 // UnbindIPVPN unbinds the IP-VPN from a VRF.
 func (n *Node) UnbindIPVPN(ctx context.Context, vrf string) error {
-	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+	if err := n.gate(ctx, auth.PermVRFBind, vrf); err != nil {
 		return err
 	}
 	cs, err := n.internal.UnbindIPVPN(ctx, vrf)
@@ -505,7 +505,7 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrf string) error {
 
 // AddBGPEVPNPeer adds a loopback BGP neighbor (indirect, multi-hop eBGP).
 func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) error {
-	if err := n.gate(ctx, auth.PermEVPNModify, config.NeighborIP); err != nil {
+	if err := n.gate(ctx, auth.PermEVPNPeer, config.NeighborIP); err != nil {
 		return err
 	}
 	cs, err := n.internal.AddBGPEVPNPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
@@ -515,7 +515,7 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) err
 
 // RemoveBGPEVPNPeer removes an EVPN BGP peer by IP.
 func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, ip string) error {
-	if err := n.gate(ctx, auth.PermEVPNModify, ip); err != nil {
+	if err := n.gate(ctx, auth.PermEVPNPeer, ip); err != nil {
 		return err
 	}
 	cs, err := n.internal.RemoveBGPEVPNPeer(ctx, ip)
@@ -529,7 +529,7 @@ func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, ip string) error {
 
 // AddStaticRoute adds a static route to a VRF.
 func (n *Node) AddStaticRoute(ctx context.Context, vrf, prefix, nexthop string, metric int) error {
-	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+	if err := n.gate(ctx, auth.PermVRFRoute, vrf); err != nil {
 		return err
 	}
 	cs, err := n.internal.AddStaticRoute(ctx, vrf, prefix, nexthop, metric)
@@ -539,7 +539,7 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrf, prefix, nexthop string, 
 
 // RemoveStaticRoute removes a static route from a VRF.
 func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error {
-	if err := n.gate(ctx, auth.PermVRFModify, vrf); err != nil {
+	if err := n.gate(ctx, auth.PermVRFRoute, vrf); err != nil {
 		return err
 	}
 	cs, err := n.internal.RemoveStaticRoute(ctx, vrf, prefix)
@@ -553,7 +553,7 @@ func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error 
 
 // BindMACVPN maps a VLAN to an L2VNI for EVPN.
 func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) error {
-	if err := n.gate(ctx, auth.PermEVPNModify, fmt.Sprintf("VLAN%d", vlanID)); err != nil {
+	if err := n.gate(ctx, auth.PermEVPNMACVPN, fmt.Sprintf("VLAN%d", vlanID)); err != nil {
 		return err
 	}
 	macvpnName = util.NormalizeName(macvpnName)
@@ -564,7 +564,7 @@ func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) er
 
 // UnbindMACVPN removes the MAC-VPN binding for a VLAN.
 func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) error {
-	if err := n.gate(ctx, auth.PermEVPNModify, fmt.Sprintf("VLAN%d", vlanID)); err != nil {
+	if err := n.gate(ctx, auth.PermEVPNMACVPN, fmt.Sprintf("VLAN%d", vlanID)); err != nil {
 		return err
 	}
 	cs, err := n.internal.UnbindMACVPN(ctx, vlanID)

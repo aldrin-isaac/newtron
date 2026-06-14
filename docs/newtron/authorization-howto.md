@@ -62,15 +62,18 @@ top-level keys carry the inputs:
     "vlan.modify":      ["ops"],
     "vlan.delete":      ["ops"],
     "vrf.create":       ["ops"],
-    "vrf.modify":       ["ops"],
+    "vrf.bind":         ["ops"],
+    "vrf.route":        ["ops"],
     "vrf.delete":       ["ops"],
+    "bgp.peer":         ["ops"],
     "acl.create":       ["ops"],
     "acl.modify":       ["ops"],
     "acl.delete":       ["ops"],
     "lag.create":       ["ops"],
     "lag.modify":       ["ops"],
     "lag.delete":       ["ops"],
-    "evpn.modify":      ["ops"],
+    "evpn.peer":        ["ops"],
+    "evpn.macvpn":      ["ops"],
     "service.apply":    ["ops"],
     "service.remove":   ["ops"],
     "interface.modify": ["ops"],
@@ -100,10 +103,14 @@ restrictive of the two.
 | `qos.create` / `qos.modify` / `qos.delete` | QoS policy spec + per-interface QoS apply |
 | `filter.create` / `filter.delete` | Filter (ACL spec) authoring |
 | `vlan.create` / `vlan.modify` / `vlan.delete` | Per-device VLAN + IRB configuration |
-| `vrf.create` / `vrf.modify` / `vrf.delete` | Per-device VRF + IPVPN bind/unbind + static routes + per-interface BGP peers |
+| `vrf.create` / `vrf.delete` | Per-device VRF CRUD |
+| `vrf.bind` | IPVPN bind/unbind on a VRF; Resource = VRF name |
+| `vrf.route` | Static route add/remove inside a VRF; Resource = VRF name |
+| `bgp.peer` | Per-interface direct BGP peer add/remove; Resource = peer IP |
 | `acl.create` / `acl.modify` / `acl.delete` | Per-device ACL CRUD + per-interface ACL bind/unbind |
 | `lag.create` / `lag.modify` / `lag.delete` | PortChannel CRUD + member add/remove |
-| `evpn.modify` | EVPN BGP peers + MACVPN bind/unbind |
+| `evpn.peer` | EVPN BGP peer add/remove; Resource = peer IP |
+| `evpn.macvpn` | MACVPN bind/unbind; Resource = `VLAN<id>` |
 | `service.apply` / `service.remove` | Per-interface service application |
 | `interface.modify` | Per-interface property set/clear, configure/unconfigure |
 | `device.write` | Operational mutations: `setup-device`, `init-device`, `config-reload`, `restart-service`, `exec-command`, `save`, `reconcile` |
