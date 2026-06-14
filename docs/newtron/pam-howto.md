@@ -323,9 +323,10 @@ could have tampered with.
 operator's Bearer (from `~/.newtron/sessions/`). The runner
 extracts the Bearer from the inbound Authorization header and
 attaches it on every outbound newtron call — the operator's
-identity is the runner's identity. Per-step `as: <user>` in a
-scenario switches to the named user's cached Bearer (the
-operator pre-cached it via `newtron auth login --user <user>`).
+identity is the runner's identity. Per-scenario `as: <user>`
+switches that scenario's outbound calls to the named user's
+cached Bearer (the operator pre-cached it via
+`newtron auth login --user <user>`).
 Scripted automation submits a run the same way: POST to
 `/newt-server/v1/auth/login` with HTTP Basic, persist the key,
 post to `/newtrun/v1/runs` with that key on the Authorization

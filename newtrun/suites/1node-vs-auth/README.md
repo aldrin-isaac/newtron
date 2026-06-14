@@ -9,19 +9,30 @@ expect.
 
 ## What it covers
 
-| Scenario | Layer | Verification |
+Each L1+ scenario file ships as a YAML stream of one
+per-identity scenario per document — alice's flow, bob's flow,
+mallory's flow, etc. live as siblings inside the file with
+`as: <identity>` at scenario scope and `requires:` chains
+preserving the original execution order. This is PR D of the
+engine-composition refactor: `as:` is now a scenario-level
+identity (one scenario = one verified caller end-to-end) rather
+than a per-step impersonation field. The split is transparent to
+the operator running the suite — `bin/newtrun start
+1node-vs-auth` schedules every document the way it scheduled
+each original scenario.
+
+| File | Layer | Verification |
 |---|---|---|
 | `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `profiles/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
-| `10-L1-audit-log-entries` | L1 | A handful of mutations as different callers; operator inspects the audit log file to see one entry per request with caller=alice/bob in the user field. |
-| `20-L3-spec-mutations-gated` | L3 | Per perm family (spec.author, qos.create, filter.create): denied caller gets 403, allowed caller succeeds. Plus the empty-caller fail-closed check. |
-| `25-L2c-disabled-routes` | L2c | When the server runs without `--auth-pam-service`, `POST /auth/login` and `POST /auth/logout` return 404 — the disabled-path safety contract. Also pins that the new `sessionkey.Middleware` doesn't break header-mode identity: a request with `Authorization: Bearer <anything>` plus `X-Newtron-Caller: alice` still resolves as alice. |
+| `10-L1-audit-log-entries` | L1 | Split into `-bob` + `-alice`: bob's ops group creates a QoS policy, then alice's spec-team creates her own and cleans up both. The audit log gains one entry per request with caller=alice/bob in the user field for the operator's post-suite inspection. |
+| `20-L3-spec-mutations-gated` | L3 | Split into `-mallory` + `-bob` + `-alice` (bob's qos.create result is cleaned up by alice's broader qos.delete grant — bob runs first). Per perm family (spec.author, qos.create, filter.create): denied caller (mallory) gets 403, allowed callers (alice/bob) succeed. |
 | `26-L2c-round-trip` | L2c | The full session-key arc end-to-end: PAM-authenticated `/auth/login` mints a key; a mutation under `Authorization: Bearer <key>` succeeds; `/auth/logout` revokes; the same Bearer on the same mutation 401s. Requires PAM + a real OS account (see §"L2c round-trip operator setup"). Skipped by default — the suite's `alice_basic_auth` parameter is empty unless the operator supplies it. |
-| `30-L4-node-mutations-gated` | L4 | Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
-| `40-L5-resource-scoping` | L5 | alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
+| `30-L4-node-mutations-gated` | L4 | Split into `-mallory` + `-bob`. Same shape on Node-level mutations (vlan.create, vrf.create, acl.create) via `?mode=topology`. |
+| `40-L5-resource-scoping` | L5 | Split into `-alice` + `-bob`. alice's `service.apply` grant scopes to `resource: "transit-*"`; she can apply transit-1, denied on vpn-east. bob's grant is the inverse. |
 | `50-L6-audit-verify` | L6 | `bin/newtron audit verify /tmp/1node-vs-auth-audit.jsonl` walks the chain and confirms it's intact end-to-end. |
-| `60-L3-permission-families` | L3 | Handler categories the original suite skips: super_user bypass (root sails through every check), profile/zone/topology mutations (gated on spec.author but routed through different handlers than services). |
-| `70-L4-permission-families` | L4 | Node-mutation perm families the original suite skips: lag.create (create-portchannel), evpn.modify (add-bgp-evpn-peer, prerequisite setup-device included), interface.modify (interface set-property), device.write (setup-device denied for mallory). |
-| `80-L5-dimensions` | L5 | The three `where` dimensions beyond `resource`: **field** (architects scoped to `!permissions,!user_groups,!super_users` matches services but not the grant table itself — the §3 criterion 9 meta-authorization separation), **interface** (intf-isaac scoped to `interface: "Ethernet0"` can bind ACLs on Eth0 but is denied on Eth4), **device** (dev-dora scoped to `device: switch1` is allowed; mallory still denied without any group). |
+| `60-L3-permission-families` | L3 | Split into `-root` + `-mallory` + `-alice`. Handler categories the original suite skips: super_user bypass (root sails through every check), profile/zone/topology mutations (gated on spec.author but routed through different handlers than services). |
+| `70-L4-permission-families` | L4 | Split into `-mallory` + `-bob` + `-alice`. Node-mutation perm families: lag.create (create-portchannel), evpn.modify (add-bgp-evpn-peer, prerequisite setup-device included), interface.modify (interface set-property), device.write (setup-device denied for mallory). |
+| `80-L5-dimensions` | L5 | Split into `-arch-anna` + `-iam-ian` + `-bob` + `-intf-isaac` + `-bob-cleanup` + `-dev-dora` + `-mallory` (bob is the only identity in the suite with `acl.delete`, so a bob-scoped cleanup scenario runs between intf-isaac and dev-dora). The three `where` dimensions beyond `resource`: **field** (architects scoped to `!permissions,!user_groups,!super_users` matches services but not the grant table itself — the §3 criterion 9 meta-authorization separation), **interface** (intf-isaac scoped to `interface: "Ethernet0"` can bind ACLs on Eth0 but is denied on Eth4), **device** (dev-dora scoped to `device: switch1` is allowed; mallory still denied without any group). |
 
 ## What it deliberately does NOT cover
 
@@ -42,66 +53,49 @@ In a production deployment with `--enforce-authorization` engaged, fine-grained 
 
 ## Operator setup
 
-### 1. Place the secret store on disk
+The canonical setup runs `newt-server` in PAM mode and pre-caches
+one session per identity the suite's scenarios reference. Every
+L1+ scenario uses `as: <user>` at scenario scope (PR D) — the
+runner attaches that user's cached Bearer on every outbound
+newtron call. PAM is the only way to mint those Bearers, so the
+operator setup walks PAM service-file + OS account provisioning.
 
-```sh
-cp newtrun/topologies/1node-vs-auth/specs/secrets.json /tmp/1node-vs-auth-secrets.json
-chmod 600 /tmp/1node-vs-auth-secrets.json
-```
+Under PR D every scenario authenticates via Bearer — the
+operator's own (forwarded by the runner from the inbound /runs
+request) or a `scenario.As` override. `--audit-caller-header` is
+not required; the header-mode identity surface from L1 is
+exercised by unit tests (`pkg/newtron/api/caller_middleware_test.go`)
+rather than by an integration scenario, because PR-C/D's
+operator-Bearer-forward model makes a no-Bearer request
+expressible only by running the suite under an unauthenticated
+server, which the canonical setup does not.
 
-### 2. Start `newt-server` with the full flag set
+Walk the steps in [§"L2c round-trip operator setup"](#l2c-round-trip-operator-setup)
+below to:
 
-The L6-audit-verify scenario invokes `bin/newtron` as a subprocess
-from inside `newt-server`. The subprocess inherits the server's
-`$PATH`, so the operator must put `./bin` on PATH before starting
-the server:
+1. Place the secret store on disk.
+2. Configure the PAM service file at `/etc/pam.d/newtron-test`.
+3. Provision the OS accounts the suite knows.
+4. Start `newt-server` with `--auth-pam-service` set.
+5. Pre-cache one session per identity via `login-all.sh`.
+6. Run the suite with the L2c round-trip parameter.
 
-```sh
-PATH="$(pwd)/bin:$PATH" bin/newt-server \
-    --spec-dir newtrun/topologies/1node-vs-auth/specs \
-    --net-id 1node-vs-auth \
-    --secret-store /tmp/1node-vs-auth-secrets.json \
-    --audit-log /tmp/1node-vs-auth-audit.jsonl \
-    --audit-caller-header X-Newtron-Caller \
-    --enforce-authorization \
-    --audit-log-integrity \
-    --spec-watch &
-```
-
-Flag-by-flag:
-
-- `--secret-store` engages L0 `${secret:KEY}` resolution.
-- `--audit-log` writes audit events to the named file (L1).
-- `--audit-caller-header` accepts the `X-Newtron-Caller` HTTP header as
-  the caller identity (L1 self-attested). Required for the suite —
-  every mutation step sends this header.
-- `--enforce-authorization` engages L3 + L4 gating. Without it, every
-  step would 200 regardless of caller; the `expect_failure: true`
-  assertions would all flip.
-- `--audit-log-integrity` hash-chains every audit event so L6's
-  `audit verify` has something to verify (L6).
-- `--spec-watch` enables file-change-driven reload (L6 revocation half).
-  Not exercised by suite scenarios; required for manual revoke testing.
-
-### 3. Run the suite
-
-```sh
-bin/newtrun start 1node-vs-auth --no-deploy
-```
-
-`--no-deploy` skips the lab deployment — every scenario uses
-`?mode=topology` so no SONiC VM is required.
+Despite the section name, the same setup runs the entire suite,
+not just the L2c round-trip — the param flag is empty by default,
+which skips the round-trip scenario quietly while every other
+scenario authenticates via the cached Bearers.
 
 ## L2c round-trip operator setup
 
 The `26-L2c-round-trip` scenario exercises a real PAM-authenticated
 `/auth/login`, so it needs three things the rest of the suite does not:
 
-**Single-mode workflow.** Per-step identity uses the runner's
-multi-user session cache (`as: <user>` on each step picks up the
-Bearer the operator pre-cached via `newtron auth login --user <user>`).
-The full suite runs cleanly in PAM-only mode in one server
-invocation; no header-mode/PAM-mode split is needed.
+**Single-mode workflow.** Per-scenario identity uses the runner's
+multi-user session cache (`as: <user>` at scenario scope picks up
+the Bearer the operator pre-cached via
+`newtron auth login --user <user>`). The full suite runs cleanly
+in PAM-only mode in one server invocation; no header-mode/PAM-mode
+split is needed.
 
 Two pieces wire this together:
 
@@ -111,9 +105,9 @@ Two pieces wire this together:
    logs in as every identity any scenario references via `as:`,
    pre-caching one Bearer per user in `~/.newtron/sessions/`. The
    operator submitting the run is one of those identities; the
-   runner forwards their Bearer as the default credential and
-   per-step `as:` switches to whichever cached user the scenario
-   names.
+   runner forwards their Bearer as the default credential and a
+   scenario's `as: <user>` switches that scenario to whichever
+   cached user it names.
 
 Re-run `login-all.sh` after every newt-server restart — the
 server-side session-key store is in-memory by design, so cached
@@ -185,9 +179,10 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
   set, or any other consumer hitting `/newtrun/v1/runs`) carries
   an Authorization Bearer; the runner extracts it from the
   inbound request and attaches it on every outbound newtron call.
-  Per-step `as: <user>` in a scenario switches to that user's
-  cached Bearer for the one step (the multi-user session cache
-  the operator populated via `login-all.sh`).
+  Per-scenario `as: <user>` switches every outbound newtron
+  call that scenario makes to the named user's cached Bearer
+  (the multi-user session cache the operator populated via
+  `login-all.sh`).
 
 ### 4. Pre-cache a session for every test identity
 
@@ -213,7 +208,7 @@ bin/newtrun start 1node-vs-auth --no-deploy \
     --param alice_basic_auth=$(echo -n 'alice:thepassword' | base64)
 ```
 
-All 11 scenarios pass in one server invocation. The `--target` form
+All scenarios pass in one server invocation. The `--target` form
 still works to run a dependency chain:
 
 ```sh
@@ -223,13 +218,13 @@ bin/newtrun start 1node-vs-auth --no-deploy \
 ```
 
 `--target` runs the dependency chain leading to the named scenario.
-The full suite now passes 11/11 in PAM mode (per-step `as: <user>`
+The full suite passes in PAM mode (per-scenario `as: <user>`
 impersonation replaced the header-mode spoofing the scenarios used
 before).
 
 ## Expected outcome
 
-All 11 scenarios pass on first run. If any fail:
+All scenarios pass on first run. If any fail:
 
 - L3/L4 scenarios failing for an *allowed* caller → check
   `network.json` grants and operator's `--enforce-authorization` flag.

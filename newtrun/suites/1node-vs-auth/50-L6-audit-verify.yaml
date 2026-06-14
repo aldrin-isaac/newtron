@@ -14,7 +14,7 @@ description: |
   Audit log path is hard-coded to /tmp/1node-vs-auth-audit.jsonl.
   The operator's --audit-log flag must match.
 
-requires: [L5-resource-scoping]
+requires: [L5-resource-scoping-alice, L5-resource-scoping-bob]
 
 steps:
   - name: audit-verify-chain

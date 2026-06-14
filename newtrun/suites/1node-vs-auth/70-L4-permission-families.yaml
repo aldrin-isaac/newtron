@@ -1,17 +1,14 @@
-name: L4-permission-families
+name: L4-permission-families-mallory
 description: |
   Coverage expansion: the original 30-L4-node-mutations-gated scenario
-  walks vlan.create + vrf.create + acl.create. This scenario covers the
-  remaining Node-level permission families:
+  walks vlan.create + vrf.create + acl.create. Mallory's portion of this
+  split-per-identity scenario: mallory (no group) is denied on lag.create,
+  evpn.modify, interface.modify, and device.write.
 
-    - lag.create (create-portchannel)
-    - evpn.modify (add-bgp-evpn-peer)
-    - interface.modify (interface set-property)
-    - device.write (config-reload as a representative operational verb)
+  Each: mallory denied (no group).
 
-  Each: mallory denied (no group), allowed caller succeeds.
-
-requires: [L4-node-mutations-gated]
+requires: [L4-node-mutations-gated-bob, L4-node-mutations-gated-mallory]
+as: mallory
 
 steps:
   # lag.create
@@ -20,71 +17,85 @@ steps:
     method: POST
     url: /nodes/switch1/create-portchannel?mode=topology
     params: {name: PortChannel10}
-    as: mallory
     expect_failure: true
 
-  - name: bob-create-portchannel-allowed
-    action: newtron
-    method: POST
-    url: /nodes/switch1/create-portchannel?mode=topology
-    params: {name: PortChannel20}
-    as: bob
-
-  # evpn.modify — add a loopback BGP EVPN peer. The grant on evpn.modify
-  # is held by ops; mallory denied.
-  # Prerequisite: setup-device with a source_ip so the EVPN peer group
-  # exists. bob (ops) has device.write to do this.
-  - name: bob-setup-device
-    action: newtron
-    method: POST
-    url: /nodes/switch1/setup-device?mode=topology
-    params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    as: bob
-
+  # evpn.modify — mallory denied
   - name: mallory-add-bgp-evpn-peer-denied
     action: newtron
     method: POST
     url: /nodes/switch1/add-bgp-evpn-peer?mode=topology
     params: {neighbor_ip: "10.0.0.2", remote_as: 65002, description: peer-mallory}
-    as: mallory
     expect_failure: true
+
+  # interface.modify — mallory denied
+  - name: mallory-set-property-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/set-property?mode=topology
+    params: {property: mtu, value: "9100"}
+    expect_failure: true
+
+  # device.write — mallory denied
+  - name: mallory-setup-device-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/setup-device?mode=topology
+    params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
+    expect_failure: true
+
+---
+name: L4-permission-families-bob
+description: |
+  Coverage expansion: the original 30-L4-node-mutations-gated scenario
+  walks vlan.create + vrf.create + acl.create. Bob's portion of this
+  split-per-identity scenario: bob (ops) is allowed on lag.create,
+  evpn.modify, and device.write. setup-device is the device.write
+  representative that works in topology mode; it is also a prerequisite
+  for the evpn.modify step.
+
+requires: [L4-permission-families-mallory]
+as: bob
+
+steps:
+  # lag.create — bob (ops) allowed
+  - name: bob-create-portchannel-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-portchannel?mode=topology
+    params: {name: PortChannel20}
+
+  # evpn.modify — add a loopback BGP EVPN peer. The grant on evpn.modify
+  # is held by ops; mallory denied above. Prerequisite: setup-device with
+  # a source_ip so the EVPN peer group exists. bob (ops) has device.write.
+  - name: bob-setup-device
+    action: newtron
+    method: POST
+    url: /nodes/switch1/setup-device?mode=topology
+    params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
 
   - name: bob-add-bgp-evpn-peer-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/add-bgp-evpn-peer?mode=topology
     params: {neighbor_ip: "10.0.0.3", remote_as: 65003, description: peer-bob}
-    as: bob
 
+---
+name: L4-permission-families-alice
+description: |
+  Coverage expansion: the original 30-L4-node-mutations-gated scenario
+  walks vlan.create + vrf.create + acl.create. Alice's portion of this
+  split-per-identity scenario: alice (spec-team) is allowed on
+  interface.modify (both spec-team and ops have it).
+
+requires: [L4-permission-families-bob]
+as: alice
+
+steps:
   # interface.modify — Interface.gate populates Context.Interface; the
   # gate then checks against interface.modify (both spec-team and ops
   # have it).
-  - name: mallory-set-property-denied
-    action: newtron
-    method: POST
-    url: /nodes/switch1/interfaces/Ethernet0/set-property?mode=topology
-    params: {property: mtu, value: "9100"}
-    as: mallory
-    expect_failure: true
-
   - name: alice-set-property-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/set-property?mode=topology
     params: {property: mtu, value: "9100"}
-    as: alice
-
-  # device.write — operational verbs gate on the catch-all. Both
-  # spec-team and ops have it. setup-device is the device.write
-  # representative that works in topology mode (mallory has already
-  # been denied on this above; the gate fires regardless of mode).
-  # The L4 device.write deny path was covered upstream in the
-  # init-device step the original suite skips. For now, mallory's
-  # setup-device denied path:
-  - name: mallory-setup-device-denied
-    action: newtron
-    method: POST
-    url: /nodes/switch1/setup-device?mode=topology
-    params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    as: mallory
-    expect_failure: true

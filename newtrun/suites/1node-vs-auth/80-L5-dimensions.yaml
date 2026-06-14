@@ -1,22 +1,14 @@
-name: L5-dimensions
+name: L5-dimensions-arch-anna
 description: |
   Coverage expansion: the original 40-L5-resource-scoping scenario
-  only exercises the resource dimension. This scenario covers the
-  remaining L5 where dimensions:
+  only exercises the resource dimension. Arch-anna's portion of this
+  split-per-identity scenario covers the field dimension (meta-authorization
+  §3 criterion 9): arch-anna in architects is scoped to
+  !permissions,!user_groups,!super_users. Creating a service
+  (field=services) matches the !-exclusion — allowed.
 
-    - field (meta-authorization §3 criterion 9): architects can
-      author services/profiles/topology but NOT permissions/
-      user_groups/super_users; iam-team is the inverse.
-    - interface: intf-ops scoped to interface=Ethernet0 can bind-acl
-      on Eth0 but NOT on Eth4.
-    - device: device-team scoped to device=switch1 can config-reload
-      switch1; mallory still denied.
-
-  Also exercises L5 pattern shapes: bang exclusion (!field), exact
-  match (interface=Ethernet0), and the multi-value form
-  (permissions,user_groups,super_users).
-
-requires: [L4-node-mutations-gated]
+requires: [L4-node-mutations-gated-bob, L4-node-mutations-gated-mallory]
+as: arch-anna
 
 steps:
   # FIELD dimension — meta-authorization.
@@ -27,15 +19,27 @@ steps:
     method: POST
     url: /create-service
     params: {name: svc-architect, type: routed}
-    as: arch-anna
 
   - name: architect-cleans-up-service
     action: newtron
     method: POST
     url: /delete-service
     params: {name: svc-architect}
-    as: arch-anna
 
+---
+name: L5-dimensions-iam-ian
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. Iam-ian's portion of this
+  split-per-identity scenario covers the field dimension (meta-authorization
+  §3 criterion 9): iam-ian in iam-team is scoped to
+  permissions,user_groups,super_users. Creating a service (field=services)
+  is NOT in the include list — denied.
+
+requires: [L5-dimensions-arch-anna]
+as: iam-ian
+
+steps:
   # iam-ian in iam-team: scoped to permissions,user_groups,super_users
   # (exact OR list). Creating a service (field=services) → NOT in the
   # include list → denied.
@@ -44,9 +48,22 @@ steps:
     method: POST
     url: /create-service
     params: {name: svc-iam, type: routed}
-    as: iam-ian
     expect_failure: true
 
+---
+name: L5-dimensions-bob
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. Bob's portion of this
+  split-per-identity scenario: bob (ops, has acl.create) creates the
+  ACL fixture used by intf-isaac's bind tests. Cleanup runs in
+  L5-dimensions-bob-cleanup after intf-isaac's portion (bob is the
+  only suite identity with acl.delete; see that scenario).
+
+requires: [L5-dimensions-iam-ian]
+as: bob
+
+steps:
   # INTERFACE dimension — intf-ops grant on acl.modify scoped to
   # interface=Ethernet0. First need an ACL to bind.
   - name: bob-create-acl-for-bind
@@ -54,22 +71,33 @@ steps:
     method: POST
     url: /nodes/switch1/create-acl?mode=topology
     params: {name: acl-l5, type: L3, stage: ingress}
-    as: bob
 
+---
+name: L5-dimensions-intf-isaac
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. Intf-isaac's portion of this
+  split-per-identity scenario covers the interface dimension: intf-isaac's
+  grant on acl.modify is scoped to interface=Ethernet0. Binding on Eth0
+  is allowed; binding on Eth4 is denied. Unbind on Eth0 is also
+  within scope and handled in this scenario.
+
+requires: [L5-dimensions-bob]
+as: intf-isaac
+
+steps:
   # intf-isaac scoped to Ethernet0 — bind on Ethernet0 allowed.
   - name: intf-isaac-binds-on-eth0-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/bind-acl?mode=topology&no_save=true
     params: {acl: acl-l5, direction: ingress}
-    as: intf-isaac
 
   - name: intf-isaac-unbinds-on-eth0
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/unbind-acl?mode=topology&no_save=true
     params: {acl: acl-l5}
-    as: bob
 
   # intf-isaac trying Ethernet4 → his grant's interface=Ethernet0 doesn't
   # match. Denied.
@@ -78,16 +106,40 @@ steps:
     method: POST
     url: /nodes/switch1/interfaces/Ethernet4/bind-acl?mode=topology&no_save=true
     params: {acl: acl-l5, direction: ingress}
-    as: intf-isaac
     expect_failure: true
 
+---
+name: L5-dimensions-bob-cleanup
+description: |
+  Bob cleans up the ACL fixture intf-isaac unbound. Bob (ops) is
+  the only identity in this suite with `acl.delete`; dev-dora
+  (device-team) and mallory (no group) don't qualify. Runs between
+  intf-isaac and dev-dora so the dev-dora scenario starts with a
+  clean ACL_TABLE state.
+
+requires: [L5-dimensions-intf-isaac]
+as: bob
+
+steps:
   - name: bob-cleans-up-acl
     action: newtron
     method: POST
     url: /nodes/switch1/delete-acl?mode=topology
     params: {name: acl-l5}
-    as: bob
 
+---
+name: L5-dimensions-dev-dora
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. Dev-dora's portion of this
+  split-per-identity scenario covers the device dimension: dev-dora
+  in device-team is scoped to device=switch1 and can hit switch1
+  endpoints.
+
+requires: [L5-dimensions-bob-cleanup]
+as: dev-dora
+
+steps:
   # DEVICE dimension — dev-dora in device-team scoped to device=switch1
   # can hit switch1 endpoints; the scope-clause matches. setup-device
   # is the device.write representative that works in topology mode.
@@ -96,8 +148,19 @@ steps:
     method: POST
     url: /nodes/switch1/setup-device?mode=topology
     params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    as: dev-dora
 
+---
+name: L5-dimensions-mallory
+description: |
+  Coverage expansion: the original 40-L5-resource-scoping scenario
+  only exercises the resource dimension. Mallory's portion of this
+  split-per-identity scenario: mallory is not in any group at all, so
+  no grant entry matches — denied regardless of device dimension.
+
+requires: [L5-dimensions-dev-dora]
+as: mallory
+
+steps:
   # mallory still denied regardless of device dimension (she's not in
   # any group at all, so no grant entry matches).
   - name: mallory-setup-denied
@@ -105,5 +168,4 @@ steps:
     method: POST
     url: /nodes/switch1/setup-device?mode=topology
     params: {bgp_asn: "65001", hostname: switch1, source_ip: "10.0.0.1"}
-    as: mallory
     expect_failure: true

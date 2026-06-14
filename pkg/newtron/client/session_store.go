@@ -230,9 +230,9 @@ func DeleteSession(path string) error {
 
 // LoadSessionFor loads the cached session for a specific (user,
 // server) pair. Thin convenience around LoadSession + SessionPath
-// — the multi-user-aware callers (the runner's per-step bearer
-// lookup, `newtron auth logout --user X`) read by name rather
-// than path-construct themselves.
+// — the multi-user-aware callers (the runner's per-scenario
+// Bearer lookup, `newtron auth logout --user X`) read by name
+// rather than path-construct themselves.
 func LoadSessionFor(user, server string) (*SessionRecord, error) {
 	return LoadSession(SessionPath(user, server))
 }

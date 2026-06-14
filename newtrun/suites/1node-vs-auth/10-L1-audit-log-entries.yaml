@@ -1,16 +1,44 @@
-name: L1-audit-log-entries
+name: L1-audit-log-entries-bob
 description: |
-  auth-design.md L1: every mutation hits the audit middleware. This
-  scenario fires a small batch of writes as different callers; the
-  operator verifies the audit log file (path passed to the server via
-  --audit-log) gained one entry per request, each carrying the
-  X-Newtron-Caller value as the user field.
+  auth-design.md L1: every mutation hits the audit middleware. Bob's
+  portion of the split-per-identity scenario: bob's ops group has
+  qos.create, so he creates a QoS policy. Runs before the alice half
+  so alice can verify the log contains two distinct user fields and
+  clean up both records.
 
   Direct log-file inspection from a scenario step isn't possible
   without a local-exec step action (deferred). The README documents
   the post-suite verification command (tail -n 20 /path/to/log).
 
 requires: [L0-secret-store-resolves]
+as: bob
+
+steps:
+  # As bob — ops group has qos.create grant; same shape as alice's
+  # entry below, different user field in the audit log.
+  - name: bob-creates-qos-policy
+    action: newtron
+    method: POST
+    url: /create-qos-policy
+    params: {name: qos-test-l1-bob}
+
+---
+name: L1-audit-log-entries-alice
+description: |
+  auth-design.md L1: every mutation hits the audit middleware. Alice's
+  portion of the split-per-identity scenario: alice fires her own
+  write (emitting one auditcheck:spec.author allow event + the
+  request-level POST event) and cleans up both her own and bob's
+  QoS policies — spec-team has qos.delete; ops doesn't. The
+  requires: chain forces this scenario to run after bob's create
+  so the cleanup finds bob's record present.
+
+  Direct log-file inspection from a scenario step isn't possible
+  without a local-exec step action (deferred). The README documents
+  the post-suite verification command (tail -n 20 /path/to/log).
+
+requires: [L1-audit-log-entries-bob]
+as: alice
 
 steps:
   # As alice — emits one auditcheck:spec.author allow event + the
@@ -20,16 +48,6 @@ steps:
     method: POST
     url: /create-qos-policy
     params: {name: qos-test-l1-alice}
-    as: alice
-
-  # As bob — ops group has qos.create grant; same shape, different
-  # user field in the audit log.
-  - name: bob-creates-qos-policy
-    action: newtron
-    method: POST
-    url: /create-qos-policy
-    params: {name: qos-test-l1-bob}
-    as: bob
 
   # Cleanup. spec-team has qos.delete; bob's policy created above
   # gets deleted by alice (spec-team is broader than ops here).
@@ -38,11 +56,9 @@ steps:
     method: POST
     url: /delete-qos-policy
     params: {name: qos-test-l1-alice}
-    as: alice
 
   - name: alice-deletes-qos-policy-b
     action: newtron
     method: POST
     url: /delete-qos-policy
     params: {name: qos-test-l1-bob}
-    as: alice

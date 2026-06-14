@@ -1,7 +1,7 @@
 #!/bin/sh
 # Log in as every identity 1node-vs-auth's scenarios reference, so
 # `bin/newtrun start 1node-vs-auth` has a session cached for every
-# step's `as: <user>` reference.
+# scenario's `as: <user>` reference.
 #
 # The PAM server in this suite's operator setup uses pam_permit.so
 # (accepts any password), so the literal password below is a

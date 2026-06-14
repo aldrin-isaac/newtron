@@ -1,7 +1,9 @@
 package newtrun
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,13 +24,42 @@ func ParseScenario(path string) (*Scenario, error) {
 	return s, nil
 }
 
-// ParseScenarioBytes parses a YAML scenario from a byte buffer and returns
-// a validated Scenario. Used by the inline compose-and-run HTTP endpoint
-// (PR 3) where the scenario is delivered in the request body rather than
-// read from disk.
+// ParseScenarioBytes parses a YAML scenario from a byte buffer and
+// returns a validated Scenario. Used by the inline compose-and-run
+// HTTP endpoint and the PUT scenario-authoring handler — both expect
+// exactly one scenario per call.
+//
+// Uses yaml.NewDecoder rather than yaml.Unmarshal so a multi-document
+// payload surfaces as an explicit error ("expected one scenario, got
+// a stream of N") instead of silently truncating to the first
+// document. Multi-document streams belong on the suite-directory
+// write path (loadScenarioFiles); single-scenario endpoints reject
+// them so an operator who pastes a split-per-identity file body
+// into create-scenario sees the mistake immediately
+// (ai-instructions §13 same concept = same name).
 func ParseScenarioBytes(data []byte) (*Scenario, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var s Scenario
-	if err := yaml.Unmarshal(data, &s); err != nil {
+	if err := dec.Decode(&s); err != nil {
+		if err == io.EOF {
+			return nil, fmt.Errorf("parsing scenario: empty input")
+		}
+		return nil, fmt.Errorf("parsing scenario: %w", err)
+	}
+	// Detect a second document — same wire shape as the suite loader
+	// reads, but explicitly rejected here.
+	var extra Scenario
+	if err := dec.Decode(&extra); err == nil {
+		// More than one doc; count any further to make the error honest.
+		n := 2
+		for {
+			if err := dec.Decode(&extra); err != nil {
+				break
+			}
+			n++
+		}
+		return nil, fmt.Errorf("parsing scenario: expected one scenario, got a stream of %d", n)
+	} else if err != io.EOF {
 		return nil, fmt.Errorf("parsing scenario: %w", err)
 	}
 	applyDefaults(&s)
@@ -46,6 +77,11 @@ func ParseScenarioBytes(data []byte) (*Scenario, error) {
 // belongs in suite.yaml") can name the offending file. Per §28
 // (file-level feature cohesion), scenario loading lives here in
 // parser.go; LoadSuite layers suite-level rejection on top.
+//
+// Each .yaml file may contain one or more YAML documents separated by
+// --- lines. Multi-document files let a set of split-per-identity
+// scenarios live in the same file while preserving alphabetical
+// ordering on disk.
 func loadScenarioFiles(dir string) ([]*Scenario, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -60,14 +96,51 @@ func loadScenarioFiles(dir string) ([]*Scenario, []string, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
-		s, err := ParseScenario(path)
+		ss, err := parseScenarioFile(path)
 		if err != nil {
 			return nil, nil, err
 		}
-		scenarios = append(scenarios, s)
-		paths = append(paths, path)
+		for range ss {
+			paths = append(paths, path)
+		}
+		scenarios = append(scenarios, ss...)
 	}
 	return scenarios, paths, nil
+}
+
+// parseScenarioFile reads a scenario file that may contain one or more YAML
+// documents (separated by ---). Each document is parsed and validated as an
+// independent Scenario. Returns one scenario per document in file order.
+func parseScenarioFile(path string) ([]*Scenario, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading scenario %s: %w", path, err)
+	}
+	defer f.Close()
+
+	dec := yaml.NewDecoder(f)
+	var out []*Scenario
+	for {
+		var s Scenario
+		if err := dec.Decode(&s); err != nil {
+			// io.EOF means no more documents.
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		applyDefaults(&s)
+		for i, step := range s.Steps {
+			if err := validateStepFields(s.Name, i, &step); err != nil {
+				return nil, fmt.Errorf("%s: validating scenario: %w", path, err)
+			}
+		}
+		out = append(out, &s)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: file contains no scenario documents", path)
+	}
+	return out, nil
 }
 
 // requireParam checks that a required key exists in step.Params.

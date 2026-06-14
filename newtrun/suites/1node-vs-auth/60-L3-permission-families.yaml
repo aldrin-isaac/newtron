@@ -1,19 +1,13 @@
-name: L3-permission-families
+name: L3-permission-families-root
 description: |
   Coverage expansion: the original 20-L3-spec-mutations-gated scenario
-  only walks the spec.author + qos.create + filter.create families on
-  network.json mutations. This scenario covers the handler categories
-  the original suite skips:
-
-    - super_user bypass (root, in super_users, ignores every check)
-    - profile mutations (create-profile / delete-profile, gated on
-      spec.author with field=profiles)
-    - zone mutations (create-zone / delete-zone, gated on spec.author
-      with field=zones)
-    - topology mutations (add-topology-device, gated on spec.author
-      with field=topology; populates Context.Device too)
+  only walks the spec.author + qos.create + filter.create families.
+  Root's portion of this split-per-identity scenario: super_user bypass —
+  root is in super_users; every check returns nil without consulting the
+  permissions map. Even a normally-denied action succeeds.
 
 requires: [L0-secret-store-resolves]
+as: root
 
 steps:
   # super_user bypass — root is in super_users; every check returns nil
@@ -24,39 +18,34 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-root-bypass}
-    as: root
 
   - name: root-deletes-zone-bypass
     action: newtron
     method: POST
     url: /delete-zone
     params: {name: zone-root-bypass}
-    as: root
 
-  # Profile mutations — mallory denied, alice (spec-team has spec.author)
-  # succeeds. Verifies the spec.author gate reaches handlers beyond
-  # services/qos/filters.
+---
+name: L3-permission-families-mallory
+description: |
+  Coverage expansion: the original 20-L3-spec-mutations-gated scenario
+  only walks the spec.author + qos.create + filter.create families.
+  Mallory's portion of this split-per-identity scenario: mallory (not in
+  any group) is denied on profile mutations, zone mutations, and topology
+  mutations. Verifies the spec.author gate reaches handlers beyond
+  services/qos/filters.
+
+requires: [L3-permission-families-root]
+as: mallory
+
+steps:
+  # Profile mutations — mallory denied
   - name: mallory-create-profile-denied
     action: newtron
     method: POST
     url: /create-profile
     params: {name: profile-mallory, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.99", zone: amer, platform: sonic-vs}
-    as: mallory
     expect_failure: true
-
-  - name: alice-create-profile-allowed
-    action: newtron
-    method: POST
-    url: /create-profile
-    params: {name: profile-alice, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.98", zone: amer, platform: sonic-vs}
-    as: alice
-
-  - name: alice-cleanup-profile
-    action: newtron
-    method: POST
-    url: /delete-profile
-    params: {name: profile-alice}
-    as: alice
 
   # Zone mutations
   - name: mallory-create-zone-denied
@@ -64,22 +53,7 @@ steps:
     method: POST
     url: /create-zone
     params: {name: zone-mallory}
-    as: mallory
     expect_failure: true
-
-  - name: alice-create-zone-allowed
-    action: newtron
-    method: POST
-    url: /create-zone
-    params: {name: zone-alice}
-    as: alice
-
-  - name: alice-cleanup-zone
-    action: newtron
-    method: POST
-    url: /delete-zone
-    params: {name: zone-alice}
-    as: alice
 
   # Topology mutations — exercises the network.go gates (separate from
   # spec_ops.go gates the original suite hits). Note the device-name
@@ -92,5 +66,45 @@ steps:
       name: mallory-switch
       device:
         ports: {Ethernet0: {admin_status: "up"}}
-    as: mallory
     expect_failure: true
+
+---
+name: L3-permission-families-alice
+description: |
+  Coverage expansion: the original 20-L3-spec-mutations-gated scenario
+  only walks the spec.author + qos.create + filter.create families.
+  Alice's portion of this split-per-identity scenario: alice (spec-team
+  has spec.author) is allowed on profile mutations and zone mutations.
+  Verifies the spec.author gate reaches handlers beyond services/qos/filters.
+
+requires: [L3-permission-families-mallory]
+as: alice
+
+steps:
+  # Profile mutations — alice (spec-team has spec.author) succeeds.
+  # Verifies the spec.author gate reaches handlers beyond
+  # services/qos/filters.
+  - name: alice-create-profile-allowed
+    action: newtron
+    method: POST
+    url: /create-profile
+    params: {name: profile-alice, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.98", zone: amer, platform: sonic-vs}
+
+  - name: alice-cleanup-profile
+    action: newtron
+    method: POST
+    url: /delete-profile
+    params: {name: profile-alice}
+
+  # Zone mutations
+  - name: alice-create-zone-allowed
+    action: newtron
+    method: POST
+    url: /create-zone
+    params: {name: zone-alice}
+
+  - name: alice-cleanup-zone
+    action: newtron
+    method: POST
+    url: /delete-zone
+    params: {name: zone-alice}

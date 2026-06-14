@@ -484,15 +484,18 @@ the newtron engine's `callerMiddleware` tags `audit.Caller`
 identically. The operator's identity is the runner's identity;
 the runner has no daemon-side credential of its own.
 
-Per-step `as: <user>` in a scenario overrides this default per
-request via the multi-user session cache (`Runner.UserSessions`)
-populated by the CLI at start-run time. The scenario engine
-attaches `Authorization: Bearer <other-user-key>` as a
-per-request header that the `bearerRoundTripper` respects,
-short-circuiting the default Bearer for that one call. This is
-how the 1node-vs-auth suite drives authorization-by-identity
-tests (alice allowed, mallory denied) without dropping back to
-self-attested headers.
+Per-scenario `as: <user>` overrides the operator's default
+Bearer for every outbound newtron call that scenario makes via
+the multi-user session cache (`Runner.UserSessions`) populated by
+the CLI at start-run time. One scenario, one verified identity:
+authorization-testing flows that need multiple identities author
+one scenario per identity and connect them with `requires:`. The
+scenario engine attaches `Authorization: Bearer <other-user-key>`
+as a per-request header that the `bearerRoundTripper` respects,
+short-circuiting the default Bearer for the scenario's calls.
+This is how the 1node-vs-auth suite drives authorization-by-
+identity tests (alice allowed, mallory denied) without dropping
+back to self-attested headers.
 
 **Storage model.** In-memory `map[key]→{user, expires_at}` protected
 by a mutex, with a background sweeper that drops expired entries. No
@@ -600,7 +603,7 @@ Identity-forwarding surface: `sessionkey.BearerToken(authHeader)
 `pkg/newtrun.Runner.OperatorBearer` on the outbound side.
 `pkg/newtron/client.WithBearer(key)` is the outbound attach
 point; the underlying `bearerRoundTripper` respects any
-caller-set Authorization header so per-step `as: <user>`
+caller-set Authorization header so per-scenario `as: <user>`
 overrides compose cleanly with the default-Bearer layer.
 
 **Independent value.** Cuts per-request PAM cost from "directory hit

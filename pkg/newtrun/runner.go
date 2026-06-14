@@ -40,20 +40,20 @@ type Runner struct {
 	// a Bearer (cmd/newtrun-server standalone, or cmd/newt-server
 	// without --auth-pam-service) — in that case outbound newtron
 	// calls carry no Authorization header, which is fine against a
-	// newtron engine that doesn't enforce identity. Per-step
-	// `as: <user>` overrides this default per request via the
-	// UserSessions map.
+	// newtron engine that doesn't enforce identity. Per-scenario
+	// `as: <user>` overrides this default for every call the
+	// scenario makes via the UserSessions map.
 	OperatorBearer string
 
 	// UserSessions maps a username to the Bearer session key
 	// supplied by the operator's CLI at run-start time. Used by
-	// per-step `as: <user>` impersonation in scenarios that test
-	// authorization-by-identity (mallory denied, alice allowed).
-	// Populated by the newtrun-server's StartRun handler from
-	// StartRunRequest.UserSessions; the CLI scans the suite for
-	// `as:` references and loads each user's session from
-	// ~/.newtron/sessions/ before submitting. Empty when no
-	// scenario uses `as:`.
+	// per-scenario `as: <user>` impersonation in scenarios that
+	// test authorization-by-identity (mallory denied, alice
+	// allowed). Populated by the newtrun-server's StartRun handler
+	// from StartRunRequest.UserSessions; the CLI loads every
+	// cached session from ~/.newtron/sessions/ before submitting
+	// (over-supplying is harmless). Empty when the operator has no
+	// cached sessions.
 	UserSessions map[string]string
 
 	Client       *client.Client // HTTP client for all SONiC operations
@@ -95,7 +95,13 @@ type Runner struct {
 	// runs steps in sequence within itself.
 	captured map[string]any
 
-	opts     RunOptions
+	opts RunOptions
+
+	// scenario is the currently-executing scenario, set by the
+	// iterateScenarios loop at the start of each scenario iteration
+	// and read by newtronExecutor.doCall for scenario.As. Sequential
+	// only — scenarios run one at a time per runner, so no goroutine
+	// reader races the writer.
 	scenario *Scenario
 }
 
@@ -485,8 +491,9 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 // every outbound newtron call that doesn't already carry one. The
 // operator's identity, verified once by newt-server's outer auth
 // middleware on the inbound request, flows through the runner
-// unchanged. Per-step `as: <user>` overrides the default per
-// request via the UserSessions map (see steps_newtron.go).
+// unchanged. Per-scenario `as: <user>` overrides the default for
+// every call the scenario makes via the UserSessions map (see
+// steps_newtron.go).
 func (r *Runner) connectToServer() error {
 	opts := []client.Option{
 		client.WithTLS(r.NewtronClientTLS),
