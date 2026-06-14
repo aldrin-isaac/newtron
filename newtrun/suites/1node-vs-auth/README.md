@@ -38,7 +38,7 @@ each original scenario.
 
 These verifications can't fit the current newtrun suite model:
 
-- **L2a inter-service mTLS** — N/A for `newt-server` (single process, no inter-engine network calls).
+- **L2a listener-side TLS** — N/A today; listener-side `--tls-cert`/`--tls-key`/`--tls-ca` flags on `cmd/newt-server` aren't wired yet. Operators terminate TLS at a reverse proxy in front of newt-server. See [`docs/newtron/mtls-howto.md`](../../../docs/newtron/mtls-howto.md).
 - **L2b user-to-service PAM** — requires host PAM configuration (`/etc/pam.d/newt-server`) and a real OS account; the suite can forge `X-Newtron-Caller` but not real Basic-auth credentials. The `26-L2c-round-trip` scenario exercises a PAM-authenticated `/auth/login` and so does cover one L2b flow, but operator setup is required (see below).
 - **L6 spec-watch** — requires editing `network.json` mid-suite to observe auto-reload. There's no `local-exec` step action today (deferred follow-up).
 - **L6 audit tamper detection** — requires modifying a log entry mid-suite to confirm verify catches it. Same `local-exec` gap.
