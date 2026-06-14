@@ -137,12 +137,6 @@ type ServiceSpec struct {
 
 	// QoS
 	QoSPolicy string `json:"qos_policy,omitempty"`
-
-	// Permissions overrides global grants for callers acting on this
-	// service (auth-design.md L3 service-level override). Same grant
-	// shape as NetworkSpecFile.Permissions — including legacy
-	// shorthand acceptance and per-grant Where scoping (L5).
-	Permissions map[string]PermissionGrants `json:"permissions,omitempty"`
 }
 
 // RoutingSpec defines routing protocol specification for a service.

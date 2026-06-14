@@ -4,7 +4,10 @@
 // - Write operations are checked via checkExecutePermission() when -x (execute) flag is set
 // - Read/view operations are always allowed (no permission check in dry-run/preview mode)
 // - Permissions are defined in network.json under "permissions" and "super_users"
-// - Service-specific permission overrides are supported via ServiceSpec.Permissions
+// - Per-service scoping is expressed via L5 `where: {service: "<pattern>"}`
+//   clauses on global grants (auth-design.md §L5). The pre-L5 mechanism
+//   that embedded a Permissions block on each ServiceSpec was retired in
+//   #165 — one auth table per network, not one per spec (DPN §27).
 package auth
 
 // Permission defines an action that can be controlled
