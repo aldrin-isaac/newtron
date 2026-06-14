@@ -700,3 +700,118 @@ func TestAuthorizationL4_InterfaceMutationsGated(t *testing.T) {
 		})
 	}
 }
+
+// authzServerForServiceGating builds an enforcement-on server backed
+// by the 1node-vs topology (which already declares the TRANSIT
+// service) and overwrites network.json with the grants the caller
+// supplies. The TRANSIT service definition is preserved so
+// ApplyService can locate the spec after the gate passes;
+// servicePermissionsJSON is the inner map literal for
+// ServiceSpec.Permissions on TRANSIT — issue #162 cares specifically
+// about whether that block is reached, so the fixture lets the test
+// parameterize it.
+func authzServerForServiceGating(t *testing.T, globalPermissionsJSON, servicePermissionsJSON string) *Server {
+	t.Helper()
+	specDir := copyTestSpecDir(t)
+	transitBlock := `"TRANSIT": {
+      "description": "Transit peering interface",
+      "service_type": "routed",
+      "routing": { "protocol": "bgp", "peer_as": "request" }`
+	if servicePermissionsJSON != "" {
+		transitBlock += `,
+      "permissions": ` + servicePermissionsJSON
+	}
+	transitBlock += `
+    }`
+	netJSON := `{
+  "version": "1.0",
+  "super_users": ["root"],
+  "user_groups": {
+    "device-team":  ["alice"],
+    "service-team": ["bob"]
+  },
+  "permissions": ` + globalPermissionsJSON + `,
+  "zones": {"amer": {}},
+  "services": {` + transitBlock + `}
+}`
+	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	return s
+}
+
+// TestApplyService_ServiceSpecPermissions_ConsultedFromHTTP pins the
+// #162 contract for ServiceSpec.Permissions: the embedded
+// authorization block on a specific service IS reached when the
+// service is acted on via the production HTTP gate.
+//
+// Setup:
+//   - global service.apply granted to "device-team" only
+//   - ServiceSpec.Permissions on TRANSIT grants service.apply to
+//     "service-team"
+//   - bob is in service-team but NOT device-team
+//
+// bob applying TRANSIT must pass the gate (allowed via the embedded
+// override). Without #162's wiring, Interface.gate stamps
+// Context.Service="" → checkUser's per-service path
+// (checker.go:44 `if ctx.Service != ""`) is skipped → falls through
+// to global → bob is not in device-team → 403.
+//
+// §16: the docstring claim "embedded ServiceSpec.Permissions is
+// reached from the production HTTP gate" maps to setup primitives:
+// real httptest mux, real RegisterNetwork (so the spec loader runs),
+// real handler dispatch through connectAndExecute → ApplyService →
+// gateService → Network.checkPermission → Checker.checkUser →
+// checkServicePermission. No layer is stubbed.
+func TestApplyService_ServiceSpecPermissions_ConsultedFromHTTP(t *testing.T) {
+	global := `{"service.apply": ["device-team"]}`
+	embedded := `{"service.apply": ["service-team"]}`
+	s := authzServerForServiceGating(t, global, embedded)
+
+	path := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology"
+	w := postAs(t, s, "bob", path, map[string]any{"service": "TRANSIT"})
+	if w.Code == http.StatusForbidden {
+		var env httputil.APIResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &env)
+		t.Fatalf("bob (service-team) denied applying TRANSIT despite ServiceSpec.Permissions grant — embedded block not reached from gate (status=%d, body=%s)", w.Code, env.Error)
+	}
+}
+
+// TestApplyService_WhereServiceClauseMatchesAtGate pins the #162
+// contract for L5 grant clauses: `where: {service: "<pattern>"}` on a
+// global grant matches the populated Context.Service at the apply
+// gate.
+//
+// Setup:
+//   - global service.apply granted to "service-team", scoped
+//     `where: {service: "TRANSIT"}`
+//   - no other grants (so the only path to authorize is the where
+//     clause matching the populated dimension)
+//
+// bob (∈ service-team) applying TRANSIT must pass. Without #162,
+// Context.Service is empty, "TRANSIT" pattern doesn't match "",
+// grant doesn't fire, falls through global, 403.
+func TestApplyService_WhereServiceClauseMatchesAtGate(t *testing.T) {
+	global := `{
+    "service.apply": [
+      { "groups": ["service-team"], "where": { "service": "TRANSIT" } }
+    ]
+  }`
+	s := authzServerForServiceGating(t, global, "")
+
+	path := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology"
+	w := postAs(t, s, "bob", path, map[string]any{"service": "TRANSIT"})
+	if w.Code == http.StatusForbidden {
+		var env httputil.APIResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &env)
+		t.Fatalf("bob denied applying TRANSIT despite where:{service:TRANSIT} grant — Context.Service not populated at gate (status=%d, body=%s)", w.Code, env.Error)
+	}
+}
