@@ -217,6 +217,69 @@ func TestChecker_EmptyCallerDenied(t *testing.T) {
 	})
 }
 
+// TestChecker_EmptyCallerDeniedDespiteDegenerateConfig pins the
+// structural empty-Caller fail-closed guarantee: nothing in
+// network.json — not a degenerate super_users entry, not a
+// group-membership list, not a grant — can turn an anonymous
+// request into an authorized one. The Check guard runs before any
+// table lookup; whatever lives in the table is irrelevant.
+//
+// Without the Check-level guard, each of these configurations
+// would silently authorize an empty Caller — the test sweeps the
+// three independent vectors so any regression in any one of them
+// re-fails the test.
+func TestChecker_EmptyCallerDeniedDespiteDegenerateConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		network *spec.NetworkSpecFile
+	}{
+		{
+			name: "super_users contains empty string",
+			network: &spec.NetworkSpecFile{
+				SuperUsers: []string{""},
+			},
+		},
+		{
+			name: "user_groups maps a group to empty-string member; group has 'all'",
+			network: &spec.NetworkSpecFile{
+				UserGroups: map[string][]string{
+					"ghosts": {""},
+				},
+				Permissions: map[string]spec.PermissionGrants{
+					"all": shorthand("ghosts"),
+				},
+			},
+		},
+		{
+			name: "global grant lists empty-string directly under 'all'",
+			network: &spec.NetworkSpecFile{
+				Permissions: map[string]spec.PermissionGrants{
+					"all": shorthand(""),
+				},
+			},
+		},
+		{
+			name: "global grant lists empty-string under the specific permission",
+			network: &spec.NetworkSpecFile{
+				Permissions: map[string]spec.PermissionGrants{
+					"service.apply": shorthand(""),
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			checker := NewChecker(tc.network)
+			if err := checker.Check(PermServiceApply, NewContext()); err == nil {
+				t.Errorf("empty Caller authorized under degenerate config %q — Check guard must fail-closed before reading the table", tc.name)
+			}
+			if err := checker.Check(PermServiceApply, nil); err == nil {
+				t.Errorf("nil ctx authorized under degenerate config %q — Check guard must fail-closed before reading the table", tc.name)
+			}
+		})
+	}
+}
+
 func TestChecker_ServiceWithNilPermissions(t *testing.T) {
 	network := &spec.NetworkSpecFile{
 		SuperUsers: []string{},

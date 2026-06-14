@@ -22,18 +22,31 @@ func NewChecker(network *spec.NetworkSpecFile) *Checker {
 	return &Checker{network: network}
 }
 
-// Check decides whether ctx.Caller has permission. A nil or empty-
-// Caller Context is denied: at the L3 boundary, the absence of a
-// caller is the absence of a verified identity, which fails closed.
+// Check decides whether ctx.Caller has permission. A nil ctx or an
+// empty Caller field is denied unconditionally — the absence of a
+// caller IS the absence of a verified identity, which fails closed
+// (auth-design.md L3). The guard runs before any super-user or
+// grant-list lookup, so a degenerate authorization table (e.g.
+// `super_users: [""]`, `user_groups: {g: [""]}`, or a grant
+// `["", ...]`) cannot turn an anonymous request into an authorized
+// one. The HTTP boundary populates Caller from a verified identity;
+// without one, Check fails — that is the structural contract.
 func (c *Checker) Check(permission Permission, ctx *Context) error {
-	username := ""
-	if ctx != nil {
-		username = ctx.Caller
+	if ctx == nil || ctx.Caller == "" {
+		return &PermissionError{
+			User:       "",
+			Permission: permission,
+			Context:    ctx,
+		}
 	}
-	return c.checkUser(username, permission, ctx)
+	return c.checkUser(ctx.Caller, permission, ctx)
 }
 
-// checkUser verifies if a specific user has a permission
+// checkUser evaluates one user against the loaded grant table.
+// Precondition: username is non-empty (Check enforces this). The
+// super-user bypass, service-spec override, and global table are
+// consulted in that order; first match wins. Falls through to a
+// PermissionError when nothing matches.
 func (c *Checker) checkUser(username string, permission Permission, ctx *Context) error {
 	// Superusers can do anything
 	if c.isSuperUser(username) {
