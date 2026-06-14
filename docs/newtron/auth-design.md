@@ -33,21 +33,24 @@ controls).
 
 ### 2.1 In Scope
 
-The threat surface splits into two layers — **inter-service** (one
-newtron component talking to another over the network) and
-**user-to-service** (a human operator's CLI or browser talking to a
-service). Both yield a verified caller identity that L3+ authorize
-against, but the verification mechanism differs.
+The three engines run in one process (`cmd/newt-server`); inter-
+engine calls are in-process Go function calls and never traverse a
+network boundary. The remaining threat surface is the
+operator-to-server channel: a human operator's CLI or browser
+talking to `cmd/newt-server`. L2a (listener-side TLS) and L2b
+(PAM) protect that channel; L2c (session keys) caches the PAM
+result so the operator's CLI doesn't have to re-present
+credentials per request.
 
 | Threat | Surface | Layer that addresses it |
 |---|---|---|
-| **Insider misuse — accidental.** A teammate runs the wrong CLI against the wrong network and changes config they shouldn't have. | User-to-service | L1 (audit log catches), L3 (authorization gates) |
-| **Insider misuse — deliberate.** A current team member with shell access tries to modify resources outside their role. | User-to-service | L3 + L5 (per-resource grants) |
-| **Forensic accountability.** "Who deleted that VLAN at 03:42?" is answerable from the system itself. | User-to-service | L1 |
-| **User impersonation across the wire.** Someone on the network sends requests claiming to be alice. | User-to-service | L2b (PAM for TCP; Unix peer creds for local; L2c session keys derived from L2b) |
-| **Credential reuse across requests.** A long-running automation or browser session has to embed a password in every call, or proxy it through a separate session layer. | User-to-service | L2c (PAM-issued short-lived session keys) |
-| **Service impersonation.** A rogue process pretends to be newtlab-server (or another newtron component) and serves bogus responses, or accepts requests from one engine claiming to be another. | Inter-service | L2a (mTLS) |
-| **Stale grants.** Former team member's permissions linger after they leave. | User-to-service | L6 (revocation) |
+| **Insider misuse — accidental.** A teammate runs the wrong CLI against the wrong network and changes config they shouldn't have. | Operator-to-server | L1 (audit log catches), L3 (authorization gates) |
+| **Insider misuse — deliberate.** A current team member with shell access tries to modify resources outside their role. | Operator-to-server | L3 + L5 (per-resource grants) |
+| **Forensic accountability.** "Who deleted that VLAN at 03:42?" is answerable from the system itself. | Operator-to-server | L1 |
+| **User impersonation across the wire.** Someone on the network sends requests claiming to be alice. | Operator-to-server | L2b (PAM for TCP; Unix peer creds for local; L2c session keys derived from L2b) |
+| **Credential reuse across requests.** A long-running automation or browser session has to embed a password in every call, or proxy it through a separate session layer. | Operator-to-server | L2c (PAM-issued short-lived session keys) |
+| **newt-server impersonation.** A rogue process on the network pretends to be `cmd/newt-server` and accepts operator traffic claiming to be the real service. | Operator-to-server | L2a (listener-side TLS — listener-side wiring is not yet shipped; operators terminate TLS at a reverse proxy today) |
+| **Stale grants.** Former team member's permissions linger after they leave. | Operator-to-server | L6 (revocation) |
 | **Coverage holes.** A new mutation method ships without a `checkPermission` call and bypasses authorization silently. | Both | L4 (coverage closure test) |
 | **Secret leakage from spec.** Device profile passwords sit in plain JSON on disk and in version control. | Foundational | L0 (encryption at rest) |
 | **Authorization decisions without trace.** A "deny" happened but nobody can prove it. | Both | L1 + L3 (audit emits allow + deny) |
@@ -68,22 +71,27 @@ against, but the verification mechanism differs.
 
 Each layer assumes the previous layers are in place. Specifically:
 
-- L3 (authorization) assumes L2 (verified identity for users — L2b — and
-  for services — L2a). Without verified identity, authorization decides
-  on a self-attested name — same security posture as no authorization.
+- L3 (authorization) assumes L2 (verified identity from L2b PAM —
+  or L2a listener-side TLS cert CN when wired). Without verified
+  identity, authorization decides on a self-attested name — same
+  security posture as no authorization.
 - L5 (fine-grained grants) assumes L4 (universal coverage). Per-resource
   grants on some operations and no grants on others creates an
   exploitable asymmetry.
 - L6 (revocation) assumes L3 (something to revoke). Spec reload without
   enforcement does nothing.
 
-L2a (inter-service mTLS) and L2b (user-to-service PAM) are
-**independently shippable** because they protect different surfaces. A
-deployment that runs only the composed `newt-server` binary (all engines
-in one process; no inter-service network calls) can ship L2b without
-L2a. A deployment running the three engines in separate processes needs
-both. The combined sub-layer L2 is treated as one in subsequent layers'
-dependency lists, but in scheduling terms it splits in half.
+L2a (listener-side TLS) and L2b (PAM) are **independently
+shippable** because they protect different properties of the same
+operator-to-server channel — L2a protects the wire from
+eavesdropping and verifies the server's identity to the operator
+(plus optionally the operator's cert to the server); L2b verifies
+the operator's identity from a password against PAM. Today only
+L2b is wired into `cmd/newt-server`; operators who need wire
+encryption today terminate TLS at a reverse proxy in front of
+newt-server. The combined sub-layer L2 is treated as one in
+subsequent layers' dependency lists, but in scheduling terms it
+splits in half.
 
 This ordering is **mandatory**, not aesthetic. The audit criteria for each
 layer fail if its dependencies are skipped.
@@ -104,8 +112,12 @@ Deployments adopt layers at their own pace. Specifically:
   TCP fallback header name; empty disables header-based caller
   identity (Unix socket peer creds still work if that listener is
   configured).
-- **L2a inter-service mTLS:** `--tls-cert/--tls-key/--client-ca`
-  enable; absent means plaintext HTTP between engines.
+- **L2a listener-side TLS:** not yet wired into any binary.
+  Planned `--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`;
+  the cert-CN extraction infrastructure (`pkg/httputil/conn_creds.go`,
+  the priority slot ahead of PAM in caller_middleware) is ready.
+  Today operators terminate TLS at a reverse proxy in front of
+  `cmd/newt-server`; see [`mtls-howto.md`](mtls-howto.md).
 - **L2b user-to-service PAM:** `--auth-pam-service=NAME` enables;
   absent means TCP listener doesn't authenticate via PAM (caller
   identity stays self-attested via header per L1).
@@ -153,12 +165,13 @@ only what the spec explicitly grants them, and every decision is on the
 record**. Concretely, the goal state has these properties — these are the
 criteria a security review must be able to verify:
 
-1. **Verified identity, per surface.** User-to-service requests carry a
-   caller identity verified via Unix socket peer creds (local), PAM
-   authentication (TCP, fresh credentials), or a PAM-issued session
-   key (TCP, cached PAM proof within its TTL). Inter-service requests
-   carry an identity verified via mTLS (cert CN). Neither surface
-   accepts self-attested headers as authoritative.
+1. **Verified identity on the operator-to-server channel.**
+   Requests to `cmd/newt-server` carry a caller identity verified
+   via Unix socket peer creds (local), listener-side TLS cert CN
+   (when wired), PAM authentication (TCP, fresh credentials), or
+   a PAM-issued session key (TCP, cached PAM proof within its
+   TTL). The server does not accept self-attested headers as
+   authoritative in this goal state.
 2. **Closed coverage.** Every mutation method in `pkg/newtron/` checks
    permission before acting. Reads stay ungated.
 3. **Per-resource granularity.** Permissions can be scoped to device,
@@ -200,7 +213,7 @@ form unchanged, with the listed additions:
 | Element | Current shape | Production-grade additions |
 |---|---|---|
 | `pkg/newtron/auth/Permission` (verb constants) | 20 constants, 5 referenced | L4 adds `device.write` family; L5 adds dimension-bearing variants if needed |
-| `pkg/newtron/auth/Context` (resource context) | 4 dimensions, only `Resource` populated | L3 adds `Caller` (Unix username from L1 Unix socket or L2b PAM; cert CN from L2a for inter-service); L5 populates `Device`/`Service`/`Interface` |
+| `pkg/newtron/auth/Context` (resource context) | 4 dimensions, only `Resource` populated | L3 adds `Caller` (Unix username from L1 Unix socket or L2b PAM; cert CN from L2a listener-side TLS); L5 populates `Device`/`Service`/`Interface` |
 | `pkg/newtron/auth/Checker` (decision engine) | Two-tier eval, group fallback, superuser bypass | L5 extends to evaluate dimension constraints |
 | `network.json` `permissions` map | `action → [groups]` global + per-service override | L5 extends entry value to support `{ groups, where: {...} }` |
 | `network.json` `super_users` | List of usernames who bypass | Unchanged |
@@ -284,9 +297,6 @@ Identity in this layer is **opportunistically verified**, by surface:
   records `verification_source: "self_attested_header"` so a reviewer
   can tell which entries are trustworthy. TCP entries become
   verified only when L2b lands.
-- **Inter-service calls (engine → engine) over TCP:** identity is
-  similarly self-attested in this layer. Becomes verified when L2a
-  lands.
 
 **Audit criterion met when this layer lands.** "Who deleted VLAN 100 on
 switch1 at 03:42?" has a definitive answer from the log when the
@@ -319,40 +329,58 @@ L2 has two independent sub-layers because they protect different
 surfaces with different mechanisms. Either can ship before the other;
 both are required before L3 can rely on universally-verified identity.
 
-#### L2a — Inter-Service mTLS
+#### L2a — Listener-Side TLS (Operator-to-Server)
 
-**Goal.** When newtron components talk to each other across processes
-(newtron-server → newtlab-server, newtrun-server → newtron-server,
-etc.), both ends present X.509 certificates and verify each other against
-a configured CA. Identity = cert CN. Self-attested headers between
-services are rejected when mTLS is configured.
+**Goal.** When external operators and external clients (newtcon, CI
+runners, automation) talk to `cmd/newt-server` over TCP, the listener
+authenticates them via mTLS: a peer cert verified against a configured
+CA. Identity = cert CN. The cert-CN extraction infrastructure mounts at
+the outer middleware so it composes with PAM and Unix peer creds
+uniformly.
 
-This applies only when engines are deployed in **separate processes**.
-The composed `newt-server` binary mounts all three engines on one mux in
-one process; inter-service calls there are in-process Go function calls
-and don't traverse a network boundary. L2a is no-op for the composed
-deployment.
+The three engines run in one process (`cmd/newt-server`); inter-
+engine calls are in-process Go function calls — no network
+boundary between engines to protect. An earlier separate-process
+deployment shape (each engine in its own server binary, talking
+to siblings over TCP) was retired when the engines were composed;
+the standalone engine binaries today are loopback dev tools, not
+a production deployment shape. L2a in the current architecture
+protects the operator-to-server boundary, not inter-engine.
 
-**Audit criterion met when this layer lands.** "Can a rogue process
-impersonate newtlab-server to newtron-server?" → no. A reviewer verifies
-by inspecting the CA-cert configuration, confirming that all three
-engine binaries refuse plaintext or untrusted-cert connections, and
-checking that the audit log shows `verification_source: "service_cert_cn"`
-for cross-engine calls.
+**Audit criterion met when this layer lands.** "Can a non-CA-trusted
+client open a connection to `cmd/newt-server`?" → no. A reviewer
+verifies by inspecting the CA-cert configuration on the deployment,
+attempting a connection with a non-trusted cert, and checking that
+the audit log shows `verification_source: "service_cert_cn"` on
+successful mTLS-authenticated requests. The listener-side TLS wiring
+(`--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) is not
+yet implemented; today operators terminate TLS at a reverse proxy
+and the criterion is parked pending the listener-side ship.
 
 **Dependencies.** L0, L1.
 
-**Scope of changes.** TLS listener configuration in
-`cmd/newtron-server`, `cmd/newtrun-server`, `cmd/newtlab-server`. Client-
-side mTLS support in `pkg/newtron/client`, `pkg/newtrun/client`,
-`pkg/newtlab/client`. Configuration flags for CA cert path, server cert,
-server key. Cert-CN extraction middleware in each engine's `api/`
-package. Audit log records `verification_source: "service_cert_cn"`.
-Operational HOWTO on running a small CA.
+**Scope of changes.** The cert-CN extraction infrastructure
+(`pkg/httputil.ServiceCertCNFromRequest`, `ServiceCertCNFromContext`,
+the `VerificationServiceCertCN` audit verification source, the
+priority slot ahead of PAM in `pkg/newtron/api/caller_middleware.go`)
+shipped ahead of listener-side wiring so the L3 authorization
+layer could treat cert CN as a verified identity uniformly with
+PAM and Unix peer creds. The listener-side wiring —
+`--tls-cert`/`--tls-key`/`--tls-ca` flags on `cmd/newt-server`
+and a TLS-configured `*httputil.Server` — is not yet implemented;
+operators who need TLS today terminate it at a reverse proxy in
+front of newt-server. The standalone engine binaries are loopback
+dev tools with no TLS by design.
 
-**Independent value.** Blocks service impersonation. Cross-engine calls
-become trustworthy. Even without user-side authentication (L2b), the
-inter-engine substrate is sound.
+**Independent value.** When listener-side TLS lands on
+`cmd/newt-server`, blocks both eavesdropping on the operator-to-server
+channel and impersonation of newt-server by a rogue process. The
+cert-CN identity slot already wired into caller_middleware gives
+operators an mTLS-cert-based identity path that composes with PAM
+and Unix peer creds uniformly, so the typical service-mesh pattern
+(operator → newt-server via mTLS with the operator's cert as
+identity) becomes available without further code changes once the
+flags ship.
 
 #### L2b — User-to-Service Authentication via PAM
 
@@ -376,7 +404,7 @@ authorization layer in L3 doesn't need to distinguish them.
 
 **Audit criterion met when this layer lands.** "Are user identities on
 the TCP listener verified?" → yes, via the operator's PAM stack. A
-reviewer verifies by inspecting the PAM config (`/etc/pam.d/newtron-server`),
+reviewer verifies by inspecting the PAM config (`/etc/pam.d/newt-server`),
 confirming that the server rejects unauthenticated TCP requests, and
 checking that the audit log shows
 `verification_source: "pam"` with the PAM service name and the
@@ -386,11 +414,14 @@ authenticated username.
 
 **Scope of changes.** PAM bindings via `cgo` and a Go PAM helper
 package (the existing community libraries are reviewable; pick one in
-this layer). HTTP authentication middleware in `pkg/newtron/api/`,
-`pkg/newtrun/api/`, `pkg/newtlab/api/`. Configuration flag for the PAM
-service name (default `newtron-server`). Audit log records
+this layer). HTTP authentication middleware mounted at the outer layer of
+`cmd/newt-server`; the standalone engine binaries carry no PAM
+middleware. `--auth-pam-service=NAME` flag on `cmd/newt-server`
+(default empty — empty disables PAM authentication entirely;
+operators pick a service name like `newt-server` matching the
+`/etc/pam.d/` file). Audit log records
 `verification_source: "pam"` and the PAM service name. Operational
-HOWTO on setting up `/etc/pam.d/newtron-server` (start with `pam_unix`;
+HOWTO on setting up `/etc/pam.d/newt-server` (start with `pam_unix`;
 mention `pam_ldap`/`pam_sss`/`pam_krb5` for integrated deployments).
 
 **Independent value.** Blocks user impersonation on TCP. Audit log
@@ -652,13 +683,17 @@ with a `*newtron.AuthorizationError` carrying typed
 via `audit.LogDecision` with the verification source from L1/L2 and
 Operation prefixed `authcheck:`.
 
-Service-to-service identities (cert CNs) and user identities (Unix
-usernames) share the same `Context.Caller` field but typically map to
-different `network.json` grants: services map to `super_users` so they
-can do anything they're called upon to do (newtlab-server reaching out
-to newtron-server during a deploy needs broad authority); users map to
-specific permission grants. This is a spec convention, not a code
-distinction — the Checker treats both identically.
+Service-account identities (cert CNs when listener-side TLS lands;
+operator-supplied service-account names today) and human-user
+identities (Unix usernames) share the same `Context.Caller` field
+but typically map to different `network.json` grants: service
+accounts map to `super_users` so they can do anything they're
+called upon to do; human users map to specific permission grants.
+This is a spec convention, not a code distinction — the Checker
+treats both identically. The three engines run in one process under
+`cmd/newt-server` and call each other in-process, so service-account
+identities are not used for inter-engine authentication — they exist
+for external automation that talks to `cmd/newt-server` as a service.
 
 **Audit criterion met when this layer lands.** "Are the permission
 grants in `network.json` enforced at runtime?" → yes, for the
@@ -893,8 +928,14 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   the Checker sees.
 - **L1 audit log is shipping.** The identity-extraction and audit-
   emission middlewares (`pkg/newtron/api/caller_middleware.go`,
-  `pkg/newtron/api/audit_middleware.go`) are in the chain on
-  `newtron-server` and `newt-server`. Behavior is toggled by
+  `pkg/newtron/api/audit_middleware.go`) live inside the newtron
+  engine's handler chain, which runs both under `cmd/newt-server`
+  (production / aggregated deployment) and `cmd/newtron-server`
+  (standalone dev tool). In standalone mode the only identity
+  surface is the L1 self-attested `--audit-caller-header` (and
+  Unix peer creds when `--unix-socket` is set); standalone
+  newtron-server has no PAM or session-key middleware (those live
+  at `cmd/newt-server`'s outer boundary). Behavior is toggled by
   `--audit-log`, `--audit-caller-header`, and `--unix-socket` flags
   per §2.4; default values (all empty) preserve the pre-L1 behavior.
   With `--audit-log` set, every POST/PUT/DELETE produces one Event
@@ -921,17 +962,24 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   top-level area being mutated.
 
 Both L0 deliverables are shipped (this doc + the secret store).
-L1 audit log is shipped. L2a inter-service mTLS is shipped. L2b
+L1 audit log is shipped. **L2a listener-side TLS is partially
+shipped:** the cert-CN extraction infrastructure and audit
+verification source are wired, but the listener-side flags
+(`--tls-cert`/`--tls-key`/`--tls-ca`) are not on any binary
+today. Operators terminate TLS at a reverse proxy in front of
+`cmd/newt-server`; in-process inter-engine calls in the composed
+binary have no separate TLS surface. L2b
 user-to-service PAM is shipped — `--auth-pam-service=NAME` flag on
-each standalone engine binary; the `PAMMiddleware` in
-`pkg/httputil` enforces HTTP Basic + `pam_authenticate` on TCP
-requests that don't already carry a verified identity (Unix peer
-creds from L1, mTLS cert CN from L2a). The cgo-backed
-`PAMAuthenticator` lives in `pkg/httputil/pamauth` (separate
-package so non-PAM consumers don't pull in cgo). The newtron caller
-middleware reads `PAMUsernameFromContext` and tags
-`audit.Caller` with `VerificationPAM`. Operational doc:
-[`pam-howto.md`](pam-howto.md).
+`cmd/newt-server` (the only binary with PAM); the standalone
+engine binaries are loopback dev tools with no authentication. The
+`PAMMiddleware` in `pkg/httputil` enforces HTTP Basic +
+`pam_authenticate` on TCP requests that don't already carry a verified
+identity (Unix peer creds from L1, mTLS cert CN from L2a), mounted at
+the outer layer of `cmd/newt-server`. The cgo-backed `PAMAuthenticator`
+lives in `pkg/httputil/pamauth` (separate package so non-PAM consumers
+don't pull in cgo). The newtron caller middleware reads
+`PAMUsernameFromContext` and tags `audit.Caller` with
+`VerificationPAM`. Operational doc: [`pam-howto.md`](pam-howto.md).
 
 **L3 authorization enforcement is shipped.** The `--enforce-
 authorization` flag on `newtron-server` and `newt-server`

@@ -38,7 +38,7 @@ each original scenario.
 
 These verifications can't fit the current newtrun suite model:
 
-- **L2a inter-service mTLS** — N/A for `newt-server` (single process, no inter-engine network calls).
+- **L2a listener-side TLS** — N/A today; listener-side `--tls-cert`/`--tls-key`/`--tls-ca` flags on `cmd/newt-server` aren't wired yet. Operators terminate TLS at a reverse proxy in front of newt-server. See [`docs/newtron/mtls-howto.md`](../../../docs/newtron/mtls-howto.md).
 - **L2b user-to-service PAM** — requires host PAM configuration (`/etc/pam.d/newt-server`) and a real OS account; the suite can forge `X-Newtron-Caller` but not real Basic-auth credentials. The `26-L2c-round-trip` scenario exercises a PAM-authenticated `/auth/login` and so does cover one L2b flow, but operator setup is required (see below).
 - **L6 spec-watch** — requires editing `network.json` mid-suite to observe auto-reload. There's no `local-exec` step action today (deferred follow-up).
 - **L6 audit tamper detection** — requires modifying a log entry mid-suite to confirm verify catches it. Same `local-exec` gap.
@@ -240,8 +240,8 @@ All scenarios pass on first run. If any fail:
 
 ### L2b PAM
 
-Configure `/etc/pam.d/newtron-server` per `docs/newtron/pam-howto.md`,
-restart `newt-server` with `--auth-pam-service=newtron-server` (without
+Configure `/etc/pam.d/newt-server` per `docs/newtron/pam-howto.md`,
+restart `newt-server` with `--auth-pam-service=newt-server` (without
 `--audit-caller-header` so PAM is the only identity surface), and run:
 
 ```sh
@@ -258,7 +258,11 @@ curl -u alice:correct-password -X POST http://localhost:18080/newtron/v1/network
 
 With `--spec-watch` set, edit `network.json` to remove alice from
 spec-team, save, and within ~1 second a fresh request as alice gets
-403:
+403. The canonical PAM-only setup above (§3) omits
+`--audit-caller-header` because every identity is real PAM-verified;
+for this manual verification, restart newt-server with
+`--audit-caller-header X-Newtron-Caller` alongside `--spec-watch`
+so the curl examples below carry verified-by-header identity:
 
 ```sh
 # Before edit: 201

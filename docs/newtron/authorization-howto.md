@@ -32,7 +32,7 @@ state change. Operational mutations like `setup-device`,
 |---|---|
 | Single operator, loopback-only | Optional — the OS already gates who can reach 127.0.0.1. |
 | Multi-operator, shared engine host | **Yes** — distinguishes who may author specs from who may only read. |
-| Inter-service (newtlab calling newtron) | **Yes, but** — service identities (cert CN) typically map to `super_users` since the engines need broad authority to function. |
+| External automation (CI runner, newtcon Web UI, scripted operator tooling) | **Yes** — automation that needs broad authority typically authenticates via a service-account identity mapped to `super_users` in `network.json`; the same enforcement gate applies as for human operators. |
 
 **Enable/disable per auth-design.md §2.4:** `--enforce-authorization`
 defaults `false`; with no flag set, the 26 `checkPermission` call
@@ -81,9 +81,8 @@ top-level keys carry the inputs:
 ```
 
 - **`super_users`** bypass every check. Used for the boot-and-recover
-  account and for inter-service identities that need broad authority
-  to function (e.g., newtlab's cert CN when it calls newtron during
-  deploy).
+  account and for service-account identities that need broad authority
+  to function (e.g., a CI runner's cert CN when it drives a deploy).
 - **`user_groups`** name reusable membership sets.
 - **`permissions`** maps each permission to the groups or direct
   usernames that hold it. The `"all"` wildcard key, if present,
@@ -123,10 +122,11 @@ bin/newt-server \
 
 The five flags above engage the mutation audit log with header identity
 (auth-design.md L1) and authorization enforcement (auth-design.md L3).
-For production deployments add `--unix-socket`,
-`--tls-cert`/`--tls-key`/`--tls-ca` (auth-design.md L2a), and
-`--auth-pam-service` (auth-design.md L2b) so the identity surfaces are
-verified rather than self-attested.
+For production deployments add `--unix-socket` and `--auth-pam-service`
+(auth-design.md L2b) so the identity surfaces are verified rather than
+self-attested. Listener-side TLS (auth-design.md L2a) is not yet wired
+into any binary; operators terminate TLS at a reverse proxy in front
+of `cmd/newt-server` — see [`mtls-howto.md`](mtls-howto.md).
 
 ## 4. Verify
 
@@ -398,7 +398,7 @@ integrity mid-stream without invalidating the historical log.
   layered context.
 - [pam-howto.md](pam-howto.md) — user identity verification via
   PAM (L2b).
-- [mtls-howto.md](mtls-howto.md) — service identity verification
-  via mTLS (L2a).
+- [mtls-howto.md](mtls-howto.md) — operator-to-server listener-side
+  TLS (L2a).
 - [secret-store.md](secret-store.md) — encrypted-at-rest device
   credentials (L0).
