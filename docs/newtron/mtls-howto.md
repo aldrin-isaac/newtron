@@ -1,209 +1,43 @@
 # Inter-Service mTLS — Operational HOWTO
 
-The mTLS feature (auth-design.md L2a) protects inter-service HTTP
-calls between the three standalone engine binaries:
+## Status: partial — see [auth-design.md §L2a](auth-design.md#l2a--inter-service-mtls) for design rationale.
 
-- `newtron-server` ↔ `newtlab-server` (newtron asks newtlab for SSH
-  port allocations)
-- `newtlab-server` ↔ `newtron-server` (newtlab reads specs)
-- `newtrun-server` ↔ `newtlab-server` (newtrun runs lab deploy /
-  destroy through newtlab)
-- `newtrun-server` ↔ `newtron-server` (newtrun reads topology and
-  drives device operations)
+The L2a inter-service mTLS feature has two halves:
 
-When all four flags are configured on all three binaries, every
-cross-process call uses mTLS. The audit log on the receiving side
-records `verification_source: "service_cert_cn"` and the cert's
-Subject CN as the caller identity.
+1. **Identity-extraction infrastructure (shipped).** `pkg/httputil` extracts the verified peer cert CN from a TLS handshake and exposes it via `ServiceCertCNFromRequest` / `ServiceCertCNFromContext`. The newtron caller middleware (`pkg/newtron/api/caller_middleware.go`) reads it ahead of PAM and Unix peer creds. The audit verification source `service_cert_cn` records the cert CN as the caller identity.
 
-## 1. When to use inter-service mTLS
+2. **Listener-side wiring (not yet implemented).** No binary in this project currently accepts `--tls-cert` / `--tls-key` / `--tls-ca` flags. After the engine-composition refactor (PRs A–D), encryption is a property of the server boundary, so the right home for these flags is `cmd/newt-server`. They haven't been added yet.
 
-| Deployment | mTLS status |
+## What this means for operators today
+
+| Deployment | Recommendation |
 |---|---|
-| Composed `newt-server` (all engines in one process) | **No-op** — cross-engine calls are in-process Go calls. The same `--tls-cert` flag could secure external traffic to the composed listener, but inter-engine isolation isn't a feature of this layout. |
-| Three standalone binaries on one host, talking via localhost | mTLS is **valuable but not strictly required** — localhost-only TCP is hard to MITM. Recommended if the host has other users or services. |
-| Three standalone binaries on separate hosts (multi-host lab) | mTLS is **required**. Without it, any process on the network can impersonate any engine. |
+| Production / external-traffic-facing newt-server | Terminate TLS at a reverse proxy (nginx, caddy, envoy) in front of `bin/newt-server`. The proxy holds the cert + key; `newt-server` listens on loopback or a Unix socket behind it. |
+| Composed `bin/newt-server` only — single host, single port | mTLS between engines is a no-op (engines share one process; their cross-calls are Go function calls through `http.ServeHTTP`). External TLS termination at a proxy is the right hammer. |
+| Three standalone binaries on one host | Loopback dev mode — no TLS by design (the binaries are dev tools). |
+| Three standalone binaries on separate hosts | Not a supported deployment shape post-PR-B. The standalone binaries are loopback-default. Use `bin/newt-server` for production. |
 
-## 2. Flag inventory
+## Audit log shape when L2a-listener-wiring lands
 
-The three standalone server binaries take the same three flags:
-
-| Binary | Flags |
-|---|---|
-| `newtron-server` | `--tls-cert`, `--tls-key`, `--tls-ca` |
-| `newtlab-server` | `--tls-cert`, `--tls-key`, `--tls-ca` |
-| `newtrun-server` | `--tls-cert`, `--tls-key`, `--tls-ca` |
-
-Each binary's `--tls-cert` + `--tls-key` serves a dual role: it is the
-server cert presented to incoming peer connections AND the client
-cert presented when this engine dials another engine. This is the
-typical service-mesh pattern; it keeps the operator workflow at one
-cert per engine.
-
-`--tls-ca` is the CA bundle used for two checks:
-
-- Verifying the *incoming* client cert (mTLS on this engine's
-  listener).
-- Verifying the *outgoing* server cert when this engine dials
-  another.
-
-Both directions trust the same CA. When you set all three flags on
-all three binaries, every cross-engine call ends up with mTLS.
-
-**Enable/disable per `auth-design.md` §2.4:** all three flags default
-empty. With no flags set, the binaries serve plain HTTP and clients
-dial plain HTTP — the pre-mTLS behavior is preserved exactly.
-
-## 3. Set up a small CA
-
-The example below uses `openssl` to produce a CA, three engine
-certs, and the matching keys. Adapt to your CA tooling of choice
-(cfssl, smallstep CA, your existing org CA, etc.) — newtron does not
-care which CA backend produces the PEM files.
-
-```sh
-mkdir -p ~/.newtron/tls && cd ~/.newtron/tls
-chmod 700 .
-
-# Root CA (long-lived, kept offline if possible)
-openssl ecparam -name prime256v1 -genkey -noout -out ca.key
-openssl req -x509 -new -key ca.key -days 3650 -out ca.pem \
-    -subj "/CN=newtron-lab-ca"
-
-# Per-engine certs. The CN is the identity that shows up in the
-# audit log on the receiving side, so use a name that means
-# something: e.g., "newtron-server", "newtlab-server",
-# "newtrun-server".
-for engine in newtron-server newtlab-server newtrun-server; do
-    openssl ecparam -name prime256v1 -genkey -noout -out ${engine}.key
-    openssl req -new -key ${engine}.key -out ${engine}.csr \
-        -subj "/CN=${engine}"
-    openssl x509 -req -in ${engine}.csr -CA ca.pem -CAkey ca.key \
-        -CAcreateserial -days 365 \
-        -extensions extfile -extfile <(printf '%s' "
-            subjectAltName=DNS:localhost,DNS:${engine},IP:127.0.0.1
-            keyUsage=critical,digitalSignature,keyEncipherment
-            extendedKeyUsage=serverAuth,clientAuth
-        ") -out ${engine}.pem
-    rm ${engine}.csr
-done
-
-chmod 600 *.key *.pem
-ls -l
-```
-
-You end up with:
-
-- `ca.pem` — the CA to point every engine at via `--tls-ca`
-- `ca.key` — keep this somewhere safe; not needed by any engine at
-  runtime
-- `<engine>.pem` + `<engine>.key` — per-engine cert pair
-
-## 4. Start the engines
-
-```sh
-# Engine 1: newtron-server
-bin/newtron-server \
-    --listen 0.0.0.0:19080 \
-    --tls-cert ~/.newtron/tls/newtron-server.pem \
-    --tls-key  ~/.newtron/tls/newtron-server.key \
-    --tls-ca   ~/.newtron/tls/ca.pem \
-    --newtlab-server https://newtlab-host:19082 \
-    --spec-dir /etc/newtron/lab &
-
-# Engine 2: newtlab-server
-bin/newtlab-server \
-    --listen 0.0.0.0:19082 \
-    --tls-cert ~/.newtron/tls/newtlab-server.pem \
-    --tls-key  ~/.newtron/tls/newtlab-server.key \
-    --tls-ca   ~/.newtron/tls/ca.pem \
-    --newtron-server https://newtron-host:19080 &
-
-# Engine 3: newtrun-server
-bin/newtrun-server \
-    --listen 0.0.0.0:19081 \
-    --tls-cert ~/.newtron/tls/newtrun-server.pem \
-    --tls-key  ~/.newtron/tls/newtrun-server.key \
-    --tls-ca   ~/.newtron/tls/ca.pem \
-    --newtlab-server https://newtlab-host:19082 &
-```
-
-Each engine logs `<label>-server listening on <addr> (https)` at
-startup — the `(https)` confirms TLS is active.
-
-## 5. Verify
-
-Use `curl` with the same CA + a client cert from your CA to confirm
-the listener accepts authenticated callers:
-
-```sh
-curl --cacert ~/.newtron/tls/ca.pem \
-     --cert   ~/.newtron/tls/test-client.pem \
-     --key    ~/.newtron/tls/test-client.key \
-     https://newtron-host:19080/newtron/v1/health
-```
-
-A client without a cert, or with one signed by a different CA,
-should be rejected at the TLS handshake. The server log line for
-those attempts says `TLS handshake error from <addr>: tls: client
-didn't provide a certificate` or `tls: bad certificate`.
-
-If you have `--audit-log` configured (auth-design.md L1), each
-successful cross-engine call shows up in the JSON-lines audit log
-with:
+When the listener flags are added to `cmd/newt-server`, the audit log will gain entries with:
 
 ```json
 {
-  "user": "newtlab-server",
   "verification_source": "service_cert_cn",
-  "operation": "POST /newtron/v1/networks/default/...",
+  "user": "<cert CN>",
   ...
 }
 ```
 
-## 6. Threat model — what inter-service mTLS addresses, what it doesn't
+Reviewers will tell mTLS-authenticated callers apart from PAM-authenticated ones by the `verification_source` field — both paths populate `audit.Caller` the same way.
 
-**Addressed**:
+## What the cert-CN priority does today
 
-- *Service impersonation across the wire.* Without a valid cert,
-  no process can claim to be a peer engine. The kernel + TLS stack
-  drop the connection at the handshake; the audit log doesn't
-  even record the attempt past `TLS handshake error`.
-- *Tampering / passive listening on inter-service traffic.* TLS
-  encrypts the channel; the operator's network doesn't have to be
-  trusted to be a transport.
-- *Cross-engine identity attribution.* Receiving engines log the
-  caller's verified CN; a reviewer can answer "which engine asked
-  for this?" without trusting any header.
+Even without listener-side TLS, the priority slot ahead of PAM is exercised by tests (`pkg/newtron/api/caller_middleware_test.go: WithServiceCertCNForTest`) so that when the listener side lands, the integration is mechanical — drop the `*tls.Config` into `httputil.NewServer(...)` and the rest works.
 
-**Not addressed by inter-service mTLS**:
+## Cross-references
 
-- *Authorization.* Inter-service mTLS verifies who the caller is, not
-  what they're allowed to do. Authorization enforcement (auth-design.md
-  L3) runs when `--enforce-authorization` is set — the verified cert CN
-  flows through `auth.Context.Caller` and the spec-declared grants in
-  `network.json` decide what the peer may do. Without
-  `--enforce-authorization`, every verified peer can call every
-  endpoint. (See [`authorization-howto.md`](authorization-howto.md).)
-- *Cert revocation / rotation.* The shipped pattern reloads on
-  server restart. Per-cert rotation requires restarting the engine
-  holding that cert. CRL / OCSP support is not implemented;
-  operators bound the blast radius with short cert lifetimes (the
-  example above uses 365-day engine certs).
-- *Identity in the composed `newt-server` binary.* Inter-engine calls
-  there are in-process Go function calls, not network calls. mTLS
-  has nothing to enforce; the same flags do nothing useful in that
-  topology.
-
-## 7. Cross-references
-
-- [`auth-design.md`](auth-design.md) — L2a in the layered auth plan
-- [`authorization-howto.md`](authorization-howto.md) — L3
-  authorization enforcement (the next layer in the arc)
-- [`hld.md`](hld.md) §9 — operator-facing security framing
-- [`secret-store.md`](secret-store.md) — L0 secret store (cert and
-  key paths are filesystem references, not secret-store keys —
-  they're paths to PEM files, not secret material)
-- `pkg/httputil/tls.go` — `LoadServerTLSConfig` /
-  `LoadClientTLSConfig` source
-- `pkg/httputil/conn_creds.go` — `ServiceCertCNFromRequest` source
+- [`auth-design.md` §L2a](auth-design.md#l2a--inter-service-mtls) — design rationale + threat model.
+- [`pkg/httputil/conn_creds.go`](../../pkg/httputil/conn_creds.go) — the `ServiceCertCN` type and context plumbing.
+- [`pkg/newtron/api/caller_middleware.go`](../../pkg/newtron/api/caller_middleware.go) — the caller-priority chain that places service cert CN ahead of PAM.
+- [`pam-howto.md`](pam-howto.md) — L2b user-to-service PAM (today's user-identity path).

@@ -240,8 +240,8 @@ All scenarios pass on first run. If any fail:
 
 ### L2b PAM
 
-Configure `/etc/pam.d/newtron-server` per `docs/newtron/pam-howto.md`,
-restart `newt-server` with `--auth-pam-service=newtron-server` (without
+Configure `/etc/pam.d/newt-server` per `docs/newtron/pam-howto.md`,
+restart `newt-server` with `--auth-pam-service=newt-server` (without
 `--audit-caller-header` so PAM is the only identity surface), and run:
 
 ```sh

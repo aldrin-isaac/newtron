@@ -38,15 +38,18 @@ empty; with no flag set, TCP requests pass through unauthenticated
 
 PAM (Pluggable Authentication Modules) is the Linux-standard
 authentication framework. Operators configure PAM by writing
-`/etc/pam.d/<service>` files — each engine reads its own service
-config independently. Multiple engines can share one service
-config or have separate ones (e.g., to gate `newtrun-server`
-behind a stricter group requirement).
+`/etc/pam.d/<service>` files. `cmd/newt-server` is the only binary
+in this project that reads PAM — the standalone server binaries
+(`newtron-server`, `newtrun-server`, `newtlab-server`) are
+loopback dev tools with no encryption or authentication.
+
+The examples below use the service name `newt-server`; operators
+can pick any name and pass it via `--auth-pam-service`.
 
 ### 2a. Minimal config: local Unix accounts
 
 ```sh
-# /etc/pam.d/newtron-server
+# /etc/pam.d/newt-server
 auth     required pam_unix.so
 account  required pam_unix.so
 ```
@@ -58,7 +61,7 @@ where the team already has shell accounts on the engine host.
 ### 2b. With SSSD (LDAP / Active Directory)
 
 ```sh
-# /etc/pam.d/newtron-server
+# /etc/pam.d/newt-server
 auth     required pam_sss.so
 account  required pam_sss.so
 ```
@@ -70,7 +73,7 @@ source of truth for identities.
 ### 2c. With Kerberos
 
 ```sh
-# /etc/pam.d/newtron-server
+# /etc/pam.d/newt-server
 auth     required pam_krb5.so
 account  required pam_krb5.so
 ```
@@ -80,7 +83,7 @@ Suitable when the operator already runs a Kerberos realm.
 ### 2d. With pam_listfile to gate access
 
 ```sh
-# /etc/pam.d/newtron-server
+# /etc/pam.d/newt-server
 auth     required pam_listfile.so item=user sense=allow file=/etc/newtron/operators onerr=fail
 auth     required pam_unix.so
 account  required pam_unix.so
@@ -93,44 +96,30 @@ only these are allowed to operate newtron."
 PAM is composable — these are starting points; operators arrange
 modules as their security posture requires.
 
-## 3. Start the engines with PAM
+## 3. Start newt-server with PAM
 
-Each standalone server binary takes one new flag:
+`cmd/newt-server` accepts one flag for PAM:
 
 ```sh
-bin/newtron-server \
-    --listen 0.0.0.0:19080 \
-    --auth-pam-service newtron-server \
-    ...
-
-bin/newtlab-server \
-    --listen 0.0.0.0:19082 \
-    --auth-pam-service newtlab-server \
-    ...
-
-bin/newtrun-server \
-    --listen 0.0.0.0:19081 \
-    --auth-pam-service newtrun-server \
+bin/newt-server \
+    --listen 0.0.0.0:18080 \
+    --auth-pam-service newt-server \
     ...
 ```
 
-Each value is the name of the file under `/etc/pam.d/`. Engines may
-share one PAM service ("newtron") or have separate ones; the
-example above uses per-engine services so operators can gate them
-differently.
-
-The composed `bin/newt-server` accepts the same flag and applies
-PAM authentication to its single combined TCP listener. There is no
-inter-engine authentication concern there (the engines share one
-process) — PAM authentication on `newt-server` protects external
-operator traffic to the composed listener.
+The value is the name of the file under `/etc/pam.d/`. PAM
+authentication on `newt-server` protects external operator traffic
+to the composed listener; in-process inter-engine calls (newtrun →
+newtron, newtlab → newtron) go through the same outer middleware
+chain so the operator's Bearer or PAM identity flows through
+unchanged.
 
 ## 4. Verify
 
 Operators authenticate via HTTP Basic. From a CLI:
 
 ```sh
-curl -u alice https://newtron-host:19080/newtron/v1/health
+curl -u alice https://newtron-host:18080/newt-server/v1/health
 Enter host password for user 'alice':
 ```
 
@@ -200,9 +189,11 @@ can always tell which path provided the identity by the
   via a fronting reverse proxy.
 - *Password transit security.* HTTP Basic sends credentials base64-
   encoded but not encrypted. **PAM authentication without TLS is insecure.**
-  Combine with inter-service mTLS (`--tls-cert`/`--tls-key`/`--tls-ca`)
-  for the listener, OR put a TLS-terminating reverse proxy in front, OR
-  restrict the listener to loopback / VPN / Unix socket.
+  The listener-side TLS wiring (`--tls-cert` / `--tls-key` / `--tls-ca`)
+  for `cmd/newt-server` is not yet implemented (see
+  [`mtls-howto.md`](mtls-howto.md)) — operators terminate TLS at a
+  reverse proxy in front of newt-server, OR restrict the listener to
+  loopback / VPN / Unix socket.
 - *Session reuse.* `pam_authenticate` runs on every request by
   default — no cookie, no token. For browser clients and long-running
   automations this gets expensive. **L2c (session keys)** layers on

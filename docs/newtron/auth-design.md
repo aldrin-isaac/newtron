@@ -342,13 +342,18 @@ for cross-engine calls.
 
 **Dependencies.** L0, L1.
 
-**Scope of changes.** TLS listener configuration in
-`cmd/newtron-server`, `cmd/newtrun-server`, `cmd/newtlab-server`. Client-
-side mTLS support in `pkg/newtron/client`, `pkg/newtrun/client`,
-`pkg/newtlab/client`. Configuration flags for CA cert path, server cert,
-server key. Cert-CN extraction middleware in each engine's `api/`
-package. Audit log records `verification_source: "service_cert_cn"`.
-Operational HOWTO on running a small CA.
+**Scope of changes.** The cert-CN extraction infrastructure
+(`pkg/httputil.ServiceCertCNFromRequest`, `ServiceCertCNFromContext`,
+the `VerificationServiceCertCN` audit verification source, the
+priority slot ahead of PAM in `pkg/newtron/api/caller_middleware.go`)
+shipped with the L1 audit work so the L3 authorization layer could
+treat cert CN as a verified identity uniformly with PAM and Unix
+peer creds. The listener-side wiring — `--tls-cert`/`--tls-key`/
+`--tls-ca` flags on `cmd/newt-server` and a TLS-configured
+`*httputil.Server` — is not yet implemented; operators who need
+TLS today terminate it at a reverse proxy in front of newt-server.
+The standalone engine binaries are loopback dev tools with no
+TLS by design.
 
 **Independent value.** Blocks service impersonation. Cross-engine calls
 become trustworthy. Even without user-side authentication (L2b), the
@@ -376,7 +381,7 @@ authorization layer in L3 doesn't need to distinguish them.
 
 **Audit criterion met when this layer lands.** "Are user identities on
 the TCP listener verified?" → yes, via the operator's PAM stack. A
-reviewer verifies by inspecting the PAM config (`/etc/pam.d/newtron-server`),
+reviewer verifies by inspecting the PAM config (`/etc/pam.d/newt-server`),
 confirming that the server rejects unauthenticated TCP requests, and
 checking that the audit log shows
 `verification_source: "pam"` with the PAM service name and the
@@ -386,11 +391,12 @@ authenticated username.
 
 **Scope of changes.** PAM bindings via `cgo` and a Go PAM helper
 package (the existing community libraries are reviewable; pick one in
-this layer). HTTP authentication middleware in `pkg/newtron/api/`,
-`pkg/newtrun/api/`, `pkg/newtlab/api/`. Configuration flag for the PAM
-service name (default `newtron-server`). Audit log records
+this layer). HTTP authentication middleware mounted at the outer layer of
+`cmd/newt-server`; the standalone engine binaries carry no PAM
+middleware. `--auth-pam-service=NAME` flag on `cmd/newt-server`
+(default `newt-server`). Audit log records
 `verification_source: "pam"` and the PAM service name. Operational
-HOWTO on setting up `/etc/pam.d/newtron-server` (start with `pam_unix`;
+HOWTO on setting up `/etc/pam.d/newt-server` (start with `pam_unix`;
 mention `pam_ldap`/`pam_sss`/`pam_krb5` for integrated deployments).
 
 **Independent value.** Blocks user impersonation on TCP. Audit log
@@ -921,17 +927,24 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   top-level area being mutated.
 
 Both L0 deliverables are shipped (this doc + the secret store).
-L1 audit log is shipped. L2a inter-service mTLS is shipped. L2b
+L1 audit log is shipped. **L2a inter-service mTLS is partially
+shipped:** the cert-CN extraction infrastructure and audit
+verification source are wired, but the listener-side flags
+(`--tls-cert`/`--tls-key`/`--tls-ca`) are not on any binary
+today. Operators terminate TLS at a reverse proxy in front of
+`cmd/newt-server`; in-process inter-engine calls in the composed
+binary have no separate TLS surface. L2b
 user-to-service PAM is shipped — `--auth-pam-service=NAME` flag on
-each standalone engine binary; the `PAMMiddleware` in
-`pkg/httputil` enforces HTTP Basic + `pam_authenticate` on TCP
-requests that don't already carry a verified identity (Unix peer
-creds from L1, mTLS cert CN from L2a). The cgo-backed
-`PAMAuthenticator` lives in `pkg/httputil/pamauth` (separate
-package so non-PAM consumers don't pull in cgo). The newtron caller
-middleware reads `PAMUsernameFromContext` and tags
-`audit.Caller` with `VerificationPAM`. Operational doc:
-[`pam-howto.md`](pam-howto.md).
+`cmd/newt-server` (the only binary with PAM); the standalone
+engine binaries are loopback dev tools with no authentication. The
+`PAMMiddleware` in `pkg/httputil` enforces HTTP Basic +
+`pam_authenticate` on TCP requests that don't already carry a verified
+identity (Unix peer creds from L1, mTLS cert CN from L2a), mounted at
+the outer layer of `cmd/newt-server`. The cgo-backed `PAMAuthenticator`
+lives in `pkg/httputil/pamauth` (separate package so non-PAM consumers
+don't pull in cgo). The newtron caller middleware reads
+`PAMUsernameFromContext` and tags `audit.Caller` with
+`VerificationPAM`. Operational doc: [`pam-howto.md`](pam-howto.md).
 
 **L3 authorization enforcement is shipped.** The `--enforce-
 authorization` flag on `newtron-server` and `newt-server`
