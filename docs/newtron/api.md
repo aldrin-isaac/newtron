@@ -55,6 +55,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/zones/{name}` | Show zone |
 | GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
 | GET | `/networks/{n}/topology/nodes` | List topology device names |
+| GET | `/networks/{n}/authorization` | Read user_groups + permissions + super_users from network.json |
 | GET | `/networks/{n}/hosts/{name}` | Get host profile |
 | GET | `/networks/{n}/features` | List features (also: `/{name}/dependencies`, `/{name}/unsupported-due-to`) |
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
@@ -705,6 +706,61 @@ each Node?" with substrate-grade per-entry detail rather than a summary. §11 +
 §46.
 
 _Lands newtron#6 (Phase 3 — Cluster A.6 / per-service projection slice)._
+
+### Authorization
+
+#### GET /newtron/v1/networks/{netID}/authorization
+
+Returns the network's authorization table — `user_groups`,
+`permissions`, and `super_users` exactly as they live in
+`network.json`. One round trip exposes everything an operator
+would see hand-editing the spec file; an inspector mounted on
+this endpoint reads byte-for-byte like the source.
+
+**Response (200):** `AuthorizationDetail` with:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user_groups` | `{[group: string]: string[]}` | Each entry maps a group name to the list of usernames in that group. Empty `{}` when no groups are defined. |
+| `permissions` | `{[permission: string]: PermissionGrant[]}` | Each entry maps a permission key (`spec.author`, `node.vlan.create`, etc.) to the grants that confer it. Grants encode in the same wire form the spec file accepts: shorthand `["group", ...]` when every grant has an empty `where`, typed `[{"groups": [...], "where": {...}}]` when any grant carries a scope. Empty `{}` when no permissions are configured. |
+| `super_users` | `string[]` | Usernames that bypass every permission check ([auth-design.md §L3](auth-design.md)). Empty `[]` when none are configured. |
+
+The wire shape is the canonical spec shape (DESIGN_PRINCIPLES_NEWTRON
+§46): an operator can copy a `permissions` block straight from a
+response into `network.json` and the loader will accept it
+unchanged.
+
+**Example:**
+
+```
+GET /newtron/v1/networks/default/authorization
+{
+  "data": {
+    "user_groups": {
+      "net-admins":  ["alice"],
+      "edge-admins": ["bob"]
+    },
+    "permissions": {
+      "spec.author": ["net-admins"],
+      "node.vlan.create": [
+        {"groups": ["edge-admins"], "where": {"device": "switch1"}}
+      ]
+    },
+    "super_users": ["root"]
+  }
+}
+```
+
+**Errors:** 404 when `{netID}` is not a registered network.
+
+This endpoint is intentionally ungated: it returns the same
+information an operator with shell access can read from
+`network.json`. The mutation surface that edits the table is
+already gated on `spec.author` (with L5's `where: {field: "..."}`
+clauses scoping meta-authorization separately). See
+[auth-design.md §L3](auth-design.md).
+
+_Lands newtron#150._
 
 ### Topology
 
@@ -3357,6 +3413,17 @@ Returned by `GET .../zone` (array of names) and `GET .../zones/{name}` (single).
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Zone name |
+
+#### AuthorizationDetail
+
+Returned by `GET /newtron/v1/networks/{netID}/authorization` — the
+network's authorization table as `network.json` carries it.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user_groups` | `{[group: string]: string[]}` | Group name → usernames. |
+| `permissions` | `{[permission: string]: PermissionGrant[]}` | Permission key → grants. Grant entries serialize as bare strings (`["group", ...]`) when no `where` clause is set, as objects (`[{"groups": [...], "where": {...}}]`) when one is — same wire form an operator authors in `network.json`. |
+| `super_users` | `string[]` | Usernames that bypass every permission check. |
 
 ### SSH Command Types
 

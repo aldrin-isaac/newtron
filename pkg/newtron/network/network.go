@@ -224,6 +224,36 @@ func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, err
 	return v, nil
 }
 
+// Authorization is a snapshot of the network's authorization table —
+// the user_groups, permissions, and super_users an operator authors
+// in network.json and that newtron's authorization checker consumes
+// at every mutation (auth-design.md §L3). The three fields share
+// underlying memory with the live NetworkSpecFile; callers receive
+// a read-only view suitable for serialization but must not mutate
+// the returned maps or slice.
+type Authorization struct {
+	UserGroups  map[string][]string
+	Permissions map[string]spec.PermissionGrants
+	SuperUsers  []string
+}
+
+// GetAuthorization returns the network's authorization table. The
+// table is one cohesive object owned by the network (DPN §27) —
+// authored together in network.json, applied together on
+// --enforce-authorization + reload, consumed together by the
+// auth.Checker — so one accessor returns all three fields, mirroring
+// the network.json shape.
+func (n *Network) GetAuthorization() Authorization {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.RLock()
+	defer mu.RUnlock()
+	return Authorization{
+		UserGroups:  n.spec.UserGroups,
+		Permissions: n.spec.Permissions,
+		SuperUsers:  n.spec.SuperUsers,
+	}
+}
+
 // GetService returns a service definition by name.
 func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
 	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Services, "service", util.NormalizeName(name))

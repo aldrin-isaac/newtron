@@ -133,6 +133,8 @@ func TestAPICompleteness(t *testing.T) {
 			// Device status (issue #75A+B)
 			"ProbeOnline":    true, // GET /networks/{netID}/nodes/{device}/status
 			"TopologyDrift":  true, // GET /networks/{netID}/nodes/{device}/intent/topology-drift
+			// Authorization-table inspector (issue #150)
+			"GetAuthorization": true, // GET /networks/{netID}/authorization
 		},
 		"Node": {
 			// Lifecycle (exposed via connectAndExecute/connectAndRead)
@@ -379,6 +381,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ListNodes":               "spec read",
 			"ProbeOnline":             "device read (TCP probe + newtlab port resolve)",
 			"TopologyDrift":           "device read (diff topology against device CONFIG_DB)",
+			"GetAuthorization":        "spec read (authorization-table inspector)",
 		},
 		"Node": {
 			"DeviceInfo":              "device read",
