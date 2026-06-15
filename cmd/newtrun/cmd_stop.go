@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/client"
 )
 
@@ -50,7 +49,7 @@ spec directory recorded in state, so it requires the state to be readable.`,
 			// client rather than reading state.json from disk.
 			topologyName := resolveTopologyFromState(state)
 			if topologyName != "" {
-				lc := newtlabclient.New(newtlabURL())
+				lc := newNewtlabClient()
 				if _, err := lc.LabStatus(ctx, topologyName); err == nil {
 					fmt.Printf("destroying topology %s...\n", topologyName)
 					if err := lc.Destroy(ctx, topologyName); err != nil {

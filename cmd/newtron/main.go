@@ -38,6 +38,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
@@ -204,7 +205,17 @@ Examples:
 		} else if rec != nil {
 			bearerKey = rec.Key
 		}
-		app.client = client.New(app.serverURL, app.networkID, client.WithBearer(bearerKey))
+		// auth-design.md L2a: NEWTRON_TLS_CERT/KEY/CA in the
+		// operator's env configure the client's TLS posture
+		// automatically. Unset → plain HTTP (pre-L2a default);
+		// set → trust the server cert against $NEWTRON_TLS_CA and
+		// (if cert+key also set) present them for mTLS. Same env
+		// drives cmd/newt-server when running locally.
+		tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+		if err != nil {
+			return fmt.Errorf("loading client TLS config from env: %w", err)
+		}
+		app.client = client.New(app.serverURL, app.networkID, client.WithBearer(bearerKey), client.WithTLS(tlsCfg))
 		if app.loopback {
 			app.client.Mode = api.ModeLoopback
 			app.executeMode = true // loopback is always execute — no device to protect
