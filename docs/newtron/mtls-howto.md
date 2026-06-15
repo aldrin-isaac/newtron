@@ -1,25 +1,37 @@
 # Listener-Side TLS (Operator-to-Server) — Operational HOWTO
 
-## Status: partial — see [auth-design.md §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) for design rationale.
+L2a listener-side TLS on `cmd/newt-server` is engaged by three flags:
 
-The L2a TLS feature has two halves:
+- `--tls-cert=PATH` — server certificate (PEM).
+- `--tls-key=PATH` — server private key (PEM).
+- `--tls-ca=PATH` — client-CA PEM bundle. Optional; when set, requires mTLS.
 
-1. **Identity-extraction infrastructure (shipped).** `pkg/httputil` extracts the verified peer cert CN from a TLS handshake and exposes it via `ServiceCertCNFromRequest` / `ServiceCertCNFromContext`. The newtron caller middleware (`pkg/newtron/api/caller_middleware.go`) reads it ahead of PAM and Unix peer creds. The audit verification source `service_cert_cn` records the cert CN as the caller identity.
+When `--tls-cert` is empty, the TCP listener stays on plain HTTP — the pre-L2a behavior. Set `--tls-cert` + `--tls-key` together to enable HTTPS; add `--tls-ca` to also require client certificates.
 
-2. **Listener-side wiring (not yet implemented).** No binary in this project currently accepts `--tls-cert` / `--tls-key` / `--tls-ca` flags. After the engine-composition refactor (PRs A–D), encryption is a property of the server boundary, so the right home for these flags is `cmd/newt-server`. They haven't been added yet.
+See [`auth-design.md` §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) for the threat-model rationale.
 
-## What this means for operators today
+## Three deployment shapes
 
-| Deployment | Recommendation |
+| Shape | Configuration |
 |---|---|
-| Production / external-traffic-facing newt-server | Terminate TLS at a reverse proxy (nginx, caddy, envoy) in front of `bin/newt-server`. The proxy holds the cert + key; `newt-server` listens on loopback or a Unix socket behind it. |
-| Composed `bin/newt-server` only — single host, single port | mTLS between engines is a no-op (engines share one process; their cross-calls are Go function calls through `http.ServeHTTP`). External TLS termination at a proxy is the right hammer. |
-| Three standalone binaries on one host | Loopback dev mode — no TLS by design (the binaries are dev tools). |
-| Three standalone binaries on separate hosts | Not a supported deployment shape. The standalone binaries are loopback-default dev tools; use `bin/newt-server` for production / multi-host deployments. |
+| Plain HTTP (loopback default) | No `--tls-*` flags. The TCP listener accepts plain HTTP. Identity comes from PAM (`--auth-pam-service`), the Unix socket (`--unix-socket`), or the self-attested header (`--audit-caller-header`). |
+| TLS-only (server-auth) | `--tls-cert` + `--tls-key`. The TCP listener serves HTTPS; clients verify the server cert against their trust store. Identity continues to come from PAM / Unix peer creds / the header — the cert authenticates the **server**, not the client. |
+| mTLS (server-auth + client-auth) | `--tls-cert` + `--tls-key` + `--tls-ca`. Every client must present a certificate that verifies against the configured CA pool. The verified peer cert's Subject Common Name becomes the caller identity, taking priority over PAM, the Unix socket, and the self-attested header — see the caller priority chain at `pkg/newtron/api/caller_middleware.go`. |
 
-## Audit log shape when L2a-listener-wiring lands
+Operators who prefer reverse-proxy termination (nginx/caddy/envoy in front of `newt-server`) continue to do so — `--tls-cert` flags are an alternative, not a replacement. The proxy holds the cert + key; `newt-server` listens on loopback behind it; the proxy injects `--audit-caller-header` to surface the identity it authenticated.
 
-When the listener flags are added to `cmd/newt-server`, the audit log will gain entries with:
+## Identity flow under mTLS
+
+```
+TLS handshake → verified peer cert CN
+              → r.TLS.VerifiedChains[0][0].Subject.CommonName
+              → httputil.ServiceCertCNFromRequest
+              → caller-middleware (priority slot ahead of PAM)
+              → audit.Caller{Username: <CN>, Source: "service_cert_cn"}
+              → permissions checker (L3 reads Caller from audit context)
+```
+
+Audit log entries from mTLS-authenticated callers carry:
 
 ```json
 {
@@ -29,15 +41,58 @@ When the listener flags are added to `cmd/newt-server`, the audit log will gain 
 }
 ```
 
-Reviewers will tell mTLS-authenticated callers apart from PAM-authenticated ones by the `verification_source` field — both paths populate `audit.Caller` the same way.
+Reviewers tell mTLS-authenticated callers apart from PAM-authenticated ones by the `verification_source` field — both paths populate `audit.Caller` the same way, and L3 authorization treats them uniformly through the entitlement table.
 
-## What the cert-CN priority does today
+## Bringing it up
 
-Even without listener-side TLS, the priority slot ahead of PAM is exercised by `TestCallerMiddleware_ServiceCertCNYieldsVerifiedCaller` and `TestCallerMiddleware_ServiceCertCNWinsOverEverything` in `pkg/newtron/api/caller_middleware_test.go` (both use the `httputil.WithServiceCertCNForTest` helper) so that when the listener side lands, the integration is mechanical — drop the `*tls.Config` into `httputil.NewServer(...)` and the rest works.
+1. **Generate a server cert + private key** signed by a CA the operator controls. Common pattern: an internal PKI's intermediate CA issues a cert for the newt-server host's DNS name; the same intermediate signs operator client certs.
+
+2. **(Optional) Generate operator client certs** — one cert per identity that needs to reach newt-server over mTLS. The cert's Common Name becomes the operator's username in audit + authorization.
+
+3. **Start `cmd/newt-server`:**
+
+   ```sh
+   bin/newt-server \
+     --listen 0.0.0.0:18443 \
+     --tls-cert /etc/newt-server/server.crt \
+     --tls-key /etc/newt-server/server.key \
+     --tls-ca /etc/newt-server/operators-ca.crt \
+     --audit-log /var/log/newt-server-audit.jsonl \
+     --enforce-authorization \
+     --spec-dir /etc/newt-server/specs
+   ```
+
+4. **Dial with a client cert:**
+
+   ```sh
+   curl --cacert /etc/newt-server/server-trust.crt \
+        --cert /etc/operator-alice.crt \
+        --key /etc/operator-alice.key \
+        https://newt-server.example.com:18443/newtron/v1/networks
+   ```
+
+5. **Verify the audit log:**
+
+   ```sh
+   grep '"verification_source":"service_cert_cn"' /var/log/newt-server-audit.jsonl
+   ```
+
+   Every authenticated request appears with `user: "alice"` (from the cert CN).
+
+## Failure modes
+
+| Symptom | Diagnosis |
+|---|---|
+| Server fails to start with `httputil: TLS cert "..." provided but key file is empty` | `--tls-cert` was set without `--tls-key`. Both are required together. |
+| Server fails to start with `httputil: loading TLS cert/key: ...` | Cert / key file is missing, unreadable, malformed PEM, or the two don't match. The startup error is fail-fast intentionally — operators fix the configuration before any connection is accepted. |
+| Server fails to start with `httputil: loading client CA pool: ...` | `--tls-ca` points at an unreadable file or one with no valid PEM blocks. |
+| Client gets a TLS handshake error | mTLS is on (`--tls-ca` set) and the client either presented no cert or presented one not signed by the configured CA. The handler never runs; nothing is logged at the application layer. |
+| Client connects but audit log shows `verification_source: "pam"` instead of `service_cert_cn` | The client connected without a client cert (TLS-only, not mTLS). Either `--tls-ca` isn't set on the server, or the operator's client config omitted the cert. |
 
 ## Cross-references
 
 - [`auth-design.md` §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) — design rationale + threat model.
-- [`pkg/httputil/conn_creds.go`](../../pkg/httputil/conn_creds.go) — the `ServiceCertCN` type and context plumbing.
-- [`pkg/newtron/api/caller_middleware.go`](../../pkg/newtron/api/caller_middleware.go) — the caller-priority chain that places service cert CN ahead of PAM.
-- [`pam-howto.md`](pam-howto.md) — L2b user-to-service PAM (today's user-identity path).
+- [`pkg/httputil/tls.go`](../../pkg/httputil/tls.go) — `LoadServerTLSConfig` / `LoadClientTLSConfig`.
+- [`pkg/httputil/conn_creds.go`](../../pkg/httputil/conn_creds.go) — `ServiceCertCN` and context plumbing.
+- [`pkg/newtron/api/caller_middleware.go`](../../pkg/newtron/api/caller_middleware.go) — caller-priority chain (cert CN > Unix peer creds > PAM > session key > self-attested header).
+- [`pam-howto.md`](pam-howto.md) — L2b user-to-service PAM (alternative identity path for password-based deployments).

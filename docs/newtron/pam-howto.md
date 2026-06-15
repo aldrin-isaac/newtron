@@ -22,7 +22,7 @@ requests from operators:
 |---|---|
 | Plain TCP (loopback or non-loopback) | **Yes** — without it, any process reaching the listener can act as any user. |
 | Unix socket (auth-design.md L1) | **No** — kernel peer creds already identify the caller; the middleware skips PAM. |
-| mTLS (auth-design.md L2a; the listener-side wiring on `cmd/newt-server` is not yet implemented) | **No** when wired — the verified peer cert CN would identify the caller and the middleware would skip PAM. |
+| mTLS (auth-design.md L2a; `--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) | **No** — the verified peer cert CN identifies the caller and the middleware skips PAM. |
 
 The middleware skips automatically — no separate configuration
 required. Operators set `--auth-pam-service=NAME` on `cmd/newt-server`

@@ -49,7 +49,7 @@ credentials per request.
 | **Forensic accountability.** "Who deleted that VLAN at 03:42?" is answerable from the system itself. | Operator-to-server | L1 |
 | **User impersonation across the wire.** Someone on the network sends requests claiming to be alice. | Operator-to-server | L2b (PAM for TCP; Unix peer creds for local; L2c session keys derived from L2b) |
 | **Credential reuse across requests.** A long-running automation or browser session has to embed a password in every call, or proxy it through a separate session layer. | Operator-to-server | L2c (PAM-issued short-lived session keys) |
-| **newt-server impersonation.** A rogue process on the network pretends to be `cmd/newt-server` and accepts operator traffic claiming to be the real service. | Operator-to-server | L2a (listener-side TLS — listener-side wiring is not yet shipped; operators terminate TLS at a reverse proxy today) |
+| **newt-server impersonation.** A rogue process on the network pretends to be `cmd/newt-server` and accepts operator traffic claiming to be the real service. | Operator-to-server | L2a (listener-side TLS — `--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) |
 | **Stale grants.** Former team member's permissions linger after they leave. | Operator-to-server | L6 (revocation) |
 | **Coverage holes.** A new mutation method ships without a `checkPermission` call and bypasses authorization silently. | Both | L4 (coverage closure test) |
 | **Secret leakage from spec.** Device profile passwords sit in plain JSON on disk and in version control. | Foundational | L0 (encryption at rest) |
@@ -86,12 +86,13 @@ shippable** because they protect different properties of the same
 operator-to-server channel — L2a protects the wire from
 eavesdropping and verifies the server's identity to the operator
 (plus optionally the operator's cert to the server); L2b verifies
-the operator's identity from a password against PAM. Today only
-L2b is wired into `cmd/newt-server`; operators who need wire
-encryption today terminate TLS at a reverse proxy in front of
-newt-server. The combined sub-layer L2 is treated as one in
-subsequent layers' dependency lists, but in scheduling terms it
-splits in half.
+the operator's identity from a password against PAM. Both are
+wired into `cmd/newt-server`: L2a via `--tls-cert`/`--tls-key`/
+`--tls-ca`, L2b via `--auth-pam-service`. Deployments that don't
+ship certs continue to terminate TLS at a reverse proxy in front
+of newt-server; the listener-side flags are an alternative, not a
+replacement. The combined sub-layer L2 is treated as one in
+subsequent layers' dependency lists.
 
 This ordering is **mandatory**, not aesthetic. The audit criteria for each
 layer fail if its dependencies are skipped.
@@ -112,12 +113,16 @@ Deployments adopt layers at their own pace. Specifically:
   TCP fallback header name; empty disables header-based caller
   identity (Unix socket peer creds still work if that listener is
   configured).
-- **L2a listener-side TLS:** not yet wired into any binary.
-  Planned `--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`;
-  the cert-CN extraction infrastructure (`pkg/httputil/conn_creds.go`,
-  the priority slot ahead of PAM in caller_middleware) is ready.
-  Today operators terminate TLS at a reverse proxy in front of
-  `cmd/newt-server`; see [`mtls-howto.md`](mtls-howto.md).
+- **L2a listener-side TLS:** `--tls-cert=PATH` + `--tls-key=PATH` on
+  `cmd/newt-server` enable a TLS listener; the TCP listener serves
+  HTTPS instead of HTTP. Adding `--tls-ca=PATH` requires every client
+  to present a certificate that verifies against the CA pool (mTLS);
+  the verified peer-cert Subject CN flows through
+  `httputil.ServiceCertCNFromRequest` into the caller-middleware
+  priority slot ahead of PAM. Empty flags preserve plain HTTP (the
+  pre-L2a default); operators who don't ship certs can still
+  terminate TLS at a reverse proxy in front of `cmd/newt-server` —
+  see [`mtls-howto.md`](mtls-howto.md).
 - **L2b user-to-service PAM:** `--auth-pam-service=NAME` enables;
   absent means TCP listener doesn't authenticate via PAM (caller
   identity stays self-attested via header per L1).
@@ -349,12 +354,10 @@ protects the operator-to-server boundary, not inter-engine.
 **Audit criterion met when this layer lands.** "Can a non-CA-trusted
 client open a connection to `cmd/newt-server`?" → no. A reviewer
 verifies by inspecting the CA-cert configuration on the deployment,
-attempting a connection with a non-trusted cert, and checking that
-the audit log shows `verification_source: "service_cert_cn"` on
-successful mTLS-authenticated requests. The listener-side TLS wiring
-(`--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) is not
-yet implemented; today operators terminate TLS at a reverse proxy
-and the criterion is parked pending the listener-side ship.
+attempting a connection with a non-trusted cert (handshake fails),
+and checking that the audit log shows
+`verification_source: "service_cert_cn"` on successful
+mTLS-authenticated requests.
 
 **Dependencies.** L0, L1.
 
@@ -362,18 +365,22 @@ and the criterion is parked pending the listener-side ship.
 (`pkg/httputil.ServiceCertCNFromRequest`, `ServiceCertCNFromContext`,
 the `VerificationServiceCertCN` audit verification source, the
 priority slot ahead of PAM in `pkg/newtron/api/caller_middleware.go`)
-shipped ahead of listener-side wiring so the L3 authorization
-layer could treat cert CN as a verified identity uniformly with
-PAM and Unix peer creds. The listener-side wiring —
-`--tls-cert`/`--tls-key`/`--tls-ca` flags on `cmd/newt-server`
-and a TLS-configured `*httputil.Server` — is not yet implemented;
-operators who need TLS today terminate it at a reverse proxy in
-front of newt-server. The standalone engine binaries are loopback
-dev tools with no TLS by design.
+landed first so the L3 authorization layer could treat cert CN as
+a verified identity uniformly with PAM and Unix peer creds. The
+listener-side wiring shipped in #175 — `--tls-cert`/`--tls-key`/
+`--tls-ca` flags on `cmd/newt-server` plumb into
+`httputil.LoadServerTLSConfig` and the `TLSConfig` server option;
+when all three are set, every TCP connection completes a mTLS
+handshake and the verified peer cert CN flows into the request
+context for the identity-extraction middleware. Operators who
+prefer to terminate TLS at a reverse proxy continue to do so; the
+listener-side flags are an alternative, not a replacement. The
+standalone engine binaries are loopback dev tools with no TLS by
+design.
 
-**Independent value.** When listener-side TLS lands on
-`cmd/newt-server`, blocks both eavesdropping on the operator-to-server
-channel and impersonation of newt-server by a rogue process. The
+**Independent value.** Blocks both eavesdropping on the
+operator-to-server channel and impersonation of newt-server by a
+rogue process. The
 cert-CN identity slot already wired into caller_middleware gives
 operators an mTLS-cert-based identity path that composes with PAM
 and Unix peer creds uniformly, so the typical service-mesh pattern
@@ -989,12 +996,12 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   top-level area being mutated.
 
 Both L0 deliverables are shipped (this doc + the secret store).
-L1 audit log is shipped. **L2a listener-side TLS is partially
-shipped:** the cert-CN extraction infrastructure and audit
-verification source are wired, but the listener-side flags
-(`--tls-cert`/`--tls-key`/`--tls-ca`) are not on any binary
-today. Operators terminate TLS at a reverse proxy in front of
-`cmd/newt-server`; in-process inter-engine calls in the composed
+L1 audit log is shipped. **L2a listener-side TLS is shipped** —
+the cert-CN extraction infrastructure, the audit verification
+source, and the listener-side flags
+(`--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) are
+all wired. Deployments that prefer reverse-proxy termination
+continue to do so; in-process inter-engine calls in the composed
 binary have no separate TLS surface. L2b
 user-to-service PAM is shipped — `--auth-pam-service=NAME` flag on
 `cmd/newt-server` (the only binary with PAM); the standalone
