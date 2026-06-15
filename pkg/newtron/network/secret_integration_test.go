@@ -252,3 +252,123 @@ func plainSwitch1Profile() string {
 		"underlay_asn": 65001
 	}`
 }
+
+// TestNewNetwork_SpecDirSecretStoreAutoDiscovery pins the #176
+// convention: when the operator passes secretStore=nil AND
+// <specDir>/secrets.json exists, the loader auto-opens it as a
+// FileStore and resolves references against it. No --secret-store
+// flag, no explicit operator config required.
+//
+// This is what keeps the README quickstart's `bin/newt-server` command
+// unchanged after migrating test-topology profiles from plaintext to
+// ${secret:KEY} references: the secrets.json sits next to network.json
+// and is picked up automatically.
+//
+// §16: real on-disk spec dir, real FileStore creation, real
+// NewNetwork pass — no layer stubbed. The assertion targets the
+// resolved password value end-to-end.
+func TestNewNetwork_SpecDirSecretStoreAutoDiscovery(t *testing.T) {
+	dir := newL0FixtureSpecDir(t)
+	writeProfile(t, dir, "switch1", `{
+		"mgmt_ip": "127.0.0.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "amer",
+		"platform": "p1",
+		"ssh_user": "admin",
+		"ssh_pass": "${secret:switch1-ssh}",
+		"underlay_asn": 65001
+	}`)
+
+	// Drop secrets.json next to network.json with the canonical
+	// mode 0600. The loader's convention discovers it.
+	secretsPath := filepath.Join(dir, "secrets.json")
+	if err := os.WriteFile(secretsPath, []byte(`{"switch1-ssh":"the-real-password"}`), 0o600); err != nil {
+		t.Fatalf("write secrets.json: %v", err)
+	}
+
+	n, err := NewNetwork(dir, "", nil, nil) // nil store → auto-discovery kicks in
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	resolved, err := n.resolveProfileByName("switch1")
+	if err != nil {
+		t.Fatalf("ResolveProfile: %v", err)
+	}
+	if resolved.SSHPass != "the-real-password" {
+		t.Errorf("SSHPass = %q; want the-real-password (auto-discovery should have resolved it)", resolved.SSHPass)
+	}
+}
+
+// TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery pins the
+// precedence rule: an explicit secretStore argument always wins,
+// even when <specDir>/secrets.json exists. Matches the established
+// "flag wins over env" pattern from #179 (TLS env vars).
+func TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery(t *testing.T) {
+	dir := newL0FixtureSpecDir(t)
+	writeProfile(t, dir, "switch1", `{
+		"mgmt_ip": "127.0.0.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "amer",
+		"platform": "p1",
+		"ssh_user": "admin",
+		"ssh_pass": "${secret:switch1-ssh}",
+		"underlay_asn": 65001
+	}`)
+
+	// spec-dir secrets.json says "loser".
+	if err := os.WriteFile(filepath.Join(dir, "secrets.json"), []byte(`{"switch1-ssh":"loser"}`), 0o600); err != nil {
+		t.Fatalf("write secrets.json: %v", err)
+	}
+	// Explicit store says "winner".
+	explicit, err := secret.NewFileStore(filepath.Join(t.TempDir(), "explicit.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := explicit.Set("switch1-ssh", "winner"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	n, err := NewNetwork(dir, "", nil, explicit)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	resolved, err := n.resolveProfileByName("switch1")
+	if err != nil {
+		t.Fatalf("ResolveProfile: %v", err)
+	}
+	if resolved.SSHPass != "winner" {
+		t.Errorf("SSHPass = %q; explicit store should have won over spec-dir auto-discovery", resolved.SSHPass)
+	}
+}
+
+// TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent pins the
+// no-regression path: when secretStore=nil AND <specDir>/secrets.json
+// doesn't exist, the loader proceeds as today (nil store; plaintext
+// profiles work; references error at resolve time). The auto-discovery
+// is strictly additive — it cannot break a setup that didn't have a
+// secrets.json.
+func TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent(t *testing.T) {
+	dir := newL0FixtureSpecDir(t)
+	// Plaintext profile, no secrets.json.
+	writeProfile(t, dir, "switch1", `{
+		"mgmt_ip": "127.0.0.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "amer",
+		"platform": "p1",
+		"ssh_user": "admin",
+		"ssh_pass": "YourPaSsWoRd",
+		"underlay_asn": 65001
+	}`)
+
+	n, err := NewNetwork(dir, "", nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	resolved, err := n.resolveProfileByName("switch1")
+	if err != nil {
+		t.Fatalf("ResolveProfile: %v", err)
+	}
+	if resolved.SSHPass != "YourPaSsWoRd" {
+		t.Errorf("SSHPass = %q; plaintext should pass through unchanged", resolved.SSHPass)
+	}
+}

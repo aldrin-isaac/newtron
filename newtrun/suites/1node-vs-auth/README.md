@@ -73,7 +73,9 @@ server, which the canonical setup does not.
 Walk the steps in [§"L2c round-trip operator setup"](#l2c-round-trip-operator-setup)
 below to:
 
-1. Place the secret store on disk.
+1. (Optional) Place an operator-managed secret store on disk. The
+   suite's spec dir ships `secrets.json` in-repo, so this step is
+   only needed if you want to override with your own store.
 2. Configure the PAM service file at `/etc/pam.d/newtron-test`.
 3. Provision the OS accounts the suite knows.
 4. Start `newt-server` with `--auth-pam-service` set.
@@ -159,13 +161,18 @@ each account and pass it to `login-all.sh` via
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
     --spec-dir newtrun/topologies/1node-vs-auth/specs \
     --net-id 1node-vs-auth \
-    --secret-store /tmp/1node-vs-auth-secrets.json \
     --audit-log /tmp/1node-vs-auth-audit.jsonl \
     --auth-pam-service newtron-test \
     --enforce-authorization \
     --audit-log-integrity \
     --spec-watch &
 ```
+
+The secret store is auto-discovered from
+`newtrun/topologies/1node-vs-auth/specs/secrets.json` (post-#176; the
+file ships in-repo at mode 0600). If you want to point at your own
+operator-managed store instead, add `--secret-store=PATH` — the flag
+wins over auto-discovery.
 
 - `--auth-pam-service` engages L2b PAM + auto-engages L2c session
   keys at `/newt-server/v1/auth/login` and `/newt-server/v1/auth/logout`.
@@ -230,8 +237,9 @@ All scenarios pass on first run. If any fail:
   `network.json` grants and operator's `--enforce-authorization` flag.
 - L3/L4 scenarios *not* failing for `mallory` → enforcement isn't on.
   Verify `--enforce-authorization` was passed.
-- L0 failing → check `--secret-store` path and that `secrets.json`
-  has the `switch1_ssh_pass` key.
+- L0 failing → check that `newtrun/topologies/1node-vs-auth/specs/secrets.json`
+  exists at mode 0600 with the `switch1_ssh_pass` key. If you're using
+  `--secret-store=PATH` to override, verify that path instead.
 - L6 failing with "verified 0 entries" → `--audit-log-integrity` was
   not set, or `--audit-log` path doesn't match
   `/tmp/1node-vs-auth-audit.jsonl`.

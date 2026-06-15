@@ -92,7 +92,33 @@ type FileStore struct {
 // it exists, the file mode is checked — modes broader than 0600 are
 // rejected so a misconfigured permissions setup is loud rather than
 // silent. The returned *FileStore is ready for concurrent use.
+//
+// Use this constructor for the explicit operator-supplied store —
+// i.e., when the path comes from --secret-store=PATH on cmd/newt-server
+// or cmd/newtron-server. Auto-discovery callers (#176) that may load
+// a git-committed test fixture should use NewFileStoreLooseMode
+// instead — git can't preserve 0600 on checkout, so committed
+// secrets.json files always start out 0644 in fresh clones.
 func NewFileStore(path string) (*FileStore, error) {
+	return openFileStore(path, true /* strictMode */)
+}
+
+// NewFileStoreLooseMode is the same as NewFileStore except it does
+// NOT enforce mode 0600 on an existing file. Used by spec-dir
+// auto-discovery (network.NewNetwork, #176) so test topologies that
+// ship secrets.json in-repo work after `git clone` without an extra
+// chmod step.
+//
+// The relaxation is bounded: the file must still exist (no
+// create-on-missing semantics here — auto-discovery is opt-in by file
+// presence), and the contents must still parse. Operators who want
+// strict mode enforcement on their store use --secret-store=PATH,
+// which routes through NewFileStore.
+func NewFileStoreLooseMode(path string) (*FileStore, error) {
+	return openFileStore(path, false)
+}
+
+func openFileStore(path string, strictMode bool) (*FileStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("secret: file store path is empty")
 	}
@@ -104,6 +130,12 @@ func NewFileStore(path string) (*FileStore, error) {
 
 	info, err := os.Stat(abs)
 	if errors.Is(err, os.ErrNotExist) {
+		if !strictMode {
+			// LooseMode is opt-in by file presence — refuse to
+			// create a missing one so the caller knows their
+			// auto-discovery probe failed.
+			return nil, fmt.Errorf("secret: %q does not exist", abs)
+		}
 		// Create the file with an empty map so subsequent Gets
 		// return a clean ErrNotFound rather than a confusing
 		// "file doesn't exist" message at every lookup.
@@ -115,8 +147,10 @@ func NewFileStore(path string) (*FileStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("secret: stat %q: %w", abs, err)
 	}
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return nil, fmt.Errorf("secret: refusing to open %q: mode %v allows group/other access; chmod 0600 first", abs, mode)
+	if strictMode {
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			return nil, fmt.Errorf("secret: refusing to open %q: mode %v allows group/other access; chmod 0600 first", abs, mode)
+		}
 	}
 	// Verify the file is readable + parseable up front so the
 	// operator finds out about corruption at startup, not at the

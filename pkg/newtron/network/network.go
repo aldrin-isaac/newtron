@@ -11,6 +11,8 @@ package network
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 
@@ -111,17 +113,44 @@ type Network struct {
 // secretStore (auth-design.md L0) is the operator-configured secret
 // backend. When non-nil, ${secret:KEY} references in spec values
 // (currently DeviceProfile.SSHPass and PlatformSpec.VMCredentials)
-// are resolved at network load. nil disables resolution: plaintext
+// are resolved at network load. nil triggers spec-dir auto-discovery
+// (#176): if <specDir>/secrets.json exists, it's opened as a
+// FileStore and used; otherwise resolution stays disabled — plaintext
 // spec values keep working, but a reference under a nil store is a
 // hard error from secret.Resolve so the operator finds out
 // immediately rather than silently sending "${secret:KEY}" as a
 // password.
+//
+// The explicit `secretStore` argument always wins over auto-discovery
+// — an operator who passes an explicit FileStore (typically from
+// --secret-store=PATH on cmd/newt-server or cmd/newtron-server) gets
+// that store regardless of what's next to network.json. The
+// convention only kicks in when no flag is set.
 func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store) (*Network, error) {
 	loader := spec.NewLoader(specDir)
 
 	// Load all spec files
 	if err := loader.Load(); err != nil {
 		return nil, fmt.Errorf("loading specs: %w", err)
+	}
+
+	// auth-design.md L0: spec-dir auto-discovery (#176). When the
+	// operator didn't pass an explicit store, check the conventional
+	// path <specDir>/secrets.json. Uses NewFileStoreLooseMode so a
+	// git-checked-in test fixture (which always emerges from `git
+	// checkout` at the umask default, typically 0644) loads without
+	// requiring a separate chmod step — operators who want the strict
+	// 0600 hygiene check use --secret-store=PATH (which routes
+	// through the strict NewFileStore).
+	if secretStore == nil {
+		candidatePath := filepath.Join(specDir, "secrets.json")
+		if _, statErr := os.Stat(candidatePath); statErr == nil {
+			fs, err := secret.NewFileStoreLooseMode(candidatePath)
+			if err != nil {
+				return nil, fmt.Errorf("opening spec-dir secret store %s: %w", candidatePath, err)
+			}
+			secretStore = fs
+		}
 	}
 
 	platforms := loader.GetPlatforms()
