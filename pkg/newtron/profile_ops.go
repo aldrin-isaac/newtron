@@ -136,3 +136,70 @@ func (net *Network) DeleteZone(ctx context.Context, name string, opts ExecOpts) 
 	return net.internal.DeleteZone(name)
 }
 
+
+// ============================================================================
+// Update — full-replacement profile/zone mutation (#152)
+// ============================================================================
+
+// UpdateProfile replaces an existing device profile. Returns
+// *NotFoundError → HTTP 404 when no profile with that name exists.
+// Same Field + Resource (and same `spec.author` gate) as
+// CreateProfile / DeleteProfile.
+func (net *Network) UpdateProfile(ctx context.Context, req CreateDeviceProfileRequest, opts ExecOpts) error {
+	if req.MgmtIP == "" {
+		return &ValidationError{Field: "mgmt_ip", Message: "required"}
+	}
+	if req.Zone == "" {
+		return &ValidationError{Field: "zone", Message: "required"}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("profiles").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	profile := &spec.DeviceProfile{
+		MgmtIP:      req.MgmtIP,
+		LoopbackIP:  req.LoopbackIP,
+		Zone:        req.Zone,
+		Platform:    req.Platform,
+		MAC:         req.MAC,
+		UnderlayASN: req.UnderlayASN,
+		SSHUser:     req.SSHUser,
+		SSHPass:     req.SSHPass,
+	}
+	if req.EVPN != nil {
+		profile.EVPN = &spec.EVPNConfig{
+			Peers:          req.EVPN.Peers,
+			RouteReflector: req.EVPN.RouteReflector,
+			ClusterID:      req.EVPN.ClusterID,
+		}
+	}
+	return translateInternalError(net.internal.UpdateProfile(req.Name, profile))
+}
+
+// UpdateZone replaces an existing zone. ZoneSpec carries only
+// OverridableSpecs (the network→zone→node hierarchical spec maps);
+// CreateZoneRequest transports nothing beyond the name today, so this
+// Update preserves the existing OverridableSpecs (matching the
+// preservation pattern for Filter/RoutePolicy/QoSPolicy). It exists
+// for symmetry with the other Update<Kind> verbs — when a future
+// request shape carries zone overrides, the body-build logic below
+// is where the new values flow in.
+func (net *Network) UpdateZone(ctx context.Context, req CreateZoneRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("zones").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	existing, err := net.internal.GetZone(req.Name)
+	if err != nil {
+		return err
+	}
+	return translateInternalError(net.internal.UpdateZone(req.Name, existing))
+}

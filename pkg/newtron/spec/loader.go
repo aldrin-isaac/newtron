@@ -399,6 +399,60 @@ func (l *Loader) ListProfiles() []string {
 	return names
 }
 
+// UpdateProfile atomically overwrites an existing profile file with the
+// given replacement. Returns an error if no profile with that name
+// exists (either in the in-memory cache or on disk). The whole check +
+// write runs under l.mu.Lock so a concurrent CreateProfile/UpdateProfile
+// for the same name can't both succeed against the same starting state.
+//
+// Race-safe alternative to LoadProfile-then-SaveProfile composed at a
+// higher layer.
+func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	profileDir := filepath.Join(l.specDir, "profiles")
+	path := filepath.Join(profileDir, name+".json")
+
+	// Existence check: cache hit, OR on-disk file present (profile may
+	// have been written before this Loader started and never loaded).
+	if _, cached := l.profiles[name]; !cached {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("profile '%s' does not exist", name)
+		}
+	}
+
+	// Inline what SaveProfile does (we already hold the lock).
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("creating profiles directory: %w", err)
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling profile %s: %w", name, err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(profileDir, "profile-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+	l.profiles[name] = profile
+	return nil
+}
+
 // SaveProfile writes a device profile to disk atomically (temp file + rename).
 func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
 	profileDir := filepath.Join(l.specDir, "profiles")
