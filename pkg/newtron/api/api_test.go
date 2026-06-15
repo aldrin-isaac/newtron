@@ -858,7 +858,15 @@ func copyTestSpecDir(t *testing.T) string {
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)
 		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
+		// secrets.json must be 0600 — the FileStore refuses any
+		// broader mode at open (#176 spec-dir auto-discovery routes
+		// through that check on every test that copies a topology
+		// fixture).
+		mode := os.FileMode(0o644)
+		if e.Name() == "secrets.json" {
+			mode = 0o600
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, mode); err != nil {
 			t.Fatalf("write %s: %v", e.Name(), err)
 		}
 	}

@@ -6,7 +6,7 @@
     "evpn": {
         "peers": ["spine1", "spine2"]
     },
-    "ssh_pass": "YourPaSsWoRd",
+    "ssh_pass": "${secret:leaf2_ssh_pass}",
     "ssh_user": "admin",
     "underlay_asn": 65012
 }

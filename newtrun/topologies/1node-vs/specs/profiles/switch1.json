@@ -4,6 +4,6 @@
     "zone": "amer",
     "platform": "sonic-vs",
     "ssh_user": "admin",
-    "ssh_pass": "YourPaSsWoRd",
+    "ssh_pass": "${secret:switch1_ssh_pass}",
     "underlay_asn": 65001
 }

@@ -7,7 +7,7 @@
         "peers": ["spine2"],
         "route_reflector": true
     },
-    "ssh_pass": "YourPaSsWoRd",
+    "ssh_pass": "${secret:spine1_ssh_pass}",
     "ssh_user": "admin",
     "underlay_asn": 65001
 }

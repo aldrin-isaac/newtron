@@ -29,31 +29,42 @@ contract doesn't change.
 
 ## 2. Configure the server
 
-Two flags, both default empty (current behavior preserved):
+The server discovers the secret store from two sources, in order:
 
-- `newtron-server --secret-store=PATH`
-- `newt-server --secret-store=PATH` (forwarded to the composed
-  newtron engine)
+1. **Explicit flag** — `newtron-server --secret-store=PATH` or
+   `newt-server --secret-store=PATH`. Wins over auto-discovery.
+2. **Spec-dir convention (#176)** — when no flag is set, the loader
+   checks `<spec-dir>/secrets.json` for each registered network. If
+   present, it's opened as a FileStore automatically; if absent,
+   secret resolution stays disabled.
 
-The store file is created if it doesn't exist; if it already exists,
-mode broader than 0600 (group- or world-readable) is rejected at
-startup so a misconfigured permissions setup fails loud rather than
-serving secrets under wrong perms.
+Both default-off: a plaintext-only spec dir with no `secrets.json` and
+no flag works exactly as it did pre-L0. The convention only kicks in
+for networks that ship a `secrets.json` next to their `network.json` —
+which the in-repo test topologies under `newtrun/topologies/` do.
 
-Typical operator setup:
+The store file (whether flag-pointed or auto-discovered) must be mode
+0600. Broader modes are rejected at open so a misconfigured permissions
+setup fails loud rather than serving secrets under wrong perms.
+
+Typical operator setups:
 
 ```sh
+# Operator-managed store, explicit path
 mkdir -m 700 -p ~/.newtron
 bin/newtron-server --listen 127.0.0.1:19080 \
                    --spec-dir /etc/newtron/lab \
                    --secret-store ~/.newtron/secrets.json
+
+# Spec-dir convention — secrets.json lives alongside network.json
+bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs
+# loader auto-discovers newtrun/topologies/1node-vs/specs/secrets.json
 ```
 
-When `--secret-store` is set but a referenced KEY is missing, the
-server fails to load that network with a clear error naming the
-missing key. The operator runs `bin/newtron secrets put KEY VALUE`
-and either restarts the server or calls ReloadNetwork on each
-affected network.
+When a referenced KEY is missing from the resolved store, the server
+fails to load that network with a clear error naming the missing key.
+The operator runs `bin/newtron secrets put KEY VALUE` and either
+restarts the server or calls ReloadNetwork on each affected network.
 
 ## 3. Manage the store
 
