@@ -791,6 +791,34 @@ existing specs keep working. This is the only place a "compat shim"
 exists in the auth subsystem; it's load-bearing because the shorthand
 is the obviously-right form for "no constraints needed."
 
+#### Granularity of Rule-Modification Gates
+
+Four spec-mutation surfaces operate on rules inside a container
+object: filter rules, prefix-list entries, route-policy rules, and
+QoS queues. Their gates stamp `Resource = <container name>`, not
+`Resource = <rule identifier>`:
+
+| Operation | Permission | `Resource` stamped |
+|---|---|---|
+| `AddFilterRule` / `RemoveFilterRule` | `spec.author` | filter name |
+| `AddPrefixListEntry` / `RemovePrefixListEntry` | `spec.author` | prefix-list name |
+| `AddRoutePolicyRule` / `RemoveRoutePolicyRule` | `spec.author` | route-policy name |
+| `AddQoSQueue` / `RemoveQoSQueue` | `spec.author` | qos-policy name |
+
+A `where: {resource: "<container>"}` clause scopes the entire
+container — "alice can edit any rule in filter-A" is expressible;
+"alice can edit only rule index 5 of filter-A" is not.
+
+**Why this is the right granularity.** Rule indices are unstable —
+inserting a rule at any position shifts every subsequent index.
+A grant authored against index 5 would silently scope a different
+rule the moment any earlier rule changes. Container-level scoping
+sidesteps the instability.
+
+**Operator alternative** for finer scoping: split the container.
+Two filters that each grant to a different team are expressible;
+one filter with per-rule grants is not.
+
 #### Meta-Authorization: Who Can Grant Access
 
 Before L5, "who can grant access to others" is implicit and coarse:

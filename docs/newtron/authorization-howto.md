@@ -261,6 +261,30 @@ Unknown dimensions in a `where` clause **fail closed** — a typo
 like `"devic": "edge-*"` denies the request rather than silently
 matching everything. This keeps the grant table honest.
 
+**Granularity of rule-modification gates.** Four spec surfaces
+operate on rules inside a container object — filter rules,
+prefix-list entries, route-policy rules, and QoS queues. Their
+gates stamp `Resource = <container name>`, not
+`Resource = <rule identifier>`:
+
+| Operation | `Resource` stamped |
+|---|---|
+| `AddFilterRule` / `RemoveFilterRule` | filter name |
+| `AddPrefixListEntry` / `RemovePrefixListEntry` | prefix-list name |
+| `AddRoutePolicyRule` / `RemoveRoutePolicyRule` | route-policy name |
+| `AddQoSQueue` / `RemoveQoSQueue` | qos-policy name |
+
+So `where: {resource: "filter-A"}` authorizes editing **every**
+rule inside `filter-A` — per-rule scoping (e.g., "only rule index 5")
+is not expressible. This is deliberate: rule indices shift when
+earlier rules are inserted, so an index-scoped grant would
+silently re-target after any edit. The container is the stable
+scope.
+
+If a deployment needs finer-grained authority, split the container:
+two filters that each grant to a different team are expressible;
+one filter with per-rule grants is not.
+
 ## 7. Meta-authorization — separating who can grant access
 
 `spec.author` gates every spec mutation, including changes to the
