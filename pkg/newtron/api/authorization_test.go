@@ -704,6 +704,147 @@ func TestAuthorizationL4_InterfaceMutationsGated(t *testing.T) {
 	}
 }
 
+// TestRemoveBGPPeer_ResourceRecoveredFromIntent pins the #163
+// contract for the reverse op: RemoveBGPPeer recovers the neighbor
+// IP from the intent record before gating, so
+// `where: {resource: "<peer-ip>"}` clauses scope the reverse op
+// symmetrically with AddBGPPeer.
+//
+// Setup:
+//   - global bgp.peer granted to "scoped-team" scoped
+//     `where: {resource: "10.0.0.2"}` (post-#170: bgp.peer is the
+//     dedicated permission for Interface BGP peer add/remove)
+//   - root (super-user) adds a BGP peer with neighbor_ip=10.0.0.2 to
+//     switch1/Ethernet0 (topology mode, populates the intent)
+//   - bob ∈ scoped-team attempts remove-bgp-peer on that interface
+//
+// With #163's fix: RemoveBGPPeer reads DirectBGPPeerIP() → "10.0.0.2"
+// → gate sees Resource="10.0.0.2" → grant matches → authorized.
+// Without the fix: Resource="" → pattern "10.0.0.2" doesn't match
+// "" → 403 (wrong rejection — the binding existed and the operator
+// had the scope authority).
+//
+// §16: real HTTP mux + spec loader + connectAndExecute path; the
+// add and remove flow through the same cached NodeActor so the
+// in-memory intent persists across the two requests.
+func TestRemoveBGPPeer_ResourceRecoveredFromIntent(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	netJSON := `{
+  "version": "1.0",
+  "super_users": ["root"],
+  "user_groups": {"scoped-team": ["bob"]},
+  "permissions": {
+    "bgp.peer": [
+      { "groups": ["scoped-team"], "where": { "resource": "10.0.0.2" } }
+    ],
+    "device.write": ["scoped-team"]
+  },
+  "zones": {"amer": {}},
+  "services": {}
+}`
+	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	vrfPath := "/newtron/v1/networks/default/nodes/switch1/create-vrf?mode=topology"
+	if w := postAs(t, s, "root", vrfPath, map[string]any{"name": "default"}); w.Code >= 400 {
+		t.Fatalf("root could not create vrf to set up intent state: status=%d body=%s", w.Code, w.Body.String())
+	}
+	cfgPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/configure-interface?mode=topology"
+	if w := postAs(t, s, "root", cfgPath, map[string]any{"vrf": "default", "ip": "10.0.0.1/30"}); w.Code >= 400 {
+		t.Fatalf("root could not configure interface to set up intent state: status=%d body=%s", w.Code, w.Body.String())
+	}
+	addPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/add-bgp-peer?mode=topology"
+	addBody := map[string]any{"neighbor_ip": "10.0.0.2", "remote_as": 65002}
+	if w := postAs(t, s, "root", addPath, addBody); w.Code >= 400 {
+		t.Fatalf("root could not add BGP peer to set up intent state: status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	removePath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/remove-bgp-peer?mode=topology"
+	w := postAs(t, s, "bob", removePath, map[string]any{})
+	if w.Code == http.StatusForbidden {
+		var env httputil.APIResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &env)
+		t.Fatalf("bob denied removing peer 10.0.0.2 despite where:{resource:10.0.0.2} grant — peer IP not recovered from intent (status=%d, body=%s)", w.Code, env.Error)
+	}
+}
+
+// TestRemoveQoS_ResourceRecoveredFromIntent pins the #163 contract
+// for the RemoveQoS reverse op: the bound policy name is recovered
+// from the intent record before gating, so
+// `where: {resource: "<policy>"}` clauses scope the reverse op
+// symmetrically with ApplyQoS.
+//
+// Setup mirrors the BGPPeer test:
+//   - QOS_A defined in network.json (otherwise ApplyQoS would 404)
+//   - global qos.modify scoped to where:{resource:"QOS_A"} for
+//     "scoped-team"; device.write also granted (the topology-mode
+//     persist hook gates on it downstream, see the BGPPeer test
+//     above for the same observation)
+//   - root applies QOS_A to Ethernet0
+//   - bob attempts remove-qos
+//
+// With #163's fix: RemoveQoS reads QoSPolicyName() → "QOS_A" → gate
+// sees Resource="QOS_A" → grant matches → authorized.
+// Without the fix: Resource="" → pattern "QOS_A" doesn't match ""
+// → 403.
+func TestRemoveQoS_ResourceRecoveredFromIntent(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	netJSON := `{
+  "version": "1.0",
+  "super_users": ["root"],
+  "user_groups": {"scoped-team": ["bob"]},
+  "permissions": {
+    "qos.modify": [
+      { "groups": ["scoped-team"], "where": { "resource": "QOS_A" } }
+    ],
+    "device.write": ["scoped-team"]
+  },
+  "qos_policies": {
+    "QOS_A": {
+      "description": "QoS for #163 test",
+      "queues": [
+        { "name": "default", "type": "dwrr", "weight": 100 }
+      ]
+    }
+  },
+  "zones": {"amer": {}},
+  "services": {}
+}`
+	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	applyPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-qos?mode=topology"
+	if w := postAs(t, s, "root", applyPath, map[string]any{"policy": "QOS_A"}); w.Code >= 400 {
+		t.Fatalf("root could not apply QoS to set up intent state: status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	removePath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/remove-qos?mode=topology"
+	w := postAs(t, s, "bob", removePath, map[string]any{})
+	if w.Code == http.StatusForbidden {
+		var env httputil.APIResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &env)
+		t.Fatalf("bob denied removing QOS_A despite where:{resource:QOS_A} grant — policy name not recovered from intent (status=%d, body=%s)", w.Code, env.Error)
+	}
+}
+
 // authzServerForServiceGating builds an enforcement-on server backed
 // by the 1node-vs topology (which already declares the TRANSIT
 // service) and overwrites network.json with the grants the caller

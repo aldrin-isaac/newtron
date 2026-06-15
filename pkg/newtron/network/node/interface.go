@@ -322,6 +322,39 @@ func (i *Interface) BGPNeighbors() []string {
 	return neighbors
 }
 
+// DirectBGPPeerIP returns the neighbor IP of the direct-bind BGP
+// peer on this interface, or "" if no peer is bound. Reads the
+// `interface|<name>|bgp-peer` intent record — the same key
+// AddBGPPeer/RemoveBGPPeer write and consume. Distinct from
+// BGPNeighbors, which aggregates direct-bind plus underlay peers
+// matching the same prefix.
+//
+// Used by the public Interface.RemoveBGPPeer wrapper to recover the
+// peer IP before the auth gate runs, so `where: {resource: "..."}`
+// clauses scope the reverse op symmetrically with AddBGPPeer (#163).
+func (i *Interface) DirectBGPPeerIP() string {
+	intent := i.node.GetIntent("interface|" + i.name + "|bgp-peer")
+	if intent == nil {
+		return ""
+	}
+	return intent.Params[sonic.FieldNeighborIP]
+}
+
+// QoSPolicyName returns the QoS policy bound to this interface, or
+// "" if no policy is bound. Reads the `interface|<name>|qos` intent
+// record — the same key ApplyQoS/RemoveQoS write and consume.
+//
+// Used by the public Interface.RemoveQoS wrapper to recover the
+// policy name before the auth gate runs, so `where: {resource: "..."}`
+// clauses scope the reverse op symmetrically with ApplyQoS (#163).
+func (i *Interface) QoSPolicyName() string {
+	intent := i.node.GetIntent("interface|" + i.name + "|qos")
+	if intent == nil {
+		return ""
+	}
+	return intent.Params[sonic.FieldQoSPolicy]
+}
+
 // ============================================================================
 // Interface Type Detection
 // ============================================================================
