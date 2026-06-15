@@ -61,6 +61,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
 | POST | `/networks/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
 | POST | `/networks/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
+| POST | `/networks/{n}/update-service` | Replace service in place — full-replacement (also: update-ipvpn, update-macvpn, update-qos-policy, update-filter, update-prefix-list, update-route-policy, update-profile, update-zone) |
 | POST | `/networks/{n}/create-profile` | Create device profile |
 | POST | `/networks/{n}/delete-profile` | Delete device profile |
 | POST | `/networks/{n}/create-zone` | Create zone |
@@ -990,6 +991,53 @@ Delete a service definition.
 ```
 
 **Status codes:** 200 success, 404 service not found
+
+#### POST /newtron/v1/networks/{netID}/update-X — full-replacement spec edit (#152)
+
+One verb per spec kind: `update-service`, `update-ipvpn`,
+`update-macvpn`, `update-qos-policy`, `update-filter`,
+`update-prefix-list`, `update-route-policy`, `update-profile`,
+`update-zone`. Each accepts the same request body shape as its
+`create-X` counterpart and replaces the entry whose `name` field
+matches an existing one in place.
+
+**Semantics — full-replacement of the request shape**:
+every field in the request body becomes the new content for that
+name; omitted fields revert to their JSON-zero value. The
+`UpdateTopologyDevice` precedent at
+`PUT /networks/{netID}/topology/nodes/{name}` is the same shape;
+this PR brings the spec kinds in line with it (issue #152).
+
+**Sub-collection preservation.** Three kinds carry a sub-collection
+that the Create request shape doesn't transport — `update-filter`
+preserves the existing filter's `rules`, `update-route-policy`
+preserves the policy's `rules`, `update-qos-policy` preserves the
+policy's `queues`. Operators who want to rewrite a rule list use
+the existing `add-X-rule` / `remove-X-rule` verbs alongside Update.
+
+The other 6 kinds (`update-service`, `update-ipvpn`,
+`update-macvpn`, `update-prefix-list`, `update-profile`,
+`update-zone`) replace every field carried by the request body
+directly. `update-prefix-list` is the exception that proves the
+rule: its sub-collection (`prefixes`) IS in the request shape, so
+Update replaces it.
+
+**Auth gate**: `spec.author` with `field = "<kind plural>"` and
+`resource = "<name>"`. An operator who can `create-X` or
+`delete-X` can also `update-X` (one identity for "may author specs
+at this scope" — see `auth-design.md` §L3).
+
+**Request body**: same as the `create-X` counterpart documented
+above and below. The `name` field identifies which entry to replace.
+
+**Response (200)**:
+
+```json
+{"data": {"name": "<name>"}}
+```
+
+**Status codes**: 200 success, 404 entry not found, 400 validation
+error, 403 authorization denied.
 
 ### IP-VPNs
 
