@@ -102,6 +102,18 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-zone", s.handleCreateZone)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-zone", s.handleDeleteZone)
 
+	// Update verbs (#152) — full-replacement spec mutation, parallel
+	// to create-X/delete-X. Same request shape as create.
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-service", s.handleUpdateService)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-ipvpn", s.handleUpdateIPVPN)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-macvpn", s.handleUpdateMACVPN)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-qos-policy", s.handleUpdateQoSPolicy)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-filter", s.handleUpdateFilter)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-prefix-list", s.handleUpdatePrefixList)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-route-policy", s.handleUpdateRoutePolicy)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-profile", s.handleUpdateProfile)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-zone", s.handleUpdateZone)
+
 	// ====================================================================
 	// Device initialization
 	// ====================================================================

@@ -1115,3 +1115,167 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "initialized"})
 }
+
+// ============================================================================
+// Update handlers (#152) — full-replacement spec mutation
+// ============================================================================
+//
+// Each handler decodes the Create<Kind>Request shape (Update reuses
+// the same wire form — name + fields), calls Update<Kind> on the
+// public Network, and returns 200 with the entry name. 404 surfaces
+// from the engine when the named entry does not exist; 403 from the
+// auth gate. The execOpts wrapper preserves the ?execute=false dry-run
+// semantic the Create/Delete handlers also honor.
+
+func (s *Server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateServiceRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateService(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateIPVPN(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateIPVPNRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateIPVPN(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateMACVPN(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateMACVPNRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateMACVPN(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateQoSPolicy(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateQoSPolicyRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateQoSPolicy(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateFilter(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateFilterRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateFilter(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdatePrefixList(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreatePrefixListRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdatePrefixList(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateRoutePolicyRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateRoutePolicy(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateDeviceProfileRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateProfile(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdateZone(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreateZoneRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdateZone(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}

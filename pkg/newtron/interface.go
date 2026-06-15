@@ -22,6 +22,11 @@ type Interface struct {
 // dimensional context for L5 to later constrain. When the resource
 // argument is empty (e.g., ConfigureInterface has no per-call resource
 // beyond the interface itself), Resource stays empty.
+//
+// For service-bound operations (ApplyService/RemoveService/RefreshService)
+// use gateService — it also populates Context.Service so
+// ServiceSpec.Permissions overrides and `where: {service: ...}` grant
+// clauses can match (auth-design.md §L3 + §L5).
 func (i *Interface) gate(ctx context.Context, perm auth.Permission, resource string) error {
 	return i.node.net.checkPermission(ctx, perm, auth.NewContext().
 		WithDevice(i.node.internal.Name()).
@@ -29,16 +34,42 @@ func (i *Interface) gate(ctx context.Context, perm auth.Permission, resource str
 		WithResource(resource))
 }
 
+// gateService is the gate helper for service-bound Interface
+// operations. In addition to Device/Interface/Resource, it stamps
+// Context.Service with the service name — the L3 per-service-override
+// path in Checker.checkUser (checker.go:44) gates on Context.Service
+// being non-empty, and L5 `where: {service: "<pattern>"}` clauses
+// match against the same field. Without this dimension populated, both
+// mechanisms are unreachable from production HTTP gates.
+//
+// svcName is also stamped on Resource so existing grants written
+// against `where: {resource: "<svc>"}` keep matching — a pure
+// addition of the Service dimension, not a relocation.
+func (i *Interface) gateService(ctx context.Context, perm auth.Permission, svcName string) error {
+	return i.node.net.checkPermission(ctx, perm, auth.NewContext().
+		WithDevice(i.node.internal.Name()).
+		WithInterface(i.internal.Name()).
+		WithService(svcName).
+		WithResource(svcName))
+}
+
 // ============================================================================
 // Write Operations
 // ============================================================================
 
 // ApplyService applies a service definition to this interface.
+//
+// Normalization-then-gate ordering: the canonical form of the service
+// name is what network.json grants are written against (CLAUDE.md
+// "Normalize at the Boundary"), so the gate must see the normalized
+// name. Otherwise a `where: {service: "TRANSIT"}` clause would miss a
+// caller request for "transit" — both are the same service, but the
+// raw form doesn't match the canonical grant pattern.
 func (i *Interface) ApplyService(ctx context.Context, service string, opts ApplyServiceOpts) error {
-	if err := i.gate(ctx, auth.PermServiceApply, service); err != nil {
+	service = util.NormalizeName(service)
+	if err := i.gateService(ctx, auth.PermServiceApply, service); err != nil {
 		return err
 	}
-	service = util.NormalizeName(service)
 	cs, err := i.internal.ApplyService(ctx, service, node.ApplyServiceOpts{
 		IPAddress: opts.IPAddress,
 		PeerAS:    opts.PeerAS,
@@ -52,9 +83,15 @@ func (i *Interface) ApplyService(ctx context.Context, service string, opts Apply
 	return nil
 }
 
-// RemoveService removes the service from this interface.
+// RemoveService removes the service from this interface. Recovers the
+// bound service name from the on-device binding (Interface.ServiceName,
+// interface.go:188) and stamps it on Context.Service so L5
+// `where: {service: ...}` clauses scope this reverse op the same way
+// they scope ApplyService — operational symmetry at the gate level
+// (DPN §15).
 func (i *Interface) RemoveService(ctx context.Context) error {
-	if err := i.gate(ctx, auth.PermServiceRemove, ""); err != nil {
+	svcName := i.internal.ServiceName()
+	if err := i.gateService(ctx, auth.PermServiceRemove, svcName); err != nil {
 		return err
 	}
 	cs, err := i.internal.RemoveService(ctx)
@@ -65,9 +102,13 @@ func (i *Interface) RemoveService(ctx context.Context) error {
 	return nil
 }
 
-// RefreshService reapplies the service configuration to sync with the service definition.
+// RefreshService reapplies the service configuration to sync with the
+// service definition. Recovers the bound service name the same way
+// RemoveService does — refresh acts on the currently-applied service,
+// not a caller-named one.
 func (i *Interface) RefreshService(ctx context.Context) error {
-	if err := i.gate(ctx, auth.PermServiceApply, ""); err != nil {
+	svcName := i.internal.ServiceName()
+	if err := i.gateService(ctx, auth.PermServiceApply, svcName); err != nil {
 		return err
 	}
 	cs, err := i.internal.RefreshService(ctx)
