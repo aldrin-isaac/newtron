@@ -105,9 +105,15 @@ scenario overrides this default for every call that scenario makes.
 | `--audit-log-integrity` | `false` | Hash-chain each audit entry so tampering is detectable via `bin/newtron audit verify`. Requires `--audit-log`. |
 | `--secret-store` | `""` | File path for the operator-managed secret store. When set, `${secret:KEY}` references in spec values resolve at network load. Empty disables — references become hard errors at load. |
 
-### TLS — not yet wired
+### TLS (auth-design.md §L2a)
 
-`cmd/newt-server` does not currently accept `--tls-cert` / `--tls-key` / `--tls-ca` flags. The cert-CN extraction infrastructure (auth-design.md §L2a) is wired so the integration is mechanical when those flags land, but the listener-side TLS shipment hasn't happened yet. Operators who need TLS today terminate it at a reverse proxy in front of newt-server — see [`docs/newtron/mtls-howto.md`](newtron/mtls-howto.md).
+| Flag | Default | What |
+|---|---|---|
+| `--tls-cert` | `""` | Server certificate (PEM). When set together with `--tls-key`, the TCP listener serves HTTPS. Empty disables — plain HTTP (operators can still terminate TLS at a reverse proxy in front of newt-server). |
+| `--tls-key` | `""` | Server private key (PEM) matching `--tls-cert`. Required when `--tls-cert` is set. |
+| `--tls-ca` | `""` | Client-CA PEM bundle. When set with `--tls-cert`/`--tls-key`, requires every client to present a certificate that verifies against the CA pool (mTLS); the peer cert CN becomes the caller identity with priority over PAM and the self-attested header. Empty leaves TLS one-way. |
+
+See [`docs/newtron/mtls-howto.md`](newtron/mtls-howto.md) for the operator walkthrough.
 
 ## newt-server vs standalone binaries
 
