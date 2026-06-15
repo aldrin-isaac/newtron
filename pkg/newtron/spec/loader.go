@@ -17,9 +17,10 @@ var SpecDir = "/etc/newtron"
 // Loader handles loading and validating specification files.
 //
 // All post-Load() access to the mutable in-memory state — the lazy-loaded
-// profile cache, and the network / topology pointers that get reassigned by
-// SaveNetwork / SaveTopology — is guarded by mu. platforms is read-only
-// after Load() (no setter reassigns it), so its accessors do not take mu.
+// profile cache, and the network / topology / platforms pointers that get
+// reassigned by SaveNetwork / SaveTopology / SavePlatforms — is guarded
+// by mu. (Pre-#173, platforms was documented as read-only; the platform
+// CRUD endpoints retired that invariant.)
 type Loader struct {
 	specDir   string
 	platforms *PlatformSpecFile
@@ -364,11 +365,62 @@ func (l *Loader) GetNetwork() *NetworkSpecFile {
 	return l.network
 }
 
-// GetPlatforms returns the platform spec. platforms is set once at Load()
-// and never reassigned, so no lock is needed (the publication via the
-// outer Load() return value establishes the happens-before).
+// GetPlatforms returns the platform spec. Reads l.platforms under
+// RLock — the pointer is reassigned by SavePlatforms (#173); the
+// previous "set once at Load()" invariant no longer holds now that
+// CRUD endpoints can mutate the file.
 func (l *Loader) GetPlatforms() *PlatformSpecFile {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.platforms
+}
+
+// SavePlatforms writes the platform spec to disk atomically (temp file +
+// rename), then reassigns l.platforms under the write lock so concurrent
+// GetPlatforms readers see the new pointer atomically. Mirrors
+// SaveNetwork/SaveTopology in shape and atomicity.
+//
+// Operators submitting platform updates via the HTTP API send raw
+// values; secret resolution (${secret:KEY} → plaintext) is a load-time
+// mechanism and is not re-run on Save. Operators authoring secret
+// references should edit platforms.json directly and rely on
+// --spec-watch or /reload, not the create/update API.
+func (l *Loader) SavePlatforms(spec *PlatformSpecFile) error {
+	path := filepath.Join(l.specDir, "platforms.json")
+
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling platform spec: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "platforms-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+
+	l.mu.Lock()
+	l.platforms = spec
+	l.mu.Unlock()
+
+	return nil
 }
 
 // GetTopology returns the topology spec, or nil if no topology.json was found.

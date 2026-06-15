@@ -65,6 +65,9 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/delete-profile` | Delete device profile |
 | POST | `/networks/{n}/create-zone` | Create zone |
 | POST | `/networks/{n}/delete-zone` | Delete zone |
+| POST | `/networks/{n}/create-platform` | Create platform definition |
+| POST | `/networks/{n}/update-platform` | Replace platform in place — full-replacement |
+| POST | `/networks/{n}/delete-platform` | Delete platform (409 if any profile references it) |
 | POST | `/networks/{n}/add-qos-queue` | Add queue to QoS policy |
 | POST | `/networks/{n}/remove-qos-queue` | Remove queue from QoS policy |
 | POST | `/networks/{n}/add-filter-rule` | Add rule to filter |
@@ -1501,6 +1504,78 @@ Delete a zone. Returns error if any device profile references this zone.
 ```
 
 **Status codes:** 200 success, 404 not found, 409 zone still referenced by profiles
+
+### Platforms (#173)
+
+Closes the residual gap from #152 — platform definitions
+(`platforms.json` entries) now have create/update/delete verbs,
+matching the pattern the other 9 spec kinds use.
+
+**Wire shape**: the request body embeds `spec.PlatformSpec` fields
+at the same JSON level as `name`. Operators can copy a
+`platforms.json` entry directly into the request body and the loader
+will accept it unchanged (DPN §46 — wire shape mirrors canonical
+types).
+
+**`vm_credentials` field**: API-submitted values are stored as
+plaintext. The `${secret:KEY}` reference indirection is a load-time
+mechanism and is **not** re-resolved on Save. Operators authoring
+secret references edit `platforms.json` directly and rely on
+`--spec-watch` or `/reload`.
+
+#### POST /newtron/v1/networks/{netID}/create-platform
+
+Add a new platform definition.
+
+**Query parameters:** `dry_run`
+
+**Request body:** `name` (string, required) plus any `PlatformSpec` field — `hwsku`, `port_count`, `default_speed`, `description`, `device_type`, `breakouts`, the `vm_*` family, `dataplane`, `unsupported_features`, etc.
+
+**Response (201):**
+
+```json
+{"data": {"name": "my-platform"}}
+```
+
+**Status codes:** 201 created, 400 validation error, 409 already exists, 403 authorization denied
+
+#### POST /newtron/v1/networks/{netID}/update-platform
+
+Replace an existing platform in place — full-replacement semantics matching the #152 update-X family. Every field on the request body becomes the new content for that name; omitted fields revert to their JSON-zero value.
+
+**Query parameters:** `dry_run`
+
+**Request body:** same shape as `create-platform`.
+
+**Response (200):**
+
+```json
+{"data": {"name": "my-platform"}}
+```
+
+**Status codes:** 200 success, 404 platform not found, 400 validation error, 403 authorization denied
+
+#### POST /newtron/v1/networks/{netID}/delete-platform
+
+Delete a platform. Returns 409 with a `*ConflictError` listing referring profiles if any `DeviceProfile.Platform` equals this name — the operator must retarget or delete the referring profiles first. There is no `force=true` cascade (a profile's Platform field is mandatory in practice; cascading would orphan the profile).
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Platform name to delete |
+
+**Response (200):**
+
+```json
+{"data": {"name": "my-platform"}}
+```
+
+**Status codes:** 200 success, 404 platform not found, 409 referenced by profiles, 403 authorization denied
+
+**Auth gate**: `spec.author` with `field = "platforms"` and `resource = "<name>"` for all three verbs.
 
 ---
 

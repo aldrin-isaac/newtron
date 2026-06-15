@@ -1115,3 +1115,60 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "initialized"})
 }
+
+// ============================================================================
+// Platform CRUD handlers (#173)
+// ============================================================================
+
+func (s *Server) handleCreatePlatform(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreatePlatformRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.CreatePlatform(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleUpdatePlatform(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.CreatePlatformRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.UpdatePlatform(r.Context(), req, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleDeletePlatform(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if err := ne.net.DeletePlatform(r.Context(), req.Name, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
+}

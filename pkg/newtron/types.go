@@ -774,6 +774,21 @@ type CreateRoutePolicyRequest struct {
 	Description string `json:"description,omitempty"`
 }
 
+// CreatePlatformRequest is the request for creating (or, via the
+// shared shape, updating) a platform definition. Embeds spec.PlatformSpec
+// so the wire shape mirrors the canonical type byte-for-byte (DPN §46) —
+// an operator can copy a `platforms.json` entry directly into the
+// request body and the loader will accept it unchanged.
+//
+// The embedded PlatformSpec fields appear at the same JSON level as
+// Name. The `vm_credentials` field accepts plaintext only; ${secret:KEY}
+// references are a load-time mechanism and are not re-resolved on
+// Save (#173 — see SavePlatforms doc).
+type CreatePlatformRequest struct {
+	Name string `json:"name"`
+	spec.PlatformSpec
+}
+
 // AddRoutePolicyRuleRequest is the request for adding a rule to a route policy.
 type AddRoutePolicyRuleRequest struct {
 	Policy     string              `json:"policy"`

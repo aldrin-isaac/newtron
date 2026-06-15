@@ -101,6 +101,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-profile", s.handleDeleteProfile)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-zone", s.handleCreateZone)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-zone", s.handleDeleteZone)
+	// Platform CRUD (#173).
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-platform", s.handleCreatePlatform)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-platform", s.handleUpdatePlatform)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-platform", s.handleDeletePlatform)
 
 	// ====================================================================
 	// Device initialization
