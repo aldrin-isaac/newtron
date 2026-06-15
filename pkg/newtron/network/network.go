@@ -136,13 +136,16 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 
 	// auth-design.md L0: spec-dir auto-discovery (#176). When the
 	// operator didn't pass an explicit store, check the conventional
-	// path <specDir>/secrets.json. Stat first to avoid the
-	// create-on-missing semantics of NewFileStore that would otherwise
-	// scatter empty stores across every spec dir on first load.
+	// path <specDir>/secrets.json. Uses NewFileStoreLooseMode so a
+	// git-checked-in test fixture (which always emerges from `git
+	// checkout` at the umask default, typically 0644) loads without
+	// requiring a separate chmod step — operators who want the strict
+	// 0600 hygiene check use --secret-store=PATH (which routes
+	// through the strict NewFileStore).
 	if secretStore == nil {
 		candidatePath := filepath.Join(specDir, "secrets.json")
 		if _, statErr := os.Stat(candidatePath); statErr == nil {
-			fs, err := secret.NewFileStore(candidatePath)
+			fs, err := secret.NewFileStoreLooseMode(candidatePath)
 			if err != nil {
 				return nil, fmt.Errorf("opening spec-dir secret store %s: %w", candidatePath, err)
 			}

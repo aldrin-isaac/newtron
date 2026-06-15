@@ -70,6 +70,46 @@ func TestFileStore_RefusesPermissiveExisting(t *testing.T) {
 	}
 }
 
+// TestFileStoreLooseMode_AcceptsGitCheckoutPermissions pins the #176
+// auto-discovery contract: in-repo secrets.json files always come out
+// of `git checkout` at the umask default (typically 0644) because git
+// can't preserve 0600 on the file mode bits. NewFileStoreLooseMode
+// accepts that mode so the spec-dir auto-discovery path works on a
+// fresh clone without an extra chmod step. Strict-mode behavior (the
+// 0600 hygiene check) is preserved on the explicit --secret-store
+// flag path which still routes through NewFileStore.
+func TestFileStoreLooseMode_AcceptsGitCheckoutPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "world.json")
+	if err := os.WriteFile(path, []byte(`{"k":"v"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	s, err := NewFileStoreLooseMode(path)
+	if err != nil {
+		t.Fatalf("NewFileStoreLooseMode rejected 0644 file: %v", err)
+	}
+	v, err := s.Get("k")
+	if err != nil {
+		t.Fatalf("Get after LooseMode open: %v", err)
+	}
+	if v != "v" {
+		t.Errorf("Get = %q, want v", v)
+	}
+}
+
+// TestFileStoreLooseMode_RefusesMissing pins that LooseMode is
+// opt-in by file presence — a missing path is an error, not a
+// create-on-missing trigger (different from NewFileStore which
+// creates the file). The intent of LooseMode is "open this
+// pre-existing fixture"; auto-discovery's caller already stat()d
+// the path before invoking.
+func TestFileStoreLooseMode_RefusesMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nope.json")
+	_, err := NewFileStoreLooseMode(path)
+	if err == nil {
+		t.Fatal("expected error for missing file; got nil")
+	}
+}
+
 // TestFileStore_MissingKeyTypedError pins that "key not found"
 // returns *ErrNotFound (a typed error) rather than a generic string,
 // so callers (the CLI, the resolver) can distinguish missing-key
