@@ -25,8 +25,10 @@
     "vlan.modify":    ["ops"],
     "vlan.delete":    ["ops"],
     "vrf.create":     ["ops"],
-    "vrf.modify":     ["ops"],
+    "vrf.bind":       ["ops"],
+    "vrf.route":      ["ops"],
     "vrf.delete":     ["ops"],
+    "bgp.peer":       ["ops"],
     "acl.create":     ["ops"],
     "acl.modify": [
       { "groups": ["ops"] },
@@ -36,7 +38,8 @@
     "lag.create":     ["ops"],
     "lag.modify":     ["ops"],
     "lag.delete":     ["ops"],
-    "evpn.modify":    ["ops"],
+    "evpn.peer":      ["ops"],
+    "evpn.macvpn":    ["ops"],
     "interface.modify": ["spec-team", "ops"],
     "service.apply": [
       { "groups": ["spec-team"], "where": { "resource": "transit-*" } },

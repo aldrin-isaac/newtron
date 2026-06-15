@@ -934,6 +934,144 @@ func (n *Network) CreateProfile(name string, profile *spec.DeviceProfile) error 
 }
 
 // ============================================================================
+// Update — full-replacement spec mutation (#152)
+// ============================================================================
+//
+// Each Update method holds keyNetworkSpec.Lock across the existence
+// check, the entry replacement, and the disk persist (matching the
+// Create methods' invariant). Returns *newtronErrors{notFound: true,
+// ...} when the named entry does not exist — the public layer
+// translates this to NotFoundError → 404 at the HTTP boundary.
+//
+// Semantics are deliberately full-replacement, mirroring
+// UpdateTopologyDevice (network.go:1550): every field on the given
+// def becomes the new content for that name. Operators wanting
+// patch-merge semantics build the merged structure client-side
+// before calling Update.
+
+// UpdateService atomically replaces an existing service definition.
+func (n *Network) UpdateService(name string, def *spec.ServiceSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.Services[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "service", id: name}
+	}
+	spec.NormalizeServiceRefs(def)
+	n.spec.Services[name] = def
+	return n.persistSpec()
+}
+
+// UpdateIPVPN atomically replaces an existing IP-VPN definition.
+func (n *Network) UpdateIPVPN(name string, def *spec.IPVPNSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.IPVPNs[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "ipvpn", id: name}
+	}
+	spec.NormalizeIPVPNRefs(def)
+	n.spec.IPVPNs[name] = def
+	return n.persistSpec()
+}
+
+// UpdateMACVPN atomically replaces an existing MAC-VPN definition.
+func (n *Network) UpdateMACVPN(name string, def *spec.MACVPNSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.MACVPNs[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "macvpn", id: name}
+	}
+	n.spec.MACVPNs[name] = def
+	return n.persistSpec()
+}
+
+// UpdateQoSPolicy atomically replaces an existing QoS policy.
+func (n *Network) UpdateQoSPolicy(name string, def *spec.QoSPolicy) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.QoSPolicies[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "qos-policy", id: name}
+	}
+	n.spec.QoSPolicies[name] = def
+	return n.persistSpec()
+}
+
+// UpdateFilter atomically replaces an existing filter.
+func (n *Network) UpdateFilter(name string, def *spec.FilterSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.Filters[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "filter", id: name}
+	}
+	spec.NormalizeFilterRefs(def)
+	n.spec.Filters[name] = def
+	return n.persistSpec()
+}
+
+// UpdatePrefixList atomically replaces an existing prefix list.
+func (n *Network) UpdatePrefixList(name string, prefixes []string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.PrefixLists[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "prefix-list", id: name}
+	}
+	n.spec.PrefixLists[name] = prefixes
+	return n.persistSpec()
+}
+
+// UpdateRoutePolicy atomically replaces an existing route policy.
+func (n *Network) UpdateRoutePolicy(name string, def *spec.RoutePolicy) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	name = util.NormalizeName(name)
+	if _, exists := n.spec.RoutePolicies[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "route-policy", id: name}
+	}
+	spec.NormalizeRoutePolicyRefs(def)
+	n.spec.RoutePolicies[name] = def
+	return n.persistSpec()
+}
+
+// UpdateZone atomically replaces an existing zone.
+func (n *Network) UpdateZone(name string, zone *spec.ZoneSpec) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, exists := n.spec.Zones[name]; !exists {
+		return &newtronErrors{notFound: true, resource: "zone", id: name}
+	}
+	n.spec.Zones[name] = zone
+	return n.persistSpec()
+}
+
+// UpdateProfile atomically replaces an existing device profile.
+// Delegates to spec.Loader.UpdateProfile, which holds Loader's RWMutex
+// across the existence check and the file write.
+func (n *Network) UpdateProfile(name string, profile *spec.DeviceProfile) error {
+	return n.loader.UpdateProfile(name, profile)
+}
+
+// ============================================================================
 // Atomic Add / Remove methods — read-modify-write under one Lock
 // ============================================================================
 //

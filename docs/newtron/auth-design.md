@@ -3,8 +3,8 @@
 ## 1. Purpose
 
 newtron's authorization code commits to an **entitlement pattern**
-(spec-declared permissions, group-based grants, service-level overrides,
-superuser bypass). Before this doc shipped, the runtime was inert —
+(spec-declared permissions, group-based grants, L5 `where`-clause
+scoping, superuser bypass). Before this doc shipped, the runtime was inert —
 no `main()` ever wired the Checker, so every `checkPermission`
 short-circuited to "allowed." This doc charts the path from that
 starting point to a production-grade auth subsystem where the
@@ -215,10 +215,9 @@ form unchanged, with the listed additions:
 | `pkg/newtron/auth/Permission` (verb constants) | 20 constants, 5 referenced | L4 adds `device.write` family; L5 adds dimension-bearing variants if needed |
 | `pkg/newtron/auth/Context` (resource context) | 4 dimensions, only `Resource` populated | L3 adds `Caller` (Unix username from L1 Unix socket or L2b PAM; cert CN from L2a listener-side TLS); L5 populates `Device`/`Service`/`Interface` |
 | `pkg/newtron/auth/Checker` (decision engine) | Two-tier eval, group fallback, superuser bypass | L5 extends to evaluate dimension constraints |
-| `network.json` `permissions` map | `action → [groups]` global + per-service override | L5 extends entry value to support `{ groups, where: {...} }` |
+| `network.json` `permissions` map | `action → [groups]` global | L5 extends entry value to support `{ groups, where: {...} }`; per-service scoping via `where: { service: "..." }` (replaces the retired per-service override — see #165) |
 | `network.json` `super_users` | List of usernames who bypass | Unchanged |
 | `network.json` `user_groups` | Group name → user list | Unchanged |
-| Service-level `ServiceSpec.Permissions` | Same shape as global, overrides global | Unchanged |
 | `Network.checkPermission` call sites | 26 sites in `spec_ops`/`profile_ops` | L4 expands coverage to Node ops |
 
 What went away during L1–L3 (and what remains for L4–L5):
@@ -736,8 +735,8 @@ named permission, OR in `unauthorizedExcept` with a documented reason
 (e.g., `RestartService` is operational, not authorization-gated)."
 
 Node-level write operations gate on the verb-family permissions
-already defined for the L3 constants (`vlan.create`, `vrf.modify`,
-`lag.delete`, etc.) — what were "15 unused constants" before L4
+already defined for the L3 constants (`vlan.create`, `lag.delete`,
+etc.) — what were "15 unused constants" before L4
 became the spec vocabulary for the per-device verbs. L4 adds three
 new constants: `acl.create` and `acl.delete` for symmetry with the
 create/delete pattern (the pre-L4 family had only `acl.modify`),
@@ -790,6 +789,34 @@ it's syntactic sugar for `[{ "groups": [...], "where": {} }]` — so
 existing specs keep working. This is the only place a "compat shim"
 exists in the auth subsystem; it's load-bearing because the shorthand
 is the obviously-right form for "no constraints needed."
+
+#### Granularity of Rule-Modification Gates
+
+Four spec-mutation surfaces operate on rules inside a container
+object: filter rules, prefix-list entries, route-policy rules, and
+QoS queues. Their gates stamp `Resource = <container name>`, not
+`Resource = <rule identifier>`:
+
+| Operation | Permission | `Resource` stamped |
+|---|---|---|
+| `AddFilterRule` / `RemoveFilterRule` | `spec.author` | filter name |
+| `AddPrefixListEntry` / `RemovePrefixListEntry` | `spec.author` | prefix-list name |
+| `AddRoutePolicyRule` / `RemoveRoutePolicyRule` | `spec.author` | route-policy name |
+| `AddQoSQueue` / `RemoveQoSQueue` | `spec.author` | qos-policy name |
+
+A `where: {resource: "<container>"}` clause scopes the entire
+container — "alice can edit any rule in filter-A" is expressible;
+"alice can edit only rule index 5 of filter-A" is not.
+
+**Why this is the right granularity.** Rule indices are unstable —
+inserting a rule at any position shifts every subsequent index.
+A grant authored against index 5 would silently scope a different
+rule the moment any earlier rule changes. Container-level scoping
+sidesteps the instability.
+
+**Operator alternative** for finer scoping: split the container.
+Two filters that each grant to a different team are expressible;
+one filter with per-rule grants is not.
 
 #### Meta-Authorization: Who Can Grant Access
 
@@ -1101,8 +1128,10 @@ path. See [`secret-store.md`](secret-store.md).
 - `pkg/newtron/auth/permission.go`, `checker.go` — the code that
   embodies the entitlement pattern this doc keeps as the goal.
 - `network.json` schema in `pkg/newtron/spec/types.go`:
-  `NetworkSpecFile.{SuperUsers,UserGroups,Permissions}` and
-  `ServiceSpec.Permissions` — the fields that drive the Checker.
+  `NetworkSpecFile.{SuperUsers,UserGroups,Permissions}` — the fields
+  that drive the Checker. (Per-service scoping uses L5
+  `where: {service: "..."}` clauses on global grants; the embedded
+  `ServiceSpec.Permissions` field was retired in #165.)
 - `pkg/newtron/audit/` — the audit log target L1 wires up.
 - DESIGN_PRINCIPLES_NEWTRON §33 (Public API Boundary) — the layered
   changes keep `pkg/newtron/auth/` as a public package; internal

@@ -34,7 +34,7 @@ type PermissionGrant struct {
 }
 
 // PermissionGrants is the typed value of one entry in
-// NetworkSpecFile.Permissions or ServiceSpec.Permissions. The custom
+// NetworkSpecFile.Permissions. The custom
 // UnmarshalJSON accepts both the new typed form
 // ([{"groups": [...], "where": {...}}, ...]) and the legacy
 // shorthand (["group1", "group2"]). The shorthand is the only

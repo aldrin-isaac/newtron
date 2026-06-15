@@ -757,3 +757,205 @@ func convertRoutePolicyDetail(name string, rp *spec.RoutePolicy) *RoutePolicyDet
 	}
 	return detail
 }
+
+// ============================================================================
+// Update — full-replacement spec mutation (#152)
+// ============================================================================
+//
+// Each Update verb mirrors its Create counterpart's request shape and
+// validation, but replaces an existing entry instead of creating a new
+// one. Returns *NotFoundError → HTTP 404 when the named entry does not
+// exist. Gates on spec.author with the same Field + Resource the
+// Create/Delete pair uses, so an operator who holds either of those
+// also holds Update (one identity for "may author specs at this
+// scope").
+//
+// **Sub-collection preservation.** Three kinds (Filter, RoutePolicy,
+// QoSPolicy) carry a sub-collection (Rules, Queues) that the Create
+// request shape does not transport. Their Update wrappers read the
+// existing sub-collection and preserve it onto the replacement spec —
+// otherwise the full-replacement semantic would silently wipe rules
+// the operator never asked to remove. To rewrite sub-collections,
+// operators use the existing Add/Remove<Rule|Queue> verbs.
+//
+// (Service.Routing and PrefixList.Prefixes are IN the request shape,
+// so their Update replaces them just like every other field.)
+
+// UpdateService replaces an existing service definition.
+func (net *Network) UpdateService(ctx context.Context, req CreateServiceRequest, opts ExecOpts) error {
+	if req.Type == "" {
+		return &ValidationError{Field: "type", Message: "required"}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("services").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	svc := &spec.ServiceSpec{
+		Description:   req.Description,
+		ServiceType:   req.Type,
+		IPVPN:         req.IPVPN,
+		MACVPN:        req.MACVPN,
+		VRFType:       req.VRFType,
+		QoSPolicy:     req.QoSPolicy,
+		IngressFilter: req.IngressFilter,
+		EgressFilter:  req.EgressFilter,
+	}
+	if req.Routing != nil {
+		svc.Routing = &spec.RoutingSpec{
+			Protocol:         req.Routing.Protocol,
+			PeerAS:           req.Routing.PeerAS,
+			ImportPolicy:     req.Routing.ImportPolicy,
+			ExportPolicy:     req.Routing.ExportPolicy,
+			ImportCommunity:  req.Routing.ImportCommunity,
+			ExportCommunity:  req.Routing.ExportCommunity,
+			ImportPrefixList: req.Routing.ImportPrefixList,
+			ExportPrefixList: req.Routing.ExportPrefixList,
+			Redistribute:     req.Routing.Redistribute,
+		}
+	}
+	return translateInternalError(net.internal.UpdateService(req.Name, svc))
+}
+
+// UpdateIPVPN replaces an existing IP-VPN definition.
+func (net *Network) UpdateIPVPN(ctx context.Context, req CreateIPVPNRequest, opts ExecOpts) error {
+	if req.L3VNI <= 0 {
+		return &ValidationError{Field: "l3vni", Message: "required"}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("ipvpns").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	ipvpn := &spec.IPVPNSpec{
+		Description:  req.Description,
+		L3VNI:        req.L3VNI,
+		VRF:          req.VRF,
+		RouteTargets: req.RouteTargets,
+	}
+	return translateInternalError(net.internal.UpdateIPVPN(req.Name, ipvpn))
+}
+
+// UpdateMACVPN replaces an existing MAC-VPN definition.
+func (net *Network) UpdateMACVPN(ctx context.Context, req CreateMACVPNRequest, opts ExecOpts) error {
+	if req.VNI <= 0 {
+		return &ValidationError{Field: "vni", Message: "required"}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("macvpns").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	macvpn := &spec.MACVPNSpec{
+		Description:    req.Description,
+		VNI:            req.VNI,
+		VlanID:         req.VlanID,
+		AnycastIP:      req.AnycastIP,
+		AnycastMAC:     req.AnycastMAC,
+		RouteTargets:   req.RouteTargets,
+		ARPSuppression: req.ARPSuppression,
+	}
+	return translateInternalError(net.internal.UpdateMACVPN(req.Name, macvpn))
+}
+
+// UpdateQoSPolicy replaces an existing QoS policy's metadata. Queues
+// are preserved from the existing entry — the Add/RemoveQoSQueue verbs
+// remain the only way to mutate the queue list.
+func (net *Network) UpdateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	existing, err := net.internal.GetQoSPolicy(req.Name)
+	if err != nil {
+		return err
+	}
+	policy := &spec.QoSPolicy{
+		Description: req.Description,
+		Queues:      existing.Queues,
+	}
+	return translateInternalError(net.internal.UpdateQoSPolicy(req.Name, policy))
+}
+
+// UpdateFilter replaces an existing filter's metadata. Rules are
+// preserved from the existing entry — the Add/RemoveFilterRule verbs
+// remain the only way to mutate the rule list.
+func (net *Network) UpdateFilter(ctx context.Context, req CreateFilterRequest, opts ExecOpts) error {
+	if req.Type == "" {
+		return &ValidationError{Field: "type", Message: "required (ipv4, ipv6)"}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	existing, err := net.internal.GetFilter(req.Name)
+	if err != nil {
+		return err
+	}
+	fs := &spec.FilterSpec{
+		Description: req.Description,
+		Type:        req.Type,
+		Rules:       existing.Rules,
+	}
+	return translateInternalError(net.internal.UpdateFilter(req.Name, fs))
+}
+
+// UpdatePrefixList replaces an existing prefix list's entries. Unlike
+// Filter/RoutePolicy/QoSPolicy, the prefix list IS its sub-collection
+// (a flat []string), so the request body's Prefixes replaces the
+// existing list directly.
+func (net *Network) UpdatePrefixList(ctx context.Context, req CreatePrefixListRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	prefixes := req.Prefixes
+	if prefixes == nil {
+		prefixes = []string{}
+	}
+	return translateInternalError(net.internal.UpdatePrefixList(req.Name, prefixes))
+}
+
+// UpdateRoutePolicy replaces an existing route policy's metadata.
+// Rules are preserved from the existing entry — the Add/RemoveRoutePolicyRule
+// verbs remain the only way to mutate the rule list.
+func (net *Network) UpdateRoutePolicy(ctx context.Context, req CreateRoutePolicyRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	existing, err := net.internal.GetRoutePolicy(req.Name)
+	if err != nil {
+		return err
+	}
+	rp := &spec.RoutePolicy{
+		Description: req.Description,
+		Rules:       existing.Rules,
+	}
+	return translateInternalError(net.internal.UpdateRoutePolicy(req.Name, rp))
+}
