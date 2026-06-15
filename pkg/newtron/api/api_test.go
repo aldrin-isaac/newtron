@@ -126,6 +126,10 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateRoutePolicy": true,
 			"UpdateProfile":     true,
 			"UpdateZone":        true,
+			// Platform CRUD (#173)
+			"CreatePlatform": true,
+			"UpdatePlatform": true,
+			"DeletePlatform": true,
 			// Topology / Provision
 			"HasTopology":           true,
 			"GetTopology":           true, // #14: GET /networks/{netID}/topology
@@ -307,6 +311,9 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateRoutePolicy":     auth.PermSpecAuthor,
 			"UpdateProfile":         auth.PermSpecAuthor,
 			"UpdateZone":            auth.PermSpecAuthor,
+			"CreatePlatform":        auth.PermSpecAuthor,
+			"UpdatePlatform":        auth.PermSpecAuthor,
+			"DeletePlatform":        auth.PermSpecAuthor,
 			"AddTopologyDevice":     auth.PermSpecAuthor,
 			"DeleteTopologyDevice":  auth.PermSpecAuthor,
 			"UpdateTopologyDevice":  auth.PermSpecAuthor,
