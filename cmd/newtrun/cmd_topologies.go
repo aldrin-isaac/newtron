@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -121,5 +122,10 @@ func newNewtronClient(networkID string) *newtronclient.Client {
 	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), url); err == nil && rec != nil {
 		bearerKey = rec.Key
 	}
-	return newtronclient.New(url, networkID, newtronclient.WithBearer(bearerKey))
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
+		os.Exit(1)
+	}
+	return newtronclient.New(url, networkID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
 }

@@ -1,14 +1,18 @@
 # Listener-Side TLS (Operator-to-Server) — Operational HOWTO
 
-L2a listener-side TLS on `cmd/newt-server` is engaged by three flags:
+L2a listener-side TLS is configured by three values shared between
+`cmd/newt-server` and the in-repo CLIs (`bin/newtron`, `bin/newtrun`,
+`bin/newtlab`):
 
-- `--tls-cert=PATH` — server certificate (PEM).
-- `--tls-key=PATH` — server private key (PEM).
-- `--tls-ca=PATH` — client-CA PEM bundle. Optional; when set, requires mTLS.
+| Source | What |
+|---|---|
+| `NEWTRON_TLS_CERT` env var | Path to a PEM certificate. On the server, this is the server cert; on a CLI, the client cert (mTLS identity). |
+| `NEWTRON_TLS_KEY` env var | Path to the matching PEM private key. |
+| `NEWTRON_TLS_CA` env var | Path to a CA bundle. On the server, the trust anchor for verifying client certs; on a CLI, the trust anchor for verifying the server cert. |
 
-When `--tls-cert` is empty, the TCP listener stays on plain HTTP — the pre-L2a behavior. Set `--tls-cert` + `--tls-key` together to enable HTTPS; add `--tls-ca` to also require client certificates.
+The server also accepts equivalent flags `--tls-cert`/`--tls-key`/`--tls-ca` that override the env vars when set; the CLIs read env only. **Unset everywhere → plain HTTP** (pre-L2a behavior).
 
-See [`auth-design.md` §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) for the threat-model rationale.
+This is the "automatic" deployment shape: one `export` line in the operator's shell profile (or systemd unit) drives every binary in the repo. See [`auth-design.md` §L2a](auth-design.md#l2a--listener-side-tls-operator-to-server) for the threat-model rationale.
 
 ## Three deployment shapes
 
@@ -49,29 +53,46 @@ Reviewers tell mTLS-authenticated callers apart from PAM-authenticated ones by t
 
 2. **(Optional) Generate operator client certs** — one cert per identity that needs to reach newt-server over mTLS. The cert's Common Name becomes the operator's username in audit + authorization.
 
-3. **Start `cmd/newt-server`:**
+3. **Server host — set env, start `cmd/newt-server`:**
 
    ```sh
+   # /etc/systemd/system/newt-server.service (env block) or operator shell
+   export NEWTRON_TLS_CERT=/etc/newt-server/server.crt
+   export NEWTRON_TLS_KEY=/etc/newt-server/server.key
+   export NEWTRON_TLS_CA=/etc/newt-server/operators-ca.crt
+
    bin/newt-server \
      --listen 0.0.0.0:18443 \
-     --tls-cert /etc/newt-server/server.crt \
-     --tls-key /etc/newt-server/server.key \
-     --tls-ca /etc/newt-server/operators-ca.crt \
      --audit-log /var/log/newt-server-audit.jsonl \
      --enforce-authorization \
      --spec-dir /etc/newt-server/specs
    ```
 
-4. **Dial with a client cert:**
+   No `--tls-*` flags needed; env vars are picked up.
+
+4. **Operator workstation — set env, run CLI:**
 
    ```sh
-   curl --cacert /etc/newt-server/server-trust.crt \
-        --cert /etc/operator-alice.crt \
-        --key /etc/operator-alice.key \
-        https://newt-server.example.com:18443/newtron/v1/networks
+   export NEWTRON_TLS_CERT=$HOME/.newtron/alice.crt
+   export NEWTRON_TLS_KEY=$HOME/.newtron/alice.key
+   export NEWTRON_TLS_CA=$HOME/.newtron/ca.crt
+   export NEWTRON_SERVER=https://newt-server.example.com:18443
+
+   bin/newtron leaf1 service list
    ```
 
-5. **Verify the audit log:**
+   The CLI picks up env, builds a client TLS config, presents alice's cert, dials the server. No CLI flags needed.
+
+5. **Optional curl-based smoke test (no CLI involved):**
+
+   ```sh
+   curl --cacert $NEWTRON_TLS_CA \
+        --cert $NEWTRON_TLS_CERT \
+        --key $NEWTRON_TLS_KEY \
+        $NEWTRON_SERVER/newtron/v1/networks
+   ```
+
+6. **Verify the audit log:**
 
    ```sh
    grep '"verification_source":"service_cert_cn"' /var/log/newt-server-audit.jsonl

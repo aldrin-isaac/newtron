@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
@@ -156,7 +157,14 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), newtronServer); err == nil && rec != nil {
 		bearerKey = rec.Key
 	}
-	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey))
+	// auth-design.md L2a: NEWTRON_TLS_CERT/KEY/CA in the operator's
+	// env configure the client's TLS posture automatically (shared
+	// across cmd/newtron, cmd/newtrun, cmd/newtlab, and cmd/newt-server).
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("loading client TLS config from env: %w", err)
+	}
+	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
 	// Ensure the network is registered on newtron-server so it can
 	// serve specs for this topology. RegisterNetwork is true-idempotent on
 	// matching spec_dir (returns nil); on a real conflict (same network

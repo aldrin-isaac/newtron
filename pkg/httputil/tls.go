@@ -7,6 +7,29 @@ import (
 	"os"
 )
 
+// Env-var names every binary in this repo reads to compose TLS
+// behavior automatically (auth-design.md L2a operator-experience
+// note). Set them once in the operator's shell / systemd unit and
+// every binary picks them up: `cmd/newt-server` as its server cert
+// + client-CA pool, the three CLIs (`cmd/newtron`, `cmd/newtrun`,
+// `cmd/newtlab`) as their client cert + trust pool. Unset = plain
+// HTTP everywhere (the pre-L2a default).
+const (
+	EnvTLSCert = "NEWTRON_TLS_CERT"
+	EnvTLSKey  = "NEWTRON_TLS_KEY"
+	EnvTLSCA   = "NEWTRON_TLS_CA"
+)
+
+// LoadClientTLSConfigFromEnv reads NEWTRON_TLS_CERT / NEWTRON_TLS_KEY /
+// NEWTRON_TLS_CA from the environment and delegates to
+// LoadClientTLSConfig. Returns nil + nil when NEWTRON_TLS_CA is
+// unset — the disabled-state signal that the caller should dial
+// plain HTTP. Used by every in-repo CLI client construction so an
+// operator's `export` is enough to enable TLS across all of them.
+func LoadClientTLSConfigFromEnv() (*tls.Config, error) {
+	return LoadClientTLSConfig(os.Getenv(EnvTLSCert), os.Getenv(EnvTLSKey), os.Getenv(EnvTLSCA))
+}
+
 // LoadServerTLSConfig builds a *tls.Config suitable for use on an
 // httputil.Server's listener (auth-design.md L2a inter-service
 // mTLS). Returns nil + nil err when certFile is empty — the

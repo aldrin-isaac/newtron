@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/client"
 )
@@ -13,12 +15,19 @@ import (
 // newClient constructs a newtrun-server client from the persistent
 // --newtrun-server flag, the NEWTRUN_SERVER environment variable, and the
 // default. The flag wins over the env var; the env var wins over the default.
+// TLS posture follows the shared NEWTRON_TLS_CERT/KEY/CA env vars —
+// see [httputil.LoadClientTLSConfigFromEnv].
 func newClient() *client.Client {
 	url := newtrunServerFlag
 	if url == "" {
 		url = os.Getenv("NEWTRUN_SERVER")
 	}
-	return client.New(url)
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
+		os.Exit(1)
+	}
+	return client.New(url, client.WithTLS(tlsCfg))
 }
 
 // newtlabURL resolves the URL for newtlab-server's HTTP surface from
@@ -37,6 +46,19 @@ func newtlabURL() string {
 		url = "http://127.0.0.1:18080"
 	}
 	return url
+}
+
+// newNewtlabClient constructs a newtlab-server client at newtlabURL()
+// with TLS posture from NEWTRON_TLS_CERT/KEY/CA — same env vars the
+// other in-repo CLI clients honor (auth-design.md L2a). Used by
+// status / stop to consult LabState via newtlab's HTTP surface.
+func newNewtlabClient() *newtlabclient.Client {
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
+		os.Exit(1)
+	}
+	return newtlabclient.New(newtlabURL(), newtlabclient.WithTLS(tlsCfg))
 }
 
 // requireServer probes the server's health endpoint and returns a clear

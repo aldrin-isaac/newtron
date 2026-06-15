@@ -65,9 +65,9 @@ func main() {
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
 	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newt-server/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
-	tlsCert := flag.String("tls-cert", "", "server certificate (PEM) for the TCP listener. When set together with --tls-key, the TCP listener serves HTTPS instead of HTTP. Empty disables listener-side TLS (operators terminate TLS at a reverse proxy in front of newt-server, or rely on the Unix socket where configured). (auth-design.md L2a)")
-	tlsKey := flag.String("tls-key", "", "server private key (PEM) matching --tls-cert. Required when --tls-cert is set. (auth-design.md L2a)")
-	tlsCA := flag.String("tls-ca", "", "client-CA PEM bundle. When set together with --tls-cert/--tls-key, the listener requires every client to present a certificate that verifies against this pool (mTLS); the peer cert's Subject CN flows through ServiceCertCNFromRequest into the caller-middleware identity slot with priority over PAM and the self-attested header (auth-design.md L2a). Empty leaves TLS one-way (server-auth only); client identity continues to come from PAM / Unix peer creds / the header.")
+	tlsCert := flag.String("tls-cert", "", "server certificate (PEM) for the TCP listener. When set together with --tls-key, the TCP listener serves HTTPS instead of HTTP. Falls back to $NEWTRON_TLS_CERT when the flag is empty. Empty (no flag + no env) disables listener-side TLS (operators terminate TLS at a reverse proxy in front of newt-server, or rely on the Unix socket where configured). (auth-design.md L2a)")
+	tlsKey := flag.String("tls-key", "", "server private key (PEM) matching --tls-cert. Required when --tls-cert is set. Falls back to $NEWTRON_TLS_KEY. (auth-design.md L2a)")
+	tlsCA := flag.String("tls-ca", "", "client-CA PEM bundle. When set together with --tls-cert/--tls-key, the listener requires every client to present a certificate that verifies against this pool (mTLS); the peer cert's Subject CN flows through ServiceCertCNFromRequest into the caller-middleware identity slot with priority over PAM and the self-attested header (auth-design.md L2a). Falls back to $NEWTRON_TLS_CA. Empty leaves TLS one-way (server-auth only); client identity continues to come from PAM / Unix peer creds / the header.")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newt-server: ", log.LstdFlags|log.Lmsgprefix)
@@ -76,15 +76,28 @@ func main() {
 		logger.Fatalf("invalid --listen %q: %v", *listen, err)
 	}
 
-	// auth-design.md L2a: build the TLS config from the operator
-	// flags. LoadServerTLSConfig returns nil + nil when --tls-cert
-	// is empty (the disabled state); the resulting nil flows into
-	// httputil.TLSConfig and the Server starts plain HTTP, preserving
-	// pre-L2a behavior. mTLS engages only when --tls-ca is also set
-	// (LoadServerTLSConfig sets ClientAuth=RequireAndVerifyClientCert
-	// in that path). Fail fast at startup: a bad cert path or
-	// mismatched cert/key is an operator misconfiguration the audit
-	// posture must not silently swallow.
+	// auth-design.md L2a: each TLS flag falls back to the matching
+	// NEWTRON_TLS_* env var when the flag is empty, so the same
+	// `export` line that configures the CLI clients also drives
+	// the server. Flag value wins on conflict; both unset → plain
+	// HTTP (pre-L2a default).
+	if *tlsCert == "" {
+		*tlsCert = os.Getenv(httputil.EnvTLSCert)
+	}
+	if *tlsKey == "" {
+		*tlsKey = os.Getenv(httputil.EnvTLSKey)
+	}
+	if *tlsCA == "" {
+		*tlsCA = os.Getenv(httputil.EnvTLSCA)
+	}
+	// LoadServerTLSConfig returns nil + nil when *tlsCert is empty
+	// (the disabled state); the resulting nil flows into
+	// httputil.TLSConfig and the Server starts plain HTTP. mTLS
+	// engages only when *tlsCA is also set (LoadServerTLSConfig
+	// sets ClientAuth=RequireAndVerifyClientCert in that path).
+	// Fail fast at startup: a bad cert path or mismatched cert/key
+	// is an operator misconfiguration the audit posture must not
+	// silently swallow.
 	tlsConfig, err := httputil.LoadServerTLSConfig(*tlsCert, *tlsKey, *tlsCA)
 	if err != nil {
 		logger.Fatalf("--tls-cert/--tls-key/--tls-ca: %v", err)

@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
-	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -383,7 +382,7 @@ func checkTopologyStatus(topology string) string {
 	// uses). Routes through newtlab-server's HTTP client — newtlab
 	// owns LabState (§27), so cmd/newtrun consults it via the API
 	// rather than reading state.json from disk.
-	lc := newtlabclient.New(newtlabURL())
+	lc := newNewtlabClient()
 	state, err := lc.LabStatus(context.Background(), topology)
 	if err != nil {
 		return "not deployed"
