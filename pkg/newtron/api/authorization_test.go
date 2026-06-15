@@ -348,14 +348,17 @@ func authzServerWithTopology(t *testing.T) *Server {
     "vlan.modify":       ["device-team"],
     "vrf.create":        ["device-team"],
     "vrf.delete":        ["device-team"],
-    "vrf.modify":        ["device-team"],
+    "vrf.bind":          ["device-team"],
+    "vrf.route":         ["device-team"],
+    "bgp.peer":          ["device-team"],
     "acl.create":        ["device-team"],
     "acl.delete":        ["device-team"],
     "acl.modify":        ["device-team"],
     "lag.create":        ["device-team"],
     "lag.delete":        ["device-team"],
     "lag.modify":        ["device-team"],
-    "evpn.modify":       ["device-team"],
+    "evpn.peer":         ["device-team"],
+    "evpn.macvpn":       ["device-team"],
     "service.apply":     ["device-team"],
     "service.remove":    ["device-team"],
     "interface.modify": ["device-team"],
@@ -421,7 +424,7 @@ func TestAuthorizationL4_NodeMutationsGated(t *testing.T) {
 			body: map[string]any{"name": "PortChannel1"},
 		},
 		{
-			name: "add-bgp-evpn-peer (evpn.modify)",
+			name: "add-bgp-evpn-peer (evpn.peer)",
 			path: "/newtron/v1/networks/default/nodes/switch1/add-bgp-evpn-peer?mode=topology",
 			body: map[string]any{"neighbor_ip": "10.0.0.2", "remote_as": 65002},
 		},
@@ -663,7 +666,7 @@ func TestAuthorizationL4_InterfaceMutationsGated(t *testing.T) {
 			body: map[string]any{"acl": "acl-a", "direction": "ingress"},
 		},
 		{
-			name: "add-bgp-peer (vrf.modify)",
+			name: "add-bgp-peer (bgp.peer)",
 			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/add-bgp-peer?mode=topology",
 			body: map[string]any{"neighbor_ip": "10.0.0.2", "remote_as": 65002},
 		},
@@ -708,8 +711,9 @@ func TestAuthorizationL4_InterfaceMutationsGated(t *testing.T) {
 // symmetrically with AddBGPPeer.
 //
 // Setup:
-//   - global vrf.modify granted to "scoped-team" scoped
-//     `where: {resource: "10.0.0.2"}`
+//   - global bgp.peer granted to "scoped-team" scoped
+//     `where: {resource: "10.0.0.2"}` (post-#170: bgp.peer is the
+//     dedicated permission for Interface BGP peer add/remove)
 //   - root (super-user) adds a BGP peer with neighbor_ip=10.0.0.2 to
 //     switch1/Ethernet0 (topology mode, populates the intent)
 //   - bob ∈ scoped-team attempts remove-bgp-peer on that interface
@@ -730,7 +734,7 @@ func TestRemoveBGPPeer_ResourceRecoveredFromIntent(t *testing.T) {
   "super_users": ["root"],
   "user_groups": {"scoped-team": ["bob"]},
   "permissions": {
-    "vrf.modify": [
+    "bgp.peer": [
       { "groups": ["scoped-team"], "where": { "resource": "10.0.0.2" } }
     ],
     "device.write": ["scoped-team"]

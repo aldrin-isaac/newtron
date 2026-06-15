@@ -108,7 +108,7 @@ func (i *Interface) UnbindACL(ctx context.Context, acl string) error {
 
 // AddBGPPeer adds a direct BGP peer on this interface.
 func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) error {
-	if err := i.gate(ctx, auth.PermVRFModify, config.NeighborIP); err != nil {
+	if err := i.gate(ctx, auth.PermBGPPeer, config.NeighborIP); err != nil {
 		return err
 	}
 	cs, err := i.internal.AddBGPPeer(ctx, node.DirectBGPPeerConfig{
@@ -132,7 +132,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 // returns the "no BGP peer intent" error after authorization runs.
 func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
 	peerIP := i.internal.DirectBGPPeerIP()
-	if err := i.gate(ctx, auth.PermVRFModify, peerIP); err != nil {
+	if err := i.gate(ctx, auth.PermBGPPeer, peerIP); err != nil {
 		return err
 	}
 	cs, err := i.internal.RemoveBGPPeer(ctx)

@@ -19,7 +19,8 @@
     "vlan.modify": ["neteng", "netops"],
     "vlan.view": ["neteng", "netops", "readonly"],
     "acl.modify": ["neteng"],
-    "evpn.modify": ["neteng"],
+    "evpn.peer": ["neteng"],
+    "evpn.macvpn": ["neteng"],
     "baseline.apply": ["neteng"],
     "health.check": ["neteng", "netops", "readonly"],
     "audit.view": ["neteng", "netops"]

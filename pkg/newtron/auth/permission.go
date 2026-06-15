@@ -4,7 +4,10 @@
 // - Write operations are checked via checkExecutePermission() when -x (execute) flag is set
 // - Read/view operations are always allowed (no permission check in dry-run/preview mode)
 // - Permissions are defined in network.json under "permissions" and "super_users"
-// - Service-specific permission overrides are supported via ServiceSpec.Permissions
+// - Per-service scoping is expressed via L5 `where: {service: "<pattern>"}`
+//   clauses on global grants (auth-design.md §L5). The pre-L5 mechanism
+//   that embedded a Permissions block on each ServiceSpec was retired in
+//   #165 — one auth table per network, not one per spec (DPN §27).
 package auth
 
 // Permission defines an action that can be controlled
@@ -29,7 +32,14 @@ const (
 	PermACLModify Permission = "acl.modify"
 	PermACLDelete Permission = "acl.delete"
 
-	PermEVPNModify Permission = "evpn.modify"
+	// EVPN modifications were a single coarse permission until #164
+	// split it along Resource semantics: EVPN BGP peers stamp the
+	// neighbor IP, MACVPN binds stamp a VLAN identifier. One key per
+	// Resource semantic eliminates the §13 overload where
+	// `where: {resource: ...}` matched indiscriminately across
+	// fundamentally different objects.
+	PermEVPNPeer   Permission = "evpn.peer"   // AddBGPEVPNPeer/RemoveBGPEVPNPeer; Resource = peer IP
+	PermEVPNMACVPN Permission = "evpn.macvpn" // BindMACVPN/UnbindMACVPN; Resource = VLAN<id>
 
 	// PermDeviceWrite is the catch-all for operational Node-level
 	// mutations whose verb is not a create/modify/delete on a
@@ -46,8 +56,17 @@ const (
 	PermQoSDelete Permission = "qos.delete"
 
 	PermVRFCreate Permission = "vrf.create"
-	PermVRFModify Permission = "vrf.modify"
 	PermVRFDelete Permission = "vrf.delete"
+
+	// VRF modifications were a single coarse permission until #164
+	// split it along Resource semantics. `vrf.bind` stamps the VRF
+	// name; `vrf.route` stamps the VRF name; `bgp.peer` stamps the
+	// peer IP. Splitting them lets a grant `where: {resource: ...}`
+	// match unambiguously — a VRF name and a peer IP cannot collide
+	// in the same lookup.
+	PermVRFBind  Permission = "vrf.bind"  // BindIPVPN/UnbindIPVPN; Resource = VRF name
+	PermVRFRoute Permission = "vrf.route" // AddStaticRoute/RemoveStaticRoute; Resource = VRF name
+	PermBGPPeer  Permission = "bgp.peer"  // Interface AddBGPPeer/RemoveBGPPeer; Resource = peer IP
 
 	PermSpecAuthor Permission = "spec.author"
 
