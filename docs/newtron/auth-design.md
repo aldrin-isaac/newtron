@@ -736,8 +736,8 @@ named permission, OR in `unauthorizedExcept` with a documented reason
 (e.g., `RestartService` is operational, not authorization-gated)."
 
 Node-level write operations gate on the verb-family permissions
-already defined for the L3 constants (`vlan.create`, `vrf.modify`,
-`lag.delete`, etc.) — what were "15 unused constants" before L4
+already defined for the L3 constants (`vlan.create`, `lag.delete`,
+etc.) — what were "15 unused constants" before L4
 became the spec vocabulary for the per-device verbs. L4 adds three
 new constants: `acl.create` and `acl.delete` for symmetry with the
 create/delete pattern (the pre-L4 family had only `acl.modify`),
