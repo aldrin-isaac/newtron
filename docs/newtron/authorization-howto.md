@@ -91,9 +91,21 @@ top-level keys carry the inputs:
   usernames that hold it. The `"all"` wildcard key, if present,
   grants every permission to its listed groups.
 
-Service-level overrides live under `services.<name>.permissions`
-and tighten the global grant: an operator must satisfy the more
-restrictive of the two.
+Per-service scoping uses L5 `where: {service: "<pattern>"}` clauses
+on global grants — see §6 below. Example:
+
+```json
+"permissions": {
+  "service.apply": [
+    { "groups": ["transit-team"], "where": { "service": "transit-*" } },
+    { "groups": ["dci-team"],     "where": { "service": "dci-*" } }
+  ]
+}
+```
+
+The pre-L5 embedded `services.<name>.permissions` field was
+retired in #165 — one authorization table per network, not one per
+spec (DPN §27).
 
 **Permission families** (auth-design.md L3 + L4):
 

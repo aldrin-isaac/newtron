@@ -44,29 +44,23 @@ func (c *Checker) Check(permission Permission, ctx *Context) error {
 
 // checkUser evaluates one user against the loaded grant table.
 // Precondition: username is non-empty (Check enforces this). The
-// super-user bypass, service-spec override, and global table are
-// consulted in that order; first match wins. Falls through to a
-// PermissionError when nothing matches.
+// super-user bypass and the global grant table are consulted in
+// that order; first match wins. Falls through to a PermissionError
+// when nothing matches.
+//
+// Per-service scoping is expressed via L5 `where: {service: ...}`
+// clauses on global grants (auth-design.md §L5) — the per-service
+// override path that used to consult ServiceSpec.Permissions was
+// collapsed in #165 because L5 already expressed the same
+// constraint uniformly and the embedded mechanism duplicated the
+// network's authorization table inside instance specs (DPN §27).
 func (c *Checker) checkUser(username string, permission Permission, ctx *Context) error {
-	// Superusers can do anything
 	if c.isSuperUser(username) {
 		return nil
 	}
-
-	// Check service-specific permissions first
-	if ctx != nil && ctx.Service != "" {
-		if svc, ok := c.network.Services[ctx.Service]; ok {
-			if allowed := c.checkServicePermission(username, permission, svc, ctx); allowed {
-				return nil
-			}
-		}
-	}
-
-	// Check global permissions
 	if c.checkGlobalPermission(username, permission, ctx) {
 		return nil
 	}
-
 	return &PermissionError{
 		User:       username,
 		Permission: permission,
@@ -76,13 +70,6 @@ func (c *Checker) checkUser(username string, permission Permission, ctx *Context
 
 func (c *Checker) isSuperUser(username string) bool {
 	return slices.Contains(c.network.SuperUsers, username)
-}
-
-func (c *Checker) checkServicePermission(username string, permission Permission, svc *spec.ServiceSpec, ctx *Context) bool {
-	if svc.Permissions == nil {
-		return false
-	}
-	return c.checkPermissionMap(username, permission, svc.Permissions, ctx)
 }
 
 func (c *Checker) checkGlobalPermission(username string, permission Permission, ctx *Context) bool {
