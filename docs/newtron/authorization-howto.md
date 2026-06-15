@@ -62,15 +62,18 @@ top-level keys carry the inputs:
     "vlan.modify":      ["ops"],
     "vlan.delete":      ["ops"],
     "vrf.create":       ["ops"],
-    "vrf.modify":       ["ops"],
+    "vrf.bind":         ["ops"],
+    "vrf.route":        ["ops"],
     "vrf.delete":       ["ops"],
+    "bgp.peer":         ["ops"],
     "acl.create":       ["ops"],
     "acl.modify":       ["ops"],
     "acl.delete":       ["ops"],
     "lag.create":       ["ops"],
     "lag.modify":       ["ops"],
     "lag.delete":       ["ops"],
-    "evpn.modify":      ["ops"],
+    "evpn.peer":        ["ops"],
+    "evpn.macvpn":      ["ops"],
     "service.apply":    ["ops"],
     "service.remove":   ["ops"],
     "interface.modify": ["ops"],
@@ -88,9 +91,21 @@ top-level keys carry the inputs:
   usernames that hold it. The `"all"` wildcard key, if present,
   grants every permission to its listed groups.
 
-Service-level overrides live under `services.<name>.permissions`
-and tighten the global grant: an operator must satisfy the more
-restrictive of the two.
+Per-service scoping uses L5 `where: {service: "<pattern>"}` clauses
+on global grants — see §6 below. Example:
+
+```json
+"permissions": {
+  "service.apply": [
+    { "groups": ["transit-team"], "where": { "service": "transit-*" } },
+    { "groups": ["dci-team"],     "where": { "service": "dci-*" } }
+  ]
+}
+```
+
+The pre-L5 embedded `services.<name>.permissions` field was
+retired in #165 — one authorization table per network, not one per
+spec (DPN §27).
 
 **Permission families** (auth-design.md L3 + L4):
 
@@ -100,10 +115,14 @@ restrictive of the two.
 | `qos.create` / `qos.modify` / `qos.delete` | QoS policy spec + per-interface QoS apply |
 | `filter.create` / `filter.delete` | Filter (ACL spec) authoring |
 | `vlan.create` / `vlan.modify` / `vlan.delete` | Per-device VLAN + IRB configuration |
-| `vrf.create` / `vrf.modify` / `vrf.delete` | Per-device VRF + IPVPN bind/unbind + static routes + per-interface BGP peers |
+| `vrf.create` / `vrf.delete` | Per-device VRF CRUD |
+| `vrf.bind` | IPVPN bind/unbind on a VRF; Resource = VRF name |
+| `vrf.route` | Static route add/remove inside a VRF; Resource = VRF name |
+| `bgp.peer` | Per-interface direct BGP peer add/remove; Resource = peer IP |
 | `acl.create` / `acl.modify` / `acl.delete` | Per-device ACL CRUD + per-interface ACL bind/unbind |
 | `lag.create` / `lag.modify` / `lag.delete` | PortChannel CRUD + member add/remove |
-| `evpn.modify` | EVPN BGP peers + MACVPN bind/unbind |
+| `evpn.peer` | EVPN BGP peer add/remove; Resource = peer IP |
+| `evpn.macvpn` | MACVPN bind/unbind; Resource = `VLAN<id>` |
 | `service.apply` / `service.remove` | Per-interface service application |
 | `interface.modify` | Per-interface property set/clear, configure/unconfigure |
 | `device.write` | Operational mutations: `setup-device`, `init-device`, `config-reload`, `restart-service`, `exec-command`, `save`, `reconcile` |
@@ -260,6 +279,30 @@ except these" — the shape the meta-authorization scenario below uses.
 Unknown dimensions in a `where` clause **fail closed** — a typo
 like `"devic": "edge-*"` denies the request rather than silently
 matching everything. This keeps the grant table honest.
+
+**Granularity of rule-modification gates.** Four spec surfaces
+operate on rules inside a container object — filter rules,
+prefix-list entries, route-policy rules, and QoS queues. Their
+gates stamp `Resource = <container name>`, not
+`Resource = <rule identifier>`:
+
+| Operation | `Resource` stamped |
+|---|---|
+| `AddFilterRule` / `RemoveFilterRule` | filter name |
+| `AddPrefixListEntry` / `RemovePrefixListEntry` | prefix-list name |
+| `AddRoutePolicyRule` / `RemoveRoutePolicyRule` | route-policy name |
+| `AddQoSQueue` / `RemoveQoSQueue` | qos-policy name |
+
+So `where: {resource: "filter-A"}` authorizes editing **every**
+rule inside `filter-A` — per-rule scoping (e.g., "only rule index 5")
+is not expressible. This is deliberate: rule indices shift when
+earlier rules are inserted, so an index-scoped grant would
+silently re-target after any edit. The container is the stable
+scope.
+
+If a deployment needs finer-grained authority, split the container:
+two filters that each grant to a different team are expressible;
+one filter with per-rule grants is not.
 
 ## 7. Meta-authorization — separating who can grant access
 

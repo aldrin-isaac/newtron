@@ -149,7 +149,7 @@ func (i *Interface) UnbindACL(ctx context.Context, acl string) error {
 
 // AddBGPPeer adds a direct BGP peer on this interface.
 func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) error {
-	if err := i.gate(ctx, auth.PermVRFModify, config.NeighborIP); err != nil {
+	if err := i.gate(ctx, auth.PermBGPPeer, config.NeighborIP); err != nil {
 		return err
 	}
 	cs, err := i.internal.AddBGPPeer(ctx, node.DirectBGPPeerConfig{
@@ -168,7 +168,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 // RemoveBGPPeer removes a direct BGP peer from this interface.
 // The neighbor IP is read from the intent record.
 func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
-	if err := i.gate(ctx, auth.PermVRFModify, ""); err != nil {
+	if err := i.gate(ctx, auth.PermBGPPeer, ""); err != nil {
 		return err
 	}
 	cs, err := i.internal.RemoveBGPPeer(ctx)

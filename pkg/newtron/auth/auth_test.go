@@ -58,22 +58,6 @@ func createTestNetworkSpec() *spec.NetworkSpecFile {
 			"vlan.create":    shorthand("neteng"),
 			"device.cleanup": shorthand("neteng", "netops", "viewer"),
 		},
-		OverridableSpecs: spec.OverridableSpecs{
-			Services: map[string]*spec.ServiceSpec{
-				"customer-l3": {
-					Description: "Customer L3",
-					Permissions: map[string]spec.PermissionGrants{
-						"service.apply": shorthand("netops"), // More restrictive
-					},
-				},
-				"transit": {
-					Description: "Transit service",
-					Permissions: map[string]spec.PermissionGrants{
-						"all": shorthand("neteng"), // Only neteng
-					},
-				},
-			},
-		},
 	}
 }
 
@@ -120,29 +104,44 @@ func TestChecker_GlobalPermissions(t *testing.T) {
 	})
 }
 
-func TestChecker_ServicePermissions(t *testing.T) {
-	network := createTestNetworkSpec()
+// TestChecker_WhereServiceScoping pins the post-#165 contract for
+// per-service authorization scoping: a global grant carrying
+// `where: {service: "<pattern>"}` matches when the populated
+// Context.Service matches the pattern, and denies otherwise. This
+// is the canonical replacement for the deleted ServiceSpec.Permissions
+// embedded-override mechanism (DPN §27 single owner — one auth
+// table in network.json, not one per spec).
+func TestChecker_WhereServiceScoping(t *testing.T) {
+	network := &spec.NetworkSpecFile{
+		UserGroups: map[string][]string{
+			"transit-team": {"alice"},
+		},
+		Permissions: map[string]spec.PermissionGrants{
+			"service.apply": {
+				{Groups: []string{"transit-team"}, Where: map[string]string{"service": "transit"}},
+			},
+		},
+	}
 	checker := NewChecker(network)
 
-	t.Run("service-specific override", func(t *testing.T) {
-		ctx := callerCtx("charlie").WithService("customer-l3")
-		if err := checker.Check(PermServiceApply, ctx); err != nil {
-			t.Errorf("charlie should have permission via service override: %v", err)
-		}
-	})
-
-	t.Run("service with 'all' permission", func(t *testing.T) {
+	t.Run("matches when Service equals pattern", func(t *testing.T) {
 		ctx := callerCtx("alice").WithService("transit")
 		if err := checker.Check(PermServiceApply, ctx); err != nil {
-			t.Errorf("alice should have permission via service 'all': %v", err)
+			t.Errorf("alice on transit should be authorized via where:{service:transit}: %v", err)
 		}
 	})
 
-	t.Run("no service permission falls back to global", func(t *testing.T) {
-		ctx := callerCtx("diana").WithService("transit")
-		// diana is netops, transit has no netops permission, but global does
-		if err := checker.Check(PermServiceApply, ctx); err != nil {
-			t.Errorf("diana should have permission via global fallback: %v", err)
+	t.Run("denies when Service differs from pattern", func(t *testing.T) {
+		ctx := callerCtx("alice").WithService("customer-l3")
+		if err := checker.Check(PermServiceApply, ctx); err == nil {
+			t.Error("alice on customer-l3 should be denied — where:{service:transit} doesn't match")
+		}
+	})
+
+	t.Run("denies when Service is empty", func(t *testing.T) {
+		ctx := callerCtx("alice") // no WithService
+		if err := checker.Check(PermServiceApply, ctx); err == nil {
+			t.Error("alice with empty Service should be denied — pattern 'transit' doesn't match ''")
 		}
 	})
 }
@@ -280,33 +279,6 @@ func TestChecker_EmptyCallerDeniedDespiteDegenerateConfig(t *testing.T) {
 	}
 }
 
-func TestChecker_ServiceWithNilPermissions(t *testing.T) {
-	network := &spec.NetworkSpecFile{
-		SuperUsers: []string{},
-		UserGroups: map[string][]string{
-			"neteng": {"alice"},
-		},
-		Permissions: map[string]spec.PermissionGrants{
-			"service.apply": shorthand("neteng"),
-		},
-		OverridableSpecs: spec.OverridableSpecs{
-			Services: map[string]*spec.ServiceSpec{
-				"no-perms-service": {
-					Description: "Service with nil permissions",
-					Permissions: nil, // Explicitly nil
-				},
-			},
-		},
-	}
-	checker := NewChecker(network)
-
-	// Should fall back to global permissions
-	ctx := callerCtx("alice").WithService("no-perms-service")
-	if err := checker.Check(PermServiceApply, ctx); err != nil {
-		t.Errorf("Should fall back to global permission: %v", err)
-	}
-}
-
 func TestChecker_GlobalPermissionNotFound(t *testing.T) {
 	network := &spec.NetworkSpecFile{
 		SuperUsers:  []string{},
@@ -339,34 +311,6 @@ func TestChecker_GlobalAllPermissionNotGranted(t *testing.T) {
 	err := checker.Check(PermServiceApply, callerCtx("normal-user"))
 	if err == nil {
 		t.Error("normal-user should not have permission via 'all'")
-	}
-}
-
-func TestChecker_ServiceAllPermissionNotGranted(t *testing.T) {
-	network := &spec.NetworkSpecFile{
-		SuperUsers: []string{},
-		UserGroups: map[string][]string{
-			"admins": {"admin-user"},
-			"users":  {"normal-user"},
-		},
-		Permissions: map[string]spec.PermissionGrants{},
-		OverridableSpecs: spec.OverridableSpecs{
-			Services: map[string]*spec.ServiceSpec{
-				"restricted": {
-					Description: "Restricted service",
-					Permissions: map[string]spec.PermissionGrants{
-						"all": shorthand("admins"), // Only admins have 'all' on this service
-					},
-				},
-			},
-		},
-	}
-	checker := NewChecker(network)
-
-	ctx := callerCtx("normal-user").WithService("restricted")
-	err := checker.Check(PermServiceApply, ctx)
-	if err == nil {
-		t.Error("normal-user should not have permission via service 'all'")
 	}
 }
 
