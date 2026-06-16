@@ -97,11 +97,15 @@ on global grants — see §6 below. Example:
 ```json
 "permissions": {
   "service.apply": [
-    { "groups": ["transit-team"], "where": { "service": "transit-*" } },
-    { "groups": ["dci-team"],     "where": { "service": "dci-*" } }
+    { "groups": ["transit-team"], "where": { "service": "TRANSIT_*" } },
+    { "groups": ["dci-team"],     "where": { "service": "DCI_*" } }
   ]
 }
 ```
+
+Service names are normalized at runtime (uppercase, hyphens →
+underscores) before the gate runs — see §"Where-pattern canonical
+form" below.
 
 The pre-L5 embedded `services.<name>.permissions` field was
 retired in #165 — one authorization table per network, not one per
@@ -236,7 +240,7 @@ grant form expresses that:
       { "groups": ["spine-team"], "where": { "device": "spine-*" } }
     ],
     "service.apply": [
-      { "groups": ["transit-team"], "where": { "service": "transit-*" } }
+      { "groups": ["transit-team"], "where": { "service": "TRANSIT_*" } }
     ]
   }
 }
@@ -280,6 +284,22 @@ except these" — the shape the meta-authorization scenario below uses.
 Unknown dimensions in a `where` clause **fail closed** — a typo
 like `"devic": "edge-*"` denies the request rather than silently
 matching everything. This keeps the grant table honest.
+
+**Where-pattern canonical form.** Patterns for the `service` and
+`resource` dimensions must be authored in **canonical form** —
+uppercase letters with hyphens replaced by underscores
+(`util.NormalizeName`). `Interface.gateService` normalizes the
+operator-supplied service name before stamping it on
+`Context.Service` / `Context.Resource`, so a runtime gate sees
+`TRANSIT_1` even when the operator submitted `transit-1`. A
+`where: {service: "transit-*"}` clause never matches and the grant
+becomes inert. The `device` and `interface` dimensions pass through
+raw — their patterns match device / interface names as they appear
+in topology and spec files (`edge-*`, `Ethernet0`).
+
+This is why every example above uses `TRANSIT_*` / `DCI_*` for
+service-dimension patterns and `edge-*` / `spine-*` for
+device-dimension patterns.
 
 **Granularity of rule-modification gates.** Four spec surfaces
 operate on rules inside a container object — filter rules,

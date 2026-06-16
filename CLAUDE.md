@@ -37,9 +37,11 @@ step progresses.
 3. Download the SONiC community image:
    ```
    mkdir -p ~/.newtlab/images
-   curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
+   curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=202505&platform=vs&buildId=1057313&target=target/sonic-vs.img.gz" \
      | gunzip > ~/.newtlab/images/sonic-vs.qcow2
    ```
+
+   (Pin to the `202505` stable branch — the same image `scripts/getting-started.sh` uses. The `master` build at any given moment may fail to boot or include behavior that hasn't been validated by the newtrun suites.)
 4. Deploy a single-switch lab: `bin/newtlab deploy 1node-vs --monitor`
 5. Start the aggregated server: `bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; see [`docs/newt-server.md`](docs/newt-server.md))
 6. Run a first operation to prove it works:

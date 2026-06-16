@@ -780,7 +780,7 @@ verb level, even if granularity is still all-or-nothing.
       { "groups": ["spine-operators"], "where": { "device": "spine-*" } }
     ],
     "service.apply": [
-      { "groups": ["operators"], "where": { "service": "transit-*" } }
+      { "groups": ["operators"], "where": { "service": "TRANSIT_*" } }
     ]
   }
 }
@@ -790,6 +790,27 @@ The handler middleware populates `Context.Device`, `Context.Service`,
 `Context.Interface` from the URL path. `Checker.Check` evaluates the
 `where` clauses against the populated context. Globs supported on
 specific dimensions; explicit lists for others.
+
+#### Where-pattern canonical form
+
+`where:` patterns for the `service` and `resource` dimensions must be
+authored in **canonical form** — uppercase letters with hyphens
+replaced by underscores (`util.NormalizeName`). `Interface.gateService`
+normalizes the operator-supplied service name before stamping it on
+`Context.Service` / `Context.Resource`, so a runtime gate sees
+`TRANSIT_1` even though the operator submitted `transit-1` and the
+spec file says `"transit-1"`. A `where: {service: "transit-*"}` clause
+never matches the runtime value and the grant becomes inert. The
+`device` and `interface` dimensions pass through raw (no
+normalization) — their patterns are matched against device / interface
+names exactly as they appear in topology and spec files.
+
+The rule of thumb: if the dimension can hold a service name, IPVPN
+name, MACVPN name, VRF name, ROUTE_POLICY name, QOS_POLICY name, or
+any other name that flows through `util.NormalizeName` at runtime,
+the `where:` pattern must be canonical. Verified end-to-end by the
+`1node-vs-auth` E2E suite (see `newtrun/suites/1node-vs-auth/README.md`
+§"Where-pattern canonical form").
 
 The old shorthand syntax (`"action": ["groups"]`) continues to work —
 it's syntactic sugar for `[{ "groups": [...], "where": {} }]` — so

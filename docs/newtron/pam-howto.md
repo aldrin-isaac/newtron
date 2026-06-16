@@ -195,11 +195,12 @@ provided the identity by the `verification_source` field
   via a fronting reverse proxy.
 - *Password transit security.* HTTP Basic sends credentials base64-
   encoded but not encrypted. **PAM authentication without TLS is insecure.**
-  The listener-side TLS wiring (`--tls-cert` / `--tls-key` / `--tls-ca`)
-  for `cmd/newt-server` is not yet implemented (see
-  [`mtls-howto.md`](mtls-howto.md)) — operators terminate TLS at a
-  reverse proxy in front of newt-server, OR restrict the listener to
-  loopback / VPN / Unix socket.
+  `cmd/newt-server` accepts `--tls-cert` / `--tls-key` / `--tls-ca`
+  flags (and the shared `NEWTRON_TLS_CERT` / `NEWTRON_TLS_KEY` /
+  `NEWTRON_TLS_CA` env vars) to serve the listener over TLS — see
+  [`mtls-howto.md`](mtls-howto.md). Alternatives: terminate TLS at a
+  reverse proxy in front of newt-server, OR restrict the listener
+  to loopback / VPN / Unix socket.
 - *Session reuse.* `pam_authenticate` runs on every request by
   default — no cookie, no token. For browser clients and long-running
   automations this gets expensive. **L2c (session keys)** layers on
