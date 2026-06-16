@@ -21,7 +21,7 @@ SERVER="${1:-http://127.0.0.1:18080}"
 
 # Every distinct identity any scenario in this suite references via
 # `as:`. Keep alphabetized so additions are obvious in diffs.
-USERS="alice arch-anna bob charlie dave dev-dora iam-ian intf-isaac mallory root"
+USERS="alice arch-anna bob charlie dave dev-dora iam-ian intf-isaac mallory root svc-sam"
 
 # Placeholder password — every test user gets the same one because
 # pam_permit accepts anything. Override with the env var

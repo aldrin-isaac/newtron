@@ -3,12 +3,13 @@
   "description": "Grant table the 1node-vs-auth suite exercises against an --enforce-authorization newtron-server. Mixes the legacy [\"group\"] shorthand and the L5 typed [{groups, where}] form across every permission family and every where dimension so each layer of the auth arc is exercised end to end.",
   "super_users": ["root"],
   "user_groups": {
-    "spec-team":   ["alice", "dave"],
-    "ops":         ["bob", "charlie"],
-    "architects":  ["arch-anna"],
-    "iam-team":    ["iam-ian"],
-    "intf-ops":    ["intf-isaac"],
-    "device-team": ["dev-dora"]
+    "spec-team":    ["alice", "dave"],
+    "ops":          ["bob", "charlie"],
+    "architects":   ["arch-anna"],
+    "iam-team":     ["iam-ian"],
+    "intf-ops":     ["intf-isaac"],
+    "device-team":  ["dev-dora"],
+    "service-team": ["svc-sam"]
   },
   "permissions": {
     "spec.author": [
@@ -24,7 +25,10 @@
     "vlan.create":    ["ops"],
     "vlan.modify":    ["ops"],
     "vlan.delete":    ["ops"],
-    "vrf.create":     ["ops"],
+    "vrf.create": [
+      { "groups": ["ops"] },
+      { "groups": ["service-team"], "where": { "service": "transit-*" } }
+    ],
     "vrf.bind":       ["ops"],
     "vrf.route":      ["ops"],
     "vrf.delete":     ["ops"],
@@ -42,10 +46,14 @@
     "evpn.macvpn":    ["ops"],
     "interface.modify": ["spec-team", "ops"],
     "service.apply": [
-      { "groups": ["spec-team"], "where": { "resource": "transit-*" } },
-      { "groups": ["ops"],       "where": { "resource": "vpn-*" } }
+      { "groups": ["spec-team"],    "where": { "resource": "transit-*" } },
+      { "groups": ["ops"],          "where": { "resource": "vpn-*" } },
+      { "groups": ["service-team"], "where": { "service":  "transit-*" } }
     ],
-    "service.remove": ["spec-team", "ops"],
+    "service.remove": [
+      { "groups": ["spec-team", "ops"] },
+      { "groups": ["service-team"], "where": { "service": "transit-*" } }
+    ],
     "device.write": [
       { "groups": ["spec-team", "ops"] },
       { "groups": ["device-team"], "where": { "device": "switch1" } }

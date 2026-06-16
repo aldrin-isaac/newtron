@@ -1,0 +1,146 @@
+name: L4-vrf-families-mallory
+description: |
+  Coverage expansion for the three permission families that emerged
+  from the #170 vrf.modify/evpn.modify split: vrf.bind (BindIPVPN/
+  UnbindIPVPN), vrf.route (AddStaticRoute/RemoveStaticRoute), and
+  bgp.peer (Interface AddBGPPeer/RemoveBGPPeer). The 70-L4 sibling
+  already covers lag.create, evpn.peer, interface.modify, device.write;
+  these three were left as TODO when that file landed and have grant
+  entries in network.json but no scenario coverage today.
+
+  Mallory's portion: mallory (no group) is denied on all three. The
+  gate fires in each handler before the operation looks up the VRF /
+  IPVPN / peer record, so the deny path needs no fixtures.
+
+requires: [L4-permission-families-alice]
+as: mallory
+
+steps:
+  # vrf.bind — mallory denied
+  - name: mallory-bind-ipvpn-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/bind-ipvpn?mode=topology
+    params: {vrf: vrf-mallory, ipvpn: ipvpn-mallory}
+    expect_failure: true
+
+  # vrf.route — mallory denied
+  - name: mallory-add-static-route-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/add-static-route?mode=topology
+    params:
+      vrf: vrf-mallory
+      prefix: 10.99.0.0/24
+      nexthop: 10.99.0.1
+    expect_failure: true
+
+  # bgp.peer — mallory denied
+  - name: mallory-add-bgp-peer-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/add-bgp-peer?mode=topology
+    params: {neighbor_ip: "10.99.0.2", remote_as: 65099, description: peer-mallory}
+    expect_failure: true
+
+---
+name: L4-vrf-families-alice-setup
+description: |
+  Setup fixture: alice (spec-team, has spec.author) creates the IPVPN
+  bob's bind-ipvpn allow path needs. The vrf-bob VRF that bob's bind
+  binds to was created in the upstream L4-node-mutations-gated-bob
+  scenario; this scenario adds the matching IPVPN spec. Cleanup of
+  ipvpn-75 happens in L4-vrf-families-alice-cleanup after bob's run.
+
+requires: [L4-vrf-families-mallory]
+as: alice
+
+steps:
+  - name: alice-creates-ipvpn-fixture
+    action: newtron
+    method: POST
+    url: /create-ipvpn
+    params:
+      name: ipvpn-75
+      vrf: vrf-bob
+      l3vni: 10075
+      route_targets: ["65001:75"]
+
+---
+name: L4-vrf-families-bob
+description: |
+  Bob's portion: bob (ops, has vrf.bind, vrf.route, bgp.peer) is
+  allowed on all three families and runs the reverse of each so the
+  topology projection ends back at the pre-scenario state. The reverse
+  ops also exercise the resource-recovery path on RemoveBGPPeer
+  (recovers DirectBGPPeerIP from the intent record — #163 / PR #168).
+
+  vrf-bob exists from L4-node-mutations-gated-bob. ipvpn-75 exists
+  from L4-vrf-families-alice-setup.
+
+requires: [L4-vrf-families-alice-setup]
+as: bob
+
+steps:
+  # vrf.bind — forward
+  - name: bob-bind-ipvpn-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/bind-ipvpn?mode=topology
+    params: {vrf: vrf-bob, ipvpn: ipvpn-75}
+
+  # vrf.route — forward (writes against vrf-bob)
+  - name: bob-add-static-route-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/add-static-route?mode=topology
+    params:
+      vrf: vrf-bob
+      prefix: 10.75.0.0/24
+      nexthop: 10.75.0.1
+
+  # bgp.peer — forward (direct BGP peer on Ethernet0)
+  - name: bob-add-bgp-peer-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/add-bgp-peer?mode=topology
+    params: {neighbor_ip: "10.75.0.2", remote_as: 65075, description: peer-bob}
+
+  # Reverses — same grants cover them; clean projection state.
+  - name: bob-remove-bgp-peer
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/remove-bgp-peer?mode=topology
+
+  - name: bob-remove-static-route
+    action: newtron
+    method: POST
+    url: /nodes/switch1/remove-static-route?mode=topology
+    params:
+      vrf: vrf-bob
+      prefix: 10.75.0.0/24
+      nexthop: 10.75.0.1
+
+  - name: bob-unbind-ipvpn
+    action: newtron
+    method: POST
+    url: /nodes/switch1/unbind-ipvpn?mode=topology
+    params: {vrf: vrf-bob}
+
+---
+name: L4-vrf-families-alice-cleanup
+description: |
+  Alice tears down the ipvpn-75 spec fixture she created for bob's
+  bind path. Alice (spec-team) has spec.author for the delete-ipvpn
+  endpoint. Closes the L4-vrf-families chain at a clean projection
+  state so downstream scenarios in 80-L5 / 85-L5 don't inherit it.
+
+requires: [L4-vrf-families-bob]
+as: alice
+
+steps:
+  - name: alice-deletes-ipvpn-fixture
+    action: newtron
+    method: POST
+    url: /delete-ipvpn
+    params: {name: ipvpn-75}
