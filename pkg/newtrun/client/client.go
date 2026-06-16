@@ -65,6 +65,11 @@ type Option func(*Client)
 // and the SSE stream client (auth-design.md L2a). nil tlsCfg keeps
 // the default plain-HTTP transport — the disabled state. Build the
 // config with httputil.LoadClientTLSConfig.
+//
+// Apply WithTLS BEFORE WithBearer in the option list — WithBearer
+// wraps the existing transport, so the bearer round-tripper layers
+// on top of the TLS one. Reversing the order clobbers the bearer
+// (WithTLS resets the Transport to a plain *http.Transport).
 func WithTLS(tlsCfg *tls.Config) Option {
 	return func(c *Client) {
 		if tlsCfg == nil {
@@ -74,6 +79,56 @@ func WithTLS(tlsCfg *tls.Config) Option {
 		c.httpClient.Transport = tr
 		c.streamClient.Transport = tr
 	}
+}
+
+// WithBearer attaches a static Authorization: Bearer <key> header
+// to every outbound request whose Authorization header isn't
+// already set (auth-design.md §L2c). Empty key is a no-op so the
+// no-auth CLI path stays a single code path: callers always
+// invoke WithBearer(record.Key) and pass "" when LoadCLISession
+// returned nil.
+//
+// Wraps both the request/response client AND the SSE stream client
+// so /runs/{suite}/events also carries the Bearer when the server
+// gates that endpoint (the combined newt-server does; standalone
+// newtrun-server post-#155 doesn't, but the wrap is harmless there).
+func WithBearer(key string) Option {
+	return func(c *Client) {
+		if key == "" {
+			return
+		}
+		c.httpClient.Transport = wrapBearer(c.httpClient.Transport, key)
+		c.streamClient.Transport = wrapBearer(c.streamClient.Transport, key)
+	}
+}
+
+func wrapBearer(base http.RoundTripper, key string) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &bearerRoundTripper{base: base, key: key}
+}
+
+// bearerRoundTripper sets Authorization: Bearer <key> on every
+// outbound request unless the caller has already set their own
+// Authorization header. The "respect caller-set Authorization"
+// rule mirrors the newtron client's contract — important for the
+// /auth/login (Basic) and /auth/logout (often a different Bearer
+// being revoked) endpoints — but newtrun-server has no such
+// endpoints today; the rule is preserved here for parity in case
+// they're added.
+type bearerRoundTripper struct {
+	base http.RoundTripper
+	key  string
+}
+
+func (b *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("Authorization") != "" {
+		return b.base.RoundTrip(req)
+	}
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set("Authorization", "Bearer "+b.key)
+	return b.base.RoundTrip(cloned)
 }
 
 // ServerError is returned by every client method when the server returned
