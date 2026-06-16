@@ -99,18 +99,32 @@ steps:
       prefix: 10.75.0.0/24
       nexthop: 10.75.0.1
 
-  # bgp.peer — forward (direct BGP peer on Ethernet0)
+  # bgp.peer — forward (direct BGP peer on Ethernet0). add-bgp-peer
+  # requires the interface to have an IP address (source address for
+  # the eBGP session); configure-interface gates on interface.modify
+  # which bob (ops) holds.
+  - name: bob-configure-eth0
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/configure-interface?mode=topology
+    params: {ip: "10.75.0.0/31"}
+
   - name: bob-add-bgp-peer-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/add-bgp-peer?mode=topology
-    params: {neighbor_ip: "10.75.0.2", remote_as: 65075, description: peer-bob}
+    params: {neighbor_ip: "10.75.0.1", remote_as: 65075, description: peer-bob}
 
   # Reverses — same grants cover them; clean projection state.
   - name: bob-remove-bgp-peer
     action: newtron
     method: POST
     url: /nodes/switch1/interfaces/Ethernet0/remove-bgp-peer?mode=topology
+
+  - name: bob-unconfigure-eth0
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/unconfigure-interface?mode=topology
 
   - name: bob-remove-static-route
     action: newtron

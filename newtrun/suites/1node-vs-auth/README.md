@@ -53,6 +53,60 @@ Operators verify these manually with a small shell session; pattern below.
 
 In a production deployment with `--enforce-authorization` engaged, fine-grained per-interface or per-resource grants only let an operator MUTATE; they need `device.write` (broad or scoped) to PERSIST. Whether that's the right design or an artifact of L4 catch-all coverage is its own discussion (cross-cutting auth principle vs. operator ergonomics) — out of scope for this suite, but the pattern is worth knowing about when authoring grants for real deployments.
 
+## Where-pattern canonical form
+
+`where:` patterns for the `resource` and `service` dimensions match against the **canonical** form of the name — uppercase with hyphens replaced by underscores (`util.NormalizeName`). The runtime stamps the canonical form on `Context.Service` / `Context.Resource` after `Interface.gateService` normalizes the operator-supplied input. A `where:{resource:"transit-*"}` clause never matches the runtime `TRANSIT_1`; authors must write `where:{resource:"TRANSIT_*"}` instead.
+
+The `interface` and `device` dimensions don't require this — `Ethernet0` and `switch1` are already their own canonical forms.
+
+## Validation
+
+Last full-suite run: **29 PASS / 0 FAIL / 1 SKIP** on 2026-06-15. The SKIP is L2c-round-trip (by design — the `alice_basic_auth` parameter is empty unless an operator supplies it).
+
+Reproducing the run:
+
+```sh
+# 1. one-time host setup
+sudo sh newtrun/suites/1node-vs-auth/create-test-users.sh
+
+# 2. boot newt-server with the full auth flag set
+PATH="$(pwd)/bin:$PATH" bin/newt-server \
+    --spec-dir newtrun/topologies/1node-vs-auth/specs \
+    --net-id 1node-vs-auth \
+    --audit-log /tmp/1node-vs-auth-audit.jsonl \
+    --auth-pam-service newtron-test \
+    --enforce-authorization \
+    --audit-log-integrity \
+    --spec-watch &
+
+# 3. cache one session per user
+sh newtrun/suites/1node-vs-auth/login-all.sh
+
+# 4. boot newtrun-server (PATH must include ./bin so the L6
+#    newtron-cli step can exec the `newtron` binary)
+PATH="$(pwd)/bin:$PATH" bin/newtrun-server \
+    --newtlab-server http://127.0.0.1:18080 &
+
+# 5. submit the run with root's Bearer + every cached session
+#    (bin/newtrun start doesn't forward Bearer to newtrun-server today
+#    — that's a separate gap; submit via curl instead)
+ROOT_KEY=$(jq -r .key ~/.newtron/sessions/root@127.0.0.1_18080.json)
+SESSIONS=$(jq -s 'map({key:.user, value:.key}) | from_entries' \
+    ~/.newtron/sessions/*@127.0.0.1_18080.json)
+curl -X POST http://127.0.0.1:19081/newtrun/v1/runs \
+    -H "Authorization: Bearer $ROOT_KEY" \
+    -H "Content-Type: application/json" \
+    --data "$(jq -n --argjson sessions "$SESSIONS" '{
+        suite: "1node-vs-auth", all: true, no_deploy: true,
+        newtron_server: "http://127.0.0.1:18080",
+        network_id: "1node-vs-auth",
+        user_sessions: $sessions
+    }')"
+
+# 6. watch progress
+curl -s http://127.0.0.1:19081/newtrun/v1/runs/1node-vs-auth | jq '.data.scenarios[] | {name, status}'
+```
+
 ## Operator setup
 
 The canonical setup runs `newt-server` in PAM mode and pre-caches
@@ -141,17 +195,21 @@ directory account the PAM stack can authenticate. The suite's
 - `iam-ian` (iam-team)
 - `intf-isaac` (intf-ops)
 - `dev-dora` (device-team)
+- `svc-sam` (service-team — service-dimension L5 scenario)
 - `mallory` (no group — used for denial-path tests)
 - `root` (super_user — bypasses every check)
 
-Create them:
+Create them via the bundled script — every account gets
+`/usr/sbin/nologin` as its shell so the test users can never log in
+interactively; PAM-authentication targets only.
 
 ```sh
-for u in alice dave bob charlie arch-anna iam-ian intf-isaac dev-dora mallory; do
-    sudo useradd -m -s /usr/sbin/nologin "$u"
-done
-# pam_permit ignores passwords, so any string works
+sudo sh newtrun/suites/1node-vs-auth/create-test-users.sh
 ```
+
+The script is idempotent — if a user already exists with `nologin`
+or `/bin/false` it leaves the account alone; an existing account
+with any other shell is reported but never modified.
 
 If using `pam_unix` instead of `pam_permit`, set a known password on
 each account and pass it to `login-all.sh` via
