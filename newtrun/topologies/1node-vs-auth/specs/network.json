@@ -27,7 +27,7 @@
     "vlan.delete":    ["ops"],
     "vrf.create": [
       { "groups": ["ops"] },
-      { "groups": ["service-team"], "where": { "service": "transit-*" } }
+      { "groups": ["service-team"], "where": { "service": "TRANSIT_*" } }
     ],
     "vrf.bind":       ["ops"],
     "vrf.route":      ["ops"],
@@ -46,17 +46,18 @@
     "evpn.macvpn":    ["ops"],
     "interface.modify": ["spec-team", "ops"],
     "service.apply": [
-      { "groups": ["spec-team"],    "where": { "resource": "transit-*" } },
-      { "groups": ["ops"],          "where": { "resource": "vpn-*" } },
-      { "groups": ["service-team"], "where": { "service":  "transit-*" } }
+      { "groups": ["spec-team"],    "where": { "resource": "TRANSIT_*" } },
+      { "groups": ["ops"],          "where": { "resource": "VPN_*" } },
+      { "groups": ["service-team"], "where": { "service":  "TRANSIT_*" } }
     ],
     "service.remove": [
       { "groups": ["spec-team", "ops"] },
-      { "groups": ["service-team"], "where": { "service": "transit-*" } }
+      { "groups": ["service-team"], "where": { "service": "TRANSIT_*" } }
     ],
     "device.write": [
       { "groups": ["spec-team", "ops"] },
-      { "groups": ["device-team"], "where": { "device": "switch1" } }
+      { "groups": ["device-team"],  "where": { "device": "switch1" } },
+      { "groups": ["service-team"], "where": { "device": "switch1" } }
     ]
   },
   "zones": {
