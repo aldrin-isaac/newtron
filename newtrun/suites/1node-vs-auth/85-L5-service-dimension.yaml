@@ -1,0 +1,69 @@
+name: L5-service-dimension-svc-sam
+description: |
+  auth-design.md L5: a permission grant with where: { service: "X-*" }
+  matches when Context.Service glob-matches. The 80-L5-dimensions
+  sibling covers field, interface, device; 40-L5-resource-scoping
+  covers resource; the service dimension was filed but unexercised
+  until now. This scenario closes that gap.
+
+  The `service` dimension is reachable only for permissions whose
+  gate stamps Context.Service — which today is exclusively
+  Interface.gateService (ApplyService / RemoveService / RefreshService).
+  All other gate sites (Node.gate, Interface.gate) leave Context.Service
+  empty. The 80-L5-dimensions scenarios are silent on this; this file
+  pins both sides:
+
+    1. Positive: svc-sam in service-team granted service.apply with
+       where:{service: "transit-*"} can apply transit-1 (gateService
+       stamps Context.Service="transit-1", matches transit-*).
+    2. Negative — match-fails: svc-sam applying vpn-east is denied
+       (Context.Service="vpn-east" does not match transit-*). Same
+       fail-mode the 40-L5-resource-scoping alice scenario relies on:
+       the gate fires before service-spec lookup, so the response
+       is 403 even though vpn-east is also not a registered service.
+    3. Negative — dimension-unreachable: svc-sam is granted vrf.create
+       with where:{service: "transit-*"} too. vrf.create's gate is
+       Node.gate, which does not stamp Context.Service — so the
+       where clause has nothing to match against and the grant is
+       inert. svc-sam tries create-vrf and is denied even though the
+       intent appears to allow it. This pins the fail-closed property
+       of the `service` dimension for non-service-bound operations.
+
+requires: [L4-vrf-families-alice-cleanup]
+as: svc-sam
+
+steps:
+  # POSITIVE — Context.Service matches the where glob.
+  - name: svc-sam-apply-transit-allowed
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
+    params:
+      service: transit-1
+      ip_address: 10.85.0.0/31
+      peer_as: 65085
+
+  - name: svc-sam-cleanup-transit
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/remove-service?mode=topology
+
+  # NEGATIVE — match-fails. The where clause scopes service: transit-*
+  # so vpn-east doesn't match. Gate fires before service-spec lookup.
+  - name: svc-sam-apply-vpn-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/interfaces/Ethernet0/apply-service?mode=topology
+    params: {service: vpn-east}
+    expect_failure: true
+
+  # NEGATIVE — dimension-unreachable. vrf.create uses Node.gate which
+  # does NOT stamp Context.Service, so the where:{service:"transit-*"}
+  # clause never matches — svc-sam denied even with a grant that names
+  # her group. Fail-closed.
+  - name: svc-sam-create-vrf-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vrf?mode=topology
+    params: {name: vrf-svc-sam}
+    expect_failure: true
