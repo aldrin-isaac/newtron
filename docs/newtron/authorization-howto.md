@@ -376,11 +376,43 @@ into `network.json` and the loader will accept it unchanged. See
 [api.md GET /authorization](api.md#get-newtronv1networksnetidauthorization)
 for the full type reference.
 
-The endpoint is intentionally ungated. It returns the same
-information shell access to `network.json` already gives, and the
-mutation surface that edits the table is itself gated on
-`spec.author` (with L5's `where: {field: "..."}` clauses scoping
-meta-authorization separately — §7 above).
+The endpoint is gated by `auth.read` under an **engage-when-configured**
+mechanism: if no `auth.read` entry exists in the loaded grant
+table, the endpoint stays ungated — preserves the zero-ceremony
+quickstart and any deployment that took the inspector for granted
+as readable. The moment an operator adds the first entry, the gate
+engages.
+
+```json
+"permissions": {
+  "auth.read": [
+    { "groups": ["iam-team", "audit-team"] },
+    { "groups": ["service-architects"],
+      "where": { "field": "!permissions,!user_groups,!super_users" } }
+  ]
+}
+```
+
+Why gate it at all: the response carries identity-policy material —
+which groups exist, who's in them, which permissions are scoped to
+which groups, what the where-clauses are. In a zero-trust
+deployment, this telegraphs to an attacker which targets to phish.
+For coarse-trust deployments where every authenticated identity is
+trusted to introspect, the default ungated behavior is correct;
+nothing changes.
+
+The `field` where-dimension composes the same way it does on
+`spec.author` (§7): scope `auth.read` to `!permissions` and a
+caller without the permissions-block grant is denied even though
+they're in a group. v1 is full-or-nothing: any `where` clause that
+doesn't match all three spec-fields the response carries
+(`super_users,user_groups,permissions`) denies. Partial redaction
+(returning `user_groups` without `permissions`) is filed as a v2
+follow-up.
+
+Super-users continue to bypass `auth.read` like every other
+permission — read the grant table from a super-user session if
+you're locked out and need to diagnose the gate.
 
 ## 9. Revoking access
 

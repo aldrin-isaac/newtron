@@ -915,6 +915,51 @@ operational scope (which devices/services) and authority scope (who
 can grant). Least-privilege is expressible without forking spec
 files per role.
 
+#### `auth.read` — gating the grant-table inspector
+
+L5's meta-authorization gates *writes* to the `permissions` /
+`user_groups` / `super_users` fields via `spec.author` + the `field`
+where-dimension. The *read* side — `GET /authorization`, the live
+inspector endpoint added in #150 — was shipped ungated. Any
+authenticated identity could fetch the full grant table, which is
+identity-policy disclosure: knowing alice has `service.apply`
+scoped to `TRANSIT_*` tells an attacker which targets to phish for.
+
+`auth.read` is the read-side counterpart, with an
+**engage-when-configured** mechanism: if no `auth.read` entry
+exists in the loaded grant table, the endpoint stays ungated
+(preserves the zero-ceremony quickstart and existing deployments
+that took the endpoint for granted). The moment an operator adds
+the first entry, the gate engages and fail-closes on any caller
+not matched by a grant.
+
+```json
+"permissions": {
+  "auth.read": [
+    { "groups": ["iam-team", "audit-team"] },
+    { "groups": ["service-architects"],
+      "where": { "field": "!permissions,!user_groups,!super_users" } }
+  ]
+}
+```
+
+The `field` where-dimension composes with the same fields the
+spec.author meta-auth pattern uses, so an operator who's already
+scoped writes (architects can't edit grants) can scope reads the
+same way (architects can't read the permissions block either).
+v1 is full-or-nothing — if the where clause doesn't cover all
+three fields the gate fails. v2 (partial redaction — return
+`{user_groups, super_users}` with `permissions` stripped) is
+filed as a follow-up if demand surfaces.
+
+Super-users continue to bypass `auth.read` like every other
+permission via `auth.Checker.isSuperUser`. The bootstrap path
+remains "edit `network.json` on disk and restart"; once running,
+only configured grantees can read OR write the grant table.
+
+**Verified by** the 1node-vs-auth suite's `90-L4-auth-read-gated`
+scenarios (mallory denied, iam-ian granted, root super-bypass).
+
 ### L6 — Operational Hardening (Revocation + Audit Log Integrity)
 
 **Goal.** Two operational properties that production deployments

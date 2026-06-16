@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -198,6 +199,93 @@ func TestGetAuthorization_WireForm_ShorthandVsTyped(t *testing.T) {
 	}
 	if _, ok := typedEntries[0]["where"]; !ok {
 		t.Errorf("typed entry missing 'where' (this is the whole point of the typed form); raw: %s", typed)
+	}
+}
+
+// TestGetAuthorization_EngageWhenConfigured_Fallback pins the
+// auth.read engage-when-configured contract:
+//
+//	1) --enforce-authorization=true ON
+//	2) network.json has NO auth.read entry
+//	3) Caller is mallory (no group, would be denied by any actual
+//	   gate)
+//
+// The endpoint MUST still return 200 — the gate is in fallback mode
+// because no operator has opted in. This preserves the
+// zero-ceremony quickstart and existing deployments that took GET
+// /authorization for granted as readable.
+func TestGetAuthorization_EngageWhenConfigured_Fallback(t *testing.T) {
+	specDir := scaffoldWithPermissions(t)
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/authorization", nil)
+	req.Header.Set("X-Newtron-Caller", "mallory")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200 (no auth.read entry → fallback ungated); body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetAuthorization_EngageWhenConfigured_GateEngagesAndDenies
+// pins the engaged-by-opt-in half of the contract. Same scaffold as
+// above but the network.json carries an auth.read entry granting
+// only "iam-team". mallory (no group) MUST 403; iam-ian (in
+// iam-team) MUST 200; root (super_user) MUST 200 — super-users
+// bypass auth.read like every other permission.
+func TestGetAuthorization_EngageWhenConfigured_GateEngagesAndDenies(t *testing.T) {
+	dir := t.TempDir()
+	if err := spec.Scaffold(dir, "auth.read gate fires"); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	// Rewrite network.json with an auth.read entry.
+	netJSON := `{
+  "version": "1.0",
+  "super_users": ["root"],
+  "user_groups": {"iam-team": ["iam-ian"]},
+  "permissions": {
+    "auth.read": ["iam-team"]
+  },
+  "zones": {"amer": {}},
+  "services": {}
+}`
+	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+	})
+	if err := s.RegisterNetwork("default", dir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	cases := []struct {
+		caller   string
+		wantCode int
+		why      string
+	}{
+		{"mallory", http.StatusForbidden, "no group → no auth.read grant matches"},
+		{"iam-ian", http.StatusOK, "iam-team granted auth.read"},
+		{"root", http.StatusOK, "super_user bypass"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/authorization", nil)
+		req.Header.Set("X-Newtron-Caller", tc.caller)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+		if w.Code != tc.wantCode {
+			t.Errorf("[%s] %s: got %d, want %d; body: %s", tc.caller, tc.why, w.Code, tc.wantCode, w.Body.String())
+		}
 	}
 }
 

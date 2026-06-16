@@ -238,6 +238,7 @@ func TestAPICompleteness(t *testing.T) {
 			"BuildTopologyNode":      "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"InitFromDeviceIntent":   "intent mode initialization — invoked by NodeActor.ensureActuatedIntent",
 			"SaveDeviceIntents":      "intent save — invoked by handleSave via nodeActor.execute",
+			"CheckAuthReadGate":      "auth gate helper invoked by handleGetAuthorization for the engage-when-configured PermAuthRead check (#187); not a request-handled action",
 		},
 		"Node": {
 			"BindsService":         "internal helper for /service/{name}/projection — pre-check before ServiceProjection",

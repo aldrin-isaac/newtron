@@ -1,0 +1,64 @@
+name: L4-auth-read-gated-mallory
+description: |
+  auth-design.md "auth.read": the grant-table inspector endpoint
+  GET /authorization is engage-when-configured. With an auth.read
+  entry in the grant table, mallory (no group) is denied. The same
+  scenario also confirms the gate fires BEFORE the response is
+  rendered — the 403 carries no bytes from the table.
+
+  Why this matters: pre-#187 the endpoint was ungated and any
+  authenticated identity could read the full grant table — identity-
+  policy disclosure. This scenario pins the engaged half of the
+  contract on the live --enforce-authorization server. The unengaged
+  half (no auth.read entry → fallback 200) is exercised implicitly
+  by every other scenario in this suite that hits /authorization
+  for inspection.
+
+requires: [L5-service-dimension-svc-sam]
+as: mallory
+
+steps:
+  - name: mallory-read-authorization-denied
+    action: newtron
+    method: GET
+    url: /authorization
+    expect_failure: true
+
+---
+name: L4-auth-read-gated-iam-ian
+description: |
+  iam-ian (iam-team) is granted auth.read; the read returns the
+  live grant table. Pins the granted-half of the engage-when-
+  configured contract. The jq assertion confirms the response
+  carries the auth.read entry that landed in network.json — the
+  same byte stream an operator would see hand-editing the file
+  (DPN §46).
+
+requires: [L4-auth-read-gated-mallory]
+as: iam-ian
+
+steps:
+  - name: iam-ian-read-authorization-allowed
+    action: newtron
+    method: GET
+    url: /authorization
+    expect:
+      jq: '.permissions["auth.read"] != null'
+
+---
+name: L4-auth-read-gated-root
+description: |
+  root (super_user) bypasses auth.read like every other permission.
+  Pins the super-user bypass on this gate so a future change to
+  auth.Checker.isSuperUser semantics doesn't silently regress.
+
+requires: [L4-auth-read-gated-iam-ian]
+as: root
+
+steps:
+  - name: root-read-authorization-allowed
+    action: newtron
+    method: GET
+    url: /authorization
+    expect:
+      jq: '.permissions["auth.read"] != null'

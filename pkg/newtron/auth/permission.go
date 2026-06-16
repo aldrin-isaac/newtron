@@ -72,6 +72,27 @@ const (
 
 	PermFilterCreate Permission = "filter.create"
 	PermFilterDelete Permission = "filter.delete"
+
+	// PermAuthRead gates GET /authorization (the live grant table
+	// inspector). The endpoint engages this gate "when configured" —
+	// if the loaded grant table has no auth.read entry, the gate
+	// falls back to allow so existing deployments and the
+	// zero-ceremony quickstart keep working without an explicit
+	// grant. Once an auth.read entry is added, the gate engages
+	// normally and the table fail-closes on any caller not
+	// matched by a grant.
+	//
+	// The field where-dimension scopes which spec-fields the caller
+	// may read; the gate stamps Context.Field with
+	// "super_users,user_groups,permissions" so a clause like
+	// {"field": "!permissions"} can deny a partial-read attempt.
+	// v1 is full-or-nothing — the entire endpoint either returns the
+	// full table or 403's. Partial redaction (returning user_groups
+	// without permissions) is filed as a v2 follow-up.
+	//
+	// Super-users bypass auth.read just like every other permission
+	// (auth.Checker.isSuperUser).
+	PermAuthRead Permission = "auth.read"
 )
 
 // Context carries the per-decision inputs Checker.Check consumes.
