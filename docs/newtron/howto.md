@@ -492,6 +492,42 @@ All specs from all levels are visible. If the same name exists at multiple level
 }
 ```
 
+#### Generating a PlatformSpec from a SONiC `platform.json`
+
+`newtron platform generate <path-to-sonic-platform.json>` reads the SONiC
+device-tree `platform.json` (typically at
+`/usr/share/sonic/device/<vendor>-<platform>/platform.json` on a real switch)
+and emits the newtron `PlatformSpec` shape above.
+
+The translator derives `port_count`, `default_speed` (the highest-rate 1xN
+mode across every port's `breakout_modes` — the "headline" speed each port
+runs at without a breakout split), and `breakouts` (sorted union of every
+mode key). HWSKU is required via `--hwsku` because SONiC `platform.json`
+doesn't carry it (HWSKU lives in the sibling `<hwsku>/` directory under the
+device tree).
+
+```sh
+# emit to stdout — paste into platforms.json or POST to /create-platform
+newtron platform generate /usr/share/sonic/device/x86_64-dellemc_z9332f_d1508-r0/platform.json \
+    --name dell-z9332f-32x400g --hwsku DellEMC-Z9332f-O32 \
+    --description "Dell Z9332F-ON 32x400G"
+
+# write/merge into an existing platforms.json (atomic temp+rename)
+newtron platform generate platform.json \
+    --name dell-z9332f-32x400g --hwsku DellEMC-Z9332f-O32 \
+    --output specs/platforms.json
+```
+
+What the generator does NOT derive (you fill these in after generation):
+
+- `vm_image`, `vm_memory`, `vm_cpus`, `vm_credentials`, and the other VM/lab
+  fields. Real-hardware platforms omit them entirely. Simulator platforms
+  (`sonic-vs`, `ciscovs`) need them, but the values come from per-image
+  conventions, not from `platform.json`.
+- `dataplane` (use `--dataplane` if you want it set during generation).
+- `unsupported_features` — a runtime-discovered property; populate it from
+  suite outcomes when a feature reliably fails on the target.
+
 ### 3.6 Topology Specification (Optional)
 
 When present, enables automated provisioning via `intent reconcile --topology`:

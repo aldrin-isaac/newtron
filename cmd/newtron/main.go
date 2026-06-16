@@ -415,6 +415,19 @@ func isSettingsOrHelp(cmd *cobra.Command) bool {
 			return true
 		}
 	}
+	// Per-subcommand offline opt-outs: subcommands of noun groups
+	// that ARE offline even though their parent noun-group has
+	// online siblings. `platform generate` (#185) parses a SONiC
+	// platform.json and writes to stdout / disk — no server,
+	// no session needed. `platform list` and `platform show`
+	// still hit newtron-server, so the parent platform noun
+	// CANNOT be added to the top-level skip-list.
+	if cmd.Parent() != nil && cmd.Parent().Name() == "platform" {
+		switch cmd.Name() {
+		case "generate":
+			return true
+		}
+	}
 	return false
 }
 
