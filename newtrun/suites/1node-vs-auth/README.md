@@ -61,7 +61,7 @@ The `interface` and `device` dimensions don't require this — `Ethernet0` and `
 
 ## Validation
 
-Last full-suite run: **29 PASS / 0 FAIL / 1 SKIP** on 2026-06-15. The SKIP is L2c-round-trip (by design — the `alice_basic_auth` parameter is empty unless an operator supplies it).
+Last full-suite run: **29 PASS / 0 FAIL / 1 SKIP** on 2026-06-16. The SKIP is L2c-round-trip (by design — the `alice_basic_auth` parameter is empty unless an operator supplies it).
 
 Reproducing the run:
 
@@ -69,7 +69,9 @@ Reproducing the run:
 # 1. one-time host setup
 sudo sh newtrun/suites/1node-vs-auth/create-test-users.sh
 
-# 2. boot newt-server with the full auth flag set
+# 2. boot the combined newt-server with the full auth flag set.
+#    PATH must include ./bin so the L6 newtron-cli step (which exec's
+#    `newtron audit verify ...`) finds the binary.
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
     --spec-dir newtrun/topologies/1node-vs-auth/specs \
     --net-id 1node-vs-auth \
@@ -82,30 +84,16 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
 # 3. cache one session per user
 sh newtrun/suites/1node-vs-auth/login-all.sh
 
-# 4. boot newtrun-server (PATH must include ./bin so the L6
-#    newtron-cli step can exec the `newtron` binary)
-PATH="$(pwd)/bin:$PATH" bin/newtrun-server \
-    --newtlab-server http://127.0.0.1:18080 &
-
-# 5. submit the run with root's Bearer + every cached session
-#    (bin/newtrun start doesn't forward Bearer to newtrun-server today
-#    — that's a separate gap; submit via curl instead)
-ROOT_KEY=$(jq -r .key ~/.newtron/sessions/root@127.0.0.1_18080.json)
-SESSIONS=$(jq -s 'map({key:.user, value:.key}) | from_entries' \
-    ~/.newtron/sessions/*@127.0.0.1_18080.json)
-curl -X POST http://127.0.0.1:19081/newtrun/v1/runs \
-    -H "Authorization: Bearer $ROOT_KEY" \
-    -H "Content-Type: application/json" \
-    --data "$(jq -n --argjson sessions "$SESSIONS" '{
-        suite: "1node-vs-auth", all: true, no_deploy: true,
-        newtron_server: "http://127.0.0.1:18080",
-        network_id: "1node-vs-auth",
-        user_sessions: $sessions
-    }')"
-
-# 6. watch progress
-curl -s http://127.0.0.1:19081/newtrun/v1/runs/1node-vs-auth | jq '.data.scenarios[] | {name, status}'
+# 4. submit the run. NEWTRON_USER=root selects root's cached session
+#    as the operator identity; the CLI forwards that Bearer to newt-server
+#    (#184). Every other identity (alice, bob, mallory, svc-sam, ...) is
+#    picked up automatically — bin/newtrun start packs every cached
+#    session into UserSessions so each scenario's `as: <user>` lands on
+#    the matching Bearer.
+NEWTRON_USER=root bin/newtrun start 1node-vs-auth --no-deploy --network-id 1node-vs-auth
 ```
+
+The whole reproducer fits in 3 commands plus the one-time user-account setup. Standalone `newtrun-server` is no longer needed — the combined `newt-server` serves the newtrun engine on the same port (18080) and gates it under the same auth.
 
 ## Operator setup
 

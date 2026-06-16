@@ -8,6 +8,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
+	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/client"
 )
@@ -15,8 +16,15 @@ import (
 // newClient constructs a newtrun-server client from the persistent
 // --newtrun-server flag, the NEWTRUN_SERVER environment variable, and the
 // default. The flag wins over the env var; the env var wins over the default.
+//
 // TLS posture follows the shared NEWTRON_TLS_CERT/KEY/CA env vars —
 // see [httputil.LoadClientTLSConfigFromEnv].
+//
+// Operator identity is forwarded as Bearer Authorization when a cached
+// session is found via [client.LoadCLISession] (resolved against --user /
+// NEWTRON_USER per the multi-user cache contract). Empty key when no
+// session is cached → WithBearer is a no-op, preserving the unenforced
+// quickstart path (#184).
 func newClient() *client.Client {
 	url := newtrunServerFlag
 	if url == "" {
@@ -27,7 +35,22 @@ func newClient() *client.Client {
 		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
 		os.Exit(1)
 	}
-	return client.New(url, client.WithTLS(tlsCfg))
+	// Resolve the operator's cached session (if any). Same path the
+	// newtron / newtlab CLIs and cmd/newtrun/cmd_topologies.go use. An
+	// empty key reduces WithBearer to a no-op, which is the right
+	// behavior for the no-auth quickstart.
+	resolveURL := url
+	if resolveURL == "" {
+		resolveURL = client.DefaultBaseURL
+	}
+	var bearerKey string
+	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), resolveURL); err == nil && rec != nil {
+		bearerKey = rec.Key
+	}
+	// Order matters: WithTLS before WithBearer so the bearer
+	// round-tripper wraps the TLS transport rather than being
+	// clobbered by it. See client.WithTLS docstring.
+	return client.New(url, client.WithTLS(tlsCfg), client.WithBearer(bearerKey))
 }
 
 // newtlabURL resolves the URL for newtlab-server's HTTP surface from
