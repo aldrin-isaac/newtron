@@ -528,6 +528,20 @@ What the generator does NOT derive (you fill these in after generation):
 - `unsupported_features` — a runtime-discovered property; populate it from
   suite outcomes when a feature reliably fails on the target.
 
+The generator targets SONiC's modern `platform.json` convention (an
+`interfaces` map with `breakout_modes` per port). An empirical run against
+12 representative `platform.json` files from `sonic-net/sonic-buildimage`
+landed at 8/12 successful — every Mellanox SN-series, the newer Dell Z-series
+(Z9100, Z9332f), Arista 7050CX3/7060X6, and Celestica DX010 handled cleanly.
+
+Four older platforms (Dell S6100, Dell Z9664f, Arista 7280CR3, Nokia 7250)
+ship `platform.json` with an empty `interfaces` map — they use SONiC's
+older per-HWSKU convention where per-port info lives in
+`<hwsku>/port_config.ini` (sibling to `platform.json`). The generator
+detects this case and emits an actionable error pointing at the
+`port_config.ini` location. `port_config.ini` parsing itself is filed
+as issue #190.
+
 ### 3.6 Topology Specification (Optional)
 
 When present, enables automated provisioning via `intent reconcile --topology`:

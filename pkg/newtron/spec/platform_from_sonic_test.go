@@ -37,6 +37,15 @@ func TestParseModeSpeed(t *testing.T) {
 		// Forms not in the in-repo fixtures but valid SONiC convention.
 		{"1x40G", "40G", 40000, true},
 		{"1x800G[400G]", "800G", 800000, true},
+		// 4x25G(4)[10G,1G] — parens-before-brackets, observed in
+		// the wild on mellanox-sn4700 (PR #189 follow-up real
+		// platform run). The regex captures `4x25G` and ignores
+		// everything after the suffix; this case pins that
+		// behavior so a future regex change can't silently
+		// regress on the grammar variant.
+		{"4x25G(4)[10G,1G]", "25G", 25000, true},
+		// 8x100G — observed on arista-7060x6 (8-way breakouts).
+		{"8x100G", "100G", 100000, true},
 		// Adversarial — strings the parser MUST reject so callers
 		// can skip-rather-than-misinterpret. Each case documents
 		// what reality would look like if the parser silently
@@ -181,10 +190,16 @@ func TestFromSONiCPlatformJSON_Errors(t *testing.T) {
 			wantSnip: "no \"interfaces\" entries",
 		},
 		{
-			name:     "empty-interfaces",
+			// Empty interfaces map is the older per-HWSKU
+			// port_config.ini convention (issue #190). The
+			// error MUST distinguish this case from the
+			// missing-key case so the operator knows to look
+			// at port_config.ini rather than thinking the
+			// platform is unparseable.
+			name:     "empty-interfaces-points-at-port-config-ini",
 			data:     []byte(`{"interfaces": {}}`),
 			opts:     SONiCImportOptions{HWSKU: "x"},
-			wantSnip: "no \"interfaces\" entries",
+			wantSnip: "port_config.ini",
 		},
 		{
 			name:     "no-1xn-mode",

@@ -86,11 +86,29 @@ func FromSONiCPlatformJSON(data []byte, opts SONiCImportOptions) (*PlatformSpec,
 	if opts.HWSKU == "" {
 		return nil, fmt.Errorf("HWSKU is required (not carried in platform.json; supply via SONiCImportOptions.HWSKU)")
 	}
+	// Two-pass decode so the empty-map vs missing-key cases can
+	// be distinguished. SONiC's older per-HWSKU port_config.ini
+	// convention (see issue #190) is recognized by an empty
+	// interfaces map at the top level; the error message points
+	// the operator at the fallback path rather than reading as a
+	// generic "no entries."
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("parsing SONiC platform.json: %w", err)
+	}
+	rawIfaces, hasInterfacesKey := probe["interfaces"]
 	var raw sonicPlatformFile
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parsing SONiC platform.json: %w", err)
 	}
 	if len(raw.Interfaces) == 0 {
+		if hasInterfacesKey && isEmptyJSONMap(rawIfaces) {
+			return nil, fmt.Errorf("SONiC platform.json: \"interfaces\" map is present but empty. " +
+				"This platform likely uses SONiC's older per-HWSKU convention — " +
+				"per-port info lives in <hwsku>/port_config.ini under the device tree " +
+				"(sibling to platform.json), not in platform.json. " +
+				"port_config.ini parsing is filed as issue #190 (newtron platform generate follow-up)")
+		}
 		return nil, fmt.Errorf("SONiC platform.json: no \"interfaces\" entries (expected one per front-panel port)")
 	}
 	defaultSpeed, err := deriveHeadlineSpeed(raw.Interfaces)
@@ -186,6 +204,34 @@ func deriveHeadlineSpeed(interfaces map[string]sonicInterface) (string, error) {
 		return "", fmt.Errorf("no parseable 1xN mode in any port's breakout_modes (translator expects at least one non-breakout mode for the headline-speed derivation)")
 	}
 	return bestCanonical, nil
+}
+
+// isEmptyJSONMap reports whether raw is the JSON literal `{}` (with
+// optional whitespace). Used by FromSONiCPlatformJSON to recognize
+// the older per-HWSKU port_config.ini convention where platform.json
+// ships an empty interfaces map and per-port info lives elsewhere
+// (issue #190).
+func isEmptyJSONMap(raw json.RawMessage) bool {
+	for _, b := range raw {
+		if b == ' ' || b == '\t' || b == '\n' || b == '\r' {
+			continue
+		}
+		if b != '{' && b != '}' {
+			return false
+		}
+	}
+	// We've seen only `{`, `}`, and whitespace — verify exactly
+	// one open and one close brace.
+	open, close := 0, 0
+	for _, b := range raw {
+		if b == '{' {
+			open++
+		}
+		if b == '}' {
+			close++
+		}
+	}
+	return open == 1 && close == 1
 }
 
 // unionBreakouts returns the sorted set of breakout_modes keys
