@@ -72,6 +72,29 @@ func (c *Checker) isSuperUser(username string) bool {
 	return slices.Contains(c.network.SuperUsers, username)
 }
 
+// HasPermissionEntry reports whether the loaded grant table has any
+// entry (legacy shorthand or typed) for permission. Used by
+// engage-when-configured gates that want to fall back to legacy
+// allow-all behavior until an operator explicitly opts in by adding
+// the first grant entry. PermAuthRead is the load-bearing consumer:
+// reading the grant table stays ungated until the operator adds the
+// first auth.read grant, at which point the gate engages normally.
+//
+// Returns false when the network has no permissions map at all (a
+// minimal network.json) and when the permission's slice is present
+// but empty. Either way the gate's engage-when-configured semantics
+// fall back to allow.
+func (c *Checker) HasPermissionEntry(permission Permission) bool {
+	if c.network == nil || len(c.network.Permissions) == 0 {
+		return false
+	}
+	grants, ok := c.network.Permissions[string(permission)]
+	if !ok {
+		return false
+	}
+	return len(grants) > 0
+}
+
 func (c *Checker) checkGlobalPermission(username string, permission Permission, ctx *Context) bool {
 	return c.checkPermissionMap(username, permission, c.network.Permissions, ctx)
 }

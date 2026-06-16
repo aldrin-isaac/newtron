@@ -484,3 +484,28 @@ func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, a
 		inner:      err,
 	}
 }
+
+// checkPermissionIfConfigured is checkPermission with an
+// engage-when-configured fallback: if the loaded grant table has no
+// entry for perm, the gate falls through to allow. Once an operator
+// adds the first entry, the gate engages and behaves identically to
+// checkPermission.
+//
+// PermAuthRead is the load-bearing consumer: reading the grant
+// table stays ungated by default (preserving the zero-ceremony
+// quickstart and existing deployments that took GET /authorization
+// for granted) until the operator opts in by adding the first
+// auth.read grant.
+//
+// Disabled enforcement (auth == nil) short-circuits earlier than the
+// configured-check, mirroring checkPermission. Super-users always
+// bypass through auth.Checker.isSuperUser, which fires inside Check.
+func (net *Network) checkPermissionIfConfigured(ctx context.Context, perm auth.Permission, authCtx *auth.Context) error {
+	if net.auth == nil {
+		return nil
+	}
+	if !net.auth.HasPermissionEntry(perm) {
+		return nil
+	}
+	return net.checkPermission(ctx, perm, authCtx)
+}

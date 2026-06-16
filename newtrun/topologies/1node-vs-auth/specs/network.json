@@ -45,6 +45,7 @@
     "evpn.peer":      ["ops"],
     "evpn.macvpn":    ["ops"],
     "interface.modify": ["spec-team", "ops"],
+    "auth.read":         ["iam-team"],
     "service.apply": [
       { "groups": ["spec-team"],    "where": { "resource": "TRANSIT_*" } },
       { "groups": ["ops"],          "where": { "resource": "VPN_*" } },

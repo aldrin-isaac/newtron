@@ -12,6 +12,12 @@
 // catalog the runtime checker enforces.
 package newtron
 
+import (
+	"context"
+
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
+)
+
 // GetAuthorization returns the network's authorization table as the
 // API view AuthorizationDetail. One round trip; no per-permission
 // further reads required.
@@ -22,4 +28,16 @@ func (net *Network) GetAuthorization() *AuthorizationDetail {
 		Permissions: a.Permissions,
 		SuperUsers:  a.SuperUsers,
 	}
+}
+
+// CheckAuthReadGate engages the PermAuthRead gate under the
+// engage-when-configured pattern: returns nil when no auth.read
+// entry exists in the grant table (preserves the legacy ungated
+// behavior the endpoint shipped with), otherwise runs the standard
+// gate. Used by the HTTP handler for GET /authorization. authCtx's
+// Field should be pre-populated with the spec-fields the response
+// carries (super_users,user_groups,permissions) so a where:{field}
+// clause can scope.
+func (net *Network) CheckAuthReadGate(ctx context.Context, authCtx *auth.Context) error {
+	return net.checkPermissionIfConfigured(ctx, auth.PermAuthRead, authCtx)
 }
