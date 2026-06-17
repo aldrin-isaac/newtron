@@ -16,7 +16,7 @@ var settingsCmd = &cobra.Command{
 
 Settings provide defaults for context flags:
   - default_network: Used when -n is not specified
-  - spec_dir:        Specification directory
+  - dir:        Specification directory
 
 Examples:
   newtron settings show
@@ -46,7 +46,7 @@ var settingsShowCmd = &cobra.Command{
 		}
 
 		printSetting("default_network", s.DefaultNetwork)
-		printSetting("spec_dir", s.SpecDir)
+		printSetting("dir", s.Dir)
 		printSetting("default_suite", s.DefaultSuite)
 		printSetting("networks_dir", s.NetworksDir)
 		printSetting("server", s.ServerURL)
@@ -89,8 +89,8 @@ Examples:
 		case "network":
 			s.DefaultNetwork = value
 			fmt.Printf("Default network set to: %s\n", value)
-		case "specs", "spec_dir":
-			s.SpecDir = value
+		case "dir":
+			s.Dir = value
 			fmt.Printf("Specification directory set to: %s\n", value)
 		case "suite", "default_suite":
 			s.DefaultSuite = value
@@ -105,7 +105,7 @@ Examples:
 			s.NetworkID = value
 			fmt.Printf("Network ID set to: %s\n", value)
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, networks_dir, server, network_id)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, dir, suite, networks_dir, server, network_id)", setting)
 		}
 
 		if err := newtron.SaveSettings(s); err != nil {
@@ -132,8 +132,8 @@ var settingsGetCmd = &cobra.Command{
 		switch setting {
 		case "network":
 			value = s.DefaultNetwork
-		case "specs", "spec_dir":
-			value = s.SpecDir
+		case "dir":
+			value = s.Dir
 		case "suite", "default_suite":
 			value = s.DefaultSuite
 		case "networks_dir":
@@ -143,7 +143,7 @@ var settingsGetCmd = &cobra.Command{
 		case "network_id":
 			value = s.NetworkID
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, networks_dir, server, network_id)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, dir, suite, networks_dir, server, network_id)", setting)
 		}
 
 		if value == "" {

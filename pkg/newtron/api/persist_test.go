@@ -25,7 +25,7 @@ func httpPostJSON(t *testing.T, s *Server, path string, body any) *httptest.Resp
 	return w
 }
 
-// loadTopologyJSON reads topology.json from a spec dir and parses the steps
+// loadTopologyJSON reads topology.json from a network dir and parses the steps
 // for one device. Returns the count of steps that match the given URL — the
 // hook test asserts on this rather than on a full equality check so an
 // unrelated step ordering change in 1node-vs doesn't break the test.
@@ -69,7 +69,7 @@ func stepURLCount(steps []any, url string) int {
 }
 
 // newPersistTestServer mirrors newTestServer but registers the network from
-// a writable copy of the spec dir so persist=topology can actually rewrite
+// a writable copy of the network dir so persist=topology can actually rewrite
 // topology.json without polluting the lab spec.
 func newPersistTestServer(t *testing.T) (*Server, string) {
 	t.Helper()

@@ -14,7 +14,7 @@ import (
 )
 
 // scaffoldNetwork registers a fresh network with the given id at a
-// scaffolded spec dir. Returns the server. Used by the #152 update-X
+// scaffolded network dir. Returns the server. Used by the #152 update-X
 // round-trip tests below — each test creates an entry, updates a
 // field, and reads it back through the HTTP surface.
 func scaffoldNetwork(t *testing.T, netID string) *Server {

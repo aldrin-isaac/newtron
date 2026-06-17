@@ -12,7 +12,7 @@ import (
 type LabState struct {
 	Name       string                  `json:"name"`
 	Created    time.Time               `json:"created"`
-	SpecDir    string                  `json:"spec_dir"`
+	Dir    string                  `json:"dir"`
 	SSHKeyPath string                  `json:"ssh_key_path,omitempty"` // path to lab Ed25519 private key
 	Nodes      map[string]*NodeState   `json:"nodes"`
 	Links      []*LinkState            `json:"links"`

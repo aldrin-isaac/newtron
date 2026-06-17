@@ -61,7 +61,7 @@ func (r *loopbackPortResolver) SSHPort(ctx context.Context, topology, device str
 // operations only — never across HTTP. So the cycle structurally cannot
 // form.
 //
-// Uses the 2node-vs topology (the smallest spec dir with a host device).
+// Uses the 2node-vs topology (the smallest network dir with a host device).
 // If anyone reintroduces a lock-held-across-loopback in the API layer,
 // this test fails on the 5-second deadline.
 func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {

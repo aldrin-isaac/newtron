@@ -12,7 +12,7 @@ func LoadSettings() (*UserSettings, error) {
 	}
 	return &UserSettings{
 		DefaultNetwork:  s.DefaultNetwork,
-		SpecDir:         s.SpecDir,
+		Dir:         s.Dir,
 		DefaultSuite:    s.DefaultSuite,
 		NetworksDir:   s.NetworksDir,
 		AuditLogPath:    s.AuditLogPath,
@@ -27,7 +27,7 @@ func LoadSettings() (*UserSettings, error) {
 func SaveSettings(us *UserSettings) error {
 	s := &settings.Settings{
 		DefaultNetwork:  us.DefaultNetwork,
-		SpecDir:         us.SpecDir,
+		Dir:         us.Dir,
 		DefaultSuite:    us.DefaultSuite,
 		NetworksDir:   us.NetworksDir,
 		AuditLogPath:    us.AuditLogPath,

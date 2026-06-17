@@ -94,11 +94,11 @@ the search to a specific lab.
 
 // findNodeState searches all labs for a node by name.
 func findNodeState(nodeName string) (*newtlab.LabState, string, error) {
-	if specDir != "" {
+	if dir != "" {
 		// Derive lab name from path; load the existing state file
 		// directly (this is newtlab's own runtime state, not newtron's
 		// spec — no HTTP call needed).
-		absDir, err := filepath.Abs(specDir)
+		absDir, err := filepath.Abs(dir)
 		if err != nil {
 			return nil, "", err
 		}

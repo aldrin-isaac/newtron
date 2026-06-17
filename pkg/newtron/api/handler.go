@@ -251,7 +251,7 @@ func (s *Server) buildMux() http.Handler {
 // kinds carry typed Data:
 //
 //   - VerificationFailedError → WriteResult (Verification, DeviceOps, Changes)
-//   - alreadyRegisteredError → AlreadyRegisteredErrorInfo (existing spec_dir)
+//   - alreadyRegisteredError → AlreadyRegisteredErrorInfo (existing dir)
 //   - AuthorizationError → the AuthorizationError itself (Caller, Permission,
 //     Resource) per auth-design.md L3
 //
@@ -269,7 +269,7 @@ func writeError(w http.ResponseWriter, err error) {
 	if errors.As(err, &alreadyReg) {
 		envelope.Data = AlreadyRegisteredErrorInfo{
 			ID:              alreadyReg.id,
-			ExistingSpecDir: alreadyReg.existingSpecDir,
+			ExistingDir: alreadyReg.existingDir,
 		}
 	}
 	var authz *newtron.AuthorizationError

@@ -387,7 +387,7 @@ func TestSaveAndLoadState(t *testing.T) {
 
 	state := &LabState{
 		Name:    "test-lab",
-		SpecDir: "/tmp/specs",
+		Dir: "/tmp/specs",
 		Nodes: map[string]*NodeState{
 			"spine1": {PID: 1234, Status: "running", SSHPort: 40000, ConsolePort: 30000},
 		},
@@ -418,8 +418,8 @@ func TestSaveAndLoadState(t *testing.T) {
 	if loaded.Name != "test-lab" {
 		t.Errorf("Name = %q, want test-lab", loaded.Name)
 	}
-	if loaded.SpecDir != "/tmp/specs" {
-		t.Errorf("SpecDir = %q, want /tmp/specs", loaded.SpecDir)
+	if loaded.Dir != "/tmp/specs" {
+		t.Errorf("Dir = %q, want /tmp/specs", loaded.Dir)
 	}
 	if loaded.Nodes["spine1"].PID != 1234 {
 		t.Errorf("spine1 PID = %d, want 1234", loaded.Nodes["spine1"].PID)

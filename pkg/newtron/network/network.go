@@ -1481,7 +1481,7 @@ func (n *Network) GetProfile(name string) (*spec.DeviceProfile, error) {
 	return n.loadProfile(name)
 }
 
-// ListProfiles returns the names of all profile files in the profiles directory.
+// ListProfiles returns the names of all profile files in the nodes directory.
 func (n *Network) ListProfiles() []string {
 	return n.loader.ListProfiles()
 }
@@ -2072,7 +2072,7 @@ func (n *Network) isHostDeviceLocked(name string) bool {
 	return platform.IsHost()
 }
 
-// loadProfile loads a device profile from the profiles directory and
+// loadProfile loads a device profile from the nodes directory and
 // resolves any ${secret:KEY} references in its SSH credentials
 // (auth-design.md L0). The loader caches the in-memory profile, so
 // once resolution runs the cached value carries plaintext; later

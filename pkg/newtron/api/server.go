@@ -44,11 +44,11 @@ type Server struct {
 	// Nil disables resolver consultation (tests, real-hardware).
 	portResolver PortResolver
 
-	// scaffoldRoot is the on-disk root under which derived-spec_dir
+	// scaffoldRoot is the on-disk root under which derived-dir
 	// scaffolds land (#122). Set via the --scaffold-root flag on
 	// newtron-server / newt-server. Empty means "this server doesn't
 	// derive paths" — POST /newtron/v1/networks with scaffold=true and
-	// no spec_dir returns 400 in that mode. The derived layout is
+	// no dir returns 400 in that mode. The derived layout is
 	// filepath.Join(scaffoldRoot, id); collision handling matches the
 	// explicit-path case (existing spec.ErrAlreadyInitialized → 409).
 	//
@@ -83,7 +83,7 @@ type Server struct {
 
 	// watcher is the auth-design.md L6 revocation watcher. nil when
 	// cfg.SpecWatch is false. When set, RegisterNetwork adds the
-	// spec dir; UnregisterNetwork removes it; on settled spec-file
+	// network dir; UnregisterNetwork removes it; on settled spec-file
 	// changes the watcher calls back into ReloadNetwork.
 	watcher *netpkg.SpecWatcher
 }
@@ -114,9 +114,9 @@ type Config struct {
 	// (DESIGN_PRINCIPLES §33, §34).
 	PortResolver PortResolver
 
-	// ScaffoldRoot enables the derived-spec_dir mode of POST
+	// ScaffoldRoot enables the derived-dir mode of POST
 	// /newtron/v1/networks (issue #122). When set, requests with
-	// scaffold:true and no spec_dir scaffold into
+	// scaffold:true and no dir scaffold into
 	// filepath.Join(ScaffoldRoot, id). Empty keeps the explicit-
 	// path-only behavior — the derived mode then returns 400
 	// rather than guessing a default.
@@ -257,10 +257,10 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	defer s.mu.Unlock()
 
 	if existing, exists := s.networks[id]; exists {
-		return &alreadyRegisteredError{id: id, existingSpecDir: existing.specDir}
+		return &alreadyRegisteredError{id: id, existingDir: existing.specDir}
 	}
 
-	net, err := newtron.LoadNetwork(specDir, topologyName(specDir), s.portResolver, s.secretStore)
+	net, err := newtron.LoadNetwork(specDir, networkName(specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
@@ -329,7 +329,7 @@ func (s *Server) ReloadNetwork(id string) error {
 	entity.stop()
 
 	// Reload specs from disk
-	net, err := newtron.LoadNetwork(entity.specDir, topologyName(entity.specDir), s.portResolver, s.secretStore)
+	net, err := newtron.LoadNetwork(entity.specDir, networkName(entity.specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
 	}
@@ -367,7 +367,7 @@ func (s *Server) ListNetworks() []NetworkInfo {
 // getNetworkInfo returns NetworkInfo for the registered id, or nil
 // when no network is registered under that id. Used by the
 // register-network handler to return the canonical NetworkInfo on 201
-// (§46) so the client learns the resolved spec_dir even when the
+// (§46) so the client learns the resolved dir even when the
 // server picked it (#122).
 func (s *Server) getNetworkInfo(id string) *NetworkInfo {
 	s.mu.RLock()
@@ -386,21 +386,21 @@ func (s *Server) getNetworkInfo(id string) *NetworkInfo {
 func networkInfoFor(id string, entity *networkEntity) NetworkInfo {
 	return NetworkInfo{
 		ID:          id,
-		SpecDir:     entity.specDir,
+		Dir:     entity.specDir,
 		HasTopology: entity.net.HasTopology(),
-		Topology:    topologyName(entity.specDir),
+		Topology:    networkName(entity.specDir),
 		Nodes:       entity.net.ListNodes(),
 	}
 }
 
-// topologyName derives the network name from a spec directory path.
-// After the layout collapse, specDir IS the network root, so the name
+// networkName derives the network name from its directory path.
+// After the layout collapse, dir IS the network root, so the name
 // is its basename.
 // e.g. "networks/1node-vs" → "1node-vs"
-func topologyName(specDir string) string {
-	dir := filepath.Base(filepath.Clean(specDir))
-	if dir == "." || dir == "/" {
+func networkName(dir string) string {
+	base := filepath.Base(filepath.Clean(dir))
+	if base == "." || base == "/" {
 		return ""
 	}
-	return dir
+	return base
 }

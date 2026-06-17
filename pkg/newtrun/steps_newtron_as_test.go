@@ -154,7 +154,7 @@ func TestNewtronExecutor_NoAsForwardsOperatorBearer(t *testing.T) {
 		// the path the test is asserting about.
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`{"data":[{"id":"net-1","spec_dir":"/tmp","has_topology":false,"topology":"t","nodes":[]}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"net-1","dir":"/tmp","has_topology":false,"topology":"t","nodes":[]}]}`))
 			return
 		}
 		mu.Lock()

@@ -52,7 +52,7 @@ type App struct {
 
 	// Option flags
 	rootDir     string // -S flag: network root dir (contains specs/)
-	specDir     string // resolved: rootDir/specs or rootDir (flat layout)
+	dir         string // network directory (was rootDir/specs in old layout) (same as rootDir after layout collapse)
 	serverURL   string // --server flag
 	networkID   string // --network-id flag
 	executeMode bool
@@ -98,14 +98,6 @@ func isKnownCommand(name string) bool {
 		}
 	}
 	return name == "help" || name == "completion"
-}
-
-// resolveNetworkSpecDir returns the directory containing the network's
-// spec files. After the layout collapse (PR after #205), this IS just
-// the network's root dir — kept as a helper so call sites stay
-// symmetric.
-func resolveNetworkSpecDir(rootDir string) string {
-	return rootDir
 }
 
 var rootCmd = &cobra.Command{
@@ -158,11 +150,12 @@ Examples:
 
 		// Apply defaults from settings
 		if app.rootDir == "" {
-			app.rootDir = app.settings.GetSpecDir()
+			app.rootDir = app.settings.GetDir()
 		}
 
-		// Resolve spec dir from root dir (auto-detect nested vs flat layout)
-		app.specDir = resolveNetworkSpecDir(app.rootDir)
+		// Spec files live at the network root after the layout collapse;
+		// app.dir is the same string as rootDir.
+		app.dir = app.rootDir
 
 		// Set log level: quiet by default, verbose on -v
 		if app.verbose {
@@ -219,7 +212,7 @@ Examples:
 		} else if app.topology {
 			app.client.Mode = api.ModeTopology
 		}
-		if err := app.client.RegisterNetwork(app.specDir); err != nil {
+		if err := app.client.RegisterNetwork(app.dir); err != nil {
 			return fmt.Errorf("registering network with server: %w", err)
 		}
 
@@ -227,7 +220,7 @@ Examples:
 		// Failure on the default path (e.g., $HOME not writable in CI)
 		// is silent — only warn when the operator set an explicit path
 		// and it didn't work.
-		auditPath := app.settings.GetAuditLogPath(app.specDir)
+		auditPath := app.settings.GetAuditLogPath(app.dir)
 		if err := newtron.InitAuditLogger(auditPath, app.settings.GetAuditMaxSizeMB(), app.settings.GetAuditMaxBackups()); err != nil {
 			if app.settings.IsAuditLogPathExplicit() {
 				util.Logger.Warnf("Could not initialize audit logging at %s: %v", auditPath, err)
@@ -243,7 +236,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "D", "", "Device name")
 
 	// Option flags (global)
-	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network directory (contains network.json + topology.json + nodes/)")
+	rootCmd.PersistentFlags().StringVar(&app.rootDir, "dir", "", "Network directory (contains network.json + topology.json + nodes/)")
 	rootCmd.PersistentFlags().StringVar(&app.serverURL, "server", "", "newtron-server URL (default: http://localhost:18080, env: NEWTRON_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&app.networkID, "network-id", "N", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")

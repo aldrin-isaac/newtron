@@ -53,13 +53,13 @@ func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
 	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own spec files (network.json, topology.json, platforms.json, nodes/<name>.json) plus suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
-	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
+	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no dir lays out <root>/<id>")
 	auditLog := flag.String("audit-log", "", "file path for the mutation audit log; empty disables audit emission entirely (default). (auth-design.md L1)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution. (auth-design.md L0)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime for the newtron engine; denials surface as HTTP 403. Off (default) preserves pre-enforcement behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made. (auth-design.md L3)")
-	specWatch := flag.Bool("spec-watch", false, "watch every registered network's spec directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
+	specWatch := flag.Bool("spec-watch", false, "watch every registered network's network directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
 	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newt-server/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
@@ -178,9 +178,9 @@ func main() {
 	//
 	// Explicit POST /newtron/v1/networks remains for the lab-as-network
 	// case (network id ≠ basename, e.g. `bin/newtlab deploy alice-lab`
-	// binds id "alice-lab" to a spec_dir under one of the templates here).
+	// binds id "alice-lab" to a dir under one of the templates here).
 	// In that case Server.RegisterNetwork is idempotent on a matching
-	// spec_dir, so the deploy path doesn't conflict with the pre-registered
+	// dir, so the deploy path doesn't conflict with the pre-registered
 	// template slot.
 	discoverAndRegisterNetworks(newtronSrv, *networksBase, logger)
 	// newtrun reaches newtlab via HTTP (§27 — newtlab owns LabState).

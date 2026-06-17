@@ -150,7 +150,7 @@ Returns the canonical [`LabState`](../../pkg/newtlab/state.go) for a deployed la
   "data": {
     "name": "1node-vs",
     "created": "2026-05-26T22:43:32.345-07:00",
-    "spec_dir": "/path/to/networks/1node-vs/specs",
+    "dir": "/path/to/networks/1node-vs",
     "ssh_key_path": "/home/.../1node-vs/lab.key",
     "nodes": {
       "switch1": {

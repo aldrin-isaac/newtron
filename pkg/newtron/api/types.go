@@ -16,26 +16,26 @@ import (
 
 // RegisterNetworkRequest is the body for POST /network.
 //
-// When Scaffold is true, the server creates an empty spec layout at SpecDir
+// When Scaffold is true, the server creates an empty spec layout at Dir
 // (three zero-valued spec files plus an empty profiles/ subdirectory) before
 // registering, and Description seeds topology.json. When Scaffold is false
-// (the default), SpecDir must already contain valid specs — the same
+// (the default), Dir must already contain valid specs — the same
 // register-existing flow the endpoint has always had.
 //
 // Scaffold + register-existing as one wire operation avoids a two-call
 // dance (scaffold-then-register) and keeps newtron the sole owner of the
 // spec-directory layout (§27 Single Owner).
 //
-// SpecDir is required for the register-existing case (scaffold=false). For
+// Dir is required for the register-existing case (scaffold=false). For
 // the scaffold case it is optional: when omitted with scaffold=true, the
 // server derives the path from its --scaffold-root config as
 // filepath.Join(scaffoldRoot, id), so UI clients don't have to know
-// newtron's on-disk layout (§33; #122). The resolved spec_dir is always
+// newtron's on-disk layout (§33; #122). The resolved dir is always
 // returned in the 201 response (NetworkInfo) so the caller can display
 // "created at <path>" without re-fetching.
 type RegisterNetworkRequest struct {
 	ID          string `json:"id"`
-	SpecDir     string `json:"spec_dir,omitempty"`
+	Dir     string `json:"dir,omitempty"`
 	Scaffold    bool   `json:"scaffold,omitempty"`
 	Description string `json:"description,omitempty"`
 }
@@ -43,7 +43,7 @@ type RegisterNetworkRequest struct {
 // NetworkInfo is returned when listing or showing a registered network.
 type NetworkInfo struct {
 	ID          string   `json:"id"`
-	SpecDir     string   `json:"spec_dir"`
+	Dir     string   `json:"dir"`
 	HasTopology bool     `json:"has_topology"`
 	Topology    string   `json:"topology,omitempty"` // topology name derived from specDir
 	Nodes       []string `json:"nodes"`
@@ -270,28 +270,28 @@ func (e *notRegisteredError) Error() string {
 
 // AlreadyRegisteredErrorInfo is the data payload of the 409 envelope on
 // POST /networks when the id is already registered. It carries the existing
-// spec_dir so clients can distinguish true-idempotent re-registration (same
-// id, same spec_dir → return nil) from a real conflict (same id, different
-// spec_dir → surface a typed error). §46 (HTTP API Boundary) on the failure
+// dir so clients can distinguish true-idempotent re-registration (same
+// id, same dir → return nil) from a real conflict (same id, different
+// dir → surface a typed error). §46 (HTTP API Boundary) on the failure
 // path: the substrate the server already knows is propagated through
 // envelope.Data, the same shape VerificationFailedError uses for its
 // VerificationResult.
 type AlreadyRegisteredErrorInfo struct {
 	ID              string `json:"id"`
-	ExistingSpecDir string `json:"existing_spec_dir"`
+	ExistingDir string `json:"existing_dir"`
 }
 
 // alreadyRegisteredError is returned when a network ID is already registered.
 type alreadyRegisteredError struct {
 	id              string
-	existingSpecDir string
+	existingDir string
 }
 
 func (e *alreadyRegisteredError) Error() string {
-	if e.existingSpecDir == "" {
+	if e.existingDir == "" {
 		return "network '" + e.id + "' already registered"
 	}
-	return "network '" + e.id + "' already registered with spec_dir '" + e.existingSpecDir + "'"
+	return "network '" + e.id + "' already registered with dir '" + e.existingDir + "'"
 }
 
 // httpStatusFromError maps Go error types to HTTP status codes.

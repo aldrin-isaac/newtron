@@ -563,7 +563,7 @@ type Runner struct {
     HostConns      map[string]*ssh.Client
     Progress       ProgressReporter
     Network        string         // network name (from server)
-    SpecDir        string         // spec directory (from server)
+    Dir        string         // network directory (from server)
 
     discoveredPlatform string
     opts               RunOptions
@@ -582,7 +582,7 @@ type Runner struct {
 | `HostConns` | `connectDevices` | `host-exec` SSH calls. |
 | `Progress` | `handleStartRun` (HTTPReporter → StateReporter chain) | Every lifecycle event. |
 | `Network` | `connectToServer` from `GET /network` | Verified against `Suite.Network` (declared once in `suite.yaml`). |
-| `SpecDir` | `connectToServer` | Used by `Reconcile` action and by `cmd_stop` when destroying. |
+| `Dir` | `connectToServer` | Used by `Reconcile` action and by `cmd_stop` when destroying. |
 
 ### 6.2 RunOptions
 
@@ -662,7 +662,7 @@ func (r *Runner) connectToServer() error
 func (r *Runner) connectDevices() error
 ```
 
-`connectToServer` constructs the newtron HTTP client (`client.New(r.ServerURL, r.NetworkID)`) and reads the server's loaded network spec to populate `r.Topology` and `r.SpecDir`. Fails fast if the server has no network registered.
+`connectToServer` constructs the newtron HTTP client (`client.New(r.ServerURL, r.NetworkID)`) and reads the server's loaded network spec to populate `r.Topology` and `r.Dir`. Fails fast if the server has no network registered.
 
 `connectDevices` walks the topology's device list, identifies hosts via `Client.IsHostDevice(name)`, opens an SSH connection to each, and stores them in `r.HostConns`. Skipped when `opts.NoDeploy == true`.
 

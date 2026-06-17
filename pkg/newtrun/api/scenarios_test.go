@@ -362,7 +362,7 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 // /newtrun/v1/suites returns a CreateSuiteResponse, not an ad-hoc map.
 // Catches the case where a future refactor silently reverts to the
 // untyped map and clients that started depending on field discovery
-// stop seeing new fields (e.g. spec_dir, if it ever lands here).
+// stop seeing new fields (e.g. dir, if it ever lands here).
 func TestSuite_CreateReturnsTypedResponse(t *testing.T) {
 	srv, _ := newTestServer(t)
 	ts := httptest.NewServer(srv.buildHandler())

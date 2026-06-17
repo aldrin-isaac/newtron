@@ -899,7 +899,7 @@ type DeviceProfileDetail struct {
 ```go
 type UserSettings struct {
     DefaultNetwork  string `json:"default_network,omitempty"`
-    SpecDir         string `json:"spec_dir,omitempty"`
+    Dir             string `json:"dir,omitempty"`
     ServerURL       string `json:"server_url,omitempty"`
     NetworkID       string `json:"network_id,omitempty"`
     AuditLogPath    string `json:"audit_log_path,omitempty"`
@@ -1714,7 +1714,7 @@ type AuditEvent struct {
 
 Audit events capture: who did what, on which device, what CONFIG_DB entries were modified, whether it succeeded, and whether it was a dry-run or execute. Dry-run events are logged for auditability — they show what was previewed even though no changes were applied.
 
-Configuration: `UserSettings.AuditLogPath` (default: `{spec_dir}/audit.log`), `AuditMaxSizeMB` (default: 10), `AuditMaxBackups` (default: 10).
+Configuration: `UserSettings.AuditLogPath` (default: `{dir}/audit.log`), `AuditMaxSizeMB` (default: 10), `AuditMaxBackups` (default: 10).
 
 ---
 

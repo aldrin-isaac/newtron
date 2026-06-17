@@ -11,7 +11,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// loadTestNetwork builds a Network from a fresh spec dir seeded with a
+// loadTestNetwork builds a Network from a fresh network dir seeded with a
 // minimal network.json. Each test gets its own dir so file persistence
 // stays isolated.
 func loadTestNetwork(t *testing.T) *Network {

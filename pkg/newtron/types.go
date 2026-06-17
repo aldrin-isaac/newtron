@@ -936,7 +936,7 @@ type AuditIntegrityResult struct {
 // UserSettings holds persistent user preferences.
 type UserSettings struct {
 	DefaultNetwork  string `json:"default_network,omitempty"`
-	SpecDir         string `json:"spec_dir,omitempty"`
+	Dir         string `json:"dir,omitempty"`
 	DefaultSuite    string `json:"default_suite,omitempty"`
 	NetworksDir   string `json:"networks_dir,omitempty"`
 	AuditLogPath    string `json:"audit_log_path,omitempty"`
@@ -946,8 +946,8 @@ type UserSettings struct {
 	NetworkID       string `json:"network_id,omitempty"`
 }
 
-// DefaultSpecDir is the default specification directory.
-const DefaultSpecDir = "/etc/newtron"
+// DefaultDir is the default specification directory.
+const DefaultDir = "/etc/newtron"
 
 // DefaultAuditMaxSizeMB is the default maximum audit log size in megabytes.
 const DefaultAuditMaxSizeMB = 10
@@ -955,12 +955,12 @@ const DefaultAuditMaxSizeMB = 10
 // DefaultAuditMaxBackups is the default maximum number of rotated audit log files.
 const DefaultAuditMaxBackups = 10
 
-// GetSpecDir returns the spec directory with a fallback default.
-func (us *UserSettings) GetSpecDir() string {
-	if us.SpecDir != "" {
-		return us.SpecDir
+// GetDir returns the network directory with a fallback default.
+func (us *UserSettings) GetDir() string {
+	if us.Dir != "" {
+		return us.Dir
 	}
-	return DefaultSpecDir
+	return DefaultDir
 }
 
 // GetAuditLogPath returns the audit log path with a fallback default.

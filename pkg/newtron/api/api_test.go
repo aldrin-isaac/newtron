@@ -20,7 +20,7 @@ import (
 )
 
 // repoRoot walks up from this test file to the newtron repo root so tests
-// can locate the newtrun topology spec dirs without depending on cwd.
+// can locate the newtrun topology network dirs without depending on cwd.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -823,7 +823,7 @@ func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
 	}
 }
 
-// copyTestSpecDir copies the 1node-vs spec directory into t.TempDir() so
+// copyTestSpecDir copies the 1node-vs network directory into t.TempDir() so
 // topology CRUD tests can mutate freely without polluting the lab spec.
 // Returns the temp spec path; cleanup is automatic via t.TempDir().
 func copyTestSpecDir(t *testing.T) string {

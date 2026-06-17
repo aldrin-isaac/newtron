@@ -11,8 +11,8 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
-// SpecDir is the default specification directory
-var SpecDir = "/etc/newtron"
+// Dir is the default specification directory
+var Dir = "/etc/newtron"
 
 // Loader handles loading and validating specification files.
 //
@@ -34,7 +34,7 @@ type Loader struct {
 // NewLoader creates a new specification loader
 func NewLoader(specDir string) *Loader {
 	if specDir == "" {
-		specDir = SpecDir
+		specDir = Dir
 	}
 	return &Loader{
 		specDir:  specDir,
@@ -431,7 +431,7 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 	return l.topology
 }
 
-// ListProfiles returns the names of all profile files in the profiles directory.
+// ListProfiles returns the names of all profile files in the nodes directory.
 func (l *Loader) ListProfiles() []string {
 	profileDir := filepath.Join(l.specDir, "nodes")
 	entries, err := os.ReadDir(profileDir)
@@ -476,7 +476,7 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 
 	// Inline what SaveProfile does (we already hold the lock).
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
-		return fmt.Errorf("creating profiles directory: %w", err)
+		return fmt.Errorf("creating nodes directory: %w", err)
 	}
 	data, err := json.MarshalIndent(profile, "", "  ")
 	if err != nil {
@@ -509,7 +509,7 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
 	profileDir := filepath.Join(l.specDir, "nodes")
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
-		return fmt.Errorf("creating profiles directory: %w", err)
+		return fmt.Errorf("creating nodes directory: %w", err)
 	}
 
 	path := filepath.Join(profileDir, name+".json")
@@ -578,7 +578,7 @@ func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
 
 	// Inline what SaveProfile does (we already hold the lock).
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
-		return fmt.Errorf("creating profiles directory: %w", err)
+		return fmt.Errorf("creating nodes directory: %w", err)
 	}
 	data, err := json.MarshalIndent(profile, "", "  ")
 	if err != nil {

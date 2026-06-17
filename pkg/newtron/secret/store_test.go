@@ -129,7 +129,7 @@ func TestFileStore_MissingKeyTypedError(t *testing.T) {
 // TestFileStore_PersistsAcrossReopen pins that Set's atomic write
 // actually persists to disk (the next New of the same path sees the
 // values). Without this the store would be ephemeral and the L0
-// goal — "passwords live outside the spec dir, not just outside the
+// goal — "passwords live outside the network dir, not just outside the
 // process" — wouldn't be met.
 func TestFileStore_PersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.json")

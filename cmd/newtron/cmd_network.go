@@ -31,7 +31,7 @@ var networkListCmd = &cobra.Command{
 	Short: "List all registered networks",
 	Long: `List all networks currently registered with the newtron server.
 
-Shows the network ID, spec directory, whether a topology is defined, and
+Shows the network ID, network directory, whether a topology is defined, and
 the number of connected nodes.
 
 Examples:
@@ -58,7 +58,7 @@ Examples:
 			if n.HasTopology {
 				topology = "yes"
 			}
-			t.Row(n.ID, dash(n.SpecDir), topology, fmt.Sprintf("%d", len(n.Nodes)))
+			t.Row(n.ID, dash(n.Dir), topology, fmt.Sprintf("%d", len(n.Nodes)))
 		}
 		t.Flush()
 

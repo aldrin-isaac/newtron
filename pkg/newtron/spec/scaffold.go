@@ -11,7 +11,7 @@ import (
 // ErrAlreadyInitialized is returned by Scaffold when specDir already contains
 // at least one of the three seed spec files. The caller should map this to
 // 409 Conflict on HTTP; the existing topology is not overwritten.
-var ErrAlreadyInitialized = errors.New("spec directory already initialized")
+var ErrAlreadyInitialized = errors.New("network directory already initialized")
 
 // Scaffold creates an empty topology layout at specDir: the directory itself
 // (mkdir -p), an empty profiles/ subdirectory, and three zero-valued spec
@@ -28,7 +28,7 @@ var ErrAlreadyInitialized = errors.New("spec directory already initialized")
 // carries authoring context. Pass "" to omit.
 func Scaffold(specDir, description string) error {
 	if specDir == "" {
-		return fmt.Errorf("spec_dir is required")
+		return fmt.Errorf("dir is required")
 	}
 
 	// Refuse to overwrite existing specs. Check all three before doing any

@@ -396,7 +396,7 @@ Steps:
 (default `http://127.0.0.1:18080`) before any topology operation — the
 newtron and newtlab engines share the same process inside `bin/newt-server`,
 so there's no ordering issue between them. The CLI's `prepareLab()` calls
-`client.RegisterNetwork(specDir)` idempotently so the operator does not
+`client.RegisterNetwork(dir)` idempotently so the operator does not
 have to register topologies manually.
 
 ### 4.2 Deploy
@@ -932,7 +932,7 @@ display. Defined in `state.go`.
 type LabState struct {
     Name       string
     Created    time.Time
-    SpecDir    string                  // legacy: populated by pre-#66 state.json files; new Lab() leaves this empty (spec data flows from newtron via HTTP per §27)
+    Dir    string                  // legacy: populated by pre-#66 state.json files; new Lab() leaves this empty (spec data flows from newtron via HTTP per §27)
     SSHKeyPath string                  // lab Ed25519 private key path
     Nodes      map[string]*NodeState
     Links      []*LinkState
@@ -1128,14 +1128,14 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 
 ### Phase 0 — CLI dispatch
 
-`cmd_deploy.go` → `resolveSpecDir(["2node-ngdp"])` → `resolveTopologyDir("2node-ngdp")`
-→ `"networks/2node-ngdp/specs"`.
+`cmd_deploy.go` → `resolveDir(["2node-ngdp"])` → `resolveTopologyDir("2node-ngdp")`
+→ `"networks/2node-ngdp"`.
 
 ### Phase 1 — NewLab
 
-`NewLab("networks/2node-ngdp/specs")`:
+`NewLab("networks/2node-ngdp")`:
 
-1. `absDir` = `~/src/newtron/networks/2node-ngdp/specs`, name = `"2node-ngdp"`.
+1. `absDir` = `~/src/newtron/networks/2node-ngdp`, name = `"2node-ngdp"`.
 2. Load `topology.json` — 8 devices (2 switches, 6 hosts), 9 links derived from `interface.link` fields.
 3. Load `platforms.json` — platform `sonic-ciscovs`: `sequential` interface map, `e1000` NIC driver, 8192 MB memory, 6 CPUs, 600s boot timeout. Platform `alpine-host`: `linux` interface map, `device_type: "host"`.
 4. Load profiles for all 8 devices.
@@ -1157,7 +1157,7 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 `Lab.Deploy(ctx)`:
 
 1. **Pre-checks:** `CollectAllPorts()` → 24 allocations (3 SSH + 3 console + 18 link). `ProbeAllPorts()` checks all free. Bridge stats no longer allocates a port — newtlink pushes to newtlab-server (#118).
-2. **State init:** `LabState{Name: "2node-ngdp", SpecDir: ..., Nodes: {}}`, 9 link state entries. `SaveState()`.
+2. **State init:** `LabState{Name: "2node-ngdp", Dir: ..., Nodes: {}}`, 9 link state entries. `SaveState()`.
 3. **Overlay disks:** `CreateOverlay(platform.VMImage, ~/.newtlab/labs/2node-ngdp/disks/switch1.qcow2)` for switch1, switch2, and hostvm-0 (3 VMs).
 4. **Bridges:** `WriteBridgeConfig()` → `bridge.json` with 9 links + `orchestrator_url` / `lab_name` / `worker_host` for newtlink push. `startBridgeProcess()` → `newtlink ~/.newtlab/labs/2node-ngdp/bridge.json`. Wait for ports 10000–10017. newtlink fires its first push to `/newtlab/v1/labs/2node-ngdp/bridges/local/stats` once workers are up.
 5. **Boot VMs:** `StartNode(switch1, stateDir, "")` → `QEMUCommand.Build()` → `qemu-system-x86_64 -m 8192 -smp 6 -cpu host -enable-kvm -drive file=.../switch1.qcow2,... -serial tcp::12006,server,nowait -netdev user,id=mgmt,hostfwd=tcp::13006-:22 -device e1000,... -netdev socket,id=eth1,connect=127.0.0.1:10000 ...`. Same for switch2 and hostvm-0.
