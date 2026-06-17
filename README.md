@@ -93,7 +93,7 @@ make build
 #    on :18080). Must start BEFORE the deploy so `newtlab deploy --monitor`
 #    can read live link telemetry — newtlink pushes per-link byte counters
 #    to newt-server every 5 seconds and the deploy monitor renders them.
-bin/newt-server &  # auto-discovers every networks/<name>/specs/topology.json
+bin/newt-server &  # auto-discovers every networks/<name>/topology.json
 NEWT_SERVER_PID=$!
 sleep 2 && kill -0 $NEWT_SERVER_PID || { echo "newt-server failed to start"; exit 1; }
 
@@ -210,7 +210,7 @@ device-specific CONFIG_DB entries.
 specs/
 ├── network.json        # Services, VPNs, filters, routing policy, QoS
 ├── platforms.json      # Platform capabilities, VM defaults
-└── profiles/           # Per-device: loopback IP, ASN, zone, EVPN peers
+└── nodes/           # Per-device: loopback IP, ASN, zone, EVPN peers
     ├── spine1.json
     └── leaf1.json
 ```

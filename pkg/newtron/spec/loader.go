@@ -90,7 +90,7 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 	}
 	l.mu.RUnlock()
 
-	path := filepath.Join(l.specDir, "profiles", deviceName+".json")
+	path := filepath.Join(l.specDir, "nodes", deviceName+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading profile %s: %w", deviceName, err)
@@ -433,7 +433,7 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 
 // ListProfiles returns the names of all profile files in the profiles directory.
 func (l *Loader) ListProfiles() []string {
-	profileDir := filepath.Join(l.specDir, "profiles")
+	profileDir := filepath.Join(l.specDir, "nodes")
 	entries, err := os.ReadDir(profileDir)
 	if err != nil {
 		return nil
@@ -463,7 +463,7 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	profileDir := filepath.Join(l.specDir, "profiles")
+	profileDir := filepath.Join(l.specDir, "nodes")
 	path := filepath.Join(profileDir, name+".json")
 
 	// Existence check: cache hit, OR on-disk file present (profile may
@@ -507,7 +507,7 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 
 // SaveProfile writes a device profile to disk atomically (temp file + rename).
 func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
-	profileDir := filepath.Join(l.specDir, "profiles")
+	profileDir := filepath.Join(l.specDir, "nodes")
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
 		return fmt.Errorf("creating profiles directory: %w", err)
 	}
@@ -570,7 +570,7 @@ func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
 	// On-disk file may exist even when the cache hasn't seen it yet —
 	// e.g. profile was written before this Loader started, then not
 	// loaded yet. Check the filesystem too.
-	profileDir := filepath.Join(l.specDir, "profiles")
+	profileDir := filepath.Join(l.specDir, "nodes")
 	path := filepath.Join(profileDir, name+".json")
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("profile '%s' already exists", name)
@@ -609,7 +609,7 @@ func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
 
 // DeleteProfile removes a device profile file and its cache entry.
 func (l *Loader) DeleteProfile(name string) error {
-	path := filepath.Join(l.specDir, "profiles", name+".json")
+	path := filepath.Join(l.specDir, "nodes", name+".json")
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("deleting profile %s: %w", name, err)
 	}
@@ -729,7 +729,7 @@ func (l *Loader) validateTopology() error {
 
 	for deviceName := range l.topology.Devices {
 		// All device names must have profiles in profiles/
-		profilePath := filepath.Join(l.specDir, "profiles", deviceName+".json")
+		profilePath := filepath.Join(l.specDir, "nodes", deviceName+".json")
 		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
 			v.AddErrorf("topology device '%s' has no profile at %s", deviceName, profilePath)
 		}

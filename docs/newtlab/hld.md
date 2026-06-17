@@ -10,7 +10,7 @@ For the architectural principles behind newtron, newtlab, and newtrun, see
 newtlab realizes network topologies as connected QEMU virtual machines,
 wired together through **userspace socket bridges** — not kernel networking.
 It reads newtron's spec files (`topology.json`, `platforms.json`,
-`profiles/*.json`) and brings the topology to life: deploying VMs (primarily
+`nodes/*.json`) and brings the topology to life: deploying VMs (primarily
 SONiC), wiring them across one or more servers, and patching device profiles
 so newtron can connect. No root, no Linux bridges, no veth pairs, no Docker.
 
@@ -35,7 +35,7 @@ files — no shared libraries, no IPC, no API calls between them.
               │                                │
               │     Shared Spec Directory      │
               │ topology.json, platforms.json, │
-              │ profiles/*.json, network.json  │
+              │ nodes/*.json, network.json  │
               │                                │ ─┐
               └────────────────────────────────┘  │
                 │                                 │
@@ -114,9 +114,9 @@ patched profiles (output that enables newtron).
 ┌────────────────────────┐           ┌───────────────────────────┐     ┌─────────────────┐
 │                        │           │                           │     │                 │
 │ Spec Directory (input) │           │ Patched Profiles (output) │     │                 │
-│     topology.json      │           │   profiles/spine1.json    │     │  newtron reads  │
+│     topology.json      │           │   nodes/spine1.json    │     │  newtron reads  │
 │     platforms.json     │           │ + ssh_port, console_port  │     │   (to connect   │
-│    profiles/*.json     │  deploy   │         + mgmt_ip         │     │ via SSH tunnel) │
+│    nodes/*.json     │  deploy   │         + mgmt_ip         │     │ via SSH tunnel) │
 │      network.json      │  patch    │                           │     │                 │
 │                        │ ────────▶ │                           │ ──▶ │                 │
 └────────────────────────┘           └───────────────────────────┘     └─────────────────┘
@@ -159,7 +159,7 @@ required — the same directory structure serves both tools.
 |------|-------------------|
 | `topology.json` | `devices` (names, interfaces), `links` (endpoint pairs), `newtlab` section (port bases, servers) |
 | `platforms.json` | VM defaults per platform: image path, memory, CPUs, NIC driver, interface map, credentials, boot timeout, dataplane type, image release |
-| `profiles/<device>.json` | Per-device overrides: platform selection, SSH credentials, VM resource overrides, host pinning (`vm_host`) |
+| `nodes/<device>.json` | Per-device overrides: platform selection, SSH credentials, VM resource overrides, host pinning (`vm_host`) |
 
 newtlab reads `devices` and `links` from the same `topology.json` that
 newtron reads, plus an optional `newtlab` section for orchestration settings:
@@ -228,7 +228,7 @@ interface map to determine which QEMU NIC index carries each topology link.
 
 **Resolution order** for VM configuration (first non-empty wins):
 
-1. Profile override (`profiles/<device>.json`)
+1. Profile override (`nodes/<device>.json`)
 2. Platform default (`platforms.json`)
 3. Built-in default (4096 MB, 2 CPUs, `e1000`, `stride-4`)
 

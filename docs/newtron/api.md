@@ -50,7 +50,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
 | GET | `/networks/{n}/profiles` | List device profile names |
-| GET | `/networks/{n}/profiles/{name}` | Show device profile |
+| GET | `/networks/{n}/nodes/{name}` | Show device profile |
 | GET | `/networks/{n}/zones` | List zone names |
 | GET | `/networks/{n}/zones/{name}` | Show zone |
 | GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
@@ -450,7 +450,7 @@ memory.
 Register a network. Two consumer styles:
 
 - **Register an *existing* spec directory** (CLI / automation): pass `id` and `spec_dir`. The server loads the spec files at `spec_dir` and registers them under `id`.
-- **Scaffold a *new* topology** (UI / operator-language): pass `id` and `scaffold: true`. The server creates an empty spec layout (three zero-valued spec files plus an empty `profiles/` subdirectory) and registers it in one call. `spec_dir` is optional in this mode — when omitted, the server picks `<scaffold-root>/<id>` from its `--scaffold-root` config. The resolved path is always returned in the response so the client never has to know newtron's on-disk layout.
+- **Scaffold a *new* topology** (UI / operator-language): pass `id` and `scaffold: true`. The server creates an empty spec layout (three zero-valued spec files plus an empty `nodes/` subdirectory) and registers it in one call. `spec_dir` is optional in this mode — when omitted, the server picks `<scaffold-root>/<id>` from its `--scaffold-root` config. The resolved path is always returned in the response so the client never has to know newtron's on-disk layout.
 
 **Request body:**
 
@@ -649,7 +649,7 @@ one by name returns a single object (or 404 if not found):
 | Platforms | `GET /newtron/v1/networks/{netID}/platforms` | `GET .../platforms/{name}` | [`PlatformDetail`](#platformdetail) |
 | Route Policies | `GET /newtron/v1/networks/{netID}/route-policies` | `GET .../route-policies/{name}` | Route policy detail |
 | Prefix Lists | `GET /newtron/v1/networks/{netID}/prefix-lists` | `GET .../prefix-lists/{name}` | Prefix list detail |
-| Profiles | `GET /newtron/v1/networks/{netID}/profiles` | `GET .../profiles/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
+| Profiles | `GET /newtron/v1/networks/{netID}/nodes` | `GET .../nodes/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
 | Zones | `GET /newtron/v1/networks/{netID}/zones` | `GET .../zones/{name}` | [`ZoneDetail`](#zonedetail) |
 
 All response types are defined in [S13 Types Reference](#13-types-reference).
@@ -869,7 +869,7 @@ _Lands newtron#14 (Cluster C — topology spec substrate, §46)._
 #### POST /newtron/v1/networks/{netID}/topology/create-node
 
 Adds a device entry to `topology.json`. The matching profile file
-(`profiles/{name}.json`) must already exist; if absent, the call returns 400
+(`nodes/{name}.json`) must already exist; if absent, the call returns 400
 with the resolution path included.
 
 **Request body:**
@@ -1540,7 +1540,7 @@ Remove a rule from a route policy.
 
 ### Device Profiles
 
-Profiles are stored as individual JSON files under `profiles/{name}.json` in the
+Profiles are stored as individual JSON files under `nodes/{name}.json` in the
 spec directory. They define per-device settings (management IP, loopback, zone,
 platform, EVPN peering).
 
@@ -1554,7 +1554,7 @@ Create a new device profile.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Profile name (becomes `profiles/{name}.json`) |
+| `name` | string | yes | Profile name (becomes `nodes/{name}.json`) |
 | `mgmt_ip` | string | yes | Management IP address |
 | `loopback_ip` | string | no | Loopback IP address |
 | `zone` | string | yes | Zone name (must exist in network.json) |
@@ -3599,7 +3599,7 @@ Returned by `GET .../platform` (array) and `GET .../platforms/{name}` (single).
 
 #### DeviceProfileDetail
 
-Returned by `GET .../profile` (array of names) and `GET .../profiles/{name}` (single).
+Returned by `GET .../profile` (array of names) and `GET .../nodes/{name}` (single).
 
 | Field | Type | Description |
 |-------|------|-------------|

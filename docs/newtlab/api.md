@@ -50,7 +50,7 @@ Mirrors the convention used by `newtron-server` and `newtrun-server`.
 
 ### Path parameters
 
-- `{name}` — lab name. Resolved under `--networks-base/<name>/specs/` for `topology.json` lookup; the on-disk directory layout still calls the spec `topology.json` (newtron owns the spec schema, see [DESIGN_PRINCIPLES_NEWTRON §27](../DESIGN_PRINCIPLES_NEWTRON.md)). At the HTTP layer the deployed instance is a *lab*.
+- `{name}` — lab name. Resolved under `--networks-base/<name>/` for `topology.json` lookup; the on-disk directory layout still calls the spec `topology.json` (newtron owns the spec schema, see [DESIGN_PRINCIPLES_NEWTRON §27](../DESIGN_PRINCIPLES_NEWTRON.md)). At the HTTP layer the deployed instance is a *lab*.
 - `{node}` — device name as defined in `topology.json` (e.g., `switch1`, `host1`).
 
 ---

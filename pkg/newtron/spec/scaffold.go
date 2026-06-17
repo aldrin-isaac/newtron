@@ -39,7 +39,7 @@ func Scaffold(specDir, description string) error {
 		}
 	}
 
-	profilesDir := filepath.Join(specDir, "profiles")
+	profilesDir := filepath.Join(specDir, "nodes")
 	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
 		return fmt.Errorf("create profiles dir: %w", err)
 	}

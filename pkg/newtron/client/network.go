@@ -95,7 +95,7 @@ func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
 // ListProfiles returns all device profile names.
 func (c *Client) ListProfiles() ([]string, error) {
 	var result []string
-	if err := c.doGet(c.networkPath()+"/profiles", &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/nodes", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -105,7 +105,7 @@ func (c *Client) ListProfiles() ([]string, error) {
 // single device.
 func (c *Client) ShowProfile(name string) (*spec.DeviceProfile, error) {
 	var result spec.DeviceProfile
-	if err := c.doGet(c.networkPath()+"/profiles/"+url.PathEscape(name), &result); err != nil {
+	if err := c.doGet(c.networkPath()+"/nodes/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

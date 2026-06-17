@@ -31,7 +31,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -101,13 +100,11 @@ func isKnownCommand(name string) bool {
 	return name == "help" || name == "completion"
 }
 
-// resolveNetworkSpecDir determines the actual specs directory from a root dir.
-// If rootDir/specs/network.json exists, specs live in rootDir/specs/ (nested layout).
-// Otherwise, specs live directly in rootDir (flat layout / backwards compat).
+// resolveNetworkSpecDir returns the directory containing the network's
+// spec files. After the layout collapse (PR after #205), this IS just
+// the network's root dir — kept as a helper so call sites stay
+// symmetric.
 func resolveNetworkSpecDir(rootDir string) string {
-	if _, err := os.Stat(filepath.Join(rootDir, "specs", "network.json")); err == nil {
-		return filepath.Join(rootDir, "specs")
-	}
 	return rootDir
 }
 
@@ -246,7 +243,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "D", "", "Device name")
 
 	// Option flags (global)
-	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (contains specs/)")
+	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network directory (contains network.json + topology.json + nodes/)")
 	rootCmd.PersistentFlags().StringVar(&app.serverURL, "server", "", "newtron-server URL (default: http://localhost:18080, env: NEWTRON_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&app.networkID, "network-id", "N", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")

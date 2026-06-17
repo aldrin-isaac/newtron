@@ -1,7 +1,7 @@
 // NewtLab — VM orchestration for SONiC network topologies
 //
 // newtlab deploys QEMU virtual machines from newtron topology specs.
-// It reads topology.json, platforms.json, and profiles/*.json to create
+// It reads topology.json, platforms.json, and nodes/*.json to create
 // connected VMs with socket-based networking. No root, no bridges, no Docker.
 //
 // Usage:
@@ -116,7 +116,7 @@ func resolveTopologyDir(name string) string {
 	if strings.Contains(name, "/") {
 		return name
 	}
-	return filepath.Join(networksBaseDir(), name, "specs")
+	return filepath.Join(networksBaseDir(), name)
 }
 
 // topologyNameFromPath derives the topology name from a spec directory
@@ -124,7 +124,7 @@ func resolveTopologyDir(name string) string {
 // /path/to/<topology>/specs → <topology>; /path/to/<topology> → <topology>.
 func topologyNameFromPath(absDir string) string {
 	base := filepath.Base(absDir)
-	if base == "specs" {
+	if base == "" && filepath.Base(filepath.Clean(specDir)) == filepath.Base(specDir) {
 		return filepath.Base(filepath.Dir(absDir))
 	}
 	return base
@@ -305,7 +305,7 @@ func newListCmd() *cobra.Command {
 					continue
 				}
 				// Skip directories without a specs subdirectory (not a topology).
-				if _, err := os.Stat(filepath.Join(base, e.Name(), "specs", "topology.json")); err != nil {
+				if _, err := os.Stat(filepath.Join(base, e.Name(), "topology.json")); err != nil {
 					continue
 				}
 

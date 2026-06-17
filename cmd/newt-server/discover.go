@@ -9,7 +9,7 @@ import (
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
-// discoverAndRegisterNetworks scans <networksBase>/<name>/specs/topology.json
+// discoverAndRegisterNetworks scans <networksBase>/<name>/topology.json
 // at boot and registers each as a network with id=<name> on the newtron
 // engine. Mirrors the layout newtlab has always read from
 // (cmd/newtlab/main.go:282-308) so the two engines share one
@@ -51,7 +51,7 @@ func discoverAndRegisterNetworks(srv *newtronapi.Server, networksBase string, lo
 	sort.Strings(names)
 
 	for _, name := range names {
-		specDir := filepath.Join(networksBase, name, "specs")
+		specDir := filepath.Join(networksBase, name)
 		// The marker file is topology.json — same shape newtlab uses
 		// to decide a directory is a deployable network. Networks
 		// without topology.json are not auto-registered (could be a

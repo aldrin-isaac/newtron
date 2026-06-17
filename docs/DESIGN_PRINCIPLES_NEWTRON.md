@@ -2007,7 +2007,7 @@ intent_ops.go      → NEWTRON_INTENT
 service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
-**Specs (network.json, topology.json, platforms.json, profiles/\*.json).**
+**Specs (network.json, topology.json, platforms.json, nodes/\*.json).**
 newtron is the owner — it writes the files and exposes their contents
 through `/newtron/v1/networks/...`. Sibling engines (newtlab, newtrun)
 and external consumers (newtcon, scripts) reach the data through the

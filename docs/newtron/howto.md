@@ -203,14 +203,14 @@ Why specs? Newtron separates **intent** (what services, VPNs, and policies you w
 ├── network.json        # Services, VPNs, filters, QoS policies, prefix lists
 ├── platforms.json      # Hardware platform definitions
 ├── topology.json       # (optional) Topology for automated provisioning
-└── profiles/
+└── nodes/
     ├── leaf1.json      # Per-device: management IP, credentials, zone
     └── spine1.json
 ```
 
-Flat layout (all files in one directory) or nested layout (`specs/` subdirectory containing `network.json`) are both supported. The CLI auto-detects which.
+Single flat layout: spec files (`network.json`, `topology.json`, `platforms.json`, `nodes/<name>.json`) live at the network root.
 
-For lab environments, newtlab generates spec files per network under `networks/<name>/specs/`.
+For lab environments, newtlab generates spec files per network under `networks/<name>/`.
 
 ### 3.2 Network Specification (`network.json`)
 
@@ -345,7 +345,7 @@ All 64 DSCP values are mapped: explicitly listed values go to their queue, unmap
 
 ### 3.3 Device Profiles
 
-Each device needs a profile JSON file in `profiles/`. The profile is the source of reality for device-specific data:
+Each device needs a profile JSON file in `nodes/`. The profile is the source of reality for device-specific data:
 
 ```json
 {
@@ -443,7 +443,7 @@ newtron zone delete datacenter-west -x
 
 Zone-level specs can reference network-level specs (e.g., the `amer-transit` service references the network-level `transit-protect` filter).
 
-**Node-level overrides** — add specs to a device profile (`profiles/<device>.json`) for device-specific overrides:
+**Node-level overrides** — add specs to a device profile (`nodes/<device>.json`) for device-specific overrides:
 
 ```json
 {
@@ -511,7 +511,7 @@ newtron platform generate /usr/share/sonic/device/x86_64-dellemc_z9332f_d1508-r0
 # write/merge into an existing platforms.json (atomic temp+rename)
 newtron platform generate platform.json \
     --name dell-z9332f-32x400g --hwsku DellEMC-Z9332f-O32 \
-    --output specs/platforms.json
+    --output platforms.json
 ```
 
 What the generator does NOT derive (you fill these in after generation):

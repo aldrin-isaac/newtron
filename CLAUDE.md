@@ -43,7 +43,7 @@ step progresses.
    ```
 
    (Pin to the `202505` stable branch — the same image `scripts/getting-started.sh` uses. The `master` build at any given moment may fail to boot or include behavior that hasn't been validated by the newtrun suites.)
-4. Start the aggregated server: `bin/newt-server &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; auto-discovers every `networks/<name>/specs/topology.json` and registers each as a network; see [`docs/newt-server.md`](docs/newt-server.md)). Server must start before the deploy so `bin/newtlab deploy --monitor` can read live link telemetry — `newtlink` pushes per-link byte counters to newt-server every 5 seconds and the deploy monitor renders them. Wait ~2 seconds after the `&` then verify with `kill -0 <pid>` before proceeding.
+4. Start the aggregated server: `bin/newt-server &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; auto-discovers every `networks/<name>/topology.json` and registers each as a network; see [`docs/newt-server.md`](docs/newt-server.md)). Server must start before the deploy so `bin/newtlab deploy --monitor` can read live link telemetry — `newtlink` pushes per-link byte counters to newt-server every 5 seconds and the deploy monitor renders them. Wait ~2 seconds after the `&` then verify with `kill -0 <pid>` before proceeding.
 5. Deploy a single-switch lab: `bin/newtlab deploy 1node-vs --monitor`
 6. Run a first operation to prove it works:
    ```
@@ -156,7 +156,7 @@ service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 
 **Cross-engine data objects:**
 
-- **Specs** (network.json, topology.json, platforms.json, profiles/*.json) — newtron is the owner; consumers reach the data through `/newtron/v1/networks/...`. Opening the JSON files from another engine is the §27 violation.
+- **Specs** (network.json, topology.json, platforms.json, nodes/*.json) — newtron is the owner; consumers reach the data through `/newtron/v1/networks/...`. Opening the JSON files from another engine is the §27 violation.
 - **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers reach the data through `/newtlab/v1/labs/...`. Reading `~/.newtlab/labs/<name>/state.json` from another engine is the §27 violation.
 - **Test run state** — newtrun is the owner; consumers call `/newtrun/v1/runs/...`.
 

@@ -101,7 +101,7 @@ Exit code 0. Markdown report at `newtrun/.generated/report.md`.
 
 The full lifecycle of a real test, derived from the 2node-vs-primitive suite (21 scenarios, ~7m on a fresh lab).
 
-**Network:** 2node-vs — two SONiC switches connected by a fabric link, six host VMs attached for data-plane testing. See `networks/2node-vs/specs/topology.json` for the exact wiring.
+**Network:** 2node-vs — two SONiC switches connected by a fabric link, six host VMs attached for data-plane testing. See `networks/2node-vs/topology.json` for the exact wiring.
 
 ```bash
 # 1. Deploy the lab (8 nodes; ~1 minute on first boot)
@@ -192,7 +192,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
 | newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server &` (auto-discovers networks/) |
-| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Place specs at `networks/<name>/specs/` (auto-discovered) or `POST /newtron/v1/networks` for non-default layouts |
+| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Place specs at `networks/<name>/` (auto-discovered) or `POST /newtron/v1/networks` for non-default layouts |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--networks-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
@@ -396,7 +396,7 @@ bin/newtrun suites
 bin/newtrun networks
 
 # Bootstrap a new empty network directory (writes topology.json, platforms.json,
-# network.json, and an empty profiles/ subdirectory under networks/<name>/specs/).
+# network.json, and an empty nodes/ subdirectory under networks/<name>/).
 # The next step is to register it as a newtron network via POST /newtron/v1/networks
 # with the printed spec_dir.
 bin/newtrun network create demo-1 --description "demo lab"
@@ -1470,10 +1470,10 @@ Triggers: a previous `newtrun start` that was killed before its terminal save, a
 
 ### 14.5 Scenario fails with `<kind> '<name>' already exists`
 
-Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO' already exists`, `QoS policy 'Q_BAR' already exists`, `filter 'F_BAZ' already exists`, `prefix list 'PL_X' already exists` (`pkg/newtron/spec_ops.go`). Earlier runs created specs that newtron-server persisted to `network.json` and never cleaned up. Check `git status networks/<name>/specs/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
+Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO' already exists`, `QoS policy 'Q_BAR' already exists`, `filter 'F_BAZ' already exists`, `prefix list 'PL_X' already exists` (`pkg/newtron/spec_ops.go`). Earlier runs created specs that newtron-server persisted to `network.json` and never cleaned up. Check `git status networks/<name>/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
 
 ```bash
-git checkout HEAD -- networks/<name>/specs/network.json
+git checkout HEAD -- networks/<name>/network.json
 pkill -KILL -f "bin/newt-server" && sleep 1
 bin/newt-server &
 ```
@@ -1572,7 +1572,7 @@ Only platforms with a non-empty `dataplane` field in `platforms.json` support pa
 
 ```bash
 # Confirm the platform claims dataplane
-grep -A 2 '"sonic-' networks/<name>/specs/platforms.json | grep dataplane
+grep -A 2 '"sonic-' networks/<name>/platforms.json | grep dataplane
 
 # SSH to the host's namespace and probe
 bin/newtlab ssh host1
@@ -1591,7 +1591,7 @@ CONFIG_DB checks fail with `key does not exist` even though the apply step succe
 | Cisco P200-32x100 (CiscoVS) | 1 | Ethernet0, Ethernet1, Ethernet2, Ethernet3 |
 | Cisco 8101-P4 (Gibraltar) | 1 | Ethernet0, Ethernet1, Ethernet2, Ethernet3 |
 
-If the topology JSON ports don't match the HWSKU stride, the device renames or rejects them. Update `networks/<name>/specs/topology.json` to use the stride that matches the platform's HWSKU.
+If the topology JSON ports don't match the HWSKU stride, the device renames or rejects them. Update `networks/<name>/topology.json` to use the stride that matches the platform's HWSKU.
 
 ---
 
@@ -1632,7 +1632,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | Command | Purpose |
 |---------|---------|
 | `newtrun networks` | List network directories visible to the server. |
-| `newtrun network create <name> [--description <text>]` | Bootstrap a new network directory (seeds topology.json, platforms.json, network.json, and an empty profiles/). Prints the spec_dir to pass to `POST /newtron/v1/networks`. |
+| `newtrun network create <name> [--description <text>]` | Bootstrap a new network directory (seeds topology.json, platforms.json, network.json, and an empty nodes/). Prints the spec_dir to pass to `POST /newtron/v1/networks`. |
 | `newtrun actions` | List the six supported step actions (derived from `pkg/newtrun.StepAction`). `newtrun actions <name>` shows required fields, device semantics, and a YAML example. Mirrors [§11 Step Action Reference](#11-step-action-reference). |
 | `newtrun version` | Print build version. |
 

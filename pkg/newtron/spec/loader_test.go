@@ -78,7 +78,7 @@ func createTestSpecDir(t *testing.T) string {
 	}
 
 	// Create profiles directory
-	profilesDir := filepath.Join(tmpDir, "profiles")
+	profilesDir := filepath.Join(tmpDir, "nodes")
 	if err := os.MkdirAll(profilesDir, 0755); err != nil {
 		t.Fatalf("Failed to create profiles dir: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestLoader_LoadProfile_InvalidJSON(t *testing.T) {
 	}
 
 	// Create profile with invalid JSON
-	profilePath := filepath.Join(tmpDir, "profiles", "bad-profile.json")
+	profilePath := filepath.Join(tmpDir, "nodes", "bad-profile.json")
 	if err := os.WriteFile(profilePath, []byte("invalid json {"), 0644); err != nil {
 		t.Fatalf("Failed to write bad profile: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestLoader_ValidateProfileZoneReference(t *testing.T) {
 		"loopback_ip": "10.0.0.1",
 		"zone": "unknown-zone"
 	}`
-	profilePath := filepath.Join(tmpDir, "profiles", "bad-zone.json")
+	profilePath := filepath.Join(tmpDir, "nodes", "bad-zone.json")
 	if err := os.WriteFile(profilePath, []byte(profileJSON), 0644); err != nil {
 		t.Fatalf("Failed to write profile: %v", err)
 	}
@@ -698,7 +698,7 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			profilePath := filepath.Join(tmpDir, "profiles", "test-profile.json")
+			profilePath := filepath.Join(tmpDir, "nodes", "test-profile.json")
 			if err := os.WriteFile(profilePath, []byte(tt.profileJSON), 0644); err != nil {
 				t.Fatalf("Failed to write profile: %v", err)
 			}

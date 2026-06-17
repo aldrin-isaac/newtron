@@ -1,7 +1,7 @@
 # newtlab — HOWTO Guide
 
 newtlab realizes network topologies as connected QEMU virtual machines. It
-reads newtron's spec files (`topology.json`, `platforms.json`, `profiles/`)
+reads newtron's spec files (`topology.json`, `platforms.json`, `nodes/`)
 and manages VM lifecycle without root privileges.
 
 For the architectural principles behind newtron, newtlab, and newtrun, see
@@ -225,7 +225,7 @@ all state.
 ## Spec File Configuration
 
 newtlab reads three configuration sources: `topology.json` for the lab
-layout, `platforms.json` for VM images and settings, and `profiles/<device>.json`
+layout, `platforms.json` for VM images and settings, and `nodes/<device>.json`
 for per-device overrides. All three live in the same spec directory passed
 via `-S`.
 
@@ -333,7 +333,7 @@ NIC 0 is always reserved for management.
 
 ### Profile VM Overrides
 
-Individual devices can override VM resources in `profiles/<device>.json`:
+Individual devices can override VM resources in `nodes/<device>.json`:
 
 ```json
 {
@@ -372,7 +372,7 @@ Deploy creates QEMU VMs from spec files, sets up inter-VM links via newtlink
 bridge workers, and waits for all devices to become SSH-reachable.
 
 **Preconditions:**
-- Spec directory exists with `topology.json`, `platforms.json`, and `profiles/`
+- Spec directory exists with `topology.json`, `platforms.json`, and `nodes/`
 - VM images referenced in `platforms.json` exist at the specified paths
 - KVM available (or accept slow TCG fallback)
 - Port ranges are free (newtlab probes all ports before starting)
@@ -874,7 +874,7 @@ The key field is `"device_type": "host"` — this triggers VM coalescing.
 Host interfaces use Linux naming (`eth0`, `eth1`). The `"type": "host"` marker
 identifies the device for coalescing.
 
-**3. Create host profiles (`profiles/host1.json`):**
+**3. Create host profiles (`nodes/host1.json`):**
 
 ```json
 {

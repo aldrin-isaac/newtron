@@ -30,7 +30,7 @@ func TestResolveTopologyDir(t *testing.T) {
 	t.Run("simple name uses base dir", func(t *testing.T) {
 		t.Setenv("NEWTRUN_TOPOLOGIES", "/tmp/topos")
 		got := resolveTopologyDir("foo")
-		want := "/tmp/topos/foo/specs"
+		want := "/tmp/topos/foo"
 		if got != want {
 			t.Errorf("resolveTopologyDir(%q) = %q, want %q", "foo", got, want)
 		}
