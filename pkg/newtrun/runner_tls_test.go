@@ -110,7 +110,7 @@ func networkInfoHandler(w http.ResponseWriter, r *http.Request) {
 		"data": []map[string]any{
 			{
 				"id":       "default",
-				"spec_dir": "/tmp/test-specs",
+				"dir": "/tmp/test-specs",
 				"topology": "test-topo",
 				"nodes":    []string{"switch1"},
 			},

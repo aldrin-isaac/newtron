@@ -30,7 +30,7 @@ func newNetworksCmd() *cobra.Command {
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "  ID\tSPEC_DIR")
 			for _, info := range infos {
-				fmt.Fprintf(w, "  %s\t%s\n", info.ID, info.SpecDir)
+				fmt.Fprintf(w, "  %s\t%s\n", info.ID, info.Dir)
 			}
 			return w.Flush()
 		},
@@ -61,7 +61,7 @@ func newNetworkCreateCmd() *cobra.Command {
 (network.json, topology.json, platforms.json) plus an empty profiles/
 subdirectory, then register it as a newtron network in one call.
 
-The spec_dir defaults to <networks-base>/<name>/specs (resolved
+The dir defaults to <networks-base>/<name>/specs (resolved
 against the current working directory). Override the base with
 --networks-base.`,
 		Args: cobra.ExactArgs(1),
@@ -75,25 +75,25 @@ against the current working directory). Override the base with
 }
 
 func createNetwork(_ context.Context, name, description, networksBase string) error {
-	specDir, err := filepath.Abs(filepath.Join(networksBase, name))
+	dir, err := filepath.Abs(filepath.Join(networksBase, name))
 	if err != nil {
-		return fmt.Errorf("resolve spec_dir: %w", err)
+		return fmt.Errorf("resolve dir: %w", err)
 	}
 	c := newNewtronClient(name)
 	// CLI workflow: the caller picks the path explicitly so the
 	// scaffold lands inside the networks/ convention. The
 	// server-derived mode (#122) is for UI clients that don't track
 	// newtron's on-disk layout — newtrun's CLI does.
-	info, err := c.ScaffoldNetwork(specDir, description)
+	info, err := c.ScaffoldNetwork(dir, description)
 	if err != nil {
 		return fmt.Errorf("scaffold network %q: %w", name, err)
 	}
-	// Print the server-resolved spec_dir rather than the value the
+	// Print the server-resolved dir rather than the value the
 	// CLI passed in. They are the same here, but reading it from the
 	// response keeps the "server owns the layout" contract honest —
 	// any future evolution where the server normalizes paths (resolves
 	// symlinks, expands env vars) doesn't drift the printed value.
-	fmt.Fprintf(os.Stderr, "created network %s at %s\n", name, info.SpecDir)
+	fmt.Fprintf(os.Stderr, "created network %s at %s\n", name, info.Dir)
 	return nil
 }
 

@@ -264,7 +264,7 @@ func plainSwitch1Profile() string {
 // ${secret:KEY} references: the secrets.json sits next to network.json
 // and is picked up automatically.
 //
-// §16: real on-disk spec dir, real FileStore creation, real
+// §16: real on-disk network dir, real FileStore creation, real
 // NewNetwork pass — no layer stubbed. The assertion targets the
 // resolved password value end-to-end.
 func TestNewNetwork_SpecDirSecretStoreAutoDiscovery(t *testing.T) {

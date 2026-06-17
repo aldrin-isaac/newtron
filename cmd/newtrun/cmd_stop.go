@@ -15,7 +15,7 @@ func newStopCmd() *cobra.Command {
 		Short: "Cancel a running suite, destroy its topology, and remove state",
 		Long: `Cancel the named suite's run (if active), tear down the deployed topology,
 and remove the suite's state directory. The topology destroy step uses the
-spec directory recorded in state, so it requires the state to be readable.`,
+network directory recorded in state, so it requires the state to be readable.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			suite := args[0]
@@ -25,7 +25,7 @@ spec directory recorded in state, so it requires the state to be readable.`,
 				return err
 			}
 
-			// Fetch state before stopping so we still know the spec dir.
+			// Fetch state before stopping so we still know the network dir.
 			state, err := c.GetRun(ctx, suite)
 			if err != nil {
 				return err

@@ -38,20 +38,20 @@ func (e *ServerError) Error() string {
 }
 
 // AlreadyRegisteredError is returned by RegisterNetwork when the network ID
-// is already registered for a different spec_dir. True-idempotent
-// re-registration (same id + same spec_dir) returns nil instead, since the
+// is already registered for a different dir. True-idempotent
+// re-registration (same id + same dir) returns nil instead, since the
 // observable state matches what the caller asked for.
 type AlreadyRegisteredError struct {
 	ID               string
-	RequestedSpecDir string
-	ExistingSpecDir  string
+	RequestedDir string
+	ExistingDir  string
 }
 
 func (e *AlreadyRegisteredError) Error() string {
 	return fmt.Sprintf(
-		"network '%s' is already registered with spec_dir '%s'; "+
+		"network '%s' is already registered with dir '%s'; "+
 			"unregister it first or use a different network ID to register %q alongside",
-		e.ID, e.ExistingSpecDir, e.RequestedSpecDir,
+		e.ID, e.ExistingDir, e.RequestedDir,
 	)
 }
 
@@ -161,19 +161,19 @@ func (c *Client) NetworkID() string {
 // RegisterNetwork registers a network with the server.
 //
 // Returns nil on true-idempotent re-registration (the network is already
-// registered for the same spec_dir — the observable state already matches).
+// registered for the same dir — the observable state already matches).
 // Returns *AlreadyRegisteredError when the network is registered for a
-// different spec_dir, so callers can distinguish "you already did this" from
+// different dir, so callers can distinguish "you already did this" from
 // "someone else owns this slot." Other server errors come back as
 // *ServerError.
 //
 // The 409 response envelope carries an api.AlreadyRegisteredErrorInfo in
-// Data with the existing spec_dir; this method decodes it to make the
+// Data with the existing dir; this method decodes it to make the
 // comparison.
 func (c *Client) RegisterNetwork(specDir string) error {
 	body := api.RegisterNetworkRequest{
 		ID:      c.networkID,
-		SpecDir: specDir,
+		Dir: specDir,
 	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -204,17 +204,17 @@ func (c *Client) RegisterNetwork(specDir string) error {
 			}
 		}
 		// True idempotent only when the server actually told us the
-		// existing spec_dir AND it matches what the caller asked for.
+		// existing dir AND it matches what the caller asked for.
 		// Without the dataParsed guard, an empty/unparseable Data
-		// payload would collapse to ExistingSpecDir == "" and could
+		// payload would collapse to ExistingDir == "" and could
 		// match a (degenerate) empty specDir — best to fail loud.
-		if dataParsed && info.ExistingSpecDir == specDir {
+		if dataParsed && info.ExistingDir == specDir {
 			return nil
 		}
 		return &AlreadyRegisteredError{
 			ID:               c.networkID,
-			RequestedSpecDir: specDir,
-			ExistingSpecDir:  info.ExistingSpecDir,
+			RequestedDir: specDir,
+			ExistingDir:  info.ExistingDir,
 		}
 	}
 
@@ -234,20 +234,20 @@ func (c *Client) RegisterNetwork(specDir string) error {
 // want to know newtron's on-disk layout pass "" here; CLI consumers
 // that follow their own filesystem convention (e.g. newtrun's
 // `networks/<name>/specs`) keep passing an explicit path.
-// Either way the returned NetworkInfo carries the resolved spec_dir,
+// Either way the returned NetworkInfo carries the resolved dir,
 // so callers can display "created at <path>" without re-fetching.
 //
-// Unlike RegisterNetwork, a 409 here is meaningful — the spec_dir
+// Unlike RegisterNetwork, a 409 here is meaningful — the dir
 // (operator-supplied or derived) already contains specs — and is
 // returned to the caller so the operator can choose to register the
 // existing layout or pick a different path. A 400 from the server
 // signals the derived-path mode is requested but the server has no
 // scaffold root configured (operator must add --scaffold-root or
-// supply spec_dir explicitly).
+// supply dir explicitly).
 func (c *Client) ScaffoldNetwork(specDir, description string) (*api.NetworkInfo, error) {
 	body := api.RegisterNetworkRequest{
 		ID:          c.networkID,
-		SpecDir:     specDir,
+		Dir:     specDir,
 		Scaffold:    true,
 		Description: description,
 	}

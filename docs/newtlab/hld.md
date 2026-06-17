@@ -731,7 +731,7 @@ Tracks the complete runtime state of the lab:
 ```json
 {
   "name": "2node-ngdp",
-  "spec_dir": "/home/user/networks/2node-ngdp/specs",
+  "dir": "/home/user/networks/2node-ngdp",
   "nodes": {
     "switch1": {
       "pid": 12345, "status": "running",
@@ -886,7 +886,7 @@ focusing on the moments where layers interact in non-obvious ways.
 
 ### Spec Resolution and Port Planning
 
-newtlab resolves `2node-ngdp` to `networks/2node-ngdp/specs/`. It loads
+newtlab resolves `2node-ngdp` to `networks/2node-ngdp/`. It loads
 `topology.json` (two switches, links between them), `platforms.json`
 (CiscoVS platform: `sequential` interface map, `e1000` NIC driver, 8 GB
 memory), and both device profiles. Configuration resolution merges profile

@@ -34,7 +34,7 @@ func auditServeGet(t *testing.T, specDir, auditPath, path string) *httptest.Resp
 	return w
 }
 
-// scaffoldAuditNetwork builds an empty network spec dir suitable
+// scaffoldAuditNetwork builds an empty network network dir suitable
 // for audit-endpoint tests. The network needs no spec content for
 // the endpoints to work — they only consult the audit log and the
 // authorization table.

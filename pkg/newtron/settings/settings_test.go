@@ -9,9 +9,9 @@ import (
 func TestSettings_Defaults(t *testing.T) {
 	s := &Settings{}
 
-	// Test default spec dir
-	if got := s.GetSpecDir(); got != DefaultSpecDir {
-		t.Errorf("GetSpecDir() default = %q, want %q", got, DefaultSpecDir)
+	// Test default network dir
+	if got := s.GetDir(); got != DefaultDir {
+		t.Errorf("GetDir() default = %q, want %q", got, DefaultDir)
 	}
 
 	// Test empty defaults
@@ -28,9 +28,9 @@ func TestSettings_FieldAssignment(t *testing.T) {
 		t.Errorf("DefaultNetwork = %q, want %q", s.DefaultNetwork, "production")
 	}
 
-	s.SpecDir = "/custom/path"
-	if s.GetSpecDir() != "/custom/path" {
-		t.Errorf("GetSpecDir() = %q, want %q", s.GetSpecDir(), "/custom/path")
+	s.Dir = "/custom/path"
+	if s.GetDir() != "/custom/path" {
+		t.Errorf("GetDir() = %q, want %q", s.GetDir(), "/custom/path")
 	}
 
 	s.DefaultSuite = "networks/2node-ngdp/suites/2node-ngdp-incremental"
@@ -57,7 +57,7 @@ func TestSettings_SaveLoad(t *testing.T) {
 	// Create settings
 	original := &Settings{
 		DefaultNetwork: "production",
-		SpecDir:        "/etc/newtron",
+		Dir:        "/etc/newtron",
 		DefaultSuite:   "networks/2node-ngdp/suites/2node-ngdp-incremental",
 		NetworksDir:  "networks",
 	}
@@ -77,8 +77,8 @@ func TestSettings_SaveLoad(t *testing.T) {
 	if loaded.DefaultNetwork != original.DefaultNetwork {
 		t.Errorf("DefaultNetwork mismatch: got %q, want %q", loaded.DefaultNetwork, original.DefaultNetwork)
 	}
-	if loaded.SpecDir != original.SpecDir {
-		t.Errorf("SpecDir mismatch: got %q, want %q", loaded.SpecDir, original.SpecDir)
+	if loaded.Dir != original.Dir {
+		t.Errorf("Dir mismatch: got %q, want %q", loaded.Dir, original.Dir)
 	}
 	if loaded.DefaultSuite != original.DefaultSuite {
 		t.Errorf("DefaultSuite mismatch: got %q, want %q", loaded.DefaultSuite, original.DefaultSuite)

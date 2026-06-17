@@ -72,7 +72,7 @@ steps:
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/newtron/v1/networks":
-			_, _ = w.Write([]byte(`{"data":[{"id":"test-net","topology":"synthetic","has_topology":true,"spec_dir":""}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"test-net","topology":"synthetic","has_topology":true,"dir":""}]}`))
 		case strings.HasSuffix(r.URL.Path, "/topology/devices"):
 			_, _ = w.Write([]byte(`{"data":[]}`))
 		case strings.HasSuffix(r.URL.Path, "/create-zone"):

@@ -98,7 +98,7 @@ newtron-server -spec-dir /etc/newtron -idle-timeout -1s
 |------|---------|-------------|
 | `-addr` | `:18080` | Listen address |
 | `-spec-dir` | (none) | Spec directory to auto-register as a network |
-| `-net-id` | `default` | Network ID for the auto-registered spec directory |
+| `-net-id` | `default` | Network ID for the auto-registered network directory |
 | `-idle-timeout` | `0` (5 min) | SSH idle timeout. `0` = default 5m. Negative = no caching. |
 
 The server can manage multiple networks simultaneously. Each network has its own set of spec files and devices. The CLI registers its network on startup via the HTTP API.
@@ -165,7 +165,7 @@ export NEWTRON_SERVER=http://10.0.0.1:18080
 export NEWTRON_NETWORK_ID=production
 ```
 
-On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server with its spec directory. This is idempotent on matching state — if the network is already registered with the same spec_dir, the server returns 409 and the CLI continues silently. If the same network ID is registered with a *different* spec_dir, the client returns a typed `*AlreadyRegisteredError` carrying both paths so the operator can unregister or pick a different ID; the CLI surfaces that error.
+On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server with its network directory. This is idempotent on matching state — if the network is already registered with the same dir, the server returns 409 and the CLI continues silently. If the same network ID is registered with a *different* dir, the client returns a typed `*AlreadyRegisteredError` carrying both paths so the operator can unregister or pick a different ID; the CLI surfaces that error.
 
 ### 2.7 Reloading Specs
 
@@ -622,7 +622,7 @@ Device-scoped commands require a device name. Spec-level commands do not.
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--device` | `-D` | Device name |
-| `--specs` | `-S` | Spec directory (default: from settings or `/etc/newtron`) |
+| `--dir` |  | Network directory (default: from settings or `/etc/newtron`) |
 | `--server` | | Server URL (default: settings or `http://localhost:18080`) |
 | `--network-id` | `-N` | Network identifier (default: settings or `default`) |
 | `--verbose` | `-v` | Verbose output |
@@ -695,7 +695,7 @@ newtron settings path           # show settings file path
 
 Settings are stored in `~/.newtron/settings.json`.
 
-**Available settings:** `network`, `specs` (or `spec_dir`), `suite` (or `default_suite`), `networks_dir`, `server` (or `server_url`), `network_id`
+**Available settings:** `network`, `specs` (or `dir`), `suite` (or `default_suite`), `networks_dir`, `server` (or `server_url`), `network_id`
 
 ### 4.9 Show Device Status
 
@@ -2760,12 +2760,12 @@ bin/newtlab deploy 2node-ngdp
 bin/newt-server &
 
 # Provision switches from topology
-bin/newtron -S networks/2node-ngdp/specs -D switch1 --topology intent reconcile -x
-bin/newtron -S networks/2node-ngdp/specs -D switch2 --topology intent reconcile -x
+bin/newtron --dir networks/2node-ngdp -D switch1 --topology intent reconcile -x
+bin/newtron --dir networks/2node-ngdp -D switch2 --topology intent reconcile -x
 
 # Verify health
-bin/newtron -S networks/2node-ngdp/specs -D switch1 health check
-bin/newtron -S networks/2node-ngdp/specs -D switch2 health check
+bin/newtron --dir networks/2node-ngdp -D switch1 health check
+bin/newtron --dir networks/2node-ngdp -D switch2 health check
 
 # Run E2E test suite (uses newtrun)
 bin/newtrun start 2node-ngdp-primitive

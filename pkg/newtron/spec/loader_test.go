@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Helper to create test spec directory with files
+// Helper to create test network directory with files
 func createTestSpecDir(t *testing.T) string {
 	t.Helper()
 	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
@@ -279,11 +279,11 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 	}
 }
 
-func TestLoader_DefaultSpecDir(t *testing.T) {
+func TestLoader_DefaultDir(t *testing.T) {
 	// Test that empty string uses default
 	loader := NewLoader("")
-	if loader.specDir != SpecDir {
-		t.Errorf("Empty specDir should use default %q, got %q", SpecDir, loader.specDir)
+	if loader.specDir != Dir {
+		t.Errorf("Empty specDir should use default %q, got %q", Dir, loader.specDir)
 	}
 }
 

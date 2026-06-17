@@ -16,7 +16,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// scaffoldWithPermissions writes a minimal spec directory whose
+// scaffoldWithPermissions writes a minimal network directory whose
 // network.json declares one group, one global grant for spec.author,
 // and one super_user. The grant table is the input to
 // TestAuthorizationActuallyEnforces — a permitted caller is in the
@@ -457,7 +457,7 @@ func TestAuthorizationL4_NodeMutationsGated(t *testing.T) {
 	}
 }
 
-// scaffoldWithGrants writes a minimal spec directory whose
+// scaffoldWithGrants writes a minimal network directory whose
 // network.json carries the operator-provided permissions JSON
 // fragment, plus the standard super_users + user_groups L5 tests
 // share. Used by the L5 per-device and meta-authorization tests

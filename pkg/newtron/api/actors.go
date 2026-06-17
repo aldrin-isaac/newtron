@@ -36,7 +36,7 @@ type response struct {
 // ============================================================================
 
 // networkEntity is the API layer's record for one registered network: it
-// pairs the engine's *newtron.Network with the spec directory it was loaded
+// pairs the engine's *newtron.Network with the network directory it was loaded
 // from and a cache of per-device NodeActors. The Server holds one of these
 // per registered netID.
 //

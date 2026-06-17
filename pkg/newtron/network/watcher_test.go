@@ -19,7 +19,7 @@ func quietLogger() *log.Logger {
 }
 
 // TestSpecWatcher_FileChangeTriggersReload pins the L6 revocation
-// contract: editing a file under the watched spec dir produces one
+// contract: editing a file under the watched network dir produces one
 // reload(networkID) call within the debounce window. Without this
 // behavior, operators would still need to POST /reload to revoke
 // access — exactly the gap L6 closes.

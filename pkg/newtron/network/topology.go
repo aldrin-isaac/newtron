@@ -28,7 +28,7 @@ type TopologyProvisioner struct {
 // NewTopologyProvisioner creates a provisioner from a Network with a loaded topology.
 func NewTopologyProvisioner(network *Network) (*TopologyProvisioner, error) {
 	if !network.HasTopology() {
-		return nil, fmt.Errorf("no topology loaded — ensure topology.json exists in spec directory")
+		return nil, fmt.Errorf("no topology loaded — ensure topology.json exists in network directory")
 	}
 	return &TopologyProvisioner{network: network}, nil
 }

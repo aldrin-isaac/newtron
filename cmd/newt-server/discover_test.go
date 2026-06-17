@@ -22,25 +22,25 @@ const (
 )
 
 // seedNetwork writes a minimally valid spec tree under
-// <base>/<name>/. Returns the spec_dir path.
+// <base>/<name>/. Returns the dir path.
 func seedNetwork(t *testing.T, base, name string, withTopology bool) string {
 	t.Helper()
-	specDir := filepath.Join(base, name)
-	if err := os.MkdirAll(filepath.Join(specDir, "nodes"), 0o755); err != nil {
-		t.Fatalf("mkdir specDir: %v", err)
+	dir := filepath.Join(base, name)
+	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
+		t.Fatalf("mkdir dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(fixtureNetworkJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(fixtureNetworkJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "platforms.json"), []byte(fixturePlatformsJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "platforms.json"), []byte(fixturePlatformsJSON), 0o644); err != nil {
 		t.Fatalf("write platforms.json: %v", err)
 	}
 	if withTopology {
-		if err := os.WriteFile(filepath.Join(specDir, "topology.json"), []byte(fixtureTopologyJSON), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "topology.json"), []byte(fixtureTopologyJSON), 0o644); err != nil {
 			t.Fatalf("write topology.json: %v", err)
 		}
 	}
-	return specDir
+	return dir
 }
 
 // TestDiscoverAndRegisterNetworks_RegistersEveryTopology covers the
@@ -139,17 +139,17 @@ func TestDiscoverAndRegisterNetworks_OneBadEntryDoesNotPoisonRest(t *testing.T) 
 	seedNetwork(t, base, "good", true)
 
 	// Bad: write invalid JSON into network.json
-	badSpecDir := filepath.Join(base, "broken")
-	if err := os.MkdirAll(filepath.Join(badSpecDir, "nodes"), 0o755); err != nil {
+	badDir := filepath.Join(base, "broken")
+	if err := os.MkdirAll(filepath.Join(badDir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir broken: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(badSpecDir, "network.json"), []byte(`{not valid json`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(badDir, "network.json"), []byte(`{not valid json`), 0o644); err != nil {
 		t.Fatalf("write bad network.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(badSpecDir, "topology.json"), []byte(fixtureTopologyJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(badDir, "topology.json"), []byte(fixtureTopologyJSON), 0o644); err != nil {
 		t.Fatalf("write topology.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(badSpecDir, "platforms.json"), []byte(fixturePlatformsJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(badDir, "platforms.json"), []byte(fixturePlatformsJSON), 0o644); err != nil {
 		t.Fatalf("write platforms.json: %v", err)
 	}
 

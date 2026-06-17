@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	specDir       string
+	dir       string
 	verbose       bool
 	newtronServer string
 	newtlabServer string
@@ -74,7 +74,7 @@ Topologies are resolved by name from networks/.
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory (overrides topology name)")
+	rootCmd.PersistentFlags().StringVar(&dir, "dir", "", "network directory (overrides topology name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
 	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — used as the orchestrator URL newtlink pushes BridgeStats to (#118), and as the read path for `newtlab status` link telemetry. Default: http://127.0.0.1:18080. Env: NEWTLAB_SERVER")
@@ -110,7 +110,7 @@ func networksBaseDir() string {
 	return "networks"
 }
 
-// resolveTopologyDir resolves a topology name to its spec directory.
+// resolveTopologyDir resolves a topology name to its network directory.
 // If name contains "/" it's used as-is. Otherwise resolved under networksBaseDir.
 func resolveTopologyDir(name string) string {
 	if strings.Contains(name, "/") {
@@ -119,12 +119,12 @@ func resolveTopologyDir(name string) string {
 	return filepath.Join(networksBaseDir(), name)
 }
 
-// topologyNameFromPath derives the topology name from a spec directory
-// path. Mirrors the convention used by newtron-server's topologyName():
+// topologyNameFromPath derives the topology name from a network directory
+// path. Mirrors the convention used by newtron-server.s networkName():
 // /path/to/<topology>/specs → <topology>; /path/to/<topology> → <topology>.
 func topologyNameFromPath(absDir string) string {
 	base := filepath.Base(absDir)
-	if base == "" && filepath.Base(filepath.Clean(specDir)) == filepath.Base(specDir) {
+	if base == "" && filepath.Base(filepath.Clean(dir)) == filepath.Base(dir) {
 		return filepath.Base(filepath.Dir(absDir))
 	}
 	return base
@@ -167,9 +167,9 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
 	// Ensure the network is registered on newtron-server so it can
 	// serve specs for this topology. RegisterNetwork is true-idempotent on
-	// matching spec_dir (returns nil); on a real conflict (same network
-	// id, different spec_dir) it returns *AlreadyRegisteredError, which we
-	// surface unwrapped — the operator needs to see exactly which spec_dir
+	// matching dir (returns nil); on a real conflict (same network
+	// id, different dir) it returns *AlreadyRegisteredError, which we
+	// surface unwrapped — the operator needs to see exactly which dir
 	// is squatting in the slot.
 	if dir != "" {
 		if regErr := client.RegisterNetwork(dir); regErr != nil {
@@ -201,18 +201,18 @@ func newtlabURL() string {
 	return url
 }
 
-// resolveTarget resolves both lab name and spec directory from:
+// resolveTarget resolves both lab name and network directory from:
 // -S flag > positional topology name > auto-detect from deployed labs.
 // This is the shared resolution logic used by resolveLabName and
-// prepareLab. The spec directory is no longer used for file reads
+// prepareLab. The network directory is no longer used for file reads
 // (§27 — newtron owns spec files); it is the path newtron is asked
 // to register and serve.
 func resolveTarget(args []string) (labName string, dir string, err error) {
 	// Explicit -S flag takes priority
-	if specDir != "" {
-		absDir, absErr := filepath.Abs(specDir)
+	if dir != "" {
+		absDir, absErr := filepath.Abs(dir)
 		if absErr != nil {
-			return "", "", fmt.Errorf("resolve spec dir: %w", absErr)
+			return "", "", fmt.Errorf("resolve network dir: %w", absErr)
 		}
 		return topologyNameFromPath(absDir), absDir, nil
 	}
@@ -227,11 +227,11 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 				if loadErr != nil {
 					return "", "", loadErr
 				}
-				// state.SpecDir is empty for older labs whose state.json
-				// was written before SpecDir was persisted; fall back to
-				// the canonical spec dir for the topology name so the
+				// state.Dir is empty for older labs whose state.json
+				// was written before Dir was persisted; fall back to
+				// the canonical network dir for the topology name so the
 				// caller can still register the network with newtron.
-				dir := state.SpecDir
+				dir := state.Dir
 				if dir == "" {
 					dir = resolveTopologyDir(l)
 				}
@@ -259,7 +259,7 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 		if loadErr != nil {
 			return "", "", loadErr
 		}
-		return labs[0], state.SpecDir, nil
+		return labs[0], state.Dir, nil
 	}
 	return "", "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
 }

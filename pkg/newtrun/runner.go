@@ -72,7 +72,7 @@ type Runner struct {
 
 	// Populated by connectToServer from the server's registered network.
 	Network string // network name (from server)
-	SpecDir  string // spec directory (from server)
+	Dir  string // network directory (from server)
 
 	// Populated by Run from the loaded suite.yaml. resolvedIterations
 	// is the cross-product of suite-level targets after per-run
@@ -250,7 +250,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
 		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Network)
-		cleanup, deployErr := r.deployTopology(ctx, r.SpecDir, opts)
+		cleanup, deployErr := r.deployTopology(ctx, r.Dir, opts)
 		if deployErr != nil {
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
@@ -458,12 +458,12 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 // goes through newtlab-server's HTTP client; no in-process
 // newtlab.NewLab.
 //
-// specDir registers the network with newtron-server so newtlab can
+// dir registers the network with newtron-server so newtlab can
 // query specs from there during deploy.
-func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
-	if specDir != "" {
-		if regErr := r.Client.RegisterNetwork(specDir); regErr != nil {
-			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", specDir, regErr)
+func (r *Runner) deployTopology(ctx context.Context, dir string, opts RunOptions) (cleanup func(), err error) {
+	if dir != "" {
+		if regErr := r.Client.RegisterNetwork(dir); regErr != nil {
+			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", dir, regErr)
 		}
 	}
 	if r.NewtlabClient == nil {
@@ -487,7 +487,7 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 }
 
 // connectToServer queries the server for the registered network's info.
-// Populates r.Network, r.SpecDir, and creates the HTTP client.
+// Populates r.Network, r.Dir, and creates the HTTP client.
 //
 // The HTTP client honors r.NewtronClientTLS so the runner can
 // authenticate against an mTLS-enforced newtron-server via its peer
@@ -515,8 +515,8 @@ func (r *Runner) connectToServer() error {
 		return &InfraError{Op: "connect", Err: fmt.Errorf("querying server: %w (is the network registered?)", err)}
 	}
 
-	r.SpecDir = info.SpecDir
-	// NetworkInfo.Topology is the basename of specDir's parent (e.g.
+	r.Dir = info.Dir
+	// NetworkInfo.Topology is the basename of dir's parent (e.g.
 	// "1node-vs"); under the new vocabulary this IS the network's own
 	// name, and NetworkInfo's field reads as a redundancy with ID
 	// in the simple case. The wire field is kept as-is for now

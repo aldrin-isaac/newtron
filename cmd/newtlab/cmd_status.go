@@ -38,7 +38,7 @@ With a topology name, shows detailed status for that lab.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// No args and no -S: show all deployed labs
-			if len(args) == 0 && specDir == "" {
+			if len(args) == 0 && dir == "" {
 				if monitor {
 					return monitorAllLabs()
 				}
@@ -111,7 +111,7 @@ func showLabDetail(labName string) error {
 	}
 
 	fmt.Printf("Lab: %s (deployed %s)\n", state.Name, state.Created.Format("2006-01-02 15:04:05"))
-	fmt.Printf("Spec dir: %s\n\n", state.SpecDir)
+	fmt.Printf("Spec dir: %s\n\n", state.Dir)
 
 	// Detect if any node is on a remote host
 	hasRemoteHost := false

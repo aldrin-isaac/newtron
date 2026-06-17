@@ -21,7 +21,7 @@ import (
 // individual subdirs are logged but do not abort startup — one
 // malformed network shouldn't keep the rest of the tree unreachable.
 //
-// Registration is idempotent on matching spec_dir, so later
+// Registration is idempotent on matching dir, so later
 // `bin/newtlab deploy <name>` calls (which also call
 // client.RegisterNetwork) against an already-registered network are
 // no-ops rather than conflicts.
@@ -51,7 +51,7 @@ func discoverAndRegisterNetworks(srv *newtronapi.Server, networksBase string, lo
 	sort.Strings(names)
 
 	for _, name := range names {
-		specDir := filepath.Join(networksBase, name)
+		dir := filepath.Join(networksBase, name)
 		// The marker file is topology.json — same shape newtlab uses
 		// to decide a directory is a deployable network. Networks
 		// without topology.json are not auto-registered (could be a
@@ -59,13 +59,13 @@ func discoverAndRegisterNetworks(srv *newtronapi.Server, networksBase string, lo
 		// `newtrun network create` but doesn't yet have a substrate).
 		// Operators can still POST /networks for those if they want
 		// the slot live before topology.json lands.
-		if _, err := os.Stat(filepath.Join(specDir, "topology.json")); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, "topology.json")); err != nil {
 			continue
 		}
-		if err := srv.RegisterNetwork(name, specDir); err != nil {
-			logger.Printf("auto-discovery: failed to register %q from %s: %v", name, specDir, err)
+		if err := srv.RegisterNetwork(name, dir); err != nil {
+			logger.Printf("auto-discovery: failed to register %q from %s: %v", name, dir, err)
 			continue
 		}
-		logger.Printf("auto-discovery: registered network %q from %s", name, specDir)
+		logger.Printf("auto-discovery: registered network %q from %s", name, dir)
 	}
 }

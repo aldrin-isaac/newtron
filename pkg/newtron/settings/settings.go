@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 )
 
-// DefaultSpecDir is the default specification directory used when no override is configured.
-const DefaultSpecDir = "/etc/newtron"
+// DefaultDir is the default specification directory used when no override is configured.
+const DefaultDir = "/etc/newtron"
 
 // Settings holds persistent user preferences.
 // Settings is not goroutine-safe; callers must synchronize concurrent access.
@@ -16,8 +16,8 @@ type Settings struct {
 	// DefaultNetwork is the network to use when -n is not specified
 	DefaultNetwork string `json:"default_network,omitempty"`
 
-	// SpecDir overrides the default specification directory
-	SpecDir string `json:"spec_dir,omitempty"`
+	// Dir overrides the default specification directory
+	Dir string `json:"dir,omitempty"`
 
 	// DefaultSuite is the default --dir for newtrun start
 	DefaultSuite string `json:"default_suite,omitempty"`
@@ -104,12 +104,12 @@ func (s *Settings) SaveTo(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// GetSpecDir returns the spec directory (with fallback)
-func (s *Settings) GetSpecDir() string {
-	if s.SpecDir != "" {
-		return s.SpecDir
+// GetDir returns the network directory (with fallback)
+func (s *Settings) GetDir() string {
+	if s.Dir != "" {
+		return s.Dir
 	}
-	return DefaultSpecDir
+	return DefaultDir
 }
 
 // GetAuditLogPath returns the audit log path with a fallback default.

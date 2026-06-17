@@ -15,7 +15,7 @@ import (
 )
 
 // scaffoldPlatformNetwork registers a fresh network with id "default"
-// at a scaffolded spec dir. Returns the server. Used by the #173
+// at a scaffolded network dir. Returns the server. Used by the #173
 // platform CRUD tests.
 func scaffoldPlatformNetwork(t *testing.T) (*Server, string) {
 	t.Helper()

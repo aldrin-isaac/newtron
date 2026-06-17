@@ -89,6 +89,6 @@ func TestScaffold_EmptyPreExistingDir(t *testing.T) {
 
 func TestScaffold_EmptySpecDir(t *testing.T) {
 	if err := Scaffold("", ""); err == nil {
-		t.Fatalf("expected error for empty spec_dir")
+		t.Fatalf("expected error for empty dir")
 	}
 }

@@ -344,13 +344,13 @@ the detailed endpoint documentation in later sections.
 ### 1. Start the server and register a network
 
 ```bash
-# Start the server with a spec directory
+# Start the server with a network directory
 newtron-server -spec-dir /etc/newtron -net-id default
 
 # Or register dynamically via the API
 curl -X POST http://localhost:18080/network \
   -H "Content-Type: application/json" \
-  -d '{"id": "default", "spec_dir": "/etc/newtron"}'
+  -d '{"id": "default", "dir": "/etc/newtron"}'
 ```
 
 See [S3 Server Management](#3-server-management).
@@ -442,47 +442,47 @@ same `WriteResult`.
 
 These endpoints register and unregister networks. A network must be registered
 before any spec reads, device operations, or provisioning can occur. Registration
-loads the spec directory (network.json, device profiles, service definitions) into
+loads the network directory (network.json, device profiles, service definitions) into
 memory.
 
 ### POST /newtron/v1/networks
 
 Register a network. Two consumer styles:
 
-- **Register an *existing* spec directory** (CLI / automation): pass `id` and `spec_dir`. The server loads the spec files at `spec_dir` and registers them under `id`.
-- **Scaffold a *new* topology** (UI / operator-language): pass `id` and `scaffold: true`. The server creates an empty spec layout (three zero-valued spec files plus an empty `nodes/` subdirectory) and registers it in one call. `spec_dir` is optional in this mode — when omitted, the server picks `<scaffold-root>/<id>` from its `--scaffold-root` config. The resolved path is always returned in the response so the client never has to know newtron's on-disk layout.
+- **Register an *existing* network directory** (CLI / automation): pass `id` and `dir`. The server loads the spec files at `dir` and registers them under `id`.
+- **Scaffold a *new* topology** (UI / operator-language): pass `id` and `scaffold: true`. The server creates an empty spec layout (three zero-valued spec files plus an empty `nodes/` subdirectory) and registers it in one call. `dir` is optional in this mode — when omitted, the server picks `<scaffold-root>/<id>` from its `--scaffold-root` config. The resolved path is always returned in the response so the client never has to know newtron's on-disk layout.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `id` | string | yes | Unique network identifier (e.g., `"default"`). |
-| `spec_dir` | string | conditional | Absolute path to the spec directory. Required when `scaffold` is false. Optional when `scaffold` is true — the server derives `<scaffold-root>/<id>` if omitted. |
+| `dir` | string | conditional | Absolute path to the network directory. Required when `scaffold` is false. Optional when `scaffold` is true — the server derives `<scaffold-root>/<id>` if omitted. |
 | `scaffold` | bool | no | Create the empty spec layout before registering. Default `false`. |
 | `description` | string | no | Free-text description seeded into `topology.json` (only used when `scaffold=true`). |
 
 **Behavior matrix:**
 
-| `scaffold` | `spec_dir` | Server state | Outcome |
+| `scaffold` | `dir` | Server state | Outcome |
 |------------|------------|--------------|---------|
 | `false` (default) | supplied; exists with valid specs | — | 201, register |
 | `false` | supplied; missing or invalid | — | 500 spec load error |
-| `false` | omitted | — | 400 `spec_dir is required unless scaffold=true` |
+| `false` | omitted | — | 400 `dir is required unless scaffold=true` |
 | `true` | supplied; missing or empty | — | scaffold + register, 201 |
 | `true` | supplied; already initialized | — | 409 |
 | `true` | omitted | `--scaffold-root` set | derive `<root>/<id>`, scaffold + register, 201 |
-| `true` | omitted | `--scaffold-root` empty | 400 `spec_dir omitted but this server has no --scaffold-root configured` |
+| `true` | omitted | `--scaffold-root` empty | 400 `dir omitted but this server has no --scaffold-root configured` |
 | `true` | omitted | `<root>/<id>` already initialized | 409 |
 
 **Response (201):**
 
-The body is the canonical `NetworkInfo` — the same shape `GET /networks` returns, carrying the resolved `spec_dir` so the caller learns the path even when the server picked it.
+The body is the canonical `NetworkInfo` — the same shape `GET /networks` returns, carrying the resolved `dir` so the caller learns the path even when the server picked it.
 
 ```json
 {
   "data": {
     "id": "default",
-    "spec_dir": "/etc/newtron/default",
+    "dir": "/etc/newtron/default",
     "has_topology": true,
     "topology": "default",
     "nodes": []
@@ -492,36 +492,36 @@ The body is the canonical `NetworkInfo` — the same shape `GET /networks` retur
 
 **Response (409, id already registered):**
 
-The envelope's `data` field carries an `AlreadyRegisteredErrorInfo` with the existing `spec_dir`, so clients can distinguish a true-idempotent retry (the caller is asking to register the same id+spec_dir again — observable state already matches) from a real conflict (the id is taken by a different spec_dir):
+The envelope's `data` field carries an `AlreadyRegisteredErrorInfo` with the existing `dir`, so clients can distinguish a true-idempotent retry (the caller is asking to register the same id+dir again — observable state already matches) from a real conflict (the id is taken by a different dir):
 
 ```json
 {
-  "error": "network 'default' already registered with spec_dir '/etc/newtron/2node-vs/specs'",
+  "error": "network 'default' already registered with dir '/etc/newtron/2node-vs/specs'",
   "data": {
     "id": "default",
-    "existing_spec_dir": "/etc/newtron/2node-vs/specs"
+    "existing_dir": "/etc/newtron/2node-vs/specs"
   }
 }
 ```
 
-The Go client (`pkg/newtron/client/Client.RegisterNetwork`) decodes this shape: if `existing_spec_dir == requested spec_dir`, the call returns `nil` (true-idempotent); otherwise it returns a typed `*client.AlreadyRegisteredError` carrying both paths.
+The Go client (`pkg/newtron/client/Client.RegisterNetwork`) decodes this shape: if `existing_dir == requested dir`, the call returns `nil` (true-idempotent); otherwise it returns a typed `*client.AlreadyRegisteredError` carrying both paths.
 
-**Status codes:** 201 created, 400 missing `id` or missing `spec_dir` without `scaffold=true` or derived mode without `--scaffold-root`, 409 ID already registered (with `existing_spec_dir` in data) or scaffold-into-initialized-dir, 500 spec directory load error
+**Status codes:** 201 created, 400 missing `id` or missing `dir` without `scaffold=true` or derived mode without `--scaffold-root`, 409 ID already registered (with `existing_dir` in data) or scaffold-into-initialized-dir, 500 network directory load error
 
 **Examples:**
 
-Register an existing spec directory (CLI/automation):
+Register an existing network directory (CLI/automation):
 
 ```
 POST /newtron/v1/networks
-{"id": "lab", "spec_dir": "/etc/newtron/lab"}
+{"id": "lab", "dir": "/etc/newtron/lab"}
 ```
 
 Scaffold a new empty network with an operator-supplied path (CLI with filesystem convention, e.g., `bin/newtrun create-topology`):
 
 ```
 POST /newtron/v1/networks
-{"id": "demo-1", "spec_dir": "/var/topologies/demo-1/specs", "scaffold": true, "description": "Demo network"}
+{"id": "demo-1", "dir": "/var/topologies/demo-1/specs", "scaffold": true, "description": "Demo network"}
 ```
 
 Scaffold a new empty network using the server's derived path (UI / operator-language workflow — newtcon "New topology" modal):
@@ -534,7 +534,7 @@ POST /newtron/v1/networks
 {
   "data": {
     "id": "demo-1",
-    "spec_dir": "/etc/newtron/demo-1",
+    "dir": "/etc/newtron/demo-1",
     "has_topology": true,
     "topology": "demo-1",
     "nodes": []
@@ -553,7 +553,7 @@ List all registered networks.
   "data": [
     {
       "id": "default",
-      "spec_dir": "/etc/newtron",
+      "dir": "/etc/newtron",
       "has_topology": true,
       "nodes": ["switch1", "switch2"]
     }
@@ -586,7 +586,7 @@ Unregister a network. Closes all cached SSH connections for the network.
 
 Reload a network's specs from disk without restarting the server. Stops the existing
 networkEntity (draining all NodeActors and SSH connections), reloads specs from the
-stored spec directory, and creates a fresh networkEntity. SSH connections reconnect
+stored network directory, and creates a fresh networkEntity. SSH connections reconnect
 lazily on the next request.
 
 Use this after modifying spec files on disk (manually or via another tool) to pick
@@ -604,7 +604,7 @@ up changes without a full server restart.
 {"data": {"status": "reloaded"}}
 ```
 
-**Status codes:** 200 success, 404 network not registered, 500 spec directory load error
+**Status codes:** 200 success, 404 network not registered, 500 network directory load error
 
 **Example:**
 
@@ -628,7 +628,7 @@ POST /newtron/v1/networks/default/reload
 These endpoints read from the in-memory network spec -- service definitions, VPN
 specs, QoS policies, filters, platforms, device profiles, zones, and topology
 metadata. They do not connect to any device; they read what was loaded from the
-spec directory at registration time.
+network directory at registration time.
 
 All spec read endpoints require a registered network (`{netID}`). Atomicity is
 provided by the engine layer: each Network method acquires a per-key lock internally,
@@ -1010,7 +1010,7 @@ Check whether a platform supports a specific feature.
 
 These endpoints create and delete spec definitions (services, VPNs, QoS policies,
 filters, device profiles, zones, prefix lists, route policies). They modify the
-in-memory spec and persist changes to the spec directory on disk. Like spec reads,
+in-memory spec and persist changes to the network directory on disk. Like spec reads,
 atomicity is provided by the engine layer: each Network method acquires its key's
 lock internally before composing or persisting the spec change.
 
@@ -1541,7 +1541,7 @@ Remove a rule from a route policy.
 ### Device Profiles
 
 Profiles are stored as individual JSON files under `nodes/{name}.json` in the
-spec directory. They define per-device settings (management IP, loopback, zone,
+network directory. They define per-device settings (management IP, loopback, zone,
 platform, EVPN peering).
 
 #### POST /newtron/v1/networks/{netID}/create-profile
@@ -3652,7 +3652,7 @@ Returned in array by `GET /newtron/v1/networks`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Network identifier |
-| `spec_dir` | string | Spec directory path |
+| `dir` | string | Spec directory path |
 | `has_topology` | boolean | Whether a topology file was loaded |
 | `nodes` | string[] | Device names from topology |
 
@@ -3720,7 +3720,7 @@ The `newtron-server` binary accepts these flags:
 |------|---------|-------------|
 | `-addr` | `:18080` | Listen address (host:port) |
 | `-spec-dir` | `""` | Spec directory to auto-register as a network at startup |
-| `-net-id` | `"default"` | Network ID for the auto-registered spec directory |
+| `-net-id` | `"default"` | Network ID for the auto-registered network directory |
 | `-idle-timeout` | `0` (5m default) | SSH connection idle timeout. `0` = default (5 minutes). Negative = disable caching (connect per request). |
 
 **Example:**

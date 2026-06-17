@@ -27,26 +27,26 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: "id is required"})
 		return
 	}
-	// SpecDir is required for the register-existing case (the operator
+	// Dir is required for the register-existing case (the operator
 	// is naming an existing on-disk layout). For the scaffold case it
 	// is optional: the server can derive <scaffoldRoot>/<id> when its
 	// scaffold root is configured. The operator-language framing
 	// (§33; #122) says the UI client's intent is "create topology X" —
 	// the path is implementation. The server still owns the on-disk
 	// layout regardless of who picks the path.
-	if req.SpecDir == "" {
+	if req.Dir == "" {
 		if !req.Scaffold {
-			writeError(w, &newtron.ValidationError{Message: "spec_dir is required unless scaffold=true"})
+			writeError(w, &newtron.ValidationError{Message: "dir is required unless scaffold=true"})
 			return
 		}
 		if s.scaffoldRoot == "" {
-			writeError(w, &newtron.ValidationError{Message: "spec_dir omitted but this server has no --scaffold-root configured; supply spec_dir explicitly or start newtron-server with --scaffold-root"})
+			writeError(w, &newtron.ValidationError{Message: "dir omitted but this server has no --scaffold-root configured; supply dir explicitly or start newtron-server with --scaffold-root"})
 			return
 		}
-		req.SpecDir = filepath.Join(s.scaffoldRoot, req.ID)
+		req.Dir = filepath.Join(s.scaffoldRoot, req.ID)
 	}
 	if req.Scaffold {
-		if err := s.ScaffoldAndRegister(req.ID, req.SpecDir, req.Description); err != nil {
+		if err := s.ScaffoldAndRegister(req.ID, req.Dir, req.Description); err != nil {
 			if errors.Is(err, spec.ErrAlreadyInitialized) {
 				httputil.WriteError(w, http.StatusConflict, err)
 				return
@@ -55,13 +55,13 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		if err := s.RegisterNetwork(req.ID, req.SpecDir); err != nil {
+		if err := s.RegisterNetwork(req.ID, req.Dir); err != nil {
 			writeError(w, err)
 			return
 		}
 	}
 	// Return the canonical NetworkInfo (§46) — the caller learns the
-	// resolved spec_dir even when the server picked it, and gets the
+	// resolved dir even when the server picked it, and gets the
 	// same shape the GET /networks list returns.
 	info := s.getNetworkInfo(req.ID)
 	if info == nil {

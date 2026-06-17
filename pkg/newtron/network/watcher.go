@@ -24,7 +24,7 @@ const DefaultWatchDebounce = time.Second
 // responsible for any state synchronization it needs.
 type ReloadFunc func(networkID string) error
 
-// SpecWatcher watches one or more spec directories for changes and
+// SpecWatcher watches one or more network directories for changes and
 // invokes a reload callback after debouncing rapid events
 // (auth-design.md L6). Without it, an operator who edits
 // network.json must POST /reload for the change to take effect;
@@ -99,10 +99,10 @@ func (w *SpecWatcher) Add(specDir, networkID string) error {
 	}
 	profilesDir := filepath.Join(abs, "nodes")
 	if err := w.fsw.Add(profilesDir); err != nil {
-		// Profile dir is optional — log and continue. A spec dir
+		// Profile dir is optional — log and continue. A network dir
 		// without profiles/ is valid (every device-profile JSON
 		// lives directly in specDir in some operator layouts).
-		w.logger.Printf("spec-watcher: skip profiles subdir %s: %v", profilesDir, err)
+		w.logger.Printf("spec-watcher: skip nodes subdir %s: %v", profilesDir, err)
 	}
 	w.paths[abs] = networkID
 	return nil
@@ -185,7 +185,7 @@ func (w *SpecWatcher) loop(ctx context.Context) {
 // to. Events on the watched directory itself, on the profiles/
 // subdirectory, and on files inside either all map to the same
 // reload — the operator either edited the grant table or rotated
-// a device profile, and both reasons mean "re-read the spec dir".
+// a device profile, and both reasons mean "re-read the network dir".
 //
 // CHMOD-only events are ignored: editors sometimes set permissions
 // on save without changing content, and a reload over chmod-only

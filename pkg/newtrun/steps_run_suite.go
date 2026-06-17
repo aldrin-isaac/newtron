@@ -109,7 +109,7 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		HostConns:          r.HostConns,
 		Progress:           r.Progress,
 		Network:            r.Network,
-		SpecDir:            r.SpecDir,
+		Dir:            r.Dir,
 		discoveredPlatform: r.discoveredPlatform,
 	}
 
