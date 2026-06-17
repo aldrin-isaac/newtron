@@ -23,7 +23,7 @@ func TestScaffold_FreshDirectory(t *testing.T) {
 	}
 
 	// profiles/ exists as a directory.
-	info, err := os.Stat(filepath.Join(dir, "profiles"))
+	info, err := os.Stat(filepath.Join(dir, "nodes"))
 	if err != nil {
 		t.Fatalf("expected profiles/ to exist: %v", err)
 	}

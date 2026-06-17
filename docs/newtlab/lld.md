@@ -370,7 +370,7 @@ via the provided HTTP client and produces a fully resolved `Lab` ready for
 deployment. It does not start any processes.
 
 Spec data flows from newtron — newtron owns the spec files
-(`network.json`, `topology.json`, `platforms.json`, `profiles/*.json`) per
+(`network.json`, `topology.json`, `platforms.json`, `nodes/*.json`) per
 DESIGN_PRINCIPLES §27 (Single Owner Per Data Object). newtlab is a
 consumer, not a reader of those files. The client argument is typically
 `*pkg/newtron/client.Client`, which satisfies `SpecClient` structurally.

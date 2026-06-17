@@ -242,20 +242,20 @@ L0 is the foundation every later layer depends on. It has two
 deliverables: the threat model and layered plan (the doc), and
 encryption-at-rest of secrets in the spec directory. Without the second
 piece, every later layer's enforcement is undermined — an attacker who
-reads `profiles/*.json` has the device-admin password, so authorization
+reads `nodes/*.json` has the device-admin password, so authorization
 checks at the HTTP layer don't matter.
 
 **Goal.** (1) Articulate the threat model, goal state, and layered
 path; establish the contract subsequent layers respect. (2) Move device
 profile passwords out of plaintext in the spec directory. Secrets are
-referenced from `profiles/*.json` by a key name; resolved at process
+referenced from `nodes/*.json` by a key name; resolved at process
 load time from an operator-configured secret store (file-based KMS,
 age-encrypted file, or an interface the operator implements).
 
 **Audit criterion met when this layer lands.** (1) A reviewer can name
 the threats the system defends against and the threats out of scope,
 and trace each in-scope threat to a layer that addresses it. (2) "Where
-are device passwords stored?" → not in `profiles/*.json`. A `grep -r
+are device passwords stored?" → not in `nodes/*.json`. A `grep -r
 password networks/` returns only key-references, not
 plaintext.
 
@@ -273,7 +273,7 @@ file. The encryption-at-rest deliverable is `pkg/newtron/secret/`
 (`Store` interface + `FileStore` backend) wired into network load via
 `Config.SecretStore` and the `--secret-store=PATH` server flag.
 Operator-facing CLI: `bin/newtron secrets put|get|list|delete`.
-Reference syntax `${secret:KEY}` in `profiles/*.json` and
+Reference syntax `${secret:KEY}` in `nodes/*.json` and
 `platforms.json` values. See [`secret-store.md`](secret-store.md)
 for the operational HOWTO. The shipped `FileStore` writes plaintext
 to a mode-0600 file outside the version-controlled spec directory;

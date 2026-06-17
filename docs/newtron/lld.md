@@ -337,7 +337,7 @@ type RoutePolicySet struct {
 
 ### 2.10 DeviceProfile
 
-Per-device configuration that combines identity (IPs, ASN, zone), connectivity (SSH), and EVPN peering into a single file. Lives in `profiles/{device}.json`.
+Per-device configuration that combines identity (IPs, ASN, zone), connectivity (SSH), and EVPN peering into a single file. Lives in `nodes/{device}.json`.
 
 ```go
 type DeviceProfile struct {
@@ -1015,7 +1015,7 @@ List/show pairs for all spec types. Response types from §3.9.
 | GET | `/networks/{netID}/platforms` | `[]PlatformDetail` |
 | GET | `/networks/{netID}/platforms/{name}` | `PlatformDetail` |
 | GET | `/networks/{netID}/profiles` | `[]DeviceProfileDetail` |
-| GET | `/networks/{netID}/profiles/{name}` | `DeviceProfileDetail` |
+| GET | `/networks/{netID}/nodes/{name}` | `DeviceProfileDetail` |
 | GET | `/networks/{netID}/zones` | `[]ZoneDetail` |
 | GET | `/networks/{netID}/zones/{name}` | `ZoneDetail` |
 | GET | `/networks/{netID}/hosts/{name}` | `HostProfile` |

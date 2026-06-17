@@ -447,7 +447,7 @@ construct `network.SpecWatcher` with a smaller debounce — the API
 isn't exposed through a flag because most deployments prefer the
 default.
 
-The watcher also fires on changes to the `profiles/` subdirectory,
+The watcher also fires on changes to the `nodes/` subdirectory,
 catching device-profile JSON rotations as part of the same revoke
 flow.
 

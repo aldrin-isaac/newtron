@@ -52,7 +52,7 @@ const defaultListen = "127.0.0.1:18080"
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
-	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own specs (<base>/<name>/specs/) and suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/specs/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
+	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own spec files (network.json, topology.json, platforms.json, nodes/<name>.json) plus suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
 	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
 	auditLog := flag.String("audit-log", "", "file path for the mutation audit log; empty disables audit emission entirely (default). (auth-design.md L1)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
@@ -167,7 +167,7 @@ func main() {
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,
 	})
-	// Auto-discovery: every <networks-base>/<name>/specs/topology.json
+	// Auto-discovery: every <networks-base>/<name>/topology.json
 	// on disk is pre-registered as a network with id=<name>. Mirrors the
 	// long-standing newtlab behavior (cmd/newtlab/main.go:282 scans for
 	// the same shape to resolve deploy targets) — newtron's registry was

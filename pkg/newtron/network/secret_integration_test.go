@@ -222,10 +222,10 @@ func writeTopology(t *testing.T, dir string, deviceName string) {
 
 func writeProfile(t *testing.T, dir, name, body string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, "profiles"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir profiles: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "profiles", name+".json"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "nodes", name+".json"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
 }

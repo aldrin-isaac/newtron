@@ -18,8 +18,8 @@ Two spec fields currently carry `${secret:KEY}` references:
 
 | Spec | Field | File location |
 |---|---|---|
-| `DeviceProfile.SSHPass` | `ssh_pass` | `profiles/<device>.json` |
-| `DeviceProfile.SSHUser` | `ssh_user` | `profiles/<device>.json` |
+| `DeviceProfile.SSHPass` | `ssh_pass` | `nodes/<device>.json` |
+| `DeviceProfile.SSHUser` | `ssh_user` | `nodes/<device>.json` |
 | `VMCredentials.Pass` | `vm_credentials.pass` | `platforms.json` (per platform) |
 | `VMCredentials.User` | `vm_credentials.user` | `platforms.json` (per platform) |
 
@@ -54,10 +54,10 @@ Typical operator setups:
 mkdir -m 700 -p ~/.newtron
 bin/newt-server --secret-store ~/.newtron/secrets.json
 
-# Convention — secrets.json lives alongside network.json under networks/<name>/specs/
+# Convention — secrets.json lives alongside network.json under networks/<name>/
 bin/newt-server &
-# loader auto-discovers every networks/<name>/specs/topology.json AND
-# the matching networks/<name>/specs/secrets.json
+# loader auto-discovers every networks/<name>/topology.json AND
+# the matching networks/<name>/secrets.json
 ```
 
 When a referenced KEY is missing from the resolved store, the server
@@ -94,7 +94,7 @@ returns success — idempotent so cleanup scripts can run repeatedly.
 
 ## 4. Reference secrets from spec files
 
-Edit `profiles/<device>.json` or `platforms.json` to swap the
+Edit `nodes/<device>.json` or `platforms.json` to swap the
 plaintext value for a reference:
 
 ```diff

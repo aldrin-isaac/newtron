@@ -75,7 +75,7 @@ against the current working directory). Override the base with
 }
 
 func createNetwork(_ context.Context, name, description, networksBase string) error {
-	specDir, err := filepath.Abs(filepath.Join(networksBase, name, "specs"))
+	specDir, err := filepath.Abs(filepath.Join(networksBase, name))
 	if err != nil {
 		return fmt.Errorf("resolve spec_dir: %w", err)
 	}

@@ -158,7 +158,7 @@ newtron/
 │
 └── networks/                     # E2E test assets (repo root)
     └── <network>/                # Per-network spec directories + nested suites
-        ├── specs/                # topology.json, network.json, platforms.json, profiles/
+        ├── network.json, topology.json, platforms.json
         └── suites/<suite>/       # suite.yaml + scenario YAMLs
 ```
 
@@ -331,7 +331,7 @@ Inline scenarios are embedded-target only — parameterization requires a suite 
 
 ## 6. Test Networks
 
-Networks are pre-defined spec directories checked into the repo. Each contains the full newtron spec set: `topology.json`, `network.json`, `platforms.json`, `profiles/*.json`. newtrun reads them directly — no generation step.
+Networks are pre-defined spec directories checked into the repo. Each contains the full newtron spec set: `topology.json`, `network.json`, `platforms.json`, `nodes/*.json`. newtrun reads them directly — no generation step.
 
 ### 6.1 Built-in networks
 
@@ -446,11 +446,11 @@ Each network directory contains:
 | `topology.json` | newtlab + newtron | Devices, interfaces, links, newtlab settings |
 | `network.json` | newtron | Services, filters, VPNs, zones |
 | `platforms.json` | newtlab + newtron | Platform definitions: VM settings consumed by newtlab; HWSKU, dataplane capability, and port count consumed by newtron's spec loader. |
-| `profiles/*.json` | newtlab + newtron | Per-device settings, EVPN config |
+| `nodes/*.json` | newtlab + newtron | Per-device settings, EVPN config |
 
 ### 6.3 Custom networks
 
-The built-in networks cover common patterns; newtrun works with any network newtlab can deploy. Create a directory under `networks/<name>/specs/`, add the standard spec files, reference it from scenario YAML.
+The built-in networks cover common patterns; newtrun works with any network newtlab can deploy. Create a directory under `networks/<name>/`, add the standard spec files, reference it from scenario YAML.
 
 ## 7. Verification Tiers
 

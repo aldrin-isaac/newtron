@@ -36,7 +36,7 @@ func repoRoot(t *testing.T) string {
 // endpoint. Stops the server at test cleanup.
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs")
 	s := NewServer(Config{})
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)
@@ -629,7 +629,7 @@ func TestHandleConfigDBSnapshot_RouteRegistered(t *testing.T) {
 // No device connection required; topology mode runs setup-device so VLAN
 // preconditions are satisfied.
 func TestWriteResult_ChangesPopulated(t *testing.T) {
-	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs")
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
 	if err != nil {
@@ -750,7 +750,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 // from before — the add the op would produce). Confirms the snapshot/restore
 // leaves the Node's observable state unchanged.
 func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
-	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs")
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
 	if err != nil {
@@ -828,9 +828,9 @@ func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
 // Returns the temp spec path; cleanup is automatic via t.TempDir().
 func copyTestSpecDir(t *testing.T) string {
 	t.Helper()
-	src := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
-	dst := filepath.Join(t.TempDir(), "specs")
-	if err := os.MkdirAll(filepath.Join(dst, "profiles"), 0o755); err != nil {
+	src := filepath.Join(repoRoot(t), "networks", "1node-vs")
+	dst := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dst, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	entries, err := os.ReadDir(src)
@@ -839,18 +839,18 @@ func copyTestSpecDir(t *testing.T) string {
 	}
 	for _, e := range entries {
 		if e.IsDir() {
-			if e.Name() == "profiles" {
-				profs, err := os.ReadDir(filepath.Join(src, "profiles"))
+			if e.Name() == "nodes" {
+				profs, err := os.ReadDir(filepath.Join(src, "nodes"))
 				if err != nil {
-					t.Fatalf("readdir profiles: %v", err)
+					t.Fatalf("readdir nodes: %v", err)
 				}
 				for _, p := range profs {
-					data, err := os.ReadFile(filepath.Join(src, "profiles", p.Name()))
+					data, err := os.ReadFile(filepath.Join(src, "nodes", p.Name()))
 					if err != nil {
-						t.Fatalf("read profile %s: %v", p.Name(), err)
+						t.Fatalf("read node %s: %v", p.Name(), err)
 					}
-					if err := os.WriteFile(filepath.Join(dst, "profiles", p.Name()), data, 0o644); err != nil {
-						t.Fatalf("write profile %s: %v", p.Name(), err)
+					if err := os.WriteFile(filepath.Join(dst, "nodes", p.Name()), data, 0o644); err != nil {
+						t.Fatalf("write node %s: %v", p.Name(), err)
 					}
 				}
 			}
@@ -875,7 +875,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	// Add a profile for switch2 (matches the 1:1 name convention).
 	if err := os.WriteFile(
-		filepath.Join(specDir, "profiles", "switch2.json"),
+		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
@@ -914,7 +914,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	if err := os.WriteFile(
-		filepath.Join(specDir, "profiles", "switch2.json"),
+		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
@@ -970,7 +970,7 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	if err := os.WriteFile(
-		filepath.Join(specDir, "profiles", "switch2.json"),
+		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
@@ -1015,7 +1015,7 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	if err := os.WriteFile(
-		filepath.Join(specDir, "profiles", "switch2.json"),
+		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
@@ -1086,7 +1086,7 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	if err := os.WriteFile(
-		filepath.Join(specDir, "profiles", "switch2.json"),
+		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {

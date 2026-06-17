@@ -23,7 +23,7 @@ each original scenario.
 
 | File | Layer | Verification |
 |---|---|---|
-| `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `profiles/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
+| `00-L0-secret-store-resolves` | L0 | `${secret:KEY}` in `nodes/switch1.json` resolves at network load; profile read returns the unresolved value never reaches the wire. |
 | `10-L1-audit-log-entries` | L1 | Split into `-bob` + `-alice`: bob's ops group creates a QoS policy, then alice's spec-team creates her own and cleans up both. The audit log gains one entry per request with caller=alice/bob in the user field for the operator's post-suite inspection. |
 | `20-L3-spec-mutations-gated` | L3 | Split into `-mallory` + `-bob` + `-alice` (bob's qos.create result is cleaned up by alice's broader qos.delete grant — bob runs first). Per perm family (spec.author, qos.create, filter.create): denied caller (mallory) gets 403, allowed callers (alice/bob) succeed. |
 | `26-L2c-round-trip` | L2c | The full session-key arc end-to-end: PAM-authenticated `/auth/login` mints a key; a mutation under `Authorization: Bearer <key>` succeeds; `/auth/logout` revokes; the same Bearer on the same mutation 401s. Requires PAM + a real OS account (see §"L2c round-trip operator setup"). Skipped by default — the suite's `alice_basic_auth` parameter is empty unless the operator supplies it. |
@@ -213,7 +213,7 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
 ```
 
 The secret store is auto-discovered from
-`networks/1node-vs-auth/specs/secrets.json` (post-#176; the
+`networks/1node-vs-auth/secrets.json` (post-#176; the
 file ships in-repo at mode 0600). If you want to point at your own
 operator-managed store instead, add `--secret-store=PATH` — the flag
 wins over auto-discovery.
@@ -281,7 +281,7 @@ All scenarios pass on first run. If any fail:
   `network.json` grants and operator's `--enforce-authorization` flag.
 - L3/L4 scenarios *not* failing for `mallory` → enforcement isn't on.
   Verify `--enforce-authorization` was passed.
-- L0 failing → check that `networks/1node-vs-auth/specs/secrets.json`
+- L0 failing → check that `networks/1node-vs-auth/secrets.json`
   exists at mode 0600 with the `switch1_ssh_pass` key. If you're using
   `--secret-store=PATH` to override, verify that path instead.
 - L6 failing with "verified 0 entries" → `--audit-log-integrity` was

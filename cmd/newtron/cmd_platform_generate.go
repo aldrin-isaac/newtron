@@ -71,12 +71,12 @@ Examples:
   # write/merge into an existing platforms.json
   newtron platform generate ./platform.json \
       --name cisco-8101-32x100g --hwsku Cisco-8101-32x100 \
-      --output specs/platforms.json
+      --output platforms.json
 
   # overwrite an existing same-named entry
   newtron platform generate ./platform.json \
       --name cisco-8101-32x100g --hwsku Cisco-8101-32x100 \
-      --output specs/platforms.json --force`,
+      --output platforms.json --force`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if platformGenerateName == "" {

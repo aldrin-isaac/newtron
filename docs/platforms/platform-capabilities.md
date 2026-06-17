@@ -170,7 +170,7 @@ requires_features: [evpn-vxlan, macvpn]
    }
    ```
 
-2. **Update platform spec** (`topologies/*/specs/platforms.json`):
+2. **Update platform spec** (`networks/*/platforms.json`):
    ```json
    "unsupported_features": ["acl", "evpn-vxlan", "new-feature"]
    ```

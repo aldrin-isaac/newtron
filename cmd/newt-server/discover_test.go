@@ -22,11 +22,11 @@ const (
 )
 
 // seedNetwork writes a minimally valid spec tree under
-// <base>/<name>/specs/. Returns the spec_dir path.
+// <base>/<name>/. Returns the spec_dir path.
 func seedNetwork(t *testing.T, base, name string, withTopology bool) string {
 	t.Helper()
-	specDir := filepath.Join(base, name, "specs")
-	if err := os.MkdirAll(filepath.Join(specDir, "profiles"), 0o755); err != nil {
+	specDir := filepath.Join(base, name)
+	if err := os.MkdirAll(filepath.Join(specDir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir specDir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(fixtureNetworkJSON), 0o644); err != nil {
@@ -44,7 +44,7 @@ func seedNetwork(t *testing.T, base, name string, withTopology bool) string {
 }
 
 // TestDiscoverAndRegisterNetworks_RegistersEveryTopology covers the
-// happy path: every <base>/<name>/specs/topology.json triggers a
+// happy path: every <base>/<name>/topology.json triggers a
 // registration with id=<name>. The discovery output is asserted both
 // in the server's registered-network list and in the boot log lines so
 // operators see auditable evidence at startup.
@@ -139,8 +139,8 @@ func TestDiscoverAndRegisterNetworks_OneBadEntryDoesNotPoisonRest(t *testing.T) 
 	seedNetwork(t, base, "good", true)
 
 	// Bad: write invalid JSON into network.json
-	badSpecDir := filepath.Join(base, "broken", "specs")
-	if err := os.MkdirAll(filepath.Join(badSpecDir, "profiles"), 0o755); err != nil {
+	badSpecDir := filepath.Join(base, "broken")
+	if err := os.MkdirAll(filepath.Join(badSpecDir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir broken: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(badSpecDir, "network.json"), []byte(`{not valid json`), 0o644); err != nil {

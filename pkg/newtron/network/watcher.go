@@ -97,7 +97,7 @@ func (w *SpecWatcher) Add(specDir, networkID string) error {
 	if err := w.fsw.Add(abs); err != nil {
 		return err
 	}
-	profilesDir := filepath.Join(abs, "profiles")
+	profilesDir := filepath.Join(abs, "nodes")
 	if err := w.fsw.Add(profilesDir); err != nil {
 		// Profile dir is optional — log and continue. A spec dir
 		// without profiles/ is valid (every device-profile JSON
@@ -120,7 +120,7 @@ func (w *SpecWatcher) Remove(specDir string) error {
 		return nil
 	}
 	_ = w.fsw.Remove(abs)
-	_ = w.fsw.Remove(filepath.Join(abs, "profiles"))
+	_ = w.fsw.Remove(filepath.Join(abs, "nodes"))
 	delete(w.paths, abs)
 	if timer, ok := w.pending[abs]; ok {
 		timer.Stop()

@@ -14,7 +14,7 @@ import (
 // spec_dir and asserts the directory was scaffolded with the three seed
 // specs and the network was registered.
 func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
-	specDir := filepath.Join(t.TempDir(), "specs")
+	specDir := t.TempDir()
 	srv := NewServer(Config{})
 
 	body, _ := json.Marshal(RegisterNetworkRequest{
@@ -35,7 +35,7 @@ func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
 			t.Errorf("expected %s after scaffold: %v", name, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(specDir, "profiles")); err != nil {
+	if _, err := os.Stat(filepath.Join(specDir, "nodes")); err != nil {
 		t.Errorf("expected profiles/ after scaffold: %v", err)
 	}
 	if _, ok := srv.networks["demo-1"]; !ok {
@@ -46,7 +46,7 @@ func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
 // TestRegisterNetwork_Scaffold_ConflictReturns409 ensures a pre-existing
 // spec_dir maps the spec-package sentinel error onto 409.
 func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
-	specDir := filepath.Join(t.TempDir(), "specs")
+	specDir := t.TempDir()
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
 // (register-existing) flow still rejects an empty spec_dir — the scaffold
 // extension must not alter the contract for the existing call site.
 func TestRegisterNetwork_NoScaffold_MissingSpecDir(t *testing.T) {
-	specDir := filepath.Join(t.TempDir(), "specs")
+	specDir := t.TempDir()
 
 	srv := NewServer(Config{})
 	body, _ := json.Marshal(RegisterNetworkRequest{
@@ -204,7 +204,7 @@ func TestRegisterNetwork_Scaffold_DerivedSpecDir_Conflict(t *testing.T) {
 // NetworkInfo — the response shape is uniform across the two modes so
 // clients don't have to branch on input style.
 func TestRegisterNetwork_201ResponseCarriesNetworkInfo(t *testing.T) {
-	specDir := filepath.Join(t.TempDir(), "specs")
+	specDir := t.TempDir()
 	srv := NewServer(Config{})
 
 	body, _ := json.Marshal(RegisterNetworkRequest{
@@ -241,7 +241,7 @@ func TestRegisterNetwork_201ResponseCarriesNetworkInfo(t *testing.T) {
 // (different spec_dir → typed error). Without this, the client's old
 // silent-409 swallow masks the conflict.
 func TestRegisterNetwork_AlreadyRegistered_409EnvelopeCarriesExistingSpecDir(t *testing.T) {
-	specDir := filepath.Join(t.TempDir(), "specs")
+	specDir := t.TempDir()
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

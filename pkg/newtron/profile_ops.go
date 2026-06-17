@@ -36,7 +36,7 @@ func (net *Network) CreateProfile(ctx context.Context, req CreateDeviceProfileRe
 		return fmt.Errorf("profile '%s' already exists", req.Name)
 	}
 	if opts.Execute {
-		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("profiles").WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("nodes").WithResource(req.Name)); err != nil {
 			return err
 		}
 	}
@@ -72,7 +72,7 @@ func (net *Network) DeleteProfile(ctx context.Context, name string, opts ExecOpt
 		return err
 	}
 	if opts.Execute {
-		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("profiles").WithResource(name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("nodes").WithResource(name)); err != nil {
 			return err
 		}
 	}
@@ -153,7 +153,7 @@ func (net *Network) UpdateProfile(ctx context.Context, req CreateDeviceProfileRe
 		return &ValidationError{Field: "zone", Message: "required"}
 	}
 	if opts.Execute {
-		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("profiles").WithResource(req.Name)); err != nil {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("nodes").WithResource(req.Name)); err != nil {
 			return err
 		}
 	}

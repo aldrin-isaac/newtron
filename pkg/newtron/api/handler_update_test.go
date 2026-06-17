@@ -175,7 +175,7 @@ func TestUpdateFilter_PreservesRules(t *testing.T) {
 }
 
 // TestUpdateProfile_RoundTrip exercises the profile path
-// specifically — Profile lives in profiles/<name>.json, distinct
+// specifically — Profile lives in nodes/<name>.json, distinct
 // from the other spec kinds that live in network.json. The Loader
 // path (UpdateProfile in spec/loader.go) is what changes, not the
 // Network spec persist path. The test creates a profile, updates
@@ -207,7 +207,7 @@ func TestUpdateProfile_RoundTrip(t *testing.T) {
 		t.Fatalf("update-profile: status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/profiles/switch1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/nodes/switch1", nil)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -228,7 +228,7 @@ func TestUpdateProfile_RoundTrip(t *testing.T) {
 	// Round-trip the on-disk file too: re-read the profile JSON and
 	// confirm the new mgmt_ip landed atomically.
 	specDir := s.networks["default"].specDir
-	raw, err := os.ReadFile(filepath.Join(specDir, "profiles", "switch1.json"))
+	raw, err := os.ReadFile(filepath.Join(specDir, "nodes", "switch1.json"))
 	if err != nil {
 		t.Fatalf("read profile file: %v", err)
 	}
