@@ -70,6 +70,12 @@ type Server struct {
 	// spec behavior.
 	secretStore secret.Store
 
+	// auditLogPath is the file path the audit logger writes to
+	// (auth-design.md L1). Used by the GET /audit/events and
+	// GET /audit/integrity handlers (#196). Empty disables those
+	// endpoints — they return 404 because there's no log to query.
+	auditLogPath string
+
 	// enforceAuthorization (auth-design.md L3) drives
 	// EnableAuthorization on every RegisterNetwork / ReloadNetwork
 	// path. false → checkPermission stays inert; pre-L3 behavior.
@@ -166,6 +172,15 @@ type Config struct {
 	// /reload call. When false (default), the operator must POST
 	// /reload to make a spec change observable.
 	SpecWatch bool
+
+	// AuditLogPath is the file path the audit logger writes to
+	// (auth-design.md L1). When non-empty, the GET /audit/events and
+	// GET /audit/integrity handlers can read it; when empty, those
+	// handlers return 404 because there's no audit log to query.
+	// Composed in by cmd/newt-server from --audit-log; the operator's
+	// startup writes both into audit.SetDefaultLogger AND into this
+	// config field so the read handlers know where to look.
+	AuditLogPath string
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -188,6 +203,7 @@ func NewServer(cfg Config) *Server {
 		scaffoldRoot:         cfg.ScaffoldRoot,
 		auditCallerHeader:    cfg.AuditCallerHeader,
 		secretStore:          cfg.SecretStore,
+		auditLogPath:         cfg.AuditLogPath,
 		enforceAuthorization: cfg.EnforceAuthorization,
 	}
 	if cfg.SpecWatch {

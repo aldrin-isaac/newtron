@@ -166,6 +166,7 @@ func main() {
 		AuditCallerHeader:    *auditCallerHeader,
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
+		AuditLogPath:         *auditLog,
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,
 	})

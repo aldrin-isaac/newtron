@@ -882,6 +882,53 @@ type AuditChange struct {
 	Fields map[string]string `json:"fields,omitempty"`
 }
 
+// AuditEventPage is the wire shape returned by GET /audit/events
+// (issue #196). Pairs the events slice with paging metadata so a
+// browsing UI knows whether more entries are available.
+//
+// Per §46: the events field carries AuditEvent values directly —
+// the same shape the audit middleware writes. Total reflects the
+// full filtered-but-not-paginated count so the client can render
+// "N of M entries"; NextOffset is non-nil when more entries remain
+// past the current page, nil when the page exhausted the filter.
+type AuditEventPage struct {
+	Events     []AuditEvent `json:"events"`
+	Total      int          `json:"total"`
+	NextOffset *int         `json:"next_offset,omitempty"`
+}
+
+// AuditIntegrityResult is the wire shape returned by GET /audit/integrity
+// (issue #196 / auth-design.md L6). Mirrors audit.VerifyResult with
+// JSON field names. The result reflects an end-to-end walk of the
+// hash chain at request time — operators run it periodically and on
+// suspected tamper.
+//
+// Field meanings:
+//
+//   - ChainHeadHash: the running chain head after walking every
+//     entry. Stable across calls when the log is unmodified; an
+//     operator can record this and re-check later as a cheap tripwire.
+//   - EntryCount: the number of integrity-enabled entries scanned.
+//     Pre-L6 entries (empty ID) are tolerated and counted as scanned
+//     but not chained.
+//   - BreakAt: the line number of the first entry whose chain link
+//     didn't verify, or 0 if the chain is clean end to end.
+//   - BreakReason: "prev_hash mismatch" or "id mismatch" describing
+//     the failure mode at BreakAt, or empty for a clean chain.
+//   - VerifiedAt: the server-side timestamp of the verification.
+//     Callers can cache the result client-side keyed on this value.
+type AuditIntegrityResult struct {
+	ChainHeadHash string `json:"chain_head_hash"`
+	EntryCount    int    `json:"entry_count"`
+	// BreakAt and BreakReason are NOT omitempty: a clean chain has
+	// BreakAt=0 and BreakReason="", and operators check those values
+	// to decide cleanliness. Omitting them would make ".break_at == 0"
+	// fail because the field would be missing rather than 0.
+	BreakAt     int    `json:"break_at"`
+	BreakReason string `json:"break_reason"`
+	VerifiedAt  string `json:"verified_at"`
+}
+
 // ============================================================================
 // Settings Types
 // ============================================================================

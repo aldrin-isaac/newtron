@@ -93,6 +93,28 @@ const (
 	// Super-users bypass auth.read just like every other permission
 	// (auth.Checker.isSuperUser).
 	PermAuthRead Permission = "auth.read"
+
+	// PermAuditRead gates the GET /audit/events and GET /audit/integrity
+	// inspector endpoints. Same engage-when-configured shape as
+	// PermAuthRead: if the loaded grant table has no audit.read entry,
+	// the gates fall back to allow so existing deployments and the
+	// zero-ceremony quickstart keep working without an explicit grant.
+	// Once an audit.read entry is added, the gates engage normally and
+	// fail-closed on any caller not matched by a grant.
+	//
+	// The field where-dimension scopes which audit surface the caller
+	// may read. The gates stamp Context.Field with one of:
+	//
+	//   - "audit_events"     for GET /audit/events
+	//   - "audit_integrity"  for GET /audit/integrity
+	//
+	// A clause like {"field": "audit_events"} grants event-list reads
+	// only; {"field": "audit_integrity"} grants integrity-status reads
+	// only. Both granted via the legacy shorthand
+	// (`"audit.read": ["iam-team"]`) since the empty Where matches both.
+	//
+	// Super-users bypass audit.read like every other permission.
+	PermAuditRead Permission = "audit.read"
 )
 
 // Context carries the per-decision inputs Checker.Check consumes.

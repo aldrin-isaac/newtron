@@ -757,14 +757,99 @@ GET /newtron/v1/networks/default/authorization
 
 **Errors:** 404 when `{netID}` is not a registered network.
 
-This endpoint is intentionally ungated: it returns the same
-information an operator with shell access can read from
-`network.json`. The mutation surface that edits the table is
-already gated on `spec.author` (with L5's `where: {field: "..."}`
-clauses scoping meta-authorization separately). See
-[auth-design.md §L3](auth-design.md).
+This endpoint is **engage-when-configured** by `auth.read`: when
+no `auth.read` entry is in the grant table, it stays ungated
+(preserves the original behavior the inspector shipped with). The
+moment an operator adds the first `auth.read` entry, the gate
+engages and fail-closes on any caller not matched by a grant.
+Super-users continue to bypass. See [auth-design.md §L3](auth-design.md)
+and [authorization-howto.md §"Reading the grant table"](authorization-howto.md).
 
-_Lands newtron#150._
+_Lands newtron#150 (initial) + newtron#187 (gate)._
+
+### Audit log
+
+Two read endpoints over the audit log file the operator configured
+via `--audit-log` on `cmd/newt-server`. Both are gated by
+`audit.read` under the same engage-when-configured pattern as
+`auth.read` — no entry in the grant table means ungated; the first
+entry engages the gate. `audit.read` is filed under newtron#196.
+
+When `--audit-log` is unset on `cmd/newt-server`, both endpoints
+return 404 — there is no audit log to inspect.
+
+#### GET /newtron/v1/networks/{netID}/audit/events
+
+Paged, filtered read of audit events. Query-string parameters map
+1:1 to the in-memory `audit.Filter` shape — every dimension is
+optional and missing means "no constraint."
+
+**Query parameters (all optional):**
+
+| Param | Type | Notes |
+|---|---|---|
+| `device` | string | equality match against `event.device` |
+| `user` | string | equality match against `event.user` |
+| `operation` | string | equality match against `event.operation` (typically the HTTP verb + path) |
+| `service` | string | equality match against `event.service` |
+| `interface` | string | equality match against `event.interface` |
+| `since` | RFC3339 timestamp | lower bound (inclusive) on `event.timestamp` |
+| `until` | RFC3339 timestamp | upper bound (inclusive) on `event.timestamp` |
+| `success` | `true` or `false` | `true` returns only successful events; `false` returns only failures |
+| `limit` | integer (default 100, max 1000) | page size |
+| `offset` | integer (default 0) | offset into the filter's full match set |
+
+Malformed values (non-RFC3339 timestamp, non-numeric `limit`,
+unrecognized `success`) surface as 400 with an actionable phrase
+identifying the field.
+
+**Response (200):** `AuditEventPage` with:
+
+| Field | Type | Description |
+|---|---|---|
+| `events` | `AuditEvent[]` | The page itself, in append order from the log. |
+| `total` | integer | Total number of events matching the filter without paging — the client uses this to render "N of M" and decide whether to fetch another page. |
+| `next_offset` | integer or null | When non-null, calling the endpoint again with `?offset=<next_offset>` returns the next page. When null, the current page exhausted the filter — no more pages. |
+
+The `AuditEvent` shape is documented in §13 Types Reference (lives
+unchanged from the existing CLI-side `bin/newtron audit list`
+output — same fields, same JSON tags).
+
+**Errors:** 404 when `{netID}` is not registered or when
+`--audit-log` is unset on the server; 400 on a malformed filter
+parameter; 403 when the `audit.read` gate is engaged and the
+caller has no matching grant.
+
+_Lands newtron#196._
+
+#### GET /newtron/v1/networks/{netID}/audit/integrity
+
+Walks the audit log's hash chain end to end (L6) and returns a
+structured tamper-evidence result. Pure read; never mutates the
+log. Cheap on typical log sizes (entries are JSON-lines; walking
+is O(n) in entry count).
+
+**Response (200):** `AuditIntegrityResult` with:
+
+| Field | Type | Description |
+|---|---|---|
+| `chain_head_hash` | string | The running hash-chain head after walking every entry. Stable across calls when the log is unmodified; an operator can record this and re-check later as a cheap tripwire. |
+| `entry_count` | integer | Count of integrity-enabled entries scanned. Pre-L6 entries (empty ID) are tolerated and counted but not chained. |
+| `break_at` | integer | Line number of the first entry whose chain link didn't verify, or 0 if the chain is clean end to end. |
+| `break_reason` | string | `"prev_hash mismatch"` or `"id mismatch"` describing the failure at `break_at`, or empty for a clean chain. |
+| `verified_at` | RFC3339 timestamp | Server-side timestamp of this verification. Callers can cache the result client-side keyed on this value. |
+
+**Errors:** 404 when `{netID}` is not registered or when
+`--audit-log` is unset; 403 when the `audit.read` gate is engaged
+and the caller has no matching grant.
+
+A clean chain has `break_at == 0` and `break_reason == ""`. Any
+non-zero `break_at` indicates tamper — the line at `break_at` was
+inserted, removed, reordered, or modified after the fact. Operators
+inspect the surrounding entries in the on-disk log to learn what
+changed.
+
+_Lands newtron#196._
 
 ### Topology
 

@@ -501,6 +501,49 @@ fields. The verifier skips those entries and resumes the chain
 expectation once it sees a non-empty `ID`. Operators can switch on
 integrity mid-stream without invalidating the historical log.
 
+**HTTP equivalents.** The same data is reachable via two HTTP
+endpoints — useful for operator UIs that want to render a
+browsable event timeline and a chain-integrity badge:
+
+```sh
+# Paged, filtered event list
+curl -s 'http://newt-server/newtron/v1/networks/default/audit/events?user=alice&since=2026-06-01T00:00:00Z' \
+  | jq .data
+
+# Chain-integrity status
+curl -s http://newt-server/newtron/v1/networks/default/audit/integrity | jq .data
+# {
+#   "chain_head_hash": "7c0a2bf9d3e1c5a8...",
+#   "entry_count":     18342,
+#   "break_at":        0,
+#   "break_reason":    "",
+#   "verified_at":     "2026-06-17T07:30:00Z"
+# }
+```
+
+Both endpoints are gated by `audit.read` under the **engage-
+when-configured** mechanism (same pattern as `auth.read`, §8):
+no `audit.read` entry in the grant table means the endpoints stay
+ungated; the first entry engages the gate. The `field`
+where-dimension splits the surface: `where:{field:"audit_events"}`
+grants event-list reads only; `where:{field:"audit_integrity"}`
+grants the chain-status read only; empty `where` grants both.
+
+```json
+"permissions": {
+  "audit.read": [
+    { "groups": ["iam-team", "audit-team"] },
+    { "groups": ["sre-team"],
+      "where": { "field": "audit_integrity" } }
+  ]
+}
+```
+
+The first form covers an audit/compliance role; the second carves
+out an SRE rotation that wants the tamper tripwire without
+reading event content. See [api.md §Audit log](api.md#audit-log)
+for the full endpoint reference.
+
 ## 11. Failure modes
 
 | Symptom | Cause | Fix |
