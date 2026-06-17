@@ -33,11 +33,25 @@ package spec
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 )
+
+// ErrEmptyInterfaces is returned by FromSONiCPlatformJSON when the
+// loaded platform.json has the older per-HWSKU port_config.ini
+// convention — `"interfaces": {}` at the top level with per-port
+// shape living in `<hwsku>/port_config.ini` instead (issue #190).
+// CLI callers (cmd/newtron/cmd_platform_generate.go) detect this
+// sentinel and fall through to FromPortConfigINI.
+//
+// The error message that wraps ErrEmptyInterfaces also names the
+// fallback path so an operator running the translator outside the
+// CLI gets the same actionable phrase the CLI's auto-discovery
+// surfaces.
+var ErrEmptyInterfaces = errors.New("SONiC platform.json: interfaces map is present but empty (per-HWSKU port_config.ini convention)")
 
 // sonicPlatformFile is the subset of platform.json this translator
 // reads. The chassis section and the rest are ignored — newtron
@@ -103,11 +117,16 @@ func FromSONiCPlatformJSON(data []byte, opts SONiCImportOptions) (*PlatformSpec,
 	}
 	if len(raw.Interfaces) == 0 {
 		if hasInterfacesKey && isEmptyJSONMap(rawIfaces) {
-			return nil, fmt.Errorf("SONiC platform.json: \"interfaces\" map is present but empty. " +
-				"This platform likely uses SONiC's older per-HWSKU convention — " +
-				"per-port info lives in <hwsku>/port_config.ini under the device tree " +
-				"(sibling to platform.json), not in platform.json. " +
-				"port_config.ini parsing is filed as issue #190 (newtron platform generate follow-up)")
+			// Wrap the typed sentinel so callers can detect the
+			// older-convention case (CLI auto-discovers
+			// <hwsku>/port_config.ini) while preserving the
+			// actionable message for callers that just print
+			// the error.
+			return nil, fmt.Errorf("%w. Per-port shape lives in <hwsku>/port_config.ini "+
+				"under the device tree (sibling to platform.json), not in platform.json. "+
+				"Pass that path to FromPortConfigINI (or `--port-config-ini` on the CLI; "+
+				"the CLI auto-discovers a sibling `<hwsku>/port_config.ini` when none is supplied).",
+				ErrEmptyInterfaces)
 		}
 		return nil, fmt.Errorf("SONiC platform.json: no \"interfaces\" entries (expected one per front-panel port)")
 	}

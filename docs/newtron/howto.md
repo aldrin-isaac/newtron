@@ -534,13 +534,34 @@ The generator targets SONiC's modern `platform.json` convention (an
 landed at 8/12 successful — every Mellanox SN-series, the newer Dell Z-series
 (Z9100, Z9332f), Arista 7050CX3/7060X6, and Celestica DX010 handled cleanly.
 
-Four older platforms (Dell S6100, Dell Z9664f, Arista 7280CR3, Nokia 7250)
-ship `platform.json` with an empty `interfaces` map — they use SONiC's
-older per-HWSKU convention where per-port info lives in
-`<hwsku>/port_config.ini` (sibling to `platform.json`). The generator
-detects this case and emits an actionable error pointing at the
-`port_config.ini` location. `port_config.ini` parsing itself is filed
-as issue #190.
+Four platforms — Dell S6100, Dell Z9664f, Arista 7280CR3, Nokia 7250 — ship
+`platform.json` with an empty `interfaces` map and use SONiC's older
+per-HWSKU convention: per-port info lives in `<hwsku>/port_config.ini`
+(sibling to `platform.json`). The CLI handles this case automatically — when
+`platform.json` signals the older convention, it auto-discovers
+`<dir-of-platform.json>/<hwsku>/port_config.ini`. Pass `--port-config-ini PATH`
+to override the auto-discovered location.
+
+```sh
+# Auto-discovery (one command, both files at conventional paths)
+newtron platform generate /usr/share/sonic/device/x86_64-dell_s6100_c2538-r0/platform.json \
+    --name dell-s6100 --hwsku Force10-S6100
+
+# Explicit port_config.ini path (paths outside the conventional layout)
+newtron platform generate platform.json --name dell-s6100 --hwsku Force10-S6100 \
+    --port-config-ini /tmp/Force10-S6100/port_config.ini
+```
+
+Derivation from `port_config.ini` is **weaker** than from `platform.json`:
+
+- `port_count` and `default_speed` (dominant speed across data rows) work
+  correctly — the parser is header-aware so chassis platforms with extended
+  column sets (Nokia 7250's 10-column shape) parse identically to ToR
+  platforms.
+- `breakouts` are **unavailable** under this convention — `port_config.ini`
+  does not carry breakout-mode information. The generator emits an empty
+  `breakouts` array. Hand-author them post-generation if your platform
+  supports breakouts.
 
 ### 3.6 Topology Specification (Optional)
 
