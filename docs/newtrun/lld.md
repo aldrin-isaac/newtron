@@ -83,7 +83,7 @@ cmd/newtrun/                  # CLI binary (thin HTTP-client surface)
   scenario_e2e_test.go        # CLI→server E2E tests
 
 cmd/newt-server/              # Composed server that hosts all three engines
-  main.go                     # --listen, --spec-dir, --auth-pam-service,
+  main.go                     # --listen, --networks-base, --auth-pam-service,
                               # --tls-cert/--tls-key/--tls-ca, --secret-store
 ```
 
@@ -1150,8 +1150,7 @@ The newtrun engine has no main package of its own. `cmd/newt-server/main.go` ins
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--listen` | `127.0.0.1:18080` | Bind address for the composed listener; non-loopback values require `--auth-pam-service` plus `--tls-cert/--tls-key/--tls-ca` to be set. |
-| `--spec-dir` | (required) | Spec directory passed to the newtron engine's `RegisterNetwork`. The newtrun engine discovers suites by globbing `<networks-base>/*/suites/<name>/`; override the base with `--networks-base` if needed. |
-| `--networks-base` | `networks` | Root of the networks tree. The newtrun engine resolves suite names by globbing `<base>/*/suites/<name>/`. |
+| `--networks-base` | `networks` | Root of the networks tree. At boot, every `<base>/<name>/specs/topology.json` triggers auto-registration of `<name>` as a newtron network. The newtrun engine resolves suite names by globbing `<base>/*/suites/<name>/`. |
 
 The Config struct backing the newtrun engine has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), inherited from the composed boundary. Per-request overrides via the `newtron_server` and `network_id` fields on `POST /newtrun/v1/runs` are the supported way to point a run at a non-default newtron-server.
 

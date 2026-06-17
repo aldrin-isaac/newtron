@@ -73,8 +73,6 @@ sudo sh networks/1node-vs-auth/suites/1node-vs-auth/create-test-users.sh
 #    PATH must include ./bin so the L6 newtron-cli step (which exec's
 #    `newtron audit verify ...`) finds the binary.
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
-    --spec-dir networks/1node-vs-auth/specs \
-    --net-id 1node-vs-auth \
     --audit-log /tmp/1node-vs-auth-audit.jsonl \
     --auth-pam-service newtron-test \
     --enforce-authorization \
@@ -207,8 +205,6 @@ each account and pass it to `login-all.sh` via
 
 ```sh
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
-    --spec-dir networks/1node-vs-auth/specs \
-    --net-id 1node-vs-auth \
     --audit-log /tmp/1node-vs-auth-audit.jsonl \
     --auth-pam-service newtron-test \
     --enforce-authorization \

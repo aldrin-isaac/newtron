@@ -75,7 +75,7 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
-	httputil.WriteJSON(w, http.StatusOK, s.listNetworks())
+	httputil.WriteJSON(w, http.StatusOK, s.ListNetworks())
 }
 
 func (s *Server) handleUnregisterNetwork(w http.ResponseWriter, r *http.Request) {

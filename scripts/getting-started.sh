@@ -276,7 +276,7 @@ echo "  per-link byte counters to newt-server every 5 seconds, and"
 echo -e "  ${BOLD}newtlab status${RESET} reads them via HTTP to populate the link table."
 
 # Kill any leftover newt-server from a previous run
-existing_pid=$(pgrep -f "newt-server.*-spec-dir" || true)
+existing_pid=$(pgrep -f "bin/newt-server" || true)
 if [ -n "$existing_pid" ]; then
     echo ""
     echo -e "  ${GRAY}Stopping leftover newt-server (PID $existing_pid)...${RESET}"
@@ -293,9 +293,12 @@ if ss -tlnH 'sport = :18080' 2>/dev/null | grep -q 8080; then
 fi
 
 echo ""
-echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newt-server --spec-dir $SPEC_DIR &${RESET}"
+echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newt-server &${RESET}"
 echo ""
-bin/newt-server --spec-dir "$SPEC_DIR" > /tmp/newt-server.log 2>&1 &
+echo -e "  ${GRAY}Auto-discovers every networks/<name>/specs/topology.json on disk.${RESET}"
+echo -e "  ${GRAY}1node-vs will appear in GET /newtron/v1/networks as the network 'id'.${RESET}"
+echo ""
+bin/newt-server > /tmp/newt-server.log 2>&1 &
 SERVER_PID=$!
 sleep 2
 

@@ -120,7 +120,7 @@ newtron/
 │   │   ├── cmd_actions.go        # static action vocabulary help
 │   │   └── scenario_e2e_test.go  # CLI→server E2E: scenario lifecycle, bad-YAML rejection
 │   └── newt-server/              # Composed server that hosts all three engines
-│       └── main.go               # --listen, --spec-dir, --auth-pam-service, --tls-*
+│       └── main.go               # --listen, --networks-base, --auth-pam-service, --tls-*
 │
 ├── pkg/newtrun/                  # Engine (the orchestration core)
 │   ├── scenario.go               # Scenario, Step, StepAction, ExpectBlock, BatchCall
