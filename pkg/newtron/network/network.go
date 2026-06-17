@@ -123,9 +123,9 @@ type Network struct {
 //
 // The explicit `secretStore` argument always wins over auto-discovery
 // — an operator who passes an explicit FileStore (typically from
-// --secret-store=PATH on cmd/newt-server or cmd/newtron-server) gets
-// that store regardless of what's next to network.json. The
-// convention only kicks in when no flag is set.
+// --secret-store=PATH on cmd/newt-server) gets that store regardless
+// of what's next to network.json. The convention only kicks in when
+// no flag is set.
 func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store) (*Network, error) {
 	loader := spec.NewLoader(specDir)
 

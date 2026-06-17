@@ -30,11 +30,11 @@ unchanged.
 
 ## Authentication boundary
 
-newt-server is the only binary in this project that runs identity
-middleware. The standalone server binaries (`bin/newtron-server`,
-`bin/newtrun-server`, `bin/newtlab-server`) are loopback dev tools
-with no encryption and no authentication; their `--listen` defaults
-to a per-engine loopback port.
+newt-server is the only binary in this project that exposes the three
+engine APIs over HTTP. Identity middleware (L2b PAM, L2c session-key
+Bearer) lives at this boundary, not in any per-engine API package —
+the engines themselves trust newt-server's outer middleware chain to
+populate the request context.
 
 When `--auth-pam-service` is set on newt-server, the composition
 constructs:
@@ -115,18 +115,21 @@ scenario overrides this default for every call that scenario makes.
 
 See [`docs/newtron/mtls-howto.md`](newtron/mtls-howto.md) for the operator walkthrough.
 
-## newt-server vs standalone binaries
+## One server, three engines
 
-| Scenario | Run |
-|---|---|
-| Production / lab host / first-run path / any auth-enforcing deployment | `bin/newt-server` |
-| Iterating on one engine's code on loopback | `bin/<engine>-server` — rebuild and restart just that engine without disturbing the others' in-memory state. No identity middleware; loopback default. |
+`pkg/<engine>/api/` is the source of truth for each engine's HTTP
+surface. `cmd/newt-server` is the only binary that mounts them on
+a TCP listener — it instantiates each `api.Server`, composes their
+muxes by path prefix, wraps the result with the L2a TLS / L2b PAM /
+L2c session-key middleware chain, and serves the result on a single
+port. Iterating on an engine means rebuilding `cmd/newt-server` and
+restarting; the engine code itself has no main package.
 
-`pkg/<engine>/api/` is the source of truth in both cases. The
-binaries are thin choosers — which engines does this process
-expose. The auth boundary lives only at `cmd/newt-server` because
-encryption and identity are properties of the server boundary, not
-of any individual engine.
+The auth boundary lives only at `cmd/newt-server` because encryption
+and identity are properties of the server boundary, not of any
+individual engine. Engine packages can be embedded into other host
+processes (in-process tests, future composed deployments) without
+re-implementing the auth chain — they just run without one.
 
 ## Reasons for one process
 

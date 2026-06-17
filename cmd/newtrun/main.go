@@ -50,8 +50,8 @@ Discovery:
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
-	rootCmd.PersistentFlags().StringVar(&newtrunServerFlag, "newtrun-server", "", "URL of newt-server (or newtrun-server directly). Default: http://127.0.0.1:18080. Env: NEWTRUN_SERVER")
-	rootCmd.PersistentFlags().StringVar(&newtlabServerFlag, "newtlab-server", "", "URL of newt-server (or newtlab-server directly) for lab status / deploy / destroy. Default: http://127.0.0.1:18080. Env: NEWTLAB_SERVER")
+	rootCmd.PersistentFlags().StringVar(&newtrunServerFlag, "newtrun-server", "", "URL of newt-server. Default: http://127.0.0.1:18080. Env: NEWTRUN_SERVER")
+	rootCmd.PersistentFlags().StringVar(&newtlabServerFlag, "newtlab-server", "", "URL of newt-server for lab status / deploy / destroy. Default: http://127.0.0.1:18080. Env: NEWTLAB_SERVER")
 
 	startCmd := newStartCmd()
 

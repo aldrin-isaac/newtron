@@ -1,7 +1,7 @@
 digraph {
     rankdir=LR;
-    "\n  newtron CLI  \n\n" -> "\n  newtron-server  \n  (HTTP :18080)  \n\n";
-    "\n  newtrun  \n\n" -> "\n  newtron-server  \n  (HTTP :18080)  \n\n";
-    "\n  newtron-server  \n  (HTTP :18080)  \n\n" -> "\n  SSH tunnel  \n\n";
+    "\n  newtron CLI  \n\n" -> "\n  newt-server  \n  (newtron engine)  \n\n";
+    "\n  newtrun  \n\n" -> "\n  newt-server  \n  (newtron engine)  \n\n";
+    "\n  newt-server  \n  (newtron engine)  \n\n" -> "\n  SSH tunnel  \n\n";
     "\n  SSH tunnel  \n\n" -> "\n  SONiC Redis  \n  DB 4 (CONFIG_DB)  \n\n";
 }

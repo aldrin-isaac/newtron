@@ -4,7 +4,7 @@ This document specifies newtrun's type definitions, package structure, and code 
 
 **Audience:** Engineers reading or modifying newtrun's source code. Field-by-field type tables, package boundaries, the data flow through each handler.
 
-**Mental model:** newtrun is split into a thin CLI client (`bin/newtrun`) and a long-lived server (`bin/newtrun-server`). The CLI is a stateless HTTP client. The server owns the run registry, executes scenarios in goroutines, and streams progress over Server-Sent Events. Everything below is organized around that split.
+**Mental model:** newtrun is a thin CLI client (`bin/newtrun`) plus an engine that lives inside `bin/newt-server`. The CLI is a stateless HTTP client. The engine owns the run registry, executes scenarios in goroutines, and streams progress over Server-Sent Events. `bin/newt-server` mounts the engine's HTTP routes (`/newtrun/v1/...`) alongside the newtron and newtlab engines on a single port. Everything below is organized around that split.
 
 ---
 
@@ -24,7 +24,7 @@ This document specifies newtrun's type definitions, package structure, and code 
 12. [Results & Reporting](#12-results--reporting-reportgo)
 13. [Error Handling](#13-error-handling-errorsgo)
 14. [CLI Binary](#14-cli-binary-cmdnewtrun)
-15. [Server Binary](#15-server-binary-cmdnewtrun-server)
+15. [Engine Mount Point](#15-engine-mount-point-cmdnewt-server)
 
 ---
 
@@ -82,11 +82,12 @@ cmd/newtrun/                  # CLI binary (thin HTTP-client surface)
   cmd_actions.go              # static action vocabulary help
   scenario_e2e_test.go        # CLI→server E2E tests
 
-cmd/newtrun-server/           # Server binary entry point
-  main.go                     # --listen, --suites-base
+cmd/newt-server/              # Composed server that hosts all three engines
+  main.go                     # --listen, --spec-dir, --auth-pam-service,
+                              # --tls-cert/--tls-key/--tls-ca, --secret-store
 ```
 
-The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client → pkg/newtrun/api → pkg/newtrun`. `pkg/newtrun/` is HTTP-agnostic — it knows nothing about the server. `pkg/newtrun/newtrun/v1/` adapts the engine to HTTP. `pkg/newtrun/client/` consumes the HTTP surface.
+The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client → pkg/newtrun/api → pkg/newtrun`. `pkg/newtrun/` is HTTP-agnostic — it knows nothing about the server. `pkg/newtrun/api/` adapts the engine to HTTP (mounted by `cmd/newt-server` alongside the newtron and newtlab engines). `pkg/newtrun/client/` consumes the HTTP surface.
 
 ---
 
@@ -1140,20 +1141,20 @@ newtrun scenario delete <suite> <name>
 
 ---
 
-## 15. Server Binary (`cmd/newtrun-server/`)
+## 15. Engine Mount Point (`cmd/newt-server/`)
 
-Three flags:
+The newtrun engine has no main package of its own. `cmd/newt-server/main.go` instantiates the engine — calling `pkg/newtrun/api.NewServer(cfg)` — and mounts its routes on the composed mux alongside the newtron and newtlab engines. Engine-relevant flags on `cmd/newt-server`:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--listen` | `127.0.0.1:19081` | Bind address. Non-loopback values trigger a startup warning that there is no built-in authentication. |
-| `--suites-base` | `newtrun/suites` | Directory containing suite subdirectories. |
-| `--topologies-base` | `newtrun/topologies` | Directory containing topology subdirectories. |
+| `--listen` | `127.0.0.1:18080` | Bind address for the composed listener; non-loopback values require `--auth-pam-service` plus `--tls-cert/--tls-key/--tls-ca` to be set. |
+| `--spec-dir` | (required) | Spec directory passed to the newtron engine's `RegisterNetwork`. The newtrun engine reads suites and topologies relative to repo root by default; override with `--suites-base` if needed. |
+| `--suites-base` | `newtrun/suites` | Directory containing suite subdirectories the newtrun engine resolves names against. |
 
-The Config struct has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), but the current binary registers no CLI flag or env-var binding for either. The values can only be overridden per-request via the `newtron_server` and `network_id` fields on `POST /newtrun/v1/runs`. Adding a flag or env-var to the server binary is a small follow-on if operators need to point a whole instance at a non-default newtron-server.
+The Config struct backing the newtrun engine has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), inherited from the composed boundary. Per-request overrides via the `newtron_server` and `network_id` fields on `POST /newtrun/v1/runs` are the supported way to point a run at a non-default newtron-server.
 
-The server installs a SIGTERM handler that calls `Stop(ctx)` — cancels every in-flight run, waits up to 5 seconds for them to drain, then shuts down the HTTP listener. The Runner's ctx-cancel check ([§6.4](#64-iteratescenarios)) is what makes the drain produce honest status (`aborted`) instead of synthetic FAIL events.
+`cmd/newt-server` installs a SIGTERM handler that calls each engine's `Stop(ctx)` — for newtrun, that cancels every in-flight run, waits up to 5 seconds for them to drain, then shuts down the HTTP listener. The Runner's ctx-cancel check ([§6.4](#64-iteratescenarios)) is what makes the drain produce honest status (`aborted`) instead of synthetic FAIL events.
 
 ---
 
-*Source-traced against `pkg/newtrun/`, `pkg/newtrun/newtrun/v1/`, `pkg/newtrun/client/`, `cmd/newtrun/`, and `cmd/newtrun-server/`. Type definitions are exact; method signatures are exact. If you find a discrepancy, the code is the authority — please open an issue or PR.*
+*Source-traced against `pkg/newtrun/`, `pkg/newtrun/api/`, `pkg/newtrun/client/`, `cmd/newtrun/`, and `cmd/newt-server/`. Type definitions are exact; method signatures are exact. If you find a discrepancy, the code is the authority — please open an issue or PR.*

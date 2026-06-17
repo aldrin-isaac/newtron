@@ -52,9 +52,8 @@ Typical operator setups:
 ```sh
 # Operator-managed store, explicit path
 mkdir -m 700 -p ~/.newtron
-bin/newtron-server --listen 127.0.0.1:19080 \
-                   --spec-dir /etc/newtron/lab \
-                   --secret-store ~/.newtron/secrets.json
+bin/newt-server --spec-dir /etc/newtron/lab \
+                --secret-store ~/.newtron/secrets.json
 
 # Spec-dir convention — secrets.json lives alongside network.json
 bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs

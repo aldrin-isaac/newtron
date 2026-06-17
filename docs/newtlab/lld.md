@@ -392,13 +392,12 @@ Steps:
 8. Auto-place nodes across server pool if configured (`PlaceNodes()`, §9.1).
 9. Allocate links (`AllocateLinks()`, §5.2) — assigns NIC indices, TCP ports, worker hosts, and appends NIC entries to NodeConfigs.
 
-**Bootstrap dependency:** standalone `bin/newtlab` and `bin/newtlab-server`
-need a running newtron-server (default `--newtron-server
-http://127.0.0.1:18080`) before any topology operation. In the composed
-`bin/newt-server` binary both engines share a process; no ordering issue
-arises. The CLI's `prepareLab()` calls `client.RegisterNetwork(specDir)`
-idempotently so the operator does not have to register topologies
-manually.
+**Bootstrap dependency:** `bin/newtlab` needs a running `bin/newt-server`
+(default `http://127.0.0.1:18080`) before any topology operation — the
+newtron and newtlab engines share the same process inside `bin/newt-server`,
+so there's no ordering issue between them. The CLI's `prepareLab()` calls
+`client.RegisterNetwork(specDir)` idempotently so the operator does not
+have to register topologies manually.
 
 ### 4.2 Deploy
 

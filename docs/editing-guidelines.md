@@ -508,7 +508,7 @@ The most common offender in this project is "CLI":
 | CLI | newtron's CLI tool, SONiC device CLI (`show vlan`, `config interface`) | "newtron CLI", "SONiC CLI" |
 | shell | the operator's local shell, a remote SSH session to a device, a container shell | "device shell", "local shell" |
 | config | CONFIG_DB entries, YAML spec files, newtron server configuration | "CONFIG_DB entries", "spec files", "server config" |
-| API | newtron-server HTTP API, SONiC REST API, SAI API | "newtron API", "SONiC REST API", "SAI API" |
+| API | the newtron engine's HTTP API (inside newt-server), SONiC REST API, SAI API | "newtron API", "SONiC REST API", "SAI API" |
 | configDB | The device's Redis CONFIG_DB (DB 4), newtron's intent-derived typed view rebuilt from intent replay | "device CONFIG_DB" or "Redis CONFIG_DB" (the actual Redis store), "projection" (newtron's typed view) |
 | node | A SONiC device (VM or switch), the `Node` Go struct, a DAG vertex | "device" or "switch" (physical), "`Node`" (Go struct), "DAG node" or "intent node" (graph) |
 | interface | A network port (Ethernet0), the `Interface` Go struct, a Go behavioral contract | "network interface" or "port" (physical), "`Interface`" (Go struct), "Go interface" (contract) |

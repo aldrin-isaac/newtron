@@ -95,7 +95,7 @@ type FileStore struct {
 //
 // Use this constructor for the explicit operator-supplied store —
 // i.e., when the path comes from --secret-store=PATH on cmd/newt-server
-// or cmd/newtron-server. Auto-discovery callers (#176) that may load
+// or cmd/newt-server. Auto-discovery callers (#176) that may load
 // a git-committed test fixture should use NewFileStoreLooseMode
 // instead — git can't preserve 0600 on checkout, so committed
 // secrets.json files always start out 0644 in fresh clones.

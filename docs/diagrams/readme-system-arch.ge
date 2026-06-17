@@ -2,19 +2,22 @@ graph { flow: south; }
 
 # README architecture — runtime data path.
 #
-# Three CLIs and their servers. newtron CLI talks to newtron-server
-# directly; newtrun CLI talks to newtrun-server, which calls
-# newtron-server in turn. Every device write lands through the same
-# newtron-server SSH+Redis tunnel into the SONiC VM.
+# Two CLIs targeting one composed server. The newtron CLI talks to
+# the newtron engine inside bin/newt-server; the newtrun CLI talks to
+# the newtrun engine inside the same bin/newt-server, which in turn
+# calls the newtron engine via in-process Go (loopback HTTP is also
+# valid but in-process is the production path). Every device write
+# lands through the newtron engine's SSH+Redis tunnel into the SONiC
+# VM.
 #
-# Lab orchestration (newtlab → SONiC VM) and spec loading
-# (specs → newtron-server) are side-channel concerns covered in a
+# Lab orchestration (newtlab engine → SONiC VM) and spec loading
+# (specs → newtron engine) are side-channel concerns covered in a
 # separate diagram in the README.
 
 [ newtron CLI ] { rank: same; }
 [ newtrun CLI ] { rank: same; }
 
-[ newtron CLI ] --> { label: HTTP; } [ newtron-server ]
-[ newtrun CLI ] --> { label: HTTP; } [ newtrun-server ]
-[ newtrun-server ] --> { label: HTTP; } [ newtron-server ]
-[ newtron-server ] --> { label: SSH + Redis; } [ SONiC VM ]
+[ newtron CLI ] --> { label: HTTP; } [ newt-server\n(newtron engine) ]
+[ newtrun CLI ] --> { label: HTTP; } [ newt-server\n(newtrun engine) ]
+[ newt-server\n(newtrun engine) ] --> { label: in-process; } [ newt-server\n(newtron engine) ]
+[ newt-server\n(newtron engine) ] --> { label: SSH + Redis; } [ SONiC VM ]

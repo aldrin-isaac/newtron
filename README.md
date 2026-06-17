@@ -297,11 +297,13 @@ packet between VMs passes through **newtlink**, a Go bridge that handles
 Ethernet frames in userspace. Topologies can span multiple servers.
 
 **newtrun** executes YAML test scenarios end-to-end. The CLI is a thin
-client over **newtrun-server**, which owns the run registry and calls
-**newtron-server** for every device operation. Each scenario is a
-sequence of HTTP calls (provision a device, check BGP sessions, verify
-CONFIG_DB entries) and host commands (ping across VMs, run traffic
-generators) that exercise the primitives in concert.
+client over the **newtrun engine** inside **newt-server**, which owns
+the run registry and calls the **newtron engine** for every device
+operation (both engines run in the same process; the inter-engine
+hop is in-process Go). Each scenario is a sequence of HTTP calls
+(provision a device, check BGP sessions, verify CONFIG_DB entries)
+and host commands (ping across VMs, run traffic generators) that
+exercise the primitives in concert.
 
 A full 2node-vs-service run looks like this. Prereq: newt-server running (`bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
 
@@ -352,31 +354,31 @@ by building.
 
 | Program | What it does |
 |---------|-------------|
-| **newtron-server** | HTTP API server. Loads specs, connects to SONiC devices via SSH/Redis, exposes all operations as REST endpoints. The brain. |
-| **newtron** | CLI client. Human interface to newtron-server — every command is an HTTP call. |
-| **newtlab** | VM orchestrator. Deploys QEMU virtual machines and wires them into topologies. |
+| **newt-server** | The composed HTTP API server — the only entry point for any operational flow. Hosts three engines on one port: the **newtron engine** (loads specs, connects to SONiC devices via SSH/Redis, exposes device operations as REST endpoints — the brain), the **newtrun engine** (owns the test-run registry, executes scenarios in goroutines, streams progress over SSE), and the **newtlab engine** (deploy / destroy / status over HTTP). |
+| **newtron** | CLI client. Human interface to the newtron engine — every command is an HTTP call. |
+| **newtlab** | VM orchestrator CLI. Deploys QEMU virtual machines and wires them into topologies via the newtlab engine. |
 | **newtlink** | Userspace bridge agent. Bridges Ethernet frames between VMs over TCP sockets. Deployed by newtlab. |
-| **newtrun-server** | Test orchestration HTTP server. Owns the run registry, executes scenarios in goroutines, streams progress over SSE. Started before `newtrun` CLI usage. |
-| **newtrun** | CLI client to newtrun-server. Every command (`start`, `status`, `pause`, `stop`, `scenario`, `suite`) is an HTTP call; the server runs the actual scenario engine. |
+| **newtrun** | CLI client to the newtrun engine. Every command (`start`, `status`, `pause`, `stop`, `scenario`, `suite`) is an HTTP call; newt-server runs the actual scenario engine. |
 
 **Runtime data path.** Operator commands flow from CLI through HTTP into the device:
 
 ```
-┌────────────────┐         ┌────────────────┐
-│  newtron CLI   │         │  newtrun CLI   │
-└────────────────┘         └────────────────┘
-  │                          │
-  │ HTTP                     │ HTTP
-  ∨                          ∨
-┌────────────────┐  HTTP   ┌────────────────┐
-│ newtron-server │ <────── │ newtrun-server │
-└────────────────┘         └────────────────┘
+┌──────────────────┐               ┌──────────────────┐
+│   newtron CLI    │               │   newtrun CLI    │
+└──────────────────┘               └──────────────────┘
+  │                                  │
+  │ HTTP                             │ HTTP
+  ∨                                  ∨
+┌──────────────────┐               ┌──────────────────┐
+│   newt-server    │  in-process   │   newt-server    │
+│ (newtron engine) │ <──────────── │ (newtrun engine) │
+└──────────────────┘               └──────────────────┘
   │
   │ SSH + Redis
   ∨
-┌────────────────┐
-│    SONiC VM    │
-└────────────────┘
+┌──────────────────┐
+│     SONiC VM     │
+└──────────────────┘
 ```
 
 *Diagram source: [`docs/diagrams/readme-system-arch.ge`](docs/diagrams/readme-system-arch.ge).*
@@ -384,39 +386,41 @@ by building.
 **Deployment side-channel.** Lab orchestration and spec loading happen out of the operational data path:
 
 ```
-┌────────────────┐
-│  newtlab CLI   │
-└────────────────┘
+┌──────────────────┐
+│   newtlab CLI    │
+└──────────────────┘
   │
   │ deploy, wire
   ∨
-┌────────────────┐
-│    SONiC VM    │
-└────────────────┘
-┌────────────────┐
-│     specs      │
-└────────────────┘
+┌──────────────────┐
+│     SONiC VM     │
+└──────────────────┘
+┌──────────────────┐
+│      specs       │
+└──────────────────┘
   │
   │
   ∨
-┌────────────────┐
-│ newtron-server │
-└────────────────┘
+┌──────────────────┐
+│   newt-server    │
+│ (newtron engine) │
+└──────────────────┘
 ```
 
 *Diagram source: [`docs/diagrams/readme-deploy-sidechannel.ge`](docs/diagrams/readme-deploy-sidechannel.ge).*
 
-Both paths converge on the same SONiC devices. **newtlab** creates QEMU VMs running SONiC and wires them with **newtlink**; **newtron-server** connects to those same VMs via SSH-tunneled Redis. You can also point **newtron-server** at hardware switches or third-party labs — **newtlab** is only needed for local virtual topologies.
+Both paths converge on the same SONiC devices. **newtlab** creates QEMU VMs running SONiC and wires them with **newtlink**; the **newtron engine** (inside **newt-server**) connects to those same VMs via SSH-tunneled Redis. You can also point newt-server at hardware switches or third-party labs — **newtlab** is only needed for local virtual topologies.
 
 ## Repository Layout
 
 ```
 cmd/
   newtron/          Device provisioning and verification CLI
-  newtron-server/   HTTP API server (transport layer over pkg/newtron)
   newtlab/          VM orchestration CLI
-  newtrun/          E2E test runner CLI (client to newtrun-server)
-  newtrun-server/   Test orchestration HTTP server (transport layer over pkg/newtrun)
+  newtrun/          E2E test runner CLI
+  newt-server/      Composed HTTP server — hosts the newtron, newtrun,
+                    and newtlab engines on one port (the only entry
+                    point for any operational flow)
   newtlink/         Bridge traffic agent (deployed to remote hosts by newtlab)
 
 pkg/
