@@ -54,7 +54,7 @@ var rootCmd = &cobra.Command{
 	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
 	Long: `NewtLab deploys QEMU virtual machines from newtron topology specs.
 
-Topologies are resolved by name from newtrun/topologies/.
+Topologies are resolved by name from networks/.
 
   newtlab list                       # show topologies
   newtlab deploy 2node-ngdp           # deploy VMs from topology
@@ -98,25 +98,25 @@ func init() {
 // Topology Resolution
 // ============================================================================
 
-// topologiesBaseDir returns the base directory for topologies.
+// networksBaseDir returns the base directory for topologies.
 // Resolution: NEWTRUN_TOPOLOGIES env > settings > default.
-func topologiesBaseDir() string {
+func networksBaseDir() string {
 	if v := os.Getenv("NEWTRUN_TOPOLOGIES"); v != "" {
 		return v
 	}
-	if s, err := settings.Load(); err == nil && s.TopologiesDir != "" {
-		return s.TopologiesDir
+	if s, err := settings.Load(); err == nil && s.NetworksDir != "" {
+		return s.NetworksDir
 	}
-	return "newtrun/topologies"
+	return "networks"
 }
 
 // resolveTopologyDir resolves a topology name to its spec directory.
-// If name contains "/" it's used as-is. Otherwise resolved under topologiesBaseDir.
+// If name contains "/" it's used as-is. Otherwise resolved under networksBaseDir.
 func resolveTopologyDir(name string) string {
 	if strings.Contains(name, "/") {
 		return name
 	}
-	return filepath.Join(topologiesBaseDir(), name, "specs")
+	return filepath.Join(networksBaseDir(), name, "specs")
 }
 
 // topologyNameFromPath derives the topology name from a spec directory
@@ -279,7 +279,7 @@ func newListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List topologies and their deployment status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			base := topologiesBaseDir()
+			base := networksBaseDir()
 			entries, err := os.ReadDir(base)
 			if err != nil {
 				return fmt.Errorf("cannot find topologies directory %s: %w", base, err)

@@ -17,11 +17,11 @@ func TestReporterCallbacksProduceCorrectEventTypes(t *testing.T) {
 	r := NewHTTPReporter(b, "test-suite", nil)
 
 	scenarios := []*newtrun.Scenario{
-		{Name: "s1", Topology: "topo", Steps: []newtrun.Step{{Name: "step1"}}},
+		{Name: "s1", Network: "topo", Steps: []newtrun.Step{{Name: "step1"}}},
 	}
 	scenarioResult := &newtrun.ScenarioResult{
 		Name:     "s1",
-		Topology: "topo",
+		Network: "topo",
 		Status:   newtrun.StepStatusPassed,
 		Duration: 2 * time.Second,
 	}
@@ -118,7 +118,7 @@ func TestReporterScenarioEndCarriesResultFields(t *testing.T) {
 
 	result := &newtrun.ScenarioResult{
 		Name:     "scenario-x",
-		Topology: "topo-y",
+		Network: "topo-y",
 		Status:   newtrun.StepStatusFailed,
 		Duration: 5 * time.Second,
 		Steps: []newtrun.StepResult{

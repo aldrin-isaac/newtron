@@ -28,7 +28,7 @@ func TestRun_CaptureEndToEnd(t *testing.T) {
 	scenariosDir := t.TempDir()
 	suiteYAML := `name: capture-int
 description: integration suite for response-capture
-topology: synthetic
+network: synthetic
 `
 	if err := os.WriteFile(filepath.Join(scenariosDir, "suite.yaml"), []byte(suiteYAML), 0o644); err != nil {
 		t.Fatalf("write suite.yaml: %v", err)

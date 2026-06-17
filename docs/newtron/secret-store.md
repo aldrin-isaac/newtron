@@ -41,7 +41,7 @@ The server discovers the secret store from two sources, in order:
 Both default-off: a plaintext-only spec dir with no `secrets.json` and
 no flag works exactly as it did pre-L0. The convention only kicks in
 for networks that ship a `secrets.json` next to their `network.json` —
-which the in-repo test topologies under `newtrun/topologies/` do.
+which the in-repo test networks under `networks/` do.
 
 The store file (whether flag-pointed or auto-discovered) must be mode
 0600. Broader modes are rejected at open so a misconfigured permissions
@@ -56,8 +56,8 @@ bin/newt-server --spec-dir /etc/newtron/lab \
                 --secret-store ~/.newtron/secrets.json
 
 # Spec-dir convention — secrets.json lives alongside network.json
-bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs
-# loader auto-discovers newtrun/topologies/1node-vs/specs/secrets.json
+bin/newt-server --spec-dir networks/1node-vs/specs
+# loader auto-discovers networks/1node-vs/specs/secrets.json
 ```
 
 When a referenced KEY is missing from the resolved store, the server
@@ -140,7 +140,7 @@ values until they're individually reloaded (or the server restarts).
 - *Plaintext passwords in the version-controlled spec directory*.
   The 58 plaintext password instances across shipped topologies were
   the original motivator for the secret store; after migration,
-  `grep -r ssh_pass newtrun/topologies/` finds only references.
+  `grep -r ssh_pass networks/` finds only references.
 - *Misconfigured permissions*. `NewFileStore` refuses to open a
   store file with mode broader than 0600. An operator who
   accidentally `chmod 644`s the file gets a startup error instead of

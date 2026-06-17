@@ -36,7 +36,7 @@ func repoRoot(t *testing.T) string {
 // endpoint. Stops the server at test cleanup.
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
 	s := NewServer(Config{})
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)
@@ -629,7 +629,7 @@ func TestHandleConfigDBSnapshot_RouteRegistered(t *testing.T) {
 // No device connection required; topology mode runs setup-device so VLAN
 // preconditions are satisfied.
 func TestWriteResult_ChangesPopulated(t *testing.T) {
-	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
 	if err != nil {
@@ -750,7 +750,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 // from before — the add the op would produce). Confirms the snapshot/restore
 // leaves the Node's observable state unchanged.
 func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
-	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
 	if err != nil {
@@ -828,7 +828,7 @@ func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
 // Returns the temp spec path; cleanup is automatic via t.TempDir().
 func copyTestSpecDir(t *testing.T) string {
 	t.Helper()
-	src := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+	src := filepath.Join(repoRoot(t), "networks", "1node-vs", "specs")
 	dst := filepath.Join(t.TempDir(), "specs")
 	if err := os.MkdirAll(filepath.Join(dst, "profiles"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

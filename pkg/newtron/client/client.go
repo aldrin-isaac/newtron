@@ -233,7 +233,7 @@ func (c *Client) RegisterNetwork(specDir string) error {
 // configured scaffold root as <root>/<id> (#122). UI clients that don't
 // want to know newtron's on-disk layout pass "" here; CLI consumers
 // that follow their own filesystem convention (e.g. newtrun's
-// `newtrun/topologies/<name>/specs`) keep passing an explicit path.
+// `networks/<name>/specs`) keep passing an explicit path.
 // Either way the returned NetworkInfo carries the resolved spec_dir,
 // so callers can display "created at <path>" without re-fetching.
 //

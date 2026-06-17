@@ -1,0 +1,3 @@
+name: 1node-vs-basic
+description: Basic device boot, service lifecycle, VLAN/VRF, and CONFIG_DB/projection round-trip on the 1node-vs topology.
+network: 1node-vs

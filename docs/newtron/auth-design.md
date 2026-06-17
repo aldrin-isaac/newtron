@@ -256,7 +256,7 @@ age-encrypted file, or an interface the operator implements).
 the threats the system defends against and the threats out of scope,
 and trace each in-scope threat to a layer that addresses it. (2) "Where
 are device passwords stored?" → not in `profiles/*.json`. A `grep -r
-password newtrun/topologies/` returns only key-references, not
+password networks/` returns only key-references, not
 plaintext.
 
 **Dependencies.** None.
@@ -809,7 +809,7 @@ The rule of thumb: if the dimension can hold a service name, IPVPN
 name, MACVPN name, VRF name, ROUTE_POLICY name, QOS_POLICY name, or
 any other name that flows through `util.NormalizeName` at runtime,
 the `where:` pattern must be canonical. Verified end-to-end by the
-`1node-vs-auth` E2E suite (see `newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/README.md`
+`1node-vs-auth` E2E suite (see `networks/1node-vs-auth/suites/1node-vs-auth/README.md`
 §"Where-pattern canonical form").
 
 The old shorthand syntax (`"action": ["groups"]`) continues to work —
@@ -1153,12 +1153,12 @@ enforces classification. Tests:
 `TestAuthorizationL4_NodeMutationsGated` and
 `TestAuthorizationL4_InterfaceMutationsGated`.
 
-The shipped topology specs in `newtrun/topologies/` continue to
+The shipped network specs in `networks/` continue to
 carry plaintext passwords — those 58 instances are operator-
 migration work, not server work; the operator's workflow is
 documented in [`secret-store.md`](secret-store.md). Until those
 plaintexts get migrated to references, `grep -r ssh_pass
-newtrun/topologies/` still returns plaintexts; the L0 audit
+networks/` still returns plaintexts; the L0 audit
 criterion ("no plaintext in spec dir") is met for any *operator-
 configured* deployment but not for the in-tree test fixtures.
 
@@ -1226,7 +1226,7 @@ empty `ID` exactly as before L6. Tests:
 `pkg/newtron/audit/integrity_test.go` (5 tests).
 
 The L0 plaintext-password migration remains as the only out-of-arc
-operator-side cleanup: `grep -r ssh_pass newtrun/topologies/`
+operator-side cleanup: `grep -r ssh_pass networks/`
 still returns the in-tree test fixtures' plaintexts because the
 operator workflow to migrate them lives outside the server code
 path. See [`secret-store.md`](secret-store.md).

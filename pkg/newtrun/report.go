@@ -23,7 +23,7 @@ const (
 // ScenarioResult holds the result of a single scenario execution.
 type ScenarioResult struct {
 	Name        string
-	Topology    string
+	Network    string
 	Platform    string
 	Status      StepStatus
 	Duration    time.Duration
@@ -81,7 +81,7 @@ func ResultsFromRunState(state *RunState) []*ScenarioResult {
 	for _, sc := range state.Scenarios {
 		r := &ScenarioResult{
 			Name:       sc.Name,
-			Topology:   state.Topology,
+			Network:   state.Network,
 			Platform:   state.Platform,
 			Status:     StepStatus(sc.Status),
 			Duration:   parseReportDuration(sc.Duration),
@@ -137,7 +137,7 @@ func (g *ReportGenerator) WriteMarkdown(path string) error {
 	fmt.Fprintln(f, "|----------|----------|----------|--------|----------|------|")
 	for _, r := range g.Results {
 		fmt.Fprintf(f, "| %s | %s | %s | %s | %s | %s |\n",
-			r.Name, r.Topology, r.Platform, r.Status,
+			r.Name, r.Network, r.Platform, r.Status,
 			r.Duration.Round(time.Second), scenarioNote(r))
 	}
 

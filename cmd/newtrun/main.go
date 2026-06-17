@@ -31,7 +31,7 @@ func main() {
 
 A suite is a directory of YAML scenario files (e.g., "2node-ngdp-incremental").
 Each scenario defines steps like provision, configure, and verify.
-Suites can be specified by name (resolved across newtrun/topologies/*/suites/) or by path.
+Suites can be specified by name (resolved across networks/*/suites/) or by path.
 
 Lifecycle:
   newtrun start <suite>              # deploy topology, run all scenarios
@@ -64,8 +64,8 @@ Discovery:
 		newSuitesCmd(),
 		newSuiteCmd(),
 		newScenarioCmd(),
-		newTopologiesCmd(),
-		newTopologyCmd(),
+		newNetworksCmd(),
+		newNetworkCmd(),
 		newActionsCmd(),
 		newReportCmd(),
 		newMonitorCmd(),

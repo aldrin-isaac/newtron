@@ -71,7 +71,7 @@ Changed files:
 - `cmd/newtron/cmd_provision.go` — `ConfigReload()` instead of `RestartService("bgp")`
 - `pkg/newtron/network/node/node.go` — new `ConfigReload()` method
 - `pkg/newtrun/` — new `config-reload` action
-- `newtrun/topologies/2node-ngdp-service/suites/2node-ngdp-service/02-provision.yaml` — uses config-reload
+- `networks/2node-ngdp-service/suites/2node-ngdp-service/02-provision.yaml` — uses config-reload
 
 ## Related
 

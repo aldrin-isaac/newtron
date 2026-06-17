@@ -1,0 +1,3 @@
+name: 3node-ngdp-dataplane
+description: EVPN L2/L3 IRB dataplane verification across a two-leaf fabric (3node-ngdp).
+network: 3node-ngdp

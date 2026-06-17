@@ -137,7 +137,7 @@ On `newtron-server` or `newt-server`:
 
 ```sh
 bin/newt-server \
-  --spec-dir newtrun/topologies/1node-vs/specs \
+  --spec-dir networks/1node-vs/specs \
   --audit-log /var/log/newtron-audit.jsonl \
   --audit-caller-header X-Newtron-Caller \
   --enforce-authorization

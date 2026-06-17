@@ -14,7 +14,7 @@ import (
 // Suite is a collection of scenarios that share a topology and (when
 // the suite is parameterized) a single targets/parameters block.
 // Suites live on disk under their owning topology:
-// newtrun/topologies/<topology>/suites/<name>/, with a
+// networks/<topology>/suites/<name>/, with a
 // suite.yaml declaring the suite metadata + targets/parameters, and
 // NN-<name>.yaml scenario files alongside it.
 //
@@ -27,7 +27,7 @@ import (
 type Suite struct {
 	Name        string                   `yaml:"name"`
 	Description string                   `yaml:"description,omitempty"`
-	Topology    string                   `yaml:"topology"`
+	Network    string                   `yaml:"network"`
 	Platform    string                   `yaml:"platform,omitempty"`
 	Targets     map[string][]string      `yaml:"targets,omitempty"`
 	Parameters  map[string]ParameterSpec `yaml:"parameters,omitempty"`
@@ -226,8 +226,8 @@ func LoadSuite(dir string) (*Suite, error) {
 	if suite.Name == "" {
 		return nil, fmt.Errorf("%s: name is required", suitePath)
 	}
-	if suite.Topology == "" {
-		return nil, fmt.Errorf("%s: topology is required", suitePath)
+	if suite.Network == "" {
+		return nil, fmt.Errorf("%s: network is required", suitePath)
 	}
 	if err := validateSuiteDeclaration(&suite); err != nil {
 		return nil, fmt.Errorf("%s: %w", suitePath, err)
@@ -239,7 +239,7 @@ func LoadSuite(dir string) (*Suite, error) {
 	}
 	for i, sc := range scenarios {
 		path := paths[i]
-		if sc.Topology != "" {
+		if sc.Network != "" {
 			return nil, fmt.Errorf("%s: topology is set on suite.yaml, not on individual scenarios", path)
 		}
 		if sc.Platform != "" {

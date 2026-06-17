@@ -30,8 +30,8 @@ func TestRunner_ConnectToServer_UsesTLSConfig(t *testing.T) {
 	if err := r.connectToServer(); err != nil {
 		t.Fatalf("connectToServer with TLS: %v", err)
 	}
-	if r.Topology != "test-topo" {
-		t.Errorf("Topology = %q, want test-topo (stub server's response)", r.Topology)
+	if r.Network != "test-topo" {
+		t.Errorf("Topology = %q, want test-topo (stub server's response)", r.Network)
 	}
 }
 

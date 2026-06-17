@@ -50,7 +50,7 @@ Mirrors the convention used by `newtron-server` and `newtrun-server`.
 
 ### Path parameters
 
-- `{name}` — lab name. Resolved under `--topologies-base/<name>/specs/` for `topology.json` lookup; the on-disk directory layout still calls the spec `topology.json` (newtron owns the spec schema, see [DESIGN_PRINCIPLES_NEWTRON §27](../DESIGN_PRINCIPLES_NEWTRON.md)). At the HTTP layer the deployed instance is a *lab*.
+- `{name}` — lab name. Resolved under `--networks-base/<name>/specs/` for `topology.json` lookup; the on-disk directory layout still calls the spec `topology.json` (newtron owns the spec schema, see [DESIGN_PRINCIPLES_NEWTRON §27](../DESIGN_PRINCIPLES_NEWTRON.md)). At the HTTP layer the deployed instance is a *lab*.
 - `{node}` — device name as defined in `topology.json` (e.g., `switch1`, `host1`).
 
 ---
@@ -150,7 +150,7 @@ Returns the canonical [`LabState`](../../pkg/newtlab/state.go) for a deployed la
   "data": {
     "name": "1node-vs",
     "created": "2026-05-26T22:43:32.345-07:00",
-    "spec_dir": "/path/to/newtrun/topologies/1node-vs/specs",
+    "spec_dir": "/path/to/networks/1node-vs/specs",
     "ssh_key_path": "/home/.../1node-vs/lab.key",
     "nodes": {
       "switch1": {
@@ -165,7 +165,7 @@ Returns the canonical [`LabState`](../../pkg/newtlab/state.go) for a deployed la
 }
 ```
 
-**Error:** 404 if the lab doesn't exist under the configured `--topologies-base`.
+**Error:** 404 if the lab doesn't exist under the configured `--networks-base`.
 
 ### `POST /newtlab/v1/labs/{name}/deploy` — async deploy
 
@@ -194,7 +194,7 @@ All four are also accepted as query parameters (`?provision=true&force=true`) so
 ```
 
 **Errors:**
-- 404 — no `topology.json` under `<topologies-base>/<name>/specs/`.
+- 404 — no `topology.json` under `<networks-base>/<name>/specs/`.
 - 409 — another deploy of `{name}` is already in flight. The error message includes the in-flight start time.
 
 ### `POST /newtlab/v1/labs/{name}/destroy`

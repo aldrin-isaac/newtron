@@ -5,7 +5,7 @@
 // knows the parser's accept set, so a bad YAML cannot reach the
 // suites tree and surface later as a confusing run failure.
 //
-// Persistence: <topologies-base>/<topology>/suites/<suite>/<name>.yaml.
+// Persistence: <networks-base>/<topology>/suites/<suite>/<name>.yaml.
 // Writes go through a same-directory tempfile + rename, which is atomic
 // on POSIX filesystems — a partially-written scenario can never be
 // observed by a concurrent suite-loader read.
@@ -34,7 +34,7 @@ func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, suite)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), err)
 		return
@@ -74,7 +74,7 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, suite)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
 		return
@@ -99,7 +99,7 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 	// are declared on suite.yaml, not on individual scenarios.
 	// Accepting them here would write a file LoadSuite later refuses,
 	// silently breaking the next run of that suite.
-	if parsed.Topology != "" {
+	if parsed.Network != "" {
 		httputil.WriteError(w, http.StatusBadRequest,
 			fmt.Errorf("scenario must not set topology: — that is declared on suite.yaml"))
 		return
@@ -141,7 +141,7 @@ func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, suite)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), err)
 		return

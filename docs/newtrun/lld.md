@@ -99,7 +99,7 @@ The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client
 type Suite struct {
     Name        string                   `yaml:"name"`
     Description string                   `yaml:"description"`
-    Topology    string                   `yaml:"topology"`
+    Network     string                   `yaml:"network"`
     Platform    string                   `yaml:"platform"`
     Targets     map[string][]string      `yaml:"targets,omitempty"`
     Parameters  map[string]ParameterSpec `yaml:"parameters,omitempty"`
@@ -107,13 +107,13 @@ type Suite struct {
 }
 ```
 
-A Suite is loaded from a directory containing `suite.yaml` and zero or more scenario YAMLs (see [§3.1 LoadSuite](#31-loadsuite)). It owns the topology + platform declaration that scenarios inherit; `Targets` and `Parameters` form the catalog parameterized scenarios reference via templates.
+A Suite is loaded from a directory containing `suite.yaml` and zero or more scenario YAMLs (see [§3.1 LoadSuite](#31-loadsuite)). It owns the network + platform declaration that scenarios inherit; `Targets` and `Parameters` form the catalog parameterized scenarios reference via templates.
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Suite identifier; matches the directory name. |
 | `description` | no | Human-readable description shown on `GET /newtrun/v1/suites/{name}/scenarios` and in `newtrun list`. |
-| `topology` | yes | Topology name; the Runner aborts at startup if the server's loaded topology doesn't match. |
+| `network` | yes | Network name; the Runner aborts at startup if the server's loaded network doesn't match. |
 | `platform` | no | Default platform for capability checks; overridden by CLI `--platform`. |
 | `targets` | no | Map of plural dimension key → list of values. Recognized dimensions: `devices`, `interfaces` (see [§2.4 singularize](#24-singularize)). Values must satisfy the target-value whitelist (`^[A-Za-z0-9_-]+$`). |
 | `parameters` | no | Map of name → `ParameterSpec`. Catalog of typed values parameterized scenarios may reference via `{{param.X}}`. |
@@ -177,7 +177,7 @@ func (p *ParameterSpec) Coerce(v any) (any, error)
 type Scenario struct {
     Name             string   `yaml:"name"`
     Description      string   `yaml:"description"`
-    Topology         string   `yaml:"topology,omitempty"`        // rejected by LoadSuite
+    Network          string   `yaml:"network,omitempty"`          // rejected by LoadSuite
     Platform         string   `yaml:"platform,omitempty"`        // rejected by LoadSuite
     Requires         []string `yaml:"requires,omitempty"`
     After            []string `yaml:"after,omitempty"`
@@ -187,13 +187,13 @@ type Scenario struct {
 }
 ```
 
-A scenario carries the step list plus dependency metadata. Topology and platform are suite-level (`suite.yaml`); LoadSuite rejects any scenario that sets either field. The `Topology`/`Platform` fields remain on the Go struct only so `ParseScenarioBytes` can detect and report the violation with the file path.
+A scenario carries the step list plus dependency metadata. Network and platform are suite-level (`suite.yaml`); LoadSuite rejects any scenario that sets either field. The `Network`/`Platform` fields remain on the Go struct only so `ParseScenarioBytes` can detect and report the violation with the file path.
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Unique scenario identifier; matches filename without `.yaml` and matches the URL `{name}` segment of scenario CRUD endpoints. |
 | `description` | no | Human-readable description shown in `newtrun list` and on the SuiteStart event. |
-| `topology` | no | Suite-level field. Rejected by `LoadSuite` — declared on the suite, not on scenarios. The field exists on the Go struct so unmarshaling can detect the misplaced declaration and surface a descriptive error. |
+| `network` | no | Suite-level field. Rejected by `LoadSuite` — declared on the suite, not on scenarios. The field exists on the Go struct so unmarshaling can detect the misplaced declaration and surface a descriptive error. |
 | `platform` | no | Suite-level field. Rejected by `LoadSuite` — declared on the suite (or via CLI override), not on scenarios. Field exists on the Go struct for the same detection reason. |
 | `requires` | no | Names of scenarios that must pass before this one runs. Hard dependency — failure of a required scenario marks this one SKIP. |
 | `after` | no | Soft ordering — this scenario runs after the listed ones regardless of their status. Used for cleanup scenarios. |
@@ -320,7 +320,7 @@ The `newtron` action with `batch` runs N calls per device in sequence, collectin
 | `ActionWait` | `wait` | Sleep for `Duration`. |
 | `ActionProvision` | `topology-reconcile` | Single `Client.Reconcile(name, "topology", ...)` call per device — the newtron-server performs ConfigReload, lock, ReplaceAll, and SaveConfig internally. High-impact; inline-runs require explicit opt-in. |
 | `ActionVerifyProvisioning` | `verify-topology` | Compute drift between device CONFIG_DB and the topology projection. Zero drift = pass. |
-| `ActionRunSuite` | `run-suite` | Composition primitive: invoke another sibling suite (resolved under `Runner.TopologiesBase`) as a single step. Child runs in-process with `NoDeploy=true`; depth-counter context bounds recursion to `MaxRunSuiteDepth` (default 5). Excluded from the default inline-allowed list — file-backed suites only. |
+| `ActionRunSuite` | `run-suite` | Composition primitive: invoke another sibling suite (resolved under `Runner.NetworksBase`) as a single step. Child runs in-process with `NoDeploy=true`; depth-counter context bounds recursion to `MaxRunSuiteDepth` (default 5). Excluded from the default inline-allowed list — file-backed suites only. |
 
 ---
 
@@ -336,9 +336,9 @@ Reads the suite manifest at `<dir>/suite.yaml`, parses every other `*.yaml` file
 
 Validation steps, in order:
 
-1. `<dir>/suite.yaml` exists; `name:` and `topology:` are non-empty.
+1. `<dir>/suite.yaml` exists; `name:` and `network:` are non-empty.
 2. `validateSuiteDeclaration`: every `targets.<key>` is a recognized plural (in `singularizeMap`); every target list is non-empty; every target value matches `^[A-Za-z0-9_-]+$`; every `ParameterSpec.ValidateDeclaration` passes.
-3. For each `*.yaml` file other than `suite.yaml`: `ParseScenario` parses the file; the scenario must not set `topology:` or `platform:` (those are suite-level).
+3. For each `*.yaml` file other than `suite.yaml`: `ParseScenario` parses the file; the scenario must not set `network:` or `platform:` (those are suite-level).
 4. `validateScenarioAgainstSuite`: for each step that uses `{{target.X}}` or `{{param.X}}` — the scenario opts into parameterization — the references must resolve to declared dimensions/parameters, and the step must not also use `{{device}}` or set `devices:`.
 5. `ValidateDependencyGraph` topologically sorts the scenarios on `requires` / `after`.
 
@@ -439,7 +439,7 @@ func ComputeTargetChain(scenarios []*Scenario, target string) ([]*Scenario, erro
 ```go
 type RunState struct {
     Suite     string          `json:"suite"`
-    Topology  string          `json:"topology"`
+    Network   string          `json:"network"`
     Platform  string          `json:"platform"`
     Target    string          `json:"target,omitempty"`
     Status    SuiteStatus     `json:"status"`
@@ -452,7 +452,7 @@ type RunState struct {
 
 Persisted to `~/.newtron/newtrun/<key>/state.json` after every progress event. `<key>` is the suite name for file-backed runs or a UUID for inline runs (separate `_inline/<uuid>/` subdirectory keeps the namespaces clean).
 
-The fields exposed here are the abstract run identity — name (Suite), topology, platform, lifecycle status, and per-scenario progress. Storage internals (where `suite.yaml` lives on disk, which spec directory the runner used) are deliberately absent: clients address suites by *name*; resolving a name to bytes is server-internal and must not leak through the wire (§33 Public API Boundary). The legacy CLI-process PID lock retired when the runner became a goroutine under the registry — the AcquireLock / ReleaseLock helpers and the `pid` field were deleted together.
+The fields exposed here are the abstract run identity — name (Suite), network, platform, lifecycle status, and per-scenario progress. Storage internals (where `suite.yaml` lives on disk, which spec directory the runner used) are deliberately absent: clients address suites by *name*; resolving a name to bytes is server-internal and must not leak through the wire (§33 Public API Boundary). The legacy CLI-process PID lock retired when the runner became a goroutine under the registry — the AcquireLock / ReleaseLock helpers and the `pid` field were deleted together.
 
 ### 5.2 SuiteStatus
 
@@ -554,7 +554,7 @@ Reads `state.json` and returns true when `state.Status == SuiteStatusPausing`. T
 ```go
 type Runner struct {
     SuiteDir       string         // the suite this runner executes (holds suite.yaml + scenario YAMLs)
-    TopologiesBase string         // root for resolving sibling suites called by run-suite steps
+    NetworksBase   string         // root for resolving sibling suites called by run-suite steps
     ServerURL      string         // newtron-server HTTP address
     NetworkID      string         // network identifier for server operations
     Client         *client.Client // HTTP client for all SONiC operations
@@ -562,7 +562,7 @@ type Runner struct {
     NewtlabClient  LabClient      // deploy / destroy / status via HTTP (§27)
     HostConns      map[string]*ssh.Client
     Progress       ProgressReporter
-    Topology       string         // topology name (from server)
+    Network        string         // network name (from server)
     SpecDir        string         // spec directory (from server)
 
     discoveredPlatform string
@@ -574,14 +574,14 @@ type Runner struct {
 | Field | Set by | Used by |
 |-------|--------|---------|
 | `SuiteDir` | `NewRunner(dir)` or `handleStartRun` (via `ResolveSuiteDir` glob) | `LoadSuite` to read `suite.yaml`; parser to enumerate scenarios. |
-| `TopologiesBase` | `handleStartRun` from `Config.TopologiesBase` | `runSuiteExecutor` to resolve child suites named in `run-suite` steps. |
+| `NetworksBase` | `handleStartRun` from `Config.NetworksBase` | `runSuiteExecutor` to resolve child suites named in `run-suite` steps. |
 | `ServerURL` | `handleStartRun` from `req.NewtronServer` or server default | `client.Client` constructor + steps_cli passes to subprocess via `--server`. |
 | `NetworkID` | `handleStartRun` via `resolveNetworkID` — three-level fallback `req.NetworkID` → `suite.Topology` → `Config.NetworkID` (#116). Inline runs skip the suite step. | Network identifier in HTTP calls. |
 | `Client` | `connectToServer` | Every `newtron` action HTTP call. |
 | `NewtlabClient` | `handleStartRun` from `Config.NewtlabClient` (composed at the entry point from `--newtlab-server`) | `deployTopology` → `Deploy` / `Destroy` / `LabStatus`. Per §27, newtlab owns LabState; newtrun reaches it via HTTP, never in-process via `newtlab.NewLab`. |
 | `HostConns` | `connectDevices` | `host-exec` SSH calls. |
 | `Progress` | `handleStartRun` (HTTPReporter → StateReporter chain) | Every lifecycle event. |
-| `Topology` | `connectToServer` from `GET /network` | Verified against `Suite.Topology` (declared once in `suite.yaml`). |
+| `Network` | `connectToServer` from `GET /network` | Verified against `Suite.Network` (declared once in `suite.yaml`). |
 | `SpecDir` | `connectToServer` | Used by `Reconcile` action and by `cmd_stop` when destroying. |
 
 ### 6.2 RunOptions
@@ -747,7 +747,7 @@ type Server struct {
 
 | Field | Default |
 |-------|---------|
-| `TopologiesBase` | `newtrun/topologies` |
+| `NetworksBase` | `networks` |
 | `NewtronServer` | `http://127.0.0.1:18080` |
 | `NetworkID` | `default` (final fallback only — file-backed runs default to `suite.Topology` first; see `resolveNetworkID` in [§8 handleStartRun](#8-http-server-package-pkgnewtrunapi)) |
 | `InlineURLPrefix` | empty (no URL restriction enforced by default; see [§8.7](#87-inlinesafetypolicy)) |
@@ -1082,8 +1082,8 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 | `suites` | GET /newtrun/v1/suites | Hidden alias of `list`. |
 | `suite create/delete <name>` | POST/DELETE /newtrun/v1/suites | Per [§8](#8-http-server-package-pkgnewtrunapi). |
 | `scenario list/get/put/delete` | /newtrun/v1/suites/{suite}/scenarios* | Per [§8](#8-http-server-package-pkgnewtrunapi). |
-| `topologies` | GET /newtron/v1/networks | List newtron-registered networks (delegated). |
-| `topology create <name>` | POST /newtron/v1/networks with `scaffold=true` | Scaffold an empty spec layout and register it with newtron in one call. |
+| `networks` | GET /newtron/v1/networks | List newtron-registered networks (delegated). |
+| `network create <name>` | POST /newtron/v1/networks with `scaffold=true` | Scaffold an empty spec layout and register it with newtron in one call. |
 | `actions` | static | Help text describing the action vocabulary. |
 | `version` | static | Build info. |
 
@@ -1150,8 +1150,8 @@ The newtrun engine has no main package of its own. `cmd/newt-server/main.go` ins
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--listen` | `127.0.0.1:18080` | Bind address for the composed listener; non-loopback values require `--auth-pam-service` plus `--tls-cert/--tls-key/--tls-ca` to be set. |
-| `--spec-dir` | (required) | Spec directory passed to the newtron engine's `RegisterNetwork`. The newtrun engine discovers suites by globbing `<topologies-base>/*/suites/<name>/`; override the base with `--topologies-base` if needed. |
-| `--topologies-base` | `newtrun/topologies` | Root of the topologies tree. The newtrun engine resolves suite names by globbing `<base>/*/suites/<name>/`. |
+| `--spec-dir` | (required) | Spec directory passed to the newtron engine's `RegisterNetwork`. The newtrun engine discovers suites by globbing `<networks-base>/*/suites/<name>/`; override the base with `--networks-base` if needed. |
+| `--networks-base` | `networks` | Root of the networks tree. The newtrun engine resolves suite names by globbing `<base>/*/suites/<name>/`. |
 
 The Config struct backing the newtrun engine has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), inherited from the composed boundary. Per-request overrides via the `newtron_server` and `network_id` fields on `POST /newtrun/v1/runs` are the supported way to point a run at a non-default newtron-server.
 

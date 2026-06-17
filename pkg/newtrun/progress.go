@@ -31,7 +31,7 @@ type ProgressReporter interface {
 	// the metadata in roster headers, SSE payloads, and persisted
 	// state so consumers can show "running suite X on topology Y"
 	// without a separate fetch.
-	SuiteStart(suiteTopology, suitePlatform string, scenarios []*Scenario)
+	SuiteStart(suiteNetwork, suitePlatform string, scenarios []*Scenario)
 	ScenarioStart(name string, index, total int)
 	ScenarioEnd(result *ScenarioResult, index, total int)
 	StepStart(scenario string, step *Step, index, total int)
@@ -88,12 +88,12 @@ func (r *StateReporter) save() error {
 	return SaveRunState(r.State)
 }
 
-func (r *StateReporter) SuiteStart(suiteTopology, suitePlatform string, scenarios []*Scenario) {
+func (r *StateReporter) SuiteStart(suiteNetwork, suitePlatform string, scenarios []*Scenario) {
 	// Capture suite-level metadata on the run state. Topology was
-	// previously read off scenarios[0].Topology, which is now always
+	// previously read off scenarios[0].Network, which is now always
 	// empty (LoadSuite rejects per-scenario topology).
-	if r.State.Topology == "" {
-		r.State.Topology = suiteTopology
+	if r.State.Network == "" {
+		r.State.Network = suiteNetwork
 	}
 	if r.State.Platform == "" {
 		r.State.Platform = suitePlatform
@@ -112,7 +112,7 @@ func (r *StateReporter) SuiteStart(suiteTopology, suitePlatform string, scenario
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
-		r.Inner.SuiteStart(suiteTopology, suitePlatform, scenarios)
+		r.Inner.SuiteStart(suiteNetwork, suitePlatform, scenarios)
 	}
 }
 

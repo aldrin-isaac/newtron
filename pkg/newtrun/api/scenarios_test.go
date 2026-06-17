@@ -185,7 +185,7 @@ func TestScenario_PutRejectsTopology(t *testing.T) {
 	ts, _ := newScenarioTestServer(t)
 	body := []byte(`name: hello
 description: scenario with stray topology
-topology: synthetic
+network: synthetic
 steps:
   - name: wait
     action: wait
@@ -324,20 +324,20 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 	defer ts.Close()
 
 	resp, _ := doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
-		[]byte(`{"name":"fresh","topology":"synthetic"}`))
+		[]byte(`{"name":"fresh","network":"synthetic"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST status: got %d, want 201", resp.StatusCode)
 	}
 	// The POST declared topology "synthetic"; the suite lands under
-	// <topologies-base>/synthetic/suites/<name>/, not the test fixture's
+	// <networks-base>/synthetic/suites/<name>/, not the test fixture's
 	// default test-topo subtree.
-	if _, err := os.Stat(filepath.Join(srv.cfg.TopologiesBase, "synthetic", "suites", "fresh", "suite.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(srv.cfg.NetworksBase, "synthetic", "suites", "fresh", "suite.yaml")); err != nil {
 		t.Errorf("suite.yaml not created: %v", err)
 	}
 
 	// Duplicate POST → 409.
 	resp, _ = doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
-		[]byte(`{"name":"fresh","topology":"synthetic"}`))
+		[]byte(`{"name":"fresh","network":"synthetic"}`))
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("duplicate POST status: got %d, want 409", resp.StatusCode)
 	}
@@ -368,7 +368,7 @@ func TestSuite_CreateReturnsTypedResponse(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 	resp, body := doRequest(t, ts, http.MethodPost, "/newtrun/v1/suites",
-		[]byte(`{"name":"typed","topology":"synthetic"}`))
+		[]byte(`{"name":"typed","network":"synthetic"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status: got %d, want 201; body=%s", resp.StatusCode, body)
 	}

@@ -45,12 +45,12 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve the suite name to an on-disk location. Suite directories
-	// live under TopologiesBase by convention
-	// (<topologies-base>/<topology>/suites/<suite>/); the path itself
+	// live under NetworksBase by convention
+	// (<networks-base>/<topology>/suites/<suite>/); the path itself
 	// is server-internal and is never returned to or accepted from the
 	// client.
 	suiteKey := req.Suite
-	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suiteKey)
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, suiteKey)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suiteKey))
 		return
@@ -147,7 +147,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	if newtronURL == "" {
 		newtronURL = s.cfg.NewtronServer
 	}
-	networkID := resolveNetworkID(req.NetworkID, suite.Topology, s.cfg.NetworkID)
+	networkID := resolveNetworkID(req.NetworkID, suite.Network, s.cfg.NetworkID)
 
 	// Set up the reporter chain. HTTPReporter publishes to the broker
 	// (which feeds SSE subscribers); StateReporter persists per-step
@@ -166,7 +166,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	// (auth-design.md §L2c). Empty when the request carries no
 	// Bearer (loopback dev mode against a server with no auth).
 	runner := newtrun.NewRunner(suiteDir)
-	runner.TopologiesBase = s.cfg.TopologiesBase
+	runner.NetworksBase = s.cfg.NetworksBase
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
 	runner.NewtronClientTLS = s.cfg.NewtronClientTLS
@@ -290,8 +290,8 @@ func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult
 	// The runner discovers the topology from the connected newtron-server
 	// after handleStartRun returns; mirror it into the persisted state so
 	// `newtrun status` and `GET /run/{id}` can report it.
-	if state.Topology == "" && len(results) > 0 {
-		state.Topology = results[0].Topology
+	if state.Network == "" && len(results) > 0 {
+		state.Network = results[0].Network
 	}
 	if err := newtrun.SaveRunState(state); err != nil {
 		// Best-effort: log via the package-level logger if needed.
@@ -372,7 +372,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 	// Inline-namespaced initial state.
 	state := &newtrun.RunState{
 		Suite:    runID,
-		Topology: scenario.Topology,
+		Network: scenario.Network,
 		Status:   newtrun.SuiteStatusRunning,
 		Started:  entry.Started,
 	}
@@ -418,7 +418,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 
 	runner := newtrun.NewRunner(scenariosDir)
 	runner.ServerURL = newtronURL
-	// Inline runs have no suite manifest, so there's no suite.Topology to
+	// Inline runs have no suite manifest, so there's no suite.Network to
 	// derive from. The operator can pin a specific network via the
 	// request body (req.NetworkID); otherwise we fall back to the server
 	// default. Inline is NoDeploy=true, so the network is expected to
@@ -470,11 +470,11 @@ func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario) (string, e
 	if err := os.MkdirAll(scenariosDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := writeSuiteManifest(scenariosDir, runID, scenario.Topology); err != nil {
+	if err := writeSuiteManifest(scenariosDir, runID, scenario.Network); err != nil {
 		return "", err
 	}
 	staged := *scenario
-	staged.Topology = ""
+	staged.Network = ""
 	staged.Platform = ""
 	scenarioYAML, err := yaml.Marshal(&staged)
 	if err != nil {
@@ -610,7 +610,7 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 //
 //   1. reqNetworkID — operator explicitly named the network via the
 //      request body.
-//   2. suiteTopology — for file-backed runs, the suite manifest declares
+//   2. suiteNetwork — for file-backed runs, the suite manifest declares
 //      the topology it targets, and that becomes the default network id
 //      so concurrent suites against one newt-server don't compete for a
 //      single "default" registration slot (closes #116).
@@ -621,12 +621,12 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 //
 // The function is package-private but extracted for direct unit testing —
 // the fallback chain is the entire surface area of the change for #116.
-func resolveNetworkID(reqNetworkID, suiteTopology, cfgDefault string) string {
+func resolveNetworkID(reqNetworkID, suiteNetwork, cfgDefault string) string {
 	if reqNetworkID != "" {
 		return reqNetworkID
 	}
-	if suiteTopology != "" {
-		return suiteTopology
+	if suiteNetwork != "" {
+		return suiteNetwork
 	}
 	return cfgDefault
 }

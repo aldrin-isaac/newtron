@@ -6,7 +6,7 @@ For the architectural principles behind newtron, newtlab, and newtrun, see [Desi
 
 newtrun is an E2E testing framework that tests **composed network outcomes** — not individual features. The question is not "does VLAN creation work?" but "does the L3VPN service produce reachability across the EVPN overlay?" A feature test can pass while the composite multi-feature configuration fails due to ordering issues, missing glue config, or daemon interaction bugs. newtrun tests the thing that actually matters: the assembled result.
 
-newtrun is a general-purpose orchestration engine, not strictly a test framework. Users write topologies and scenarios as YAML files and spec directories. The built-in suites that ship with the project are examples; any topology that newtlab can deploy and any operation that newtron-server exposes can be exercised by a newtrun scenario. Test scenarios are one category of work it runs; the browser frontend's compose-and-run flows are another.
+newtrun is a general-purpose orchestration engine, not strictly a test framework. Users write networks and scenarios as YAML files and spec directories. The built-in suites that ship with the project are examples; any network that newtlab can deploy and any operation that newtron-server exposes can be exercised by a newtrun scenario. Test scenarios are one category of work it runs; the browser frontend's compose-and-run flows are another.
 
 newtrun observes devices exclusively through newtron's HTTP API — it never accesses Redis directly. newtron returns structured data; newtrun decides what "correct" means by correlating observations across devices.
 
@@ -18,7 +18,7 @@ newtrun sits between two tools that each do one thing well. Understanding the bo
 |------|----------------|-------------|
 | **newtron** | Opinionated single-device automation: translate specs → CONFIG_DB; verify own writes; observe single-device routing state | Specs, device profiles, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
 | **newtlab** | Realize VM topologies: deploy QEMU VMs from newtron's topology.json, wire socket links across servers | topology.json, platforms.json, QEMU |
-| **newtrun** | Orchestrate sequenced multi-step work: run scenarios, manage run lifecycle, surface progress over HTTP | Scenarios, topologies, run state, the substrate exposed by newtron's HTTP API |
+| **newtrun** | Orchestrate sequenced multi-step work: run scenarios, manage run lifecycle, surface progress over HTTP | Scenarios, networks, run state, the substrate exposed by newtron's HTTP API |
 
 **Verification principle.** If a tool changes the state of an entity, that same tool must be able to verify the change had the intended effect. newtron writes CONFIG_DB and configures routing — so newtron owns verification of those changes. newtrun builds on newtron's self-verification by adding the cross-device layer: using newtron to observe each device, then correlating observations across devices using topology context. newtrun never accesses Redis directly — it observes devices exclusively through the newtron-server HTTP API.
 
@@ -52,7 +52,7 @@ newtrun ships as a thin CLI client (`bin/newtrun`). The runtime engine — Runne
 
 ### 3.1 The CLI and the engine
 
-**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to the newtrun engine inside `bin/newt-server`. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or the topologies tree directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newt-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
+**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to the newtrun engine inside `bin/newt-server`. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or the networks tree directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newt-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
 
 **The newtrun engine.** Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP routes that expose all of it. Lives in `pkg/newtrun/`; the engine has no main package of its own. Hosted by `cmd/newt-server`, which mounts `/newtrun/v1/...` routes on a shared mux alongside the newtron and newtlab engines. Each `POST /newtrun/v1/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
 
@@ -100,7 +100,7 @@ Non-loopback exposure (any binding other than `127.0.0.1`) requires `bin/newt-se
 
 ## 4. Directory Structure
 
-newtrun's code lives in two places: CLI client (`cmd/newtrun/`) and core library (`pkg/newtrun/` plus `pkg/newtrun/api/` for the HTTP surface and `pkg/newtrun/client/` for the in-process client type). The engine has no main package of its own — `cmd/newt-server` mounts `pkg/newtrun/api`'s routes alongside the newtron and newtlab engines. Test assets live at the repo root under `newtrun/`.
+newtrun's code lives in two places: CLI client (`cmd/newtrun/`) and core library (`pkg/newtrun/` plus `pkg/newtrun/api/` for the HTTP surface and `pkg/newtrun/client/` for the in-process client type). The engine has no main package of its own — `cmd/newt-server` mounts `pkg/newtrun/api`'s routes alongside the newtron and newtlab engines. Test assets live at the repo root under `networks/`.
 
 ```
 newtron/
@@ -156,9 +156,10 @@ newtron/
 ├── pkg/newtrun/client/           # HTTP client (used by CLI and future browser-side adapter)
 │   └── client.go                 # All client methods + StreamEvents SSE parser
 │
-└── newtrun/                      # E2E test assets (repo root)
-    ├── topologies/               # Per-topology spec directories
-    └── suites/                   # Per-suite scenario YAMLs
+└── networks/                     # E2E test assets (repo root)
+    └── <network>/                # Per-network spec directories + nested suites
+        ├── specs/                # topology.json, network.json, platforms.json, profiles/
+        └── suites/<suite>/       # suite.yaml + scenario YAMLs
 ```
 
 The split between `pkg/newtrun/`, `pkg/newtrun/newtrun/v1/`, and `pkg/newtrun/client/` enforces a one-way import direction: `client` → `api` → `newtrun`. The engine package is HTTP-agnostic; the server package adapts the engine to HTTP; the client package consumes the HTTP surface.
@@ -167,7 +168,7 @@ The split between `pkg/newtrun/`, `pkg/newtrun/newtrun/v1/`, and `pkg/newtrun/cl
 
 newtrun organizes test artifacts in three layers:
 
-- **Suite** — a directory of scenarios that share a topology. The suite is the unit of orchestration: it owns the topology declaration, an optional catalog of targets/parameters that scenarios may opt into, and the dependency-ordered scenario list. Each suite directory holds one `suite.yaml` manifest and zero or more scenario YAMLs.
+- **Suite** — a directory of scenarios that share a network. The suite is the unit of orchestration: it owns the network declaration, an optional catalog of targets/parameters that scenarios may opt into, and the dependency-ordered scenario list. Each suite directory holds one `suite.yaml` manifest and zero or more scenario YAMLs.
 - **Scenario** — one YAML file inside a suite. It is the step list plus dependency metadata (`requires`, `after`, `requires_features`, `repeat`).
 - **Step** — one action within a scenario. Step actions are listed in §5.3.
 
@@ -178,9 +179,9 @@ Every suite directory has a `suite.yaml` declaring suite-wide metadata and, when
 ```yaml
 name: 2node-vs-service          # suite name (matches directory name)
 description: |
-  2-node sonic-vs service topology: switch1 + switch2 carrying transit,
+  2-node sonic-vs service network: switch1 + switch2 carrying transit,
   local-irb, local-bridge, l2-extend, and overlay-irb services.
-topology: 2node-vs-service       # required — owned by suite, not by scenarios
+network: 2node-vs-service        # required — owned by suite, not by scenarios
 platform: sonic-vs               # optional — default for all scenarios
 
 # Catalog used by parameterized scenarios in this suite. Embedded-
@@ -197,7 +198,7 @@ parameters:
     default: up
 ```
 
-Scenarios within the suite must not redeclare `topology:` or `platform:` — those live on the suite. Suite-level `targets:` / `parameters:` are the **catalog**; scenarios opt in by using `{{target.X}}` / `{{param.X}}` tokens (§5.4).
+Scenarios within the suite must not redeclare `network:` or `platform:` — those live on the suite. Suite-level `targets:` / `parameters:` are the **catalog**; scenarios opt in by using `{{target.X}}` / `{{param.X}}` tokens (§5.4).
 
 ### 5.2 Scenario structure
 
@@ -228,7 +229,7 @@ steps:
     expect: { jq: '.data | all(.status == "established")' }
 ```
 
-Parameterized example (drawn from `newtrun/topologies/2node-vs-service/suites/2node-vs-service/`):
+Parameterized example (drawn from `networks/2node-vs-service/suites/2node-vs-service/`):
 
 ```yaml
 name: rollout-admin-status
@@ -328,14 +329,14 @@ Browser frontends submit scenarios inline through `POST /newtrun/v1/runs/inline`
 
 Inline scenarios are embedded-target only — parameterization requires a suite catalog and goes through the file-backed `POST /newtrun/v1/runs` path. The browser composer / workbench / inbox surfaces submit inline scenarios in response to operator clicks. Each click is one one-shot scenario; safety guardrails enforce that operator-generated scenarios cannot, for instance, shell out to arbitrary commands.
 
-## 6. Test Topologies
+## 6. Test Networks
 
-Topologies are pre-defined spec directories checked into the repo. Each contains the full newtron spec set: `topology.json`, `network.json`, `platforms.json`, `profiles/*.json`. newtrun reads them directly — no generation step.
+Networks are pre-defined spec directories checked into the repo. Each contains the full newtron spec set: `topology.json`, `network.json`, `platforms.json`, `profiles/*.json`. newtrun reads them directly — no generation step.
 
-### 6.1 Built-in topologies
+### 6.1 Built-in networks
 
-| Topology | Devices | Purpose |
-|----------|---------|---------|
+| Network | Devices | Purpose |
+|---------|---------|---------|
 | **1node-vs** | switch1 | Single-switch basic operations (sonic-vs) |
 | **1node-vjunos** | r1 | Single vJunos-router smoke tests (opennetconf via `--newtlab`) |
 | **2node-ngdp** | switch1, switch2 + host1–host6 | Disaggregated primitive testing |
@@ -400,7 +401,7 @@ Same switch pair with service-annotated interfaces. Each interface has a pre-ass
 
 #### 2node-vs / 2node-vs-service
 
-Sonic-vs variants of the 2node-ngdp topologies. Same logical structure, using the community sonic-vs platform (Force10-S6000 HWSKU, stride-4 port naming: Ethernet0, Ethernet4, …). The vs-service topology is shared by three suites — service lifecycle, drift detection, and orphan cleanup — each exercising different aspects of the same provisioned state.
+Sonic-vs variants of the 2node-ngdp networks. Same logical structure, using the community sonic-vs platform (Force10-S6000 HWSKU, stride-4 port naming: Ethernet0, Ethernet4, …). The 2node-vs-service network is shared by three suites — service lifecycle, drift detection, and orphan cleanup — each exercising different aspects of the same provisioned state.
 
 #### 3node-ngdp
 
@@ -438,7 +439,7 @@ Full-mesh Clos topology: two spines with `route_reflector: true`, two leaves.
 
 ### 6.2 Spec files
 
-Each topology directory contains:
+Each network directory contains:
 
 | File | Read By | Contents |
 |------|---------|----------|
@@ -447,9 +448,9 @@ Each topology directory contains:
 | `platforms.json` | newtlab + newtron | Platform definitions: VM settings consumed by newtlab; HWSKU, dataplane capability, and port count consumed by newtron's spec loader. |
 | `profiles/*.json` | newtlab + newtron | Per-device settings, EVPN config |
 
-### 6.3 Custom topologies
+### 6.3 Custom networks
 
-The built-in topologies cover common patterns; newtrun works with any topology newtlab can deploy. Create a directory under `newtrun/topologies/<name>/specs/`, add the standard spec files, reference it from scenario YAML.
+The built-in networks cover common patterns; newtrun works with any network newtlab can deploy. Create a directory under `networks/<name>/specs/`, add the standard spec files, reference it from scenario YAML.
 
 ## 7. Verification Tiers
 
@@ -702,9 +703,9 @@ $ NEWTRUN_SERVER=http://127.0.0.1:18080 bin/newtrun start 2node-ngdp-primitive
 ### 12.3 Server-side Runner executes
 
 `pkg/newtrun/runner.go` `Run`:
-1. Parses every scenario YAML under `newtrun/topologies/2node-ngdp/suites/2node-ngdp-primitive/`.
+1. Parses every scenario YAML under `networks/2node-ngdp/suites/2node-ngdp-primitive/`.
 2. Topologically sorts scenarios by `requires` / `after`.
-3. Connects to newtron-server, verifies the server's loaded topology matches `Suite.Topology`, and records the spec directory.
+3. Connects to newtron-server, verifies the server's loaded network matches `Suite.Network`, and records the spec directory.
 4. Calls `SuiteStart` — every reporter forwards the event.
 5. Deploys the topology via newtlab (`DeployTopology`).
 6. For each scenario in order: `ScenarioStart`, iterate steps, `ScenarioEnd`. Steps dispatch through `stepExecutor` interface implementations.
@@ -746,8 +747,8 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `newtrun scenario get <suite> <name>` | `GET /newtrun/v1/suites/{suite}/scenarios/{name}` | Prints raw scenario YAML to stdout |
 | `newtrun scenario put <suite> <name>` | `PUT /newtrun/v1/suites/{suite}/scenarios/{name}` | Creates or updates a scenario from `--file` or stdin; validated via ParseScenarioBytes |
 | `newtrun scenario delete <suite> <name>` | `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}` | Deletes a scenario file |
-| `newtrun topologies` | `GET /newtron/v1/networks` | Lists networks registered with newtron (delegates) |
-| `newtrun topology create <name>` | `POST /newtron/v1/networks` with `scaffold=true` | Scaffolds an empty spec layout and registers it with newtron in one call |
+| `newtrun networks` | `GET /newtron/v1/networks` | Lists networks registered with newtron (delegates) |
+| `newtrun network create <name>` | `POST /newtron/v1/networks` with `scaffold=true` | Scaffolds an empty spec layout and registers it with newtron in one call |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |
 

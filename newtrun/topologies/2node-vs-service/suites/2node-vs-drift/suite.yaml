@@ -1,3 +1,0 @@
-name: 2node-vs-drift
-description: Drift detection and reprovision flow on the 2node-vs-service topology.
-topology: 2node-vs-service

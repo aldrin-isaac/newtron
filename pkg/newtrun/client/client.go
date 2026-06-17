@@ -199,7 +199,7 @@ func (c *Client) DeleteRun(ctx context.Context, suite string) error {
 }
 
 // ListSuites returns the suite names discoverable under the server's
-// topologies tree (<TopologiesBase>/*/suites/*/).
+// topologies tree (<NetworksBase>/*/suites/*/).
 func (c *Client) ListSuites(ctx context.Context) ([]string, error) {
 	var resp api.SuitesResponse
 	if err := c.get(ctx, "/newtrun/v1/suites", &resp); err != nil {
@@ -224,7 +224,7 @@ func (c *Client) ListSuiteScenarios(ctx context.Context, suite string) (*api.Sui
 // topology this suite targets; the runner uses it as a guard against
 // suite/server-topology mismatches at run time.
 func (c *Client) CreateSuite(ctx context.Context, name, topology string) error {
-	return c.do(ctx, http.MethodPost, "/newtrun/v1/suites", api.CreateSuiteRequest{Name: name, Topology: topology}, nil)
+	return c.do(ctx, http.MethodPost, "/newtrun/v1/suites", api.CreateSuiteRequest{Name: name, Network: topology}, nil)
 }
 
 // DeleteSuite removes an empty suite directory. Returns 409 if the

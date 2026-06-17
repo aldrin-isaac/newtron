@@ -51,7 +51,7 @@ func (f *fakeLabClient) Destroy(ctx context.Context, topology string) error {
 func TestDeployTopology_RoutesThroughClient(t *testing.T) {
 	fake := &fakeLabClient{}
 	if err := DeployTopology(context.Background(), fake, "topo"); err != nil {
-		t.Fatalf("DeployTopology: %v", err)
+		t.Fatalf("DeployNetwork: %v", err)
 	}
 	if fake.deployCalls != 1 {
 		t.Errorf("deploy calls = %d, want 1", fake.deployCalls)
@@ -91,7 +91,7 @@ func TestEnsureTopology_ReusesRunningLab(t *testing.T) {
 		},
 	}
 	if err := EnsureTopology(context.Background(), fake, "topo"); err != nil {
-		t.Fatalf("EnsureTopology: %v", err)
+		t.Fatalf("EnsureNetwork: %v", err)
 	}
 	if fake.deployCalls != 0 {
 		t.Errorf("deploy calls = %d, want 0 (reuse path)", fake.deployCalls)
@@ -129,7 +129,7 @@ func TestEnsureTopology_RedeploysWhenPartialOrMissing(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			fake := &fakeLabClient{statusFn: c.statusFn}
 			if err := EnsureTopology(context.Background(), fake, "topo"); err != nil {
-				t.Fatalf("EnsureTopology: %v", err)
+				t.Fatalf("EnsureNetwork: %v", err)
 			}
 			if fake.deployCalls != 1 {
 				t.Errorf("deploy calls = %d, want 1 (redeploy path)", fake.deployCalls)
@@ -143,7 +143,7 @@ func TestEnsureTopology_RedeploysWhenPartialOrMissing(t *testing.T) {
 func TestDestroyTopology_RoutesThroughClient(t *testing.T) {
 	fake := &fakeLabClient{}
 	if err := DestroyTopology(context.Background(), fake, "topo"); err != nil {
-		t.Fatalf("DestroyTopology: %v", err)
+		t.Fatalf("DestroyNetwork: %v", err)
 	}
 	if fake.destroyCalls != 1 {
 		t.Errorf("destroy calls = %d, want 1", fake.destroyCalls)

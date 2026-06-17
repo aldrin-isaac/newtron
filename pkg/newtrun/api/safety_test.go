@@ -21,7 +21,7 @@ func TestSafetyDefaultsAcceptWaitOnly(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: pause
     action: wait
@@ -37,7 +37,7 @@ func TestSafetyDefaultsAcceptNewtronAction(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: call
     action: newtron
@@ -53,7 +53,7 @@ func TestSafetyRejectsRequires(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 requires: [other-scenario]
 steps:
   - name: pause
@@ -73,7 +73,7 @@ func TestSafetyRejectsAfter(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 after: [other-scenario]
 steps:
   - name: pause
@@ -93,7 +93,7 @@ func TestSafetyRejectsHostExec(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: shell
     action: host-exec
@@ -113,7 +113,7 @@ func TestSafetyRejectsNewtronCLI(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: cli
     action: newtron-cli
@@ -133,7 +133,7 @@ func TestSafetyRejectsReconcileWithoutOptIn(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: reconcile
     action: topology-reconcile
@@ -153,7 +153,7 @@ func TestSafetyAcceptsReconcileWhenOptedIn(t *testing.T) {
 	p.AllowReconcile = true
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: reconcile
     action: topology-reconcile
@@ -169,7 +169,7 @@ func TestSafetyURLPrefixEnforced(t *testing.T) {
 	p.AllowedURLPrefixes = []string{"/api/networks/"}
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: call
     action: newtron
@@ -190,7 +190,7 @@ func TestSafetyURLPrefixAccepted(t *testing.T) {
 	p.AllowedURLPrefixes = []string{"/api/networks/"}
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 steps:
   - name: call
     action: newtron
@@ -206,7 +206,7 @@ func TestSafetyAccumulatesMultipleReasons(t *testing.T) {
 	p := DefaultInlineSafetyPolicy()
 	s := mustParse(t, `
 name: ok
-topology: t
+network: t
 requires: [other]
 steps:
   - name: shell

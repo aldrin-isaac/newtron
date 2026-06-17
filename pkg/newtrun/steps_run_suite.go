@@ -55,13 +55,13 @@ func withRunSuiteDepth(ctx context.Context, depth int) context.Context {
 }
 
 // runSuiteExecutor implements ActionRunSuite. It resolves the called
-// suite under Runner.TopologiesBase (globbing
+// suite under Runner.NetworksBase (globbing
 // <base>/<topology>/suites/<name>/), constructs a child Runner that
 // inherits the parent's connections, and runs the child's scenarios
 // inside the same goroutine as the parent step.
 //
 // Failure modes the executor surfaces as step errors (not crashes):
-//   - TopologiesBase not configured (top-level entry didn't wire it)
+//   - NetworksBase not configured (top-level entry didn't wire it)
 //   - depth exceeds MaxRunSuiteDepth
 //   - called suite missing or ambiguous across topologies
 //   - any child scenario fails (step status mirrors the worst child status)
@@ -75,9 +75,9 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		Duration: 0,
 	}
 
-	if r.TopologiesBase == "" {
+	if r.NetworksBase == "" {
 		result.Status = StepStatusError
-		result.Message = "run-suite requires Runner.TopologiesBase to be configured (top-level entry must wire it)"
+		result.Message = "run-suite requires Runner.NetworksBase to be configured (top-level entry must wire it)"
 		result.Duration = time.Since(start)
 		return &StepOutput{Result: result}
 	}
@@ -91,7 +91,7 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		return &StepOutput{Result: result}
 	}
 
-	childDir, err := ResolveSuiteDir(r.TopologiesBase, step.Suite)
+	childDir, err := ResolveSuiteDir(r.NetworksBase, step.Suite)
 	if err != nil {
 		result.Status = StepStatusError
 		result.Message = fmt.Sprintf("run-suite %q: %v", step.Suite, err)
@@ -100,7 +100,7 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 	}
 	child := &Runner{
 		SuiteDir:           childDir,
-		TopologiesBase:     r.TopologiesBase,
+		NetworksBase:     r.NetworksBase,
 		ServerURL:          r.ServerURL,
 		NetworkID:          r.NetworkID,
 		Client:             r.Client,
@@ -108,7 +108,7 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		NewtlabClient:      r.NewtlabClient,
 		HostConns:          r.HostConns,
 		Progress:           r.Progress,
-		Topology:           r.Topology,
+		Network:            r.Network,
 		SpecDir:            r.SpecDir,
 		discoveredPlatform: r.discoveredPlatform,
 	}

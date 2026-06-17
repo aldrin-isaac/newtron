@@ -26,7 +26,7 @@ func TestSaveLoadInlineRunStateRoundTrip(t *testing.T) {
 
 	state := &RunState{
 		Suite:    "test-uuid",
-		Topology: "test-topo",
+		Network: "test-topo",
 		Status:   SuiteStatusRunning,
 		Started:  time.Now().UTC(),
 	}
@@ -65,7 +65,7 @@ func TestLoadInlineRunStateMissing(t *testing.T) {
 func TestInlineStateDoesNotPolluteSuiteNamespace(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	t.Setenv("NEWTRUN_TOPOLOGIES_BASE", filepath.Join(tmpDir, "topologies"))
+	t.Setenv("NEWTRON_NETWORKS_BASE", filepath.Join(tmpDir, "topologies"))
 
 	// Save an inline state with an id that matches a hypothetical suite name.
 	state := &RunState{

@@ -10,7 +10,7 @@ set -euo pipefail
 SONIC_VS_URL="https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=202505&platform=vs&buildId=1057313&target=target/sonic-vs.img.gz"
 IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
-SPEC_DIR="newtrun/topologies/1node-vs/specs"
+SPEC_DIR="networks/1node-vs/specs"
 SERVER_PID=""        # newt-server PID (single process running all three engines)
 TOTAL_STEPS=12
 

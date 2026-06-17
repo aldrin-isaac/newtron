@@ -1,3 +1,0 @@
-name: 2node-ngdp-primitive
-description: Primitive operations (bridged, IRB, routed, static routes, BGP underlay, EVPN bridged/IRB) on 2node-ngdp.
-topology: 2node-ngdp

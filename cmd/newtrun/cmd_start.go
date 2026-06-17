@@ -230,7 +230,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 			resultsMu.Unlock()
 			if len(results) > 0 {
 				gen := &newtrun.ReportGenerator{Results: results}
-				if err := gen.WriteMarkdown("newtrun/.generated/report.md"); err != nil {
+				if err := gen.WriteMarkdown(".newtrun/reports/report.md"); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: failed to write markdown report: %v\n", err)
 				}
 				if junitPath != "" {
@@ -255,7 +255,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
 	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (default: http://127.0.0.1:18080, env: NEWTRON_SERVER)")
-	cmd.Flags().StringVar(&networkID, "network-id", "", "newtron network identifier (env: NEWTRON_NETWORK_ID). Empty by default — newtrun-server derives the id from suite.Topology so concurrent suites don't compete for one 'default' slot (#116).")
+	cmd.Flags().StringVar(&networkID, "network-id", "", "newtron network identifier (env: NEWTRON_NETWORK_ID). Empty by default — newtrun-server derives the id from suite.Network so concurrent suites don't compete for one 'default' slot (#116).")
 	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
 	cmd.Flags().BoolVar(&noDeploy, "no-deploy", false, "skip topology deployment (for loopback/offline mode)")
 	cmd.Flags().StringArrayVar(&params, "param", nil, "override a suite-level parameter; repeatable, format key=value (e.g. --param alice_basic_auth=$(echo -n alice:pw | base64))")
@@ -309,7 +309,7 @@ func collectResult(ev api.Event, results *[]*newtrun.ScenarioResult, mu *sync.Mu
 	// without them.
 	r := &newtrun.ScenarioResult{
 		Name:       p.Name,
-		Topology:   p.Topology,
+		Network:   p.Network,
 		Platform:   p.Platform,
 		Status:     p.Status,
 		Duration:   parseDuration(p.Duration),

@@ -1075,10 +1075,10 @@ Global flags: `-S <dir>` (spec directory override), `-v` (verbose).
 sources in priority order:
 
 1. `-S` flag → use as spec dir, derive name via `NewLab()`.
-2. Positional argument → check deployed labs by name, then try as topology name under `topologiesBaseDir()`.
+2. Positional argument → check deployed labs by name, then try as network name under `networksBaseDir()`.
 3. Auto-detect → if exactly one lab is deployed, use it.
 
-`topologiesBaseDir()` resolves from: `$NEWTRUN_TOPOLOGIES` → `settings.TopologiesDir` → `"newtrun/topologies"`.
+`networksBaseDir()` resolves from: `$NEWTRUN_TOPOLOGIES` → `settings.NetworksDir` → `"networks"`.
 
 ### 12.3 Node Search
 
@@ -1129,13 +1129,13 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 ### Phase 0 — CLI dispatch
 
 `cmd_deploy.go` → `resolveSpecDir(["2node-ngdp"])` → `resolveTopologyDir("2node-ngdp")`
-→ `"newtrun/topologies/2node-ngdp/specs"`.
+→ `"networks/2node-ngdp/specs"`.
 
 ### Phase 1 — NewLab
 
-`NewLab("newtrun/topologies/2node-ngdp/specs")`:
+`NewLab("networks/2node-ngdp/specs")`:
 
-1. `absDir` = `~/src/newtron/newtrun/topologies/2node-ngdp/specs`, name = `"2node-ngdp"`.
+1. `absDir` = `~/src/newtron/networks/2node-ngdp/specs`, name = `"2node-ngdp"`.
 2. Load `topology.json` — 8 devices (2 switches, 6 hosts), 9 links derived from `interface.link` fields.
 3. Load `platforms.json` — platform `sonic-ciscovs`: `sequential` interface map, `e1000` NIC driver, 8192 MB memory, 6 CPUs, 600s boot timeout. Platform `alpine-host`: `linux` interface map, `device_type: "host"`.
 4. Load profiles for all 8 devices.

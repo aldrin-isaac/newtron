@@ -19,7 +19,7 @@ func TestResultsFromRunState_NilStateReturnsNil(t *testing.T) {
 // `newtrun report` CLI relies on.
 func TestResultsFromRunState_PreservesScenarioFields(t *testing.T) {
 	state := &RunState{
-		Topology: "1node-vs",
+		Network: "1node-vs",
 		Platform: "sonic-vs",
 		Scenarios: []ScenarioState{
 			{
@@ -49,9 +49,9 @@ func TestResultsFromRunState_PreservesScenarioFields(t *testing.T) {
 	// in-memory ReportGenerator expects them per-scenario but the wire
 	// shape only carries them once.
 	for _, r := range results {
-		if r.Topology != "1node-vs" || r.Platform != "sonic-vs" {
+		if r.Network != "1node-vs" || r.Platform != "sonic-vs" {
 			t.Errorf("scenario %q: topology=%q platform=%q, want 1node-vs / sonic-vs",
-				r.Name, r.Topology, r.Platform)
+				r.Name, r.Network, r.Platform)
 		}
 	}
 

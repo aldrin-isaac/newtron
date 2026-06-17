@@ -65,7 +65,7 @@ func TestParseScenario(t *testing.T) {
 	yamlContent := `
 name: test-basic
 description: Basic test scenario
-topology: 2node-ngdp
+network: 2node-ngdp
 platform: sonic-vs
 steps:
   - name: provision-all
@@ -94,8 +94,8 @@ steps:
 	if s.Name != "test-basic" {
 		t.Errorf("Name = %q, want %q", s.Name, "test-basic")
 	}
-	if s.Topology != "2node-ngdp" {
-		t.Errorf("Topology = %q, want %q", s.Topology, "2node-ngdp")
+	if s.Network != "2node-ngdp" {
+		t.Errorf("Topology = %q, want %q", s.Network, "2node-ngdp")
 	}
 	if s.Platform != "sonic-vs" {
 		t.Errorf("Platform = %q, want %q", s.Platform, "sonic-vs")
@@ -568,7 +568,7 @@ func TestWriteJUnit_SkipReason(t *testing.T) {
 	results := []*ScenarioResult{
 		{
 			Name:       "skipped-test",
-			Topology:   "2node-ngdp",
+			Network:   "2node-ngdp",
 			Platform:   "sonic-vpp",
 			Status:     StepStatusSkipped,
 			SkipReason: "requires 'boot-ssh' which failed",
@@ -604,7 +604,7 @@ func TestParseScenario_Requires(t *testing.T) {
 	writeScenario(t, dir, "test.yaml", `
 name: test-requires
 description: test
-topology: 2node-ngdp
+network: 2node-ngdp
 platform: sonic-vpp
 requires: [boot-ssh, provision]
 steps:
@@ -637,7 +637,7 @@ func TestParseScenario_Repeat(t *testing.T) {
 	writeScenario(t, dir, "churn.yaml", `
 name: service-churn
 description: stress test
-topology: 2node-ngdp
+network: 2node-ngdp
 platform: sonic-vpp
 repeat: 20
 steps:
@@ -669,7 +669,7 @@ func TestParseScenario_RepeatDefault(t *testing.T) {
 	writeScenario(t, dir, "basic.yaml", `
 name: basic
 description: no repeat
-topology: 2node-ngdp
+network: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -702,7 +702,7 @@ func TestParseScenarioBytes_RejectsMultiDoc(t *testing.T) {
 			yaml: `
 name: a
 description: first
-topology: t
+network: t
 platform: p
 steps:
   - name: noop
@@ -711,7 +711,7 @@ steps:
 ---
 name: b
 description: second
-topology: t
+network: t
 platform: p
 steps:
   - name: noop
@@ -725,7 +725,7 @@ steps:
 			yaml: `
 name: a
 description: first
-topology: t
+network: t
 platform: p
 steps:
   - name: noop
@@ -734,7 +734,7 @@ steps:
 ---
 name: b
 description: second
-topology: t
+network: t
 platform: p
 steps:
   - name: noop
@@ -743,7 +743,7 @@ steps:
 ---
 name: c
 description: third
-topology: t
+network: t
 platform: p
 steps:
   - name: noop
@@ -773,7 +773,7 @@ func TestParseScenarioBytes_SingleDocPasses(t *testing.T) {
 	s, err := ParseScenarioBytes([]byte(`
 name: solo
 description: single doc
-topology: t
+network: t
 platform: p
 steps:
   - name: noop
@@ -792,7 +792,7 @@ func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
 	results := []*ScenarioResult{
 		{
 			Name:     "churn",
-			Topology: "2node-ngdp",
+			Network: "2node-ngdp",
 			Platform: "sonic-vpp",
 			Status:   StepStatusPassed,
 			Repeat:   3,
@@ -1071,14 +1071,14 @@ func TestDeviceSelector_Resolve_AllPreservesOriginal(t *testing.T) {
 func TestIterateScenarios_Normal(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc1", Network: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Network: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
 		return &ScenarioResult{
 			Name:     sc.Name,
-			Topology: r.Topology,
+			Network: r.Network,
 			Platform: platform,
 			Status:   StepStatusPassed,
 		}, nil
@@ -1103,8 +1103,8 @@ func TestIterateScenarios_Normal(t *testing.T) {
 func TestIterateScenarios_Resume(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc1", Network: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Network: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	callbackCalls := 0
@@ -1139,8 +1139,8 @@ func TestIterateScenarios_Resume(t *testing.T) {
 func TestIterateScenarios_RequiresSkip(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp", Requires: []string{"sc1"}},
+		{Name: "sc1", Network: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Network: "2node-ngdp", Platform: "sonic-vpp", Requires: []string{"sc1"}},
 	}
 
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
@@ -1164,8 +1164,8 @@ func TestIterateScenarios_RequiresSkip(t *testing.T) {
 func TestIterateScenarios_CallbackError(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc1", Network: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Network: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	sentinel := fmt.Errorf("deploy failed")

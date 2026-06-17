@@ -1,0 +1,3 @@
+name: 2node-vs-drift-actuated
+description: Drift detection in actuated mode (device-resident NEWTRON_INTENT) on the 2node-vs-service topology.
+network: 2node-vs-service

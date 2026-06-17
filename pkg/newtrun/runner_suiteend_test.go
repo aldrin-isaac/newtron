@@ -43,7 +43,7 @@ func seedMinimalSuite(t *testing.T) string {
 	dir := t.TempDir()
 	suiteYAML := `name: suiteend-test
 description: regression test for SuiteEnd-on-failure
-topology: synthetic
+network: synthetic
 platform: synthetic-platform
 `
 	scenYAML := `name: noop

@@ -9,42 +9,42 @@ func TestResolveNetworkID(t *testing.T) {
 	cases := []struct {
 		name           string
 		reqNetworkID   string
-		suiteTopology  string
+		suiteNetwork  string
 		cfgDefault     string
 		want           string
 	}{
 		{
 			name:          "request_override_wins",
 			reqNetworkID:  "operator-override",
-			suiteTopology: "from-suite",
+			suiteNetwork: "from-suite",
 			cfgDefault:    "default",
 			want:          "operator-override",
 		},
 		{
 			name:          "suite_topology_used_when_request_empty",
 			reqNetworkID:  "",
-			suiteTopology: "2node-vs-service",
+			suiteNetwork: "2node-vs-service",
 			cfgDefault:    "default",
 			want:          "2node-vs-service",
 		},
 		{
 			name:          "server_default_used_when_both_empty",
 			reqNetworkID:  "",
-			suiteTopology: "",
+			suiteNetwork: "",
 			cfgDefault:    "default",
 			want:          "default",
 		},
 		{
 			name:          "request_override_wins_over_suite_topology",
 			reqNetworkID:  "operator-override",
-			suiteTopology: "2node-vs-service",
+			suiteNetwork: "2node-vs-service",
 			cfgDefault:    "default",
 			want:          "operator-override",
 		},
 		{
 			name:          "inline_path_empty_suite_topology_falls_through",
 			reqNetworkID:  "",
-			suiteTopology: "",
+			suiteNetwork: "",
 			cfgDefault:    "running-lab",
 			want:          "running-lab",
 		},
@@ -52,10 +52,10 @@ func TestResolveNetworkID(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveNetworkID(tc.reqNetworkID, tc.suiteTopology, tc.cfgDefault)
+			got := resolveNetworkID(tc.reqNetworkID, tc.suiteNetwork, tc.cfgDefault)
 			if got != tc.want {
 				t.Errorf("resolveNetworkID(%q, %q, %q) = %q, want %q",
-					tc.reqNetworkID, tc.suiteTopology, tc.cfgDefault, got, tc.want)
+					tc.reqNetworkID, tc.suiteNetwork, tc.cfgDefault, got, tc.want)
 			}
 		})
 	}

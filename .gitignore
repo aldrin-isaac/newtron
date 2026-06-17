@@ -4,9 +4,8 @@
 /newtlab
 /newtron-server
 
-# newtrun generated reports and runtime artifacts
-newtrun/.generated/
-newtrun/**/audit.log
+# newtrun-generated run reports (CLI default output path)
+/.newtrun/
 
 # Claude Code local state (settings, scheduled-task locks, etc.)
 .claude/

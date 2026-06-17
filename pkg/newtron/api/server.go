@@ -392,7 +392,7 @@ func networkInfoFor(id string, entity *networkEntity) NetworkInfo {
 
 // topologyName derives the topology name from a spec directory path.
 // Convention: specDir ends with "/specs", topology name is the parent directory.
-// e.g. "newtrun/topologies/1node-vs/specs" → "1node-vs"
+// e.g. "networks/1node-vs/specs" → "1node-vs"
 func topologyName(specDir string) string {
 	dir := filepath.Base(filepath.Dir(filepath.Clean(specDir)))
 	if dir == "." || dir == "/" {
