@@ -44,7 +44,7 @@ func (r *HTTPReporter) SuiteStart(suiteTopology, suitePlatform string, scenarios
 	r.Broker.Publish(r.RunKey, Event{
 		Type: EventSuiteStart,
 		Payload: SuiteStartPayload{
-			Topology:  suiteTopology,
+			Network:  suiteTopology,
 			Platform:  suitePlatform,
 			Scenarios: summaries,
 		},

@@ -47,30 +47,30 @@ func buildCLI(t *testing.T) string {
 // returns the httptest.Server plus the topologies base directory the
 // server is configured against. Tests that create suites via the CLI
 // (with --topology X) then assert on-disk state at
-// suiteDirIn(topologiesBase, X, suiteName).
+// suiteDirIn(networksBase, X, suiteName).
 //
 // Callers access ts.URL when sending the URL to a subprocess and ts
 // directly when sharing the server across goroutines.
-func newE2EServer(t *testing.T) (ts *httptest.Server, topologiesBase string) {
+func newE2EServer(t *testing.T) (ts *httptest.Server, networksBase string) {
 	t.Helper()
-	topologiesBase = filepath.Join(t.TempDir(), "topologies")
-	if err := os.MkdirAll(topologiesBase, 0755); err != nil {
+	networksBase = filepath.Join(t.TempDir(), "topologies")
+	if err := os.MkdirAll(networksBase, 0755); err != nil {
 		t.Fatalf("mkdir topologies base: %v", err)
 	}
 	srv := api.NewServer(api.Config{
-		TopologiesBase: topologiesBase,
+		NetworksBase: networksBase,
 		Logger:         log.New(io.Discard, "", 0),
 	})
 	ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts, topologiesBase
+	return ts, networksBase
 }
 
 // suiteDirIn returns the on-disk path the production handler would
 // write a suite to given its declared topology. Tests compose this
 // when asserting on-disk state after `suite create --topology X`.
-func suiteDirIn(topologiesBase, topology, suite string) string {
-	return filepath.Join(topologiesBase, topology, "suites", suite)
+func suiteDirIn(networksBase, topology, suite string) string {
+	return filepath.Join(networksBase, topology, "suites", suite)
 }
 
 // runCLI invokes the test binary with stdin/stdout/stderr captured.
@@ -100,12 +100,12 @@ func runCLI(t *testing.T, binPath, serverURL string, stdin []byte, args ...strin
 // or the client's URL construction surfaces here.
 func TestE2E_ScenarioLifecycle(t *testing.T) {
 	binPath := buildCLI(t)
-	ts, topologiesBase := newE2EServer(t)
+	ts, networksBase := newE2EServer(t)
 
 	const suite = "e2edemo"
 	const topology = "synthetic"
 	const scenario = "smoke"
-	suiteDir := suiteDirIn(topologiesBase, topology, suite)
+	suiteDir := suiteDirIn(networksBase, topology, suite)
 	body := []byte(`name: smoke
 description: e2e smoke test
 steps:
@@ -175,10 +175,10 @@ steps:
 // readScenarioBody's flag handling can't ship undetected.
 func TestE2E_ScenarioPutFromFile(t *testing.T) {
 	binPath := buildCLI(t)
-	ts, topologiesBase := newE2EServer(t)
+	ts, networksBase := newE2EServer(t)
 	const suite = "filedemo"
 	const topology = "synthetic"
-	suiteDir := suiteDirIn(topologiesBase, topology, suite)
+	suiteDir := suiteDirIn(networksBase, topology, suite)
 	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
@@ -212,10 +212,10 @@ steps:
 // must name the validation failure.
 func TestE2E_ScenarioPutRejectsBadYAML(t *testing.T) {
 	binPath := buildCLI(t)
-	ts, topologiesBase := newE2EServer(t)
+	ts, networksBase := newE2EServer(t)
 	const suite = "rejectdemo"
 	const topology = "synthetic"
-	suiteDir := suiteDirIn(topologiesBase, topology, suite)
+	suiteDir := suiteDirIn(networksBase, topology, suite)
 	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}

@@ -12,14 +12,14 @@ import (
 
 // Config is the construction-time configuration for the newtrun server.
 type Config struct {
-	// TopologiesBase is the directory under which per-topology trees
+	// NetworksBase is the directory under which per-topology trees
 	// live. Suites are addressed under
-	// <TopologiesBase>/<topology>/suites/<suite>/ — colocated with the
+	// <NetworksBase>/<topology>/suites/<suite>/ — colocated with the
 	// specs they target, per §27 (Single Owner). Defaults to
-	// "newtrun/topologies" relative to the working directory. The
+	// "networks" relative to the working directory. The
 	// server scans it on GET /newtrun/v1/suites and resolves suite
 	// names against it when handling POST /newtrun/v1/runs.
-	TopologiesBase string
+	NetworksBase string
 
 	// NewtronServer is the newtron-server URL the server-side runners
 	// connect to for topology discovery. Per-run NewtronServer in the
@@ -81,8 +81,8 @@ func NewServer(cfg Config) *Server {
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
 	}
-	if cfg.TopologiesBase == "" {
-		cfg.TopologiesBase = "newtrun/topologies"
+	if cfg.NetworksBase == "" {
+		cfg.NetworksBase = "networks"
 	}
 	if cfg.NewtronServer == "" {
 		cfg.NewtronServer = "http://127.0.0.1:18080"

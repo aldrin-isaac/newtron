@@ -58,7 +58,7 @@ func (e Event) Body() any { return e.Payload }
 // browser consumers don't need at suite-start time. Per-step detail
 // is surfaced incrementally via step_start / step_end events.
 type SuiteStartPayload struct {
-	Topology  string            `json:"topology,omitempty"`
+	Network  string            `json:"network,omitempty"`
 	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
@@ -92,7 +92,7 @@ type ScenarioStartPayload struct {
 // Wire consumers report "failed on iteration K/N" from this pair.
 type ScenarioEndPayload struct {
 	Name            string              `json:"name"`
-	Topology        string              `json:"topology,omitempty"`
+	Network  string            `json:"network,omitempty"`
 	Platform        string              `json:"platform,omitempty"`
 	Status          newtrun.StepStatus  `json:"status"`
 	Duration        string              `json:"duration"`
@@ -195,7 +195,7 @@ func scenarioEndFrom(r *newtrun.ScenarioResult, index, total int) ScenarioEndPay
 	}
 	return ScenarioEndPayload{
 		Name:            r.Name,
-		Topology:        r.Topology,
+		Network:        r.Network,
 		Platform:        r.Platform,
 		Status:          r.Status,
 		Duration:        durationString(r.Duration),
@@ -247,7 +247,7 @@ func durationString(d time.Duration) string {
 // RunInfo is the response shape for GET /api/runs (list).
 type RunInfo struct {
 	Suite    string             `json:"suite"`
-	Topology string             `json:"topology,omitempty"`
+	Network  string            `json:"network,omitempty"`
 	Status   newtrun.SuiteStatus `json:"status"`
 	Started  time.Time          `json:"started,omitempty"`
 	Updated  time.Time          `json:"updated,omitempty"`
@@ -258,7 +258,7 @@ type RunInfo struct {
 func runInfoFrom(s *newtrun.RunState) RunInfo {
 	return RunInfo{
 		Suite:    s.Suite,
-		Topology: s.Topology,
+		Network: s.Network,
 		Status:   s.Status,
 		Started:  s.Started,
 		Updated:  s.Updated,
@@ -284,7 +284,7 @@ type HealthResponse struct {
 // summaries don't repeat them.
 type SuiteScenariosResponse struct {
 	Suite     string            `json:"suite"`
-	Topology  string            `json:"topology,omitempty"`
+	Network  string            `json:"network,omitempty"`
 	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
@@ -294,13 +294,13 @@ type SuiteScenariosResponse struct {
 // flags.
 //
 // The client addresses a suite by *name* — the server resolves the
-// name to bytes via ResolveSuiteDir over its TopologiesBase. Filesystem layout is server-
+// name to bytes via ResolveSuiteDir over its NetworksBase. Filesystem layout is server-
 // internal and intentionally absent from the wire (§33 Public API
 // Boundary): clients must not learn where suite.yaml lives, and the
 // server must not accept absolute paths from clients.
 type StartRunRequest struct {
 	// Suite is the file-backed suite name resolved by the server via
-	// ResolveSuiteDir across its TopologiesBase.
+	// ResolveSuiteDir across its NetworksBase.
 	Suite string `json:"suite"`
 
 	// Scenario, if set, runs a single scenario from the suite. Mutually

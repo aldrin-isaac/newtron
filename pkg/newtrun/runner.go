@@ -21,12 +21,12 @@ type Runner struct {
 	// concept the HTTP handler (handleStartRun) and ResolveSuiteDir
 	// already call "suite dir"; §13 (Same Concept = Same Name).
 	SuiteDir       string
-	// TopologiesBase is the root under which sibling suites live
+	// NetworksBase is the root under which sibling suites live
 	// (<base>/<topology>/suites/<name>/); required for run-suite step
 	// composition (issue #27) so a step in this suite can invoke a
 	// sibling suite without the parent encoding its sibling's
 	// per-topology location.
-	TopologiesBase string
+	NetworksBase string
 	ServerURL      string         // newtron-server HTTP address
 	NetworkID      string         // network identifier for server operations
 	// NewtronClientTLS is the TLS config the runner uses when
@@ -71,7 +71,7 @@ type Runner struct {
 	Progress     ProgressReporter
 
 	// Populated by connectToServer from the server's registered network.
-	Topology string // topology name (from server)
+	Network string // network name (from server)
 	SpecDir  string // spec directory (from server)
 
 	// Populated by Run from the loaded suite.yaml. resolvedIterations
@@ -221,15 +221,15 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 	if err := r.connectToServer(); err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(os.Stderr, "newtrun: server has topology %q (%d nodes)\n", r.Topology, len(r.allDeviceNames()))
+	fmt.Fprintf(os.Stderr, "newtrun: server has topology %q (%d nodes)\n", r.Network, len(r.allDeviceNames()))
 
 	// Guard: the suite's topology must match the server's.
-	if suite.Topology != "" && suite.Topology != r.Topology {
+	if suite.Network != "" && suite.Network != r.Network {
 		return nil, fmt.Errorf("suite %q requires topology %q but server has %q loaded",
-			suite.Name, suite.Topology, r.Topology)
+			suite.Name, suite.Network, r.Network)
 	}
 
-	r.progress(func(p ProgressReporter) { p.SuiteStart(suite.Topology, suite.Platform, scenarios) })
+	r.progress(func(p ProgressReporter) { p.SuiteStart(suite.Network, suite.Platform, scenarios) })
 	suiteStart := time.Now()
 
 	// Emit SuiteEnd from every path that returns after SuiteStart. The
@@ -249,13 +249,13 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
-		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Topology)
+		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Network)
 		cleanup, deployErr := r.deployTopology(ctx, r.SpecDir, opts)
 		if deployErr != nil {
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
-					Topology:    r.Topology,
+					Network:    r.Network,
 					Platform:    sc.Platform,
 					Status:      StepStatusError,
 					DeployError: &InfraError{Op: "deploy", Err: deployErr},
@@ -283,7 +283,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
-					Topology:    r.Topology,
+					Network:    r.Network,
 					Platform:    sc.Platform,
 					Status:      StepStatusError,
 					DeployError: connErr,
@@ -316,7 +316,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 
 		result := &ScenarioResult{
 			Name:     sc.Name,
-			Topology: r.Topology,
+			Network: r.Network,
 			Platform: platform,
 		}
 		start := time.Now()
@@ -369,7 +369,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 			if prev, ok := opts.Completed[sc.Name]; ok && prev == StepStatusPassed {
 				result := &ScenarioResult{
 					Name:       sc.Name,
-					Topology:   r.Topology,
+					Network:   r.Network,
 					Platform:   platform,
 					Status:     StepStatusSkipped,
 					SkipReason: "already passed (resumed)",
@@ -388,7 +388,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := checkRequires(sc, scenarioStatus); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Topology:   r.Topology,
+				Network:   r.Network,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -403,7 +403,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := r.checkPlatformFeatures(sc, deployedPlatform, platform); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Topology:   r.Topology,
+				Network:   r.Network,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -423,7 +423,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := r.checkRequiredParams(sc); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Topology:   r.Topology,
+				Network:   r.Network,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -470,16 +470,16 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 		return nil, fmt.Errorf("newtrun: no newtlab client configured (set Runner.NewtlabClient or use --newtlab-server)")
 	}
 	if opts.Suite != "" {
-		if err := EnsureTopology(ctx, r.NewtlabClient, r.Topology); err != nil {
+		if err := EnsureTopology(ctx, r.NewtlabClient, r.Network); err != nil {
 			return nil, err
 		}
 		return nil, nil // lifecycle mode: stop command handles teardown
 	}
-	if err := DeployTopology(ctx, r.NewtlabClient, r.Topology); err != nil {
+	if err := DeployTopology(ctx, r.NewtlabClient, r.Network); err != nil {
 		return nil, err
 	}
 	if !opts.Keep {
-		topo := r.Topology
+		topo := r.Network
 		client := r.NewtlabClient
 		return func() { _ = DestroyTopology(context.Background(), client, topo) }, nil
 	}
@@ -487,7 +487,7 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 }
 
 // connectToServer queries the server for the registered network's info.
-// Populates r.Topology, r.SpecDir, and creates the HTTP client.
+// Populates r.Network, r.SpecDir, and creates the HTTP client.
 //
 // The HTTP client honors r.NewtronClientTLS so the runner can
 // authenticate against an mTLS-enforced newtron-server via its peer
@@ -516,10 +516,15 @@ func (r *Runner) connectToServer() error {
 	}
 
 	r.SpecDir = info.SpecDir
-	r.Topology = info.Topology
+	// NetworkInfo.Topology is the basename of specDir's parent (e.g.
+	// "1node-vs"); under the new vocabulary this IS the network's own
+	// name, and NetworkInfo's field reads as a redundancy with ID
+	// in the simple case. The wire field is kept as-is for now
+	// (separate wire-shape concern; tracked in #200).
+	r.Network = info.Topology
 
-	if r.Topology == "" {
-		r.Topology = "(unknown)"
+	if r.Network == "" {
+		r.Network = "(unknown)"
 	}
 
 	return nil

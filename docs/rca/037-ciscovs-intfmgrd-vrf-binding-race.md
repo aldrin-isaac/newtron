@@ -67,7 +67,7 @@ simultaneously. On CiscoVS, orchagent and the SAI Silicon One layer add addition
 
 ## Fix
 
-Kernel-level workaround in `newtrun/topologies/2node-ngdp/suites/2node-ngdp-primitive/01-provision.yaml`:
+Kernel-level workaround in `networks/2node-ngdp/suites/2node-ngdp-primitive/01-provision.yaml`:
 
 ```yaml
 - name: fix-vrf-kernel-binding-switch2

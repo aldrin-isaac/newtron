@@ -63,7 +63,7 @@ The fastest path exercises the CLI's `--loopback` mode against an in-memory abst
 
 ```bash
 # 1. Start newt-server (port 18080 — runs newtron, newtrun, newtlab in one process)
-bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &
+bin/newt-server --spec-dir networks/1node-vs/specs &
 
 # 2. Run the loopback suite (--no-deploy skips lab deployment)
 bin/newtrun start 1node-vs-config --no-deploy
@@ -101,14 +101,14 @@ Exit code 0. Markdown report at `newtrun/.generated/report.md`.
 
 The full lifecycle of a real test, derived from the 2node-vs-primitive suite (21 scenarios, ~7m on a fresh lab).
 
-**Topology:** 2node-vs — two SONiC switches connected by a fabric link, six host VMs attached for data-plane testing. See `newtrun/topologies/2node-vs/specs/topology.json` for the exact wiring.
+**Network:** 2node-vs — two SONiC switches connected by a fabric link, six host VMs attached for data-plane testing. See `networks/2node-vs/specs/topology.json` for the exact wiring.
 
 ```bash
 # 1. Deploy the lab (8 nodes; ~1 minute on first boot)
 bin/newtlab deploy 2node-vs --monitor
 
-# 2. Start newt-server pointing at this topology's specs
-bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &
+# 2. Start newt-server pointing at this network's specs
+bin/newt-server --spec-dir networks/2node-vs/specs &
 
 # 3. Run the suite (deploys hosts via SSH; ~7 minutes)
 bin/newtrun start 2node-vs-primitive
@@ -155,7 +155,7 @@ The CLI POSTs to `newtrun-server`, which spawns a Runner goroutine and starts st
 
 | Form | Behavior |
 |------|----------|
-| `newtrun start <name>` | Resolves under newtrun-server's `--topologies-base` (default: globs `newtrun/topologies/*/suites/<name>/`). |
+| `newtrun start <name>` | Resolves under newtrun-server's `--networks-base` (default: globs `networks/*/suites/<name>/`). |
 | `newtrun start --dir /path/to/suite` | Absolute path to a suite directory; mutually exclusive with the positional name. |
 
 ### 4.3 Scenario selection
@@ -194,7 +194,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server --spec-dir <path> &` |
 | newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Pass `--spec-dir <path>` when starting newt-server |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
-| Suite name matches a directory under `--topologies-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
+| Suite name matches a directory under `--networks-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
 
 If any precondition fails, the CLI exits with a clear message naming the missing piece.
@@ -269,7 +269,7 @@ Example output for one suite:
 
 ```
 newtrun: 2node-vs-primitive
-  suite:     newtrun/topologies/2node-vs/suites/2node-vs-primitive
+  suite:     networks/2node-vs/suites/2node-vs-primitive
   topology:  2node-vs (deployed, 8 nodes running)
   platform:  default
   status:    running
@@ -392,14 +392,14 @@ bin/newtrun list 2node-vs-primitive
 # Hidden alias matching the API endpoint name
 bin/newtrun suites
 
-# List server-known topologies
-bin/newtrun topologies
+# List server-known networks
+bin/newtrun networks
 
-# Bootstrap a new empty topology directory (writes topology.json, platforms.json,
-# network.json, and an empty profiles/ subdirectory under newtrun/topologies/<name>/specs/).
+# Bootstrap a new empty network directory (writes topology.json, platforms.json,
+# network.json, and an empty profiles/ subdirectory under networks/<name>/specs/).
 # The next step is to register it as a newtron network via POST /newtron/v1/networks
 # with the printed spec_dir.
-bin/newtrun topology create demo-1 --description "demo lab"
+bin/newtrun network create demo-1 --description "demo lab"
 ```
 
 Example `newtrun list 2node-vs-primitive`:
@@ -407,7 +407,7 @@ Example `newtrun list 2node-vs-primitive`:
 ```
 Suite: 2node-vs-primitive (21 scenarios)
 
-  #   SCENARIO           STEPS  TOPOLOGY  REQUIRES
+  #   SCENARIO           STEPS  NETWORK   REQUIRES
   1   boot-ssh           3      2node-vs  -
   2   setup-device       19     2node-vs  boot-ssh
   3   bridged            15     2node-vs  boot-ssh
@@ -434,10 +434,10 @@ Scenario CRUD is exposed over HTTP — you can author, edit, and delete suites a
 ### 9.1 Create a suite directory
 
 ```bash
-bin/newtrun suite create my-experiment --topology 1node-vs
+bin/newtrun suite create my-experiment --network 1node-vs
 ```
 
-Creates `<topologies-base>/1node-vs/suites/my-experiment/` with a minimal `suite.yaml` declaring `name: my-experiment` and `topology: 1node-vs` — the suite is colocated with its target topology. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. `--topology` is required. Returns 409 if a suite with this name already exists in any topology (suite names are globally unique across the tree).
+Creates `<networks-base>/1node-vs/suites/my-experiment/` with a minimal `suite.yaml` declaring `name: my-experiment` and `network: 1node-vs` — the suite is colocated with its target network. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. `--network` is required. Returns 409 if a suite with this name already exists in any network (suite names are globally unique across the tree).
 
 For parameterized scenarios (production-rollout shape) edit `suite.yaml` directly to add `targets:` and `parameters:` blocks — see [§10.6 Parameterized scenarios](#106-parameterized-scenarios).
 
@@ -460,7 +460,7 @@ EOF
 bin/newtrun scenario put my-experiment hello --file hello.yaml
 ```
 
-Scenarios must NOT declare `topology:` or `platform:` — those live on `suite.yaml`. The server validates with `ParseScenarioBytes`, then `LoadSuite` enforces cross-suite invariants at run time. The body's `name:` field must match the URL `{name}`. If validation fails, the file is **never touched** — the existing scenario (if any) is preserved.
+Scenarios must NOT declare `network:` or `platform:` — those live on `suite.yaml`. The server validates with `ParseScenarioBytes`, then `LoadSuite` enforces cross-suite invariants at run time. The body's `name:` field must match the URL `{name}`. If validation fails, the file is **never touched** — the existing scenario (if any) is preserved.
 
 The on-disk file is written atomically via tempfile + rename. Concurrent readers (`newtrun list`, another `newtrun scenario get`) never see a partial write.
 
@@ -508,7 +508,7 @@ bin/newtrun start my-experiment --scenario hello --server http://localhost:18080
 
 ## 10. Writing Scenarios from Scratch
 
-A scenario is a YAML file with `name`, `description`, and a list of `steps` placed inside a suite directory whose `suite.yaml` declares `topology` (and optionally `platform`):
+A scenario is a YAML file with `name`, `description`, and a list of `steps` placed inside a suite directory whose `suite.yaml` declares `network` (and optionally `platform`):
 
 ```yaml
 name: my-first-scenario
@@ -555,7 +555,7 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 | `repeat` | no | Run the step list N times in sequence. Used for soak/stability tests. |
 | `steps` | yes | Ordered list of [Step](#step-fields) records. |
 
-`topology` and `platform` are **suite-level** — declared in `suite.yaml`, not in individual scenarios. `LoadSuite` rejects any scenario that sets them.
+`network` and `platform` are **suite-level** — declared in `suite.yaml`, not in individual scenarios. `LoadSuite` rejects any scenario that sets them.
 
 ### 10.2 Step fields
 
@@ -629,7 +629,7 @@ Parameterized scenarios are the **production-rollout shape**: one scenario templ
 
 ```yaml
 name: 2node-vs-service
-topology: 2node-vs-service
+network: 2node-vs-service
 
 targets:
   devices: [switch1, switch2]
@@ -738,7 +738,7 @@ Per-run overrides replace (not merge with) the suite default for each key — om
 **Example output (4-iteration rollout, verbose CLI):**
 
 ```
-newtrun: 1 scenarios, topology: 2node-vs-service, platform: sonic-vs
+newtrun: 1 scenarios, network: 2node-vs-service, platform: sonic-vs
 
   #     SCENARIO                  STEPS
   1     rollout-admin-status      2
@@ -1046,7 +1046,7 @@ Composes scenarios across suites. The called suite runs in the parent's process 
 ```yaml
 - name: apply-then-verify
   action: run-suite
-  suite: verify-service-health        # which suite to call (resolves under server's --topologies-base)
+  suite: verify-service-health        # which suite to call (resolves under server's --networks-base)
   parameters:                         # parameter overrides for the called suite
     service: '{{param.service}}'
   targets:                            # target-dimension overrides
@@ -1056,7 +1056,7 @@ Composes scenarios across suites. The called suite runs in the parent's process 
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `suite` | yes | Sibling suite directory name (no path separators). Resolves under the server's `--topologies-base`. |
+| `suite` | yes | Sibling suite directory name (no path separators). Resolves under the server's `--networks-base`. |
 | `parameters` | no | Per-parameter overrides that fill the called suite's `{{param.X}}` templates. Same shape as `POST /runs`' `parameters` body field. |
 | `targets` | no | Per-dimension target overrides that fill the called suite's `{{target.X}}` templates. Same shape as `POST /runs`' `targets` body field. |
 
@@ -1289,7 +1289,7 @@ Compound commands work — the executor wraps in `sh -c` so pipelines run inside
 
 ### 12.3 Worked example: L2 bridging test
 
-Adapted from the 2node-vs-primitive suite (`newtrun/topologies/2node-vs/suites/2node-vs-primitive/10-bridged.yaml`) — the real scenario adds a third tagged member and polls ASIC_DB before the host setup; the example below trims those for readability and focuses on the L2-bridging path itself. The 2node-vs topology wires host1→`switch1:Ethernet4` and host3→`switch1:Ethernet12` (Force10-S6000 stride-4 port naming). The scenario creates VLAN 100, adds the two host-facing ports as untagged members, and verifies L2 connectivity between the hosts:
+Adapted from the 2node-vs-primitive suite (`networks/2node-vs/suites/2node-vs-primitive/10-bridged.yaml`) — the real scenario adds a third tagged member and polls ASIC_DB before the host setup; the example below trims those for readability and focuses on the L2-bridging path itself. The 2node-vs topology wires host1→`switch1:Ethernet4` and host3→`switch1:Ethernet12` (Force10-S6000 stride-4 port naming). The scenario creates VLAN 100, adds the two host-facing ports as untagged members, and verifies L2 connectivity between the hosts:
 
 ```yaml
 # Create VLAN
@@ -1391,7 +1391,7 @@ The 2node-vs-primitive suite uses host-exec steps, so the runner host needs KVM/
 ```yaml
 - name: Start newt-server + deploy lab
   run: |
-    bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &
+    bin/newt-server --spec-dir networks/2node-vs/specs &
     sleep 2
     bin/newtlab deploy 2node-vs --monitor
 
@@ -1470,12 +1470,12 @@ Triggers: a previous `newtrun start` that was killed before its terminal save, a
 
 ### 14.5 Scenario fails with `<kind> '<name>' already exists`
 
-Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO' already exists`, `QoS policy 'Q_BAR' already exists`, `filter 'F_BAZ' already exists`, `prefix list 'PL_X' already exists` (`pkg/newtron/spec_ops.go`). Earlier runs created specs that newtron-server persisted to `network.json` and never cleaned up. Check `git status newtrun/topologies/<name>/specs/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
+Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO' already exists`, `QoS policy 'Q_BAR' already exists`, `filter 'F_BAZ' already exists`, `prefix list 'PL_X' already exists` (`pkg/newtron/spec_ops.go`). Earlier runs created specs that newtron-server persisted to `network.json` and never cleaned up. Check `git status networks/<name>/specs/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
 
 ```bash
-git checkout HEAD -- newtrun/topologies/<name>/specs/network.json
+git checkout HEAD -- networks/<name>/specs/network.json
 pkill -KILL -f "bin/newt-server" && sleep 1
-bin/newt-server --spec-dir newtrun/topologies/<name>/specs &
+bin/newt-server --spec-dir networks/<name>/specs &
 ```
 
 ### 14.6 BGP verification times out
@@ -1572,7 +1572,7 @@ Only platforms with a non-empty `dataplane` field in `platforms.json` support pa
 
 ```bash
 # Confirm the platform claims dataplane
-grep -A 2 '"sonic-' newtrun/topologies/<name>/specs/platforms.json | grep dataplane
+grep -A 2 '"sonic-' networks/<name>/specs/platforms.json | grep dataplane
 
 # SSH to the host's namespace and probe
 bin/newtlab ssh host1
@@ -1591,7 +1591,7 @@ CONFIG_DB checks fail with `key does not exist` even though the apply step succe
 | Cisco P200-32x100 (CiscoVS) | 1 | Ethernet0, Ethernet1, Ethernet2, Ethernet3 |
 | Cisco 8101-P4 (Gibraltar) | 1 | Ethernet0, Ethernet1, Ethernet2, Ethernet3 |
 
-If the topology JSON ports don't match the HWSKU stride, the device renames or rejects them. Update `newtrun/topologies/<name>/specs/topology.json` to use the stride that matches the platform's HWSKU.
+If the topology JSON ports don't match the HWSKU stride, the device renames or rejects them. Update `networks/<name>/specs/topology.json` to use the stride that matches the platform's HWSKU.
 
 ---
 
@@ -1631,8 +1631,8 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 
 | Command | Purpose |
 |---------|---------|
-| `newtrun topologies` | List topology directories visible to the server. |
-| `newtrun topology create <name> [--description <text>]` | Bootstrap a new topology directory (seeds topology.json, platforms.json, network.json, and an empty profiles/). Prints the spec_dir to pass to `POST /newtron/v1/networks`. |
+| `newtrun networks` | List network directories visible to the server. |
+| `newtrun network create <name> [--description <text>]` | Bootstrap a new network directory (seeds topology.json, platforms.json, network.json, and an empty profiles/). Prints the spec_dir to pass to `POST /newtron/v1/networks`. |
 | `newtrun actions` | List the six supported step actions (derived from `pkg/newtrun.StepAction`). `newtrun actions <name>` shows required fields, device semantics, and a YAML example. Mirrors [§11 Step Action Reference](#11-step-action-reference). |
 | `newtrun version` | Print build version. |
 
@@ -1661,4 +1661,4 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 
 ---
 
-*Source-traced against `cmd/newtrun/` and the `bin/newtrun --help` output. CLI command names, flag names, and exit-code mappings are exact. YAML examples are runnable against the suites in `newtrun/topologies/`. If you find a discrepancy, the code is the authority — please open an issue or PR.*
+*Source-traced against `cmd/newtrun/` and the `bin/newtrun --help` output. CLI command names, flag names, and exit-code mappings are exact. YAML examples are runnable against the suites in `networks/`. If you find a discrepancy, the code is the authority — please open an issue or PR.*

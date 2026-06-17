@@ -36,7 +36,7 @@ func newClient() *client.Client {
 		os.Exit(1)
 	}
 	// Resolve the operator's cached session (if any). Same path the
-	// newtron / newtlab CLIs and cmd/newtrun/cmd_topologies.go use. An
+	// newtron / newtlab CLIs and cmd/newtrun/cmd_networks.go use. An
 	// empty key reduces WithBearer to a no-op, which is the right
 	// behavior for the no-auth quickstart.
 	resolveURL := url

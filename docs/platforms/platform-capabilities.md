@@ -111,7 +111,7 @@ Test scenarios declare `requires_features` in YAML:
 ```yaml
 name: evpn-l2-irb
 description: EVPN L2VNI with IRB testing
-topology: 3node-ngdp
+network: 3node-ngdp
 platform: ciscovs
 requires: [boot-provision]
 requires_features: [evpn-vxlan, macvpn]

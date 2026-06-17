@@ -32,7 +32,7 @@ import (
 type Scenario struct {
 	Name             string   `yaml:"name"`
 	Description      string   `yaml:"description"`
-	Topology         string   `yaml:"topology,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
+	Network          string   `yaml:"network,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
 	Platform         string   `yaml:"platform,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
 	Requires         []string `yaml:"requires,omitempty"`
 	After            []string `yaml:"after,omitempty"`             // Run after these scenarios (ordering only, no pass/fail gate)
@@ -114,7 +114,7 @@ type Step struct {
 	Capture map[string]string `yaml:"capture,omitempty"`
 
 	// run-suite (composition: invoke another suite as a step)
-	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved across the runner's TopologiesBase)
+	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved across the runner's NetworksBase)
 	Parameters map[string]any      `yaml:"parameters,omitempty"` // parameter overrides for the called suite
 	Targets    map[string][]string `yaml:"targets,omitempty"`    // target-dimension overrides for the called suite
 

@@ -69,7 +69,7 @@ func SuiteStatusFromOutcome(runErr error, results []*ScenarioResult) SuiteStatus
 // wire shape (§33 Public API Boundary).
 type RunState struct {
 	Suite     string          `json:"suite"`
-	Topology  string          `json:"topology"`
+	Network   string          `json:"network"`
 	Platform  string          `json:"platform"`
 	Target    string          `json:"target,omitempty"` // --target scenario (empty = all)
 	Status    SuiteStatus     `json:"status"`
@@ -214,9 +214,9 @@ func ListSuiteStates() ([]string, error) {
 	// Determine topologies base (env > default). Suites live under
 	// <base>/<topology>/suites/<name>/; resolve each candidate via the
 	// shared ResolveSuiteDir helper.
-	topologiesBase := os.Getenv("NEWTRUN_TOPOLOGIES_BASE")
-	if topologiesBase == "" {
-		topologiesBase = "newtrun/topologies"
+	networksBase := os.Getenv("NEWTRON_NETWORKS_BASE")
+	if networksBase == "" {
+		networksBase = "networks"
 	}
 
 	var names []string
@@ -224,7 +224,7 @@ func ListSuiteStates() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := ResolveSuiteDir(topologiesBase, e.Name()); err == nil {
+		if _, err := ResolveSuiteDir(networksBase, e.Name()); err == nil {
 			names = append(names, e.Name())
 		}
 	}

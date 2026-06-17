@@ -22,7 +22,7 @@ func newDeployCmd() *cobra.Command {
 		Use:   "deploy [topology]",
 		Short: "Deploy VMs from topology",
 		Long: `Deploy VMs from a topology spec. The topology can be a name
-(resolved under newtrun/topologies/) or specified via -S.
+(resolved under networks/) or specified via -S.
 
   newtlab deploy 2node-ngdp
   newtlab deploy 2node-ngdp --monitor

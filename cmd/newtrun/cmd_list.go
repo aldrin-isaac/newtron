@@ -64,7 +64,7 @@ func listSuites(ctx context.Context) error {
 			continue
 		}
 		fmt.Fprintf(w, "  %s\t%d\t%s\n",
-			name, len(summary.Scenarios), summary.Topology)
+			name, len(summary.Scenarios), summary.Network)
 	}
 	return w.Flush()
 }
@@ -82,7 +82,7 @@ func listScenarios(ctx context.Context, suite string) error {
 	// Topology + Platform live on the response envelope (suite-
 	// level), not on each ScenarioSummary. The header carries the
 	// suite metadata; the per-scenario rows carry the rest.
-	header := fmt.Sprintf("Suite: %s  topology=%s", resp.Suite, resp.Topology)
+	header := fmt.Sprintf("Suite: %s  topology=%s", resp.Suite, resp.Network)
 	if resp.Platform != "" {
 		header += "  platform=" + resp.Platform
 	}

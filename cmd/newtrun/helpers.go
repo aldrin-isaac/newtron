@@ -11,5 +11,5 @@ import (
 // should display "unknown" rather than silently fall back to on-disk
 // reads of scenario YAMLs.
 func resolveTopologyFromState(state *newtrun.RunState) string {
-	return state.Topology
+	return state.Network
 }

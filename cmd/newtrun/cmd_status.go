@@ -159,7 +159,7 @@ func renderSuiteStatus(out io.Writer, suite string, state *newtrun.RunState, det
 	if topology != "" {
 		topoStatus = checkTopologyStatus(topology)
 	}
-	fmt.Fprintf(out, "  topology:  %s (%s)\n", topology, topoStatus)
+	fmt.Fprintf(out, "  network:   %s (%s)\n", topology, topoStatus)
 
 	// Platform
 	platform := state.Platform

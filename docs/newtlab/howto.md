@@ -55,10 +55,10 @@ Deploy a topology, SSH in, and tear down — the minimal path:
 go build -o bin/newtlab ./cmd/newtlab
 
 # 2. Deploy VMs from a spec directory
-bin/newtlab deploy -S newtrun/topologies/2node-ngdp/specs
+bin/newtlab deploy -S networks/2node-ngdp/specs
 
 # 3. Provision CONFIG_DB on all switches
-bin/newtlab provision -S newtrun/topologies/2node-ngdp/specs
+bin/newtlab provision -S networks/2node-ngdp/specs
 
 # 4. SSH to a device
 bin/newtlab ssh switch1
@@ -70,7 +70,7 @@ bin/newtlab destroy
 Steps 2 and 3 can be combined:
 
 ```bash
-bin/newtlab deploy -S newtrun/topologies/2node-ngdp/specs --provision
+bin/newtlab deploy -S networks/2node-ngdp/specs --provision
 ```
 
 The rest of this guide covers each step in detail with all flags, example
@@ -87,7 +87,7 @@ status, data plane test, and teardown.
 **Deploy with provisioning:**
 
 ```bash
-newtlab deploy -S newtrun/topologies/2node-ngdp-service/specs --provision
+newtlab deploy -S networks/2node-ngdp-service/specs --provision
 ```
 
 ```
@@ -133,7 +133,7 @@ newtlab status 2node-ngdp-service
 
 ```
 Lab: 2node-ngdp-service (deployed 2026-03-05 10:30:00)
-Spec dir: /home/user/newtrun/topologies/2node-ngdp-service/specs
+Spec dir: /home/user/networks/2node-ngdp-service/specs
 
   NODE      TYPE                   STATUS   IMAGE              SSH    CONSOLE  PID
   host1     vhost:hostvm-0/host1   running  alpine-testhost    13000  12000    54320
@@ -551,7 +551,7 @@ newtlab status -S <specs>
 
 ```
 Lab: 2node-ngdp (deployed 2026-03-01 14:30:00)
-Spec dir: /home/user/newtrun/topologies/2node-ngdp/specs
+Spec dir: /home/user/networks/2node-ngdp/specs
 
   NODE      TYPE                   STATUS   IMAGE              SSH    CONSOLE  PID
   host1     vhost:hostvm-0/host1   running  alpine-testhost    13000  12000    54320

@@ -938,7 +938,7 @@ type UserSettings struct {
 	DefaultNetwork  string `json:"default_network,omitempty"`
 	SpecDir         string `json:"spec_dir,omitempty"`
 	DefaultSuite    string `json:"default_suite,omitempty"`
-	TopologiesDir   string `json:"topologies_dir,omitempty"`
+	NetworksDir   string `json:"networks_dir,omitempty"`
 	AuditLogPath    string `json:"audit_log_path,omitempty"`
 	AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"`
 	AuditMaxBackups int    `json:"audit_max_backups,omitempty"`

@@ -67,7 +67,7 @@ func (r *loopbackPortResolver) SSHPort(ctx context.Context, topology, device str
 func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {
 	resolver := &loopbackPortResolver{}
 	s := NewServer(Config{PortResolver: resolver})
-	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "2node-vs", "specs")
+	specDir := filepath.Join(repoRoot(t), "networks", "2node-vs", "specs")
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)
 	}

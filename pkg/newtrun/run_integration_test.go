@@ -28,7 +28,7 @@ func TestRun_ParameterizedSuite_EndToEnd(t *testing.T) {
 	// devices; cross-product is 4 bindings × 1 step = 4 results.
 	suiteYAML := `name: int-test
 description: integration suite for Runner.Run + parameterized expansion
-topology: synthetic
+network: synthetic
 targets:
   devices: [s1, s2]
   interfaces: [Ethernet0, Ethernet4]

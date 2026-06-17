@@ -28,7 +28,7 @@ func writeMinimalSuite(t *testing.T, base, name, body string) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	manifest := fmt.Sprintf("name: %s\ntopology: synthetic\n", name)
+	manifest := fmt.Sprintf("name: %s\nnetwork: synthetic\n", name)
 	if err := os.WriteFile(filepath.Join(dir, "suite.yaml"), []byte(manifest), 0644); err != nil {
 		t.Fatalf("write suite.yaml: %v", err)
 	}

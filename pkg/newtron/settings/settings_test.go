@@ -33,14 +33,14 @@ func TestSettings_FieldAssignment(t *testing.T) {
 		t.Errorf("GetSpecDir() = %q, want %q", s.GetSpecDir(), "/custom/path")
 	}
 
-	s.DefaultSuite = "newtrun/topologies/2node-ngdp/suites/2node-ngdp-incremental"
-	if s.DefaultSuite != "newtrun/topologies/2node-ngdp/suites/2node-ngdp-incremental" {
+	s.DefaultSuite = "networks/2node-ngdp/suites/2node-ngdp-incremental"
+	if s.DefaultSuite != "networks/2node-ngdp/suites/2node-ngdp-incremental" {
 		t.Errorf("DefaultSuite = %q", s.DefaultSuite)
 	}
 
-	s.TopologiesDir = "newtrun/topologies"
-	if s.TopologiesDir != "newtrun/topologies" {
-		t.Errorf("TopologiesDir = %q", s.TopologiesDir)
+	s.NetworksDir = "networks"
+	if s.NetworksDir != "networks" {
+		t.Errorf("NetworksDir = %q", s.NetworksDir)
 	}
 }
 
@@ -58,8 +58,8 @@ func TestSettings_SaveLoad(t *testing.T) {
 	original := &Settings{
 		DefaultNetwork: "production",
 		SpecDir:        "/etc/newtron",
-		DefaultSuite:   "newtrun/topologies/2node-ngdp/suites/2node-ngdp-incremental",
-		TopologiesDir:  "newtrun/topologies",
+		DefaultSuite:   "networks/2node-ngdp/suites/2node-ngdp-incremental",
+		NetworksDir:  "networks",
 	}
 
 	// Save
@@ -83,8 +83,8 @@ func TestSettings_SaveLoad(t *testing.T) {
 	if loaded.DefaultSuite != original.DefaultSuite {
 		t.Errorf("DefaultSuite mismatch: got %q, want %q", loaded.DefaultSuite, original.DefaultSuite)
 	}
-	if loaded.TopologiesDir != original.TopologiesDir {
-		t.Errorf("TopologiesDir mismatch: got %q, want %q", loaded.TopologiesDir, original.TopologiesDir)
+	if loaded.NetworksDir != original.NetworksDir {
+		t.Errorf("NetworksDir mismatch: got %q, want %q", loaded.NetworksDir, original.NetworksDir)
 	}
 }
 

@@ -22,8 +22,8 @@ type Settings struct {
 	// DefaultSuite is the default --dir for newtrun start
 	DefaultSuite string `json:"default_suite,omitempty"`
 
-	// TopologiesDir is the base directory for newtrun topologies
-	TopologiesDir string `json:"topologies_dir,omitempty"`
+	// NetworksDir is the base directory for newtrun topologies
+	NetworksDir string `json:"networks_dir,omitempty"`
 
 	// AuditLogPath overrides the default audit log path
 	AuditLogPath string `json:"audit_log_path,omitempty"`

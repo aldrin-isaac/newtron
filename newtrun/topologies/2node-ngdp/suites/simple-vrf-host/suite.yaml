@@ -1,3 +1,0 @@
-name: simple-vrf-host
-description: VRF + per-interface VRF binding + host-reachability smoke test on the 2node-ngdp topology.
-topology: 2node-ngdp

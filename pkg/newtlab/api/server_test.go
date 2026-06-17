@@ -18,7 +18,7 @@ func newTestServer(t *testing.T) *Server {
 	base := t.TempDir()
 	logger := log.New(&strings.Builder{}, "", 0) // silence test logger
 	return NewServer(Config{
-		TopologiesBase: base,
+		NetworksBase: base,
 		Logger:         logger,
 	})
 }

@@ -53,7 +53,7 @@ spec directory recorded in state, so it requires the state to be readable.`,
 				if _, err := lc.LabStatus(ctx, topologyName); err == nil {
 					fmt.Printf("destroying topology %s...\n", topologyName)
 					if err := lc.Destroy(ctx, topologyName); err != nil {
-						fmt.Printf("warning: destroy topology: %v\n", err)
+						fmt.Printf("warning: destroy network: %v\n", err)
 					}
 				}
 			}

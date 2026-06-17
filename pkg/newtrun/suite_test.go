@@ -530,7 +530,7 @@ func writeSuiteDir(t *testing.T, files map[string]string) string {
 func TestLoadSuite_HappyPath(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 targets:
   devices: [s1, s2]
 parameters:
@@ -559,7 +559,7 @@ steps:
 	if err != nil {
 		t.Fatalf("LoadSuite: %v", err)
 	}
-	if suite.Name != "demo" || suite.Topology != "synthetic" {
+	if suite.Name != "demo" || suite.Network != "synthetic" {
 		t.Errorf("metadata mismatch: %+v", suite)
 	}
 	if len(suite.Scenarios) != 2 {
@@ -591,7 +591,7 @@ func TestLoadSuite_MissingTopology(t *testing.T) {
 `,
 	})
 	_, err := LoadSuite(dir)
-	if err == nil || !strings.Contains(err.Error(), "topology is required") {
+	if err == nil || !strings.Contains(err.Error(), "network is required") {
 		t.Errorf("err = %v, want topology-required error", err)
 	}
 }
@@ -610,10 +610,10 @@ func TestLoadSuite_MissingName(t *testing.T) {
 func TestLoadSuite_RejectsScenarioWithTopology(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 `,
 		"00-bad.yaml": `name: bad
-topology: synthetic
+network: synthetic
 steps:
   - name: wait
     action: wait
@@ -629,7 +629,7 @@ steps:
 func TestLoadSuite_RejectsScenarioWithPlatform(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 `,
 		"00-bad.yaml": `name: bad
 platform: sonic-vs
@@ -648,7 +648,7 @@ steps:
 func TestLoadSuite_RejectsUndeclaredTargetRef(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 targets:
   devices: [s1]
 `,
@@ -669,7 +669,7 @@ steps:
 func TestLoadSuite_RejectsUndeclaredParamRef(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 parameters:
   declared: foo
 `,
@@ -692,7 +692,7 @@ steps:
 func TestLoadSuite_RejectsStepDevicesWithTemplates(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 targets:
   devices: [s1]
 `,
@@ -714,7 +714,7 @@ steps:
 func TestLoadSuite_RejectsDeviceTokenWithTemplates(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 targets:
   devices: [s1]
 `,
@@ -735,7 +735,7 @@ steps:
 func TestLoadSuite_RejectsUnknownTargetDimension(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 targets:
   unicorns: [u1]
 `,
@@ -749,7 +749,7 @@ targets:
 func TestLoadSuite_RejectsBadTargetValue(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 targets:
   devices: ["s1; rm -rf /"]
 `,
@@ -763,7 +763,7 @@ targets:
 func TestLoadSuite_RejectsBadParameterDeclaration(t *testing.T) {
 	dir := writeSuiteDir(t, map[string]string{
 		"suite.yaml": `name: demo
-topology: synthetic
+network: synthetic
 parameters:
   bad:
     type: enum

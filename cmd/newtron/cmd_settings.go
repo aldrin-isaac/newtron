@@ -48,7 +48,7 @@ var settingsShowCmd = &cobra.Command{
 		printSetting("default_network", s.DefaultNetwork)
 		printSetting("spec_dir", s.SpecDir)
 		printSetting("default_suite", s.DefaultSuite)
-		printSetting("topologies_dir", s.TopologiesDir)
+		printSetting("networks_dir", s.NetworksDir)
 		printSetting("server", s.ServerURL)
 		printSetting("network_id", s.NetworkID)
 
@@ -66,7 +66,7 @@ Available settings:
   network        - Default network name (-n flag default)
   specs          - Specification directory (-S flag default for newtron and newtlab)
   suite          - Default newtrun suite directory (--dir flag default)
-  topologies_dir - Base directory for newtrun topologies
+  networks_dir - Base directory for newtrun topologies
   server         - newtron-server HTTP address (default: http://localhost:18080)
   network_id     - Network identifier for server operations (default: "default")
 
@@ -95,8 +95,8 @@ Examples:
 		case "suite", "default_suite":
 			s.DefaultSuite = value
 			fmt.Printf("Default suite set to: %s\n", value)
-		case "topologies_dir":
-			s.TopologiesDir = value
+		case "networks_dir":
+			s.NetworksDir = value
 			fmt.Printf("Topologies directory set to: %s\n", value)
 		case "server", "server_url":
 			s.ServerURL = value
@@ -105,7 +105,7 @@ Examples:
 			s.NetworkID = value
 			fmt.Printf("Network ID set to: %s\n", value)
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir, server, network_id)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, networks_dir, server, network_id)", setting)
 		}
 
 		if err := newtron.SaveSettings(s); err != nil {
@@ -136,14 +136,14 @@ var settingsGetCmd = &cobra.Command{
 			value = s.SpecDir
 		case "suite", "default_suite":
 			value = s.DefaultSuite
-		case "topologies_dir":
-			value = s.TopologiesDir
+		case "networks_dir":
+			value = s.NetworksDir
 		case "server", "server_url":
 			value = s.ServerURL
 		case "network_id":
 			value = s.NetworkID
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir, server, network_id)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, networks_dir, server, network_id)", setting)
 		}
 
 		if value == "" {

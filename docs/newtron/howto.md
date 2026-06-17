@@ -210,7 +210,7 @@ Why specs? Newtron separates **intent** (what services, VPNs, and policies you w
 
 Flat layout (all files in one directory) or nested layout (`specs/` subdirectory containing `network.json`) are both supported. The CLI auto-detects which.
 
-For lab environments, newtlab generates spec files per topology under `newtrun/topologies/<name>/specs/`.
+For lab environments, newtlab generates spec files per network under `networks/<name>/specs/`.
 
 ### 3.2 Network Specification (`network.json`)
 
@@ -695,7 +695,7 @@ newtron settings path           # show settings file path
 
 Settings are stored in `~/.newtron/settings.json`.
 
-**Available settings:** `network`, `specs` (or `spec_dir`), `suite` (or `default_suite`), `topologies_dir`, `server` (or `server_url`), `network_id`
+**Available settings:** `network`, `specs` (or `spec_dir`), `suite` (or `default_suite`), `networks_dir`, `server` (or `server_url`), `network_id`
 
 ### 4.9 Show Device Status
 
@@ -2753,19 +2753,19 @@ newtron leaf1 intent drift
 # Build all tools
 make build
 
-# Deploy topology (uses newtlab)
-bin/newtlab deploy newtrun/topologies/2node-ngdp
+# Deploy network (uses newtlab)
+bin/newtlab deploy 2node-ngdp
 
-# Start server pointing at lab specs
-bin/newt-server --spec-dir newtrun/topologies/2node-ngdp/specs &
+# Start server pointing at network specs
+bin/newt-server --spec-dir networks/2node-ngdp/specs &
 
 # Provision switches from topology
-bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 --topology intent reconcile -x
-bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch2 --topology intent reconcile -x
+bin/newtron -S networks/2node-ngdp/specs -D switch1 --topology intent reconcile -x
+bin/newtron -S networks/2node-ngdp/specs -D switch2 --topology intent reconcile -x
 
 # Verify health
-bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 health check
-bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch2 health check
+bin/newtron -S networks/2node-ngdp/specs -D switch1 health check
+bin/newtron -S networks/2node-ngdp/specs -D switch2 health check
 
 # Run E2E test suite (uses newtrun)
 bin/newtrun start 2node-ngdp-primitive

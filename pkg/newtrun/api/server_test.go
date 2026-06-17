@@ -20,7 +20,7 @@ import (
 
 // testTopology is the placeholder topology name every test fixture
 // nests its suites under. The on-disk layout in tests mirrors the
-// production layout exactly — <topologies-base>/<topology>/suites/<name>/
+// production layout exactly — <networks-base>/<topology>/suites/<name>/
 // — so the same ResolveSuiteDir glob handles both.
 const testTopology = "test-topo"
 
@@ -34,14 +34,14 @@ func newTestServer(t *testing.T) (*Server, func()) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	topologiesBase := filepath.Join(tmpDir, "topologies")
-	if err := os.MkdirAll(filepath.Join(topologiesBase, testTopology, "suites"), 0755); err != nil {
+	networksBase := filepath.Join(tmpDir, "topologies")
+	if err := os.MkdirAll(filepath.Join(networksBase, testTopology, "suites"), 0755); err != nil {
 		t.Fatalf("mkdir suites root: %v", err)
 	}
-	t.Setenv("NEWTRUN_TOPOLOGIES_BASE", topologiesBase)
+	t.Setenv("NEWTRON_NETWORKS_BASE", networksBase)
 
 	srv := NewServer(Config{
-		TopologiesBase: topologiesBase,
+		NetworksBase: networksBase,
 		Logger:         log.New(io.Discard, "", 0),
 	})
 	return srv, func() {}
@@ -53,7 +53,7 @@ func newTestServer(t *testing.T) (*Server, func()) {
 // topology." Helpers that build suites (writeMinimalSuite,
 // newScenarioTestServer) join under this root.
 func suitesRoot(srv *Server) string {
-	return filepath.Join(srv.cfg.TopologiesBase, testTopology, "suites")
+	return filepath.Join(srv.cfg.NetworksBase, testTopology, "suites")
 }
 
 // seedSuite writes a state.json for one suite and creates the matching suite
@@ -62,7 +62,7 @@ func seedSuite(t *testing.T, srv *Server, name string, status newtrun.SuiteStatu
 	t.Helper()
 	state := &newtrun.RunState{
 		Suite:    name,
-		Topology: testTopology,
+		Network: testTopology,
 		Status:   status,
 		Started:  time.Now().Add(-time.Hour),
 		Updated:  time.Now().Add(-30 * time.Minute),

@@ -12,12 +12,12 @@ import (
 
 // Config is the construction-time configuration for the newtlab server.
 type Config struct {
-	// TopologiesBase is the directory under which topology spec
-	// directories live. Defaults to "newtrun/topologies" relative to
+	// NetworksBase is the directory under which topology spec
+	// directories live. Defaults to "networks" relative to
 	// the working directory. This path is sent to newtron-server during
 	// registration so newtron knows where to read the spec files
 	// (DESIGN_PRINCIPLES §27 — newtron owns spec files).
-	TopologiesBase string
+	NetworksBase string
 
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
@@ -69,8 +69,8 @@ func NewServer(cfg Config) *Server {
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
 	}
-	if cfg.TopologiesBase == "" {
-		cfg.TopologiesBase = "newtrun/topologies"
+	if cfg.NetworksBase == "" {
+		cfg.NetworksBase = "networks"
 	}
 	s := &Server{
 		cfg:        cfg,

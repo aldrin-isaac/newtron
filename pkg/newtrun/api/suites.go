@@ -31,7 +31,7 @@ import (
 // Callers must validate name + topology against nameRE before calling
 // — writeSuiteManifest does not re-validate.
 func writeSuiteManifest(dir, name, topology string) error {
-	body, err := yaml.Marshal(&newtrun.Suite{Name: name, Topology: topology})
+	body, err := yaml.Marshal(&newtrun.Suite{Name: name, Network: topology})
 	if err != nil {
 		return fmt.Errorf("marshal suite.yaml: %w", err)
 	}
@@ -49,7 +49,7 @@ var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 // the runner can guard against topology/scenario mismatches.
 type CreateSuiteRequest struct {
 	Name     string `json:"name"`
-	Topology string `json:"topology"`
+	Network   string          `json:"network"`
 }
 
 // CreateSuiteResponse is the body returned by POST /api/suites.
@@ -62,12 +62,12 @@ type CreateSuiteResponse struct {
 }
 
 // handleListSuites returns every suite name discoverable under
-// TopologiesBase by scanning <base>/*/suites/*. Suite ownership lives
+// NetworksBase by scanning <base>/*/suites/*. Suite ownership lives
 // in the topology subtree (§27); the API surface stays flat — callers
 // see a single list of suite names regardless of which topology each
 // belongs to.
 func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
-	names, err := newtrun.ListAllSuites(s.cfg.TopologiesBase)
+	names, err := newtrun.ListAllSuites(s.cfg.NetworksBase)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
@@ -91,8 +91,8 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q: must match %s", req.Name, nameRE))
 		return
 	}
-	if !nameRE.MatchString(req.Topology) {
-		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid topology %q: must match %s", req.Topology, nameRE))
+	if !nameRE.MatchString(req.Network) {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid topology %q: must match %s", req.Network, nameRE))
 		return
 	}
 	// Refuse to create a suite whose name already exists under any
@@ -100,16 +100,16 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 	// (see resolveSuiteDir). Catching the conflict at create time
 	// gives the operator a 409 with a clear message rather than a
 	// later ambiguous-resolution 500.
-	if existing, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, req.Name); err == nil {
+	if existing, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, req.Name); err == nil {
 		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists at %s", req.Name, existing))
 		return
 	}
-	dir := filepath.Join(s.cfg.TopologiesBase, req.Topology, "suites", req.Name)
+	dir := filepath.Join(s.cfg.NetworksBase, req.Network, "suites", req.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
 		return
 	}
-	if err := writeSuiteManifest(dir, req.Name, req.Topology); err != nil {
+	if err := writeSuiteManifest(dir, req.Name, req.Network); err != nil {
 		_ = os.RemoveAll(dir)
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
@@ -128,7 +128,7 @@ func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return
 	}
-	dir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	dir, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, suite)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
 		return
@@ -175,7 +175,7 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return
 	}
-	dir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	dir, err := newtrun.ResolveSuiteDir(s.cfg.NetworksBase, suite)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
 		return
@@ -196,7 +196,7 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 	}
 	resp := SuiteScenariosResponse{
 		Suite:    suite,
-		Topology: loaded.Topology,
+		Network: loaded.Network,
 	}
 	// Topology and Platform are on the SuiteScenariosResponse envelope,
 	// not on per-scenario summaries — repeating them would diverge once

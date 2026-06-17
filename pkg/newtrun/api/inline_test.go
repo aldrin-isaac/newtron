@@ -21,7 +21,7 @@ import (
 const inlineScenarioWait = `
 name: inline-test
 description: smoke test
-topology: test-topo
+network: test-topo
 steps:
   - name: brief-pause
     action: wait
@@ -73,7 +73,7 @@ func TestInlineRejectsBannedAction(t *testing.T) {
 
 	banned := `
 name: bad
-topology: t
+network: t
 steps:
   - name: shell
     action: host-exec
@@ -97,7 +97,7 @@ func TestInlineRejectsReconcileWithoutOptIn(t *testing.T) {
 
 	scenario := `
 name: bad
-topology: t
+network: t
 steps:
   - name: rec
     action: topology-reconcile
@@ -120,7 +120,7 @@ func TestInlineAcceptsReconcileWithOptIn(t *testing.T) {
 
 	scenario := `
 name: ok
-topology: t
+network: t
 steps:
   - name: rec
     action: topology-reconcile
@@ -246,8 +246,8 @@ func TestInlineStagesAsLoadableSuite(t *testing.T) {
 	if len(suite.Scenarios) != 1 {
 		t.Fatalf("LoadSuite returned %d scenarios, want 1", len(suite.Scenarios))
 	}
-	if suite.Topology != "test-topo" {
-		t.Errorf("suite topology = %q, want test-topo", suite.Topology)
+	if suite.Network != "test-topo" {
+		t.Errorf("suite topology = %q, want test-topo", suite.Network)
 	}
 }
 

@@ -25,7 +25,7 @@ The newtrun HTTP server (`newtrun-server`) is the canonical access point for eve
 6. [Inline Runs](#6-inline-runs)
 7. [Suite Management](#7-suite-management)
 8. [Scenario Authoring](#8-scenario-authoring)
-9. [Topologies](#9-topologies)
+9. [Networks](#9-networks)
 10. [SSE Event Reference](#10-sse-event-reference)
 11. [Types Reference](#11-types-reference)
 
@@ -170,7 +170,7 @@ If another run holds the suite's registry slot, the response is 409 Conflict wit
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
-| `suite` | string | yes | Suite name. The server resolves it under its own `suites_base`; filesystem layout is server-internal and intentionally never accepted from or returned to clients. The named directory must contain a `suite.yaml` declaring `name` + `topology`. |
+| `suite` | string | yes | Suite name. The server resolves it under its own `suites_base`; filesystem layout is server-internal and intentionally never accepted from or returned to clients. The named directory must contain a `suite.yaml` declaring `name` + `network`. |
 | `scenario` | string | no | Run only the named scenario. Mutually exclusive with `target` and `all`. |
 | `target` | string | no | Run the minimal dependency chain reaching this scenario. |
 | `all` | bool | no | Run all scenarios. Defaults to true when none of `scenario` / `target` / `all` are set. |
@@ -224,7 +224,7 @@ Returns one `RunInfo` per suite that has a `state.json` on disk under `~/.newtro
   "data": [
     {
       "suite": "2node-vs-primitive",
-      "topology": "2node-vs",
+      "network": "2node-vs",
       "status": "complete",
       "started":  "2026-05-29T19:47:52-07:00",
       "updated":  "2026-05-29T19:55:03-07:00",
@@ -232,7 +232,7 @@ Returns one `RunInfo` per suite that has a `state.json` on disk under `~/.newtro
     },
     {
       "suite": "1node-vs-basic",
-      "topology": "1node-vs",
+      "network": "1node-vs",
       "status": "aborted",
       "started":  "2026-05-28T15:57:23-07:00",
       "updated":  "2026-05-28T16:02:11-07:00"
@@ -322,7 +322,7 @@ Submits a single scenario as inline YAML — no suite directory, no state-persis
 |-------|------|----------|---------|
 | `scenario_yaml` | string | yes | The full scenario YAML body (same shape as a file under a suite directory). |
 | `newtron_server` | string | no | Override the server's default newtron-server URL for this run only. |
-| `network_id` | string | no | Override the newtron network identifier for this run. Empty = use the server's configured default. Inline runs are `NoDeploy=true`, so the network must already be registered under whichever id the operator chose at deploy time (#116 — newtlab/newtrun derive ids from the lab/suite topology when not explicitly overridden). |
+| `network_id` | string | no | Override the newtron network identifier for this run. Empty = use the server's configured default. Inline runs are `NoDeploy=true`, so the network must already be registered under whichever id the operator chose at deploy time (#116 — newtlab/newtrun derive ids from the lab/suite network when not explicitly overridden). |
 | `timeout_seconds` | int | no | Override the safety policy's wall-time budget for this run only. `0` keeps the policy default (60s). |
 | `allow_reconcile` | bool | no | Opt in to permitting the `topology-reconcile` action for this scenario. Default `false` is the high-impact gate. |
 
@@ -366,23 +366,23 @@ Returns the names of immediate subdirectories under `suites_base`. Missing base 
 
 ### `POST /newtrun/v1/suites`
 
-Creates the suite directory and writes a minimal `suite.yaml` manifest containing the supplied `name` + `topology`. After creation the operator can `PUT` scenarios into the suite or edit `suite.yaml` directly to add `targets:` / `parameters:` for parameterized scenarios.
+Creates the suite directory and writes a minimal `suite.yaml` manifest containing the supplied `name` + `network`. After creation the operator can `PUT` scenarios into the suite or edit `suite.yaml` directly to add `targets:` / `parameters:` for parameterized scenarios.
 
 **Request:** `application/json`, body is a `CreateSuiteRequest`:
 
 ```json
 {
   "name":     "my-new-suite",
-  "topology": "2node-vs-service"
+  "network": "2node-vs-service"
 }
 ```
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
 | `name` | string | yes | Suite identifier; matches `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`. |
-| `topology` | string | yes | Topology this suite targets; written into `suite.yaml`. Validated against the same identifier regex as `name` — a topology string containing YAML metacharacters (newlines, colons, leading dashes) is rejected so it can't smuggle additional top-level fields into the generated manifest. |
+| `network` | string | yes | Network this suite targets; written into `suite.yaml`. Validated against the same identifier regex as `name` — a network string containing YAML metacharacters (newlines, colons, leading dashes) is rejected so it can't smuggle additional top-level fields into the generated manifest. |
 
-**Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name or invalid topology, 409 if the directory already exists.
+**Response:** 201 with `{"data": {"name": "my-new-suite"}}`. 400 on invalid name or invalid network, 409 if the directory already exists.
 
 ### `DELETE /newtrun/v1/suites/{suite}`
 
@@ -400,17 +400,17 @@ Returns the scenarios in a suite as summaries — `ScenarioSummary` ([§11](#11-
 {
   "data": {
     "suite": "1node-vs-basic",
-    "topology": "1node-vs",
+    "network": "1node-vs",
     "scenarios": [
       {
         "name": "boot-ssh",
-        "topology": "1node-vs",
+        "network": "1node-vs",
         "platform": "sonic-vs",
         "step_count": 1
       },
       {
         "name": "setup-device",
-        "topology": "1node-vs",
+        "network": "1node-vs",
         "platform": "sonic-vs",
         "step_count": 2,
         "requires": ["boot-ssh"]
@@ -456,9 +456,9 @@ Removes the file. Same lookup rule as GET.
 
 ---
 
-## 9. Topologies
+## 9. Networks
 
-Newtrun does not expose topology endpoints — newtron owns the spec
+Newtrun does not expose network endpoints — newtron owns the spec
 directory layout (§27 Single Owner). To list or create networks, call
 newtron directly:
 
@@ -467,9 +467,8 @@ newtron directly:
 | List registered networks | `GET /newtron/v1/networks` |
 | Scaffold + register a new network in one call | `POST /newtron/v1/networks` with `scaffold: true` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
 
-The `newtrun topologies` and `newtrun topology create` CLI subcommands
-have been repointed to these newtron endpoints — operator surface is
-unchanged; the wire is just shorter.
+The `newtrun networks` and `newtrun network create` CLI subcommands
+delegate to these newtron endpoints.
 
 ---
 
@@ -485,11 +484,11 @@ suite_start  →  (scenario_start  →  (step_start  →  step_end)*  →  scena
 
 ### `suite_start`
 
-Sent once at the start of the run with the suite metadata and scenario roster. Topology and platform are suite-level (declared in `suite.yaml`) and ride on the envelope; per-scenario summaries don't repeat them.
+Sent once at the start of the run with the suite metadata and scenario roster. Network and platform are suite-level (declared in `suite.yaml`) and ride on the envelope; per-scenario summaries don't repeat them.
 
 ```json
 {
-  "topology": "1node-vs",
+  "network": "1node-vs",
   "platform": "sonic-vs",
   "scenarios": [
     {
@@ -583,7 +582,7 @@ Sent at the end of each scenario with the full per-step result list.
 ```json
 {
   "name": "setup-device",
-  "topology": "1node-vs",
+  "network": "1node-vs",
   "platform": "sonic-vs",
   "status": "PASS",
   "duration": "1s",
@@ -618,7 +617,7 @@ The complete record for one run. Returned by `GET /newtrun/v1/runs/{suite}` ([§
 ```json
 {
   "suite": "1node-vs-config",
-  "topology": "1node-vs",
+  "network": "1node-vs",
   "platform": "sonic-vs",
   "status": "complete",
   "started": "2026-05-29T19:59:14-07:00",
@@ -641,7 +640,7 @@ The list-view summary of a run. Returned by `GET /newtrun/v1/runs` ([§4](#4-sui
 ```json
 {
   "suite": "...",
-  "topology": "...",
+  "network": "...",
   "status": "complete",
   "started": "...",
   "updated": "...",
@@ -653,11 +652,11 @@ The list-view summary of a run. Returned by `GET /newtrun/v1/runs` ([§4](#4-sui
 
 The per-scenario summary used in `suite_start` events and `GET /newtrun/v1/suites/{suite}/scenarios`.
 
-Fields: `name`, `description`, `topology`, `platform`, `step_count`, `requires`.
+Fields: `name`, `description`, `network`, `platform`, `step_count`, `requires`.
 
 ### `HealthResponse`, `SuitesResponse`
 
-Single-field wrappers around the relevant array or scalar. See examples in [§3](#3-server-management) and [§7](#7-suite-management). Topology listing is owned by newtron — see the [newtron API](../newtron/api.md#get-newtronv1network).
+Single-field wrappers around the relevant array or scalar. See examples in [§3](#3-server-management) and [§7](#7-suite-management). Network listing is owned by newtron — see the [newtron API](../newtron/api.md#get-newtronv1network).
 
 ### Event payloads
 

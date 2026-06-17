@@ -93,7 +93,7 @@ make build
 #    on :18080). Must start BEFORE the deploy so `newtlab deploy --monitor`
 #    can read live link telemetry — newtlink pushes per-link byte counters
 #    to newt-server every 5 seconds and the deploy monitor renders them.
-bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &
+bin/newt-server --spec-dir networks/1node-vs/specs &
 NEWT_SERVER_PID=$!
 sleep 2 && kill -0 $NEWT_SERVER_PID || { echo "newt-server failed to start"; exit 1; }
 
@@ -176,12 +176,12 @@ built project, a running SONiC lab, and an oriented AI assistant ready to work.
 ## Explore Without VMs
 
 You can explore **newtron**'s specs and dry-run output without deploying
-any SONiC devices. Build, start the server with a shipped topology's
+any SONiC devices. Build, start the server with a shipped network's
 specs, and browse:
 
 ```bash
 make build
-bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &
+bin/newt-server --spec-dir networks/2node-vs/specs &
 
 bin/newtron service list                     # List defined services
 bin/newtron switch1 show                     # Show device profile
@@ -313,7 +313,7 @@ hop is in-process Go). Each scenario is a sequence of HTTP calls
 and host commands (ping across VMs, run traffic generators) that
 exercise the primitives in concert.
 
-A full 2node-vs-service run looks like this. Prereq: newt-server running (`bin/newt-server --spec-dir newtrun/topologies/2node-vs/specs &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
+A full 2node-vs-service run looks like this. Prereq: newt-server running (`bin/newt-server --spec-dir networks/2node-vs/specs &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
 
 ```
 $ bin/newtrun start 2node-vs-service --server http://localhost:18080
@@ -445,9 +445,8 @@ pkg/
   cli/              Shared CLI formatting (tables, colors, progress)
   util/             Errors, logging, IP/string helpers
 
-newtrun/
-  topologies/       Test topologies (1node-vs, 2node-vs, 2node-vs-service)
-  suites/           Test suites and scenarios (YAML)
+networks/           Networks (1node-vs, 2node-vs, 2node-vs-service): specs +
+                    their nested suites/<suite>/ directories
 
 docs/
   newtron/          HLD, LLD, device LLD, API reference, HOWTO
