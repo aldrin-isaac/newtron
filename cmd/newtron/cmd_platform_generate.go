@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,12 +28,13 @@ import (
 )
 
 var (
-	platformGenerateName        string
-	platformGenerateHWSKU       string
-	platformGenerateDescription string
-	platformGenerateOutput      string
-	platformGenerateDataplane   string
-	platformGenerateForce       bool
+	platformGenerateName         string
+	platformGenerateHWSKU        string
+	platformGenerateDescription  string
+	platformGenerateOutput       string
+	platformGenerateDataplane    string
+	platformGenerateForce        bool
+	platformGeneratePortConfigINI string
 )
 
 var platformGenerateCmd = &cobra.Command{
@@ -83,11 +85,7 @@ Examples:
 		if platformGenerateHWSKU == "" {
 			return fmt.Errorf("--hwsku is required (SONiC platform.json does not carry HWSKU)")
 		}
-		data, err := os.ReadFile(args[0])
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", args[0], err)
-		}
-		ps, err := spec.FromSONiCPlatformJSON(data, spec.SONiCImportOptions{
+		ps, err := derivePlatformSpec(args[0], platformGeneratePortConfigINI, spec.SONiCImportOptions{
 			HWSKU:       platformGenerateHWSKU,
 			Description: platformGenerateDescription,
 			Dataplane:   platformGenerateDataplane,
@@ -100,6 +98,72 @@ Examples:
 		}
 		return mergePlatformIntoFile(platformGenerateOutput, platformGenerateName, ps, platformGenerateForce)
 	},
+}
+
+// derivePlatformSpec runs the two-step translation: try
+// platform.json first, fall through to port_config.ini when the
+// JSON is the older per-HWSKU convention (empty `interfaces` map,
+// signaled by spec.ErrEmptyInterfaces).
+//
+// port_config.ini source priority:
+//
+//  1. explicit --port-config-ini PATH (always wins)
+//  2. auto-discovery: <dir-of-platform.json>/<hwsku>/port_config.ini
+//
+// If both paths miss when the platform.json signals
+// ErrEmptyInterfaces, the operator gets an error citing every
+// path checked so the next move is obvious (supply the explicit
+// flag, or download the missing fixture).
+func derivePlatformSpec(jsonPath, explicitINIPath string, opts spec.SONiCImportOptions) (*spec.PlatformSpec, error) {
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", jsonPath, err)
+	}
+	ps, jsonErr := spec.FromSONiCPlatformJSON(jsonData, opts)
+	if jsonErr == nil {
+		return ps, nil
+	}
+	if !errors.Is(jsonErr, spec.ErrEmptyInterfaces) {
+		return nil, jsonErr
+	}
+	// platform.json says "I'm the older convention — look at
+	// port_config.ini." Find it.
+	iniPath, err := resolvePortConfigINIPath(jsonPath, opts.HWSKU, explicitINIPath)
+	if err != nil {
+		return nil, err
+	}
+	iniData, err := os.ReadFile(iniPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", iniPath, err)
+	}
+	ps, err = spec.FromPortConfigINI(iniData, opts)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", iniPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "(derived from %s — breakouts unavailable in this convention)\n", iniPath)
+	return ps, nil
+}
+
+// resolvePortConfigINIPath picks the port_config.ini source. The
+// explicit --port-config-ini flag wins outright; otherwise the
+// auto-discovery probe is <dir-of-platform.json>/<hwsku>/port_config.ini.
+// If neither resolves to an existing file, the error names both
+// paths checked (or just the auto-discovery path if no flag was
+// passed) so the operator's next action is obvious.
+func resolvePortConfigINIPath(jsonPath, hwsku, explicit string) (string, error) {
+	if explicit != "" {
+		if _, err := os.Stat(explicit); err != nil {
+			return "", fmt.Errorf("--port-config-ini %s: %w", explicit, err)
+		}
+		return explicit, nil
+	}
+	auto := filepath.Join(filepath.Dir(jsonPath), hwsku, "port_config.ini")
+	if _, err := os.Stat(auto); err == nil {
+		return auto, nil
+	}
+	return "", fmt.Errorf("platform.json signals the older per-HWSKU convention but no port_config.ini was found. "+
+		"Auto-discovery looked at %s (sibling-of-platform.json + --hwsku + port_config.ini). "+
+		"Pass --port-config-ini PATH to override the location.", auto)
 }
 
 // emitPlatformToStdout writes the generated PlatformSpec as a
@@ -195,5 +259,9 @@ func init() {
 		"Optional dataplane hint (\"vpp\", \"barefoot\", \"\" for none).")
 	platformGenerateCmd.Flags().BoolVar(&platformGenerateForce, "force", false,
 		"With --output, overwrite a same-named platform entry. Without --force, conflicts refuse.")
+	platformGenerateCmd.Flags().StringVar(&platformGeneratePortConfigINI, "port-config-ini", "",
+		"Path to a SONiC port_config.ini (the older per-HWSKU convention). When set, used directly. "+
+			"When unset, the CLI auto-discovers a sibling <hwsku>/port_config.ini iff platform.json's "+
+			"interfaces map is empty.")
 	platformCmd.AddCommand(platformGenerateCmd)
 }
