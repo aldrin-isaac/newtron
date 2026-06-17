@@ -320,7 +320,7 @@ The `newtron` action with `batch` runs N calls per device in sequence, collectin
 | `ActionWait` | `wait` | Sleep for `Duration`. |
 | `ActionProvision` | `topology-reconcile` | Single `Client.Reconcile(name, "topology", ...)` call per device — the newtron-server performs ConfigReload, lock, ReplaceAll, and SaveConfig internally. High-impact; inline-runs require explicit opt-in. |
 | `ActionVerifyProvisioning` | `verify-topology` | Compute drift between device CONFIG_DB and the topology projection. Zero drift = pass. |
-| `ActionRunSuite` | `run-suite` | Composition primitive: invoke another sibling suite (resolved under `Runner.SuitesBase`) as a single step. Child runs in-process with `NoDeploy=true`; depth-counter context bounds recursion to `MaxRunSuiteDepth` (default 5). Excluded from the default inline-allowed list — file-backed suites only. |
+| `ActionRunSuite` | `run-suite` | Composition primitive: invoke another sibling suite (resolved under `Runner.TopologiesBase`) as a single step. Child runs in-process with `NoDeploy=true`; depth-counter context bounds recursion to `MaxRunSuiteDepth` (default 5). Excluded from the default inline-allowed list — file-backed suites only. |
 
 ---
 
@@ -553,16 +553,17 @@ Reads `state.json` and returns true when `state.Status == SuiteStatusPausing`. T
 
 ```go
 type Runner struct {
-    ScenariosDir  string
-    ServerURL     string         // newtron-server HTTP address
-    NetworkID     string         // network identifier for server operations
-    Client        *client.Client // HTTP client for all SONiC operations
-    NewtlabURL    string         // newtlab-server HTTP address
-    NewtlabClient LabClient      // deploy / destroy / status via HTTP (§27)
-    HostConns     map[string]*ssh.Client
-    Progress      ProgressReporter
-    Topology      string         // topology name (from server)
-    SpecDir       string         // spec directory (from server)
+    SuiteDir       string         // the suite this runner executes (holds suite.yaml + scenario YAMLs)
+    TopologiesBase string         // root for resolving sibling suites called by run-suite steps
+    ServerURL      string         // newtron-server HTTP address
+    NetworkID      string         // network identifier for server operations
+    Client         *client.Client // HTTP client for all SONiC operations
+    NewtlabURL     string         // newtlab-server HTTP address
+    NewtlabClient  LabClient      // deploy / destroy / status via HTTP (§27)
+    HostConns      map[string]*ssh.Client
+    Progress       ProgressReporter
+    Topology       string         // topology name (from server)
+    SpecDir        string         // spec directory (from server)
 
     discoveredPlatform string
     opts               RunOptions
@@ -572,7 +573,8 @@ type Runner struct {
 
 | Field | Set by | Used by |
 |-------|--------|---------|
-| `ScenariosDir` | `NewRunner(dir)` or `handleStartRun` | Parser to enumerate scenarios. |
+| `SuiteDir` | `NewRunner(dir)` or `handleStartRun` (via `ResolveSuiteDir` glob) | `LoadSuite` to read `suite.yaml`; parser to enumerate scenarios. |
+| `TopologiesBase` | `handleStartRun` from `Config.TopologiesBase` | `runSuiteExecutor` to resolve child suites named in `run-suite` steps. |
 | `ServerURL` | `handleStartRun` from `req.NewtronServer` or server default | `client.Client` constructor + steps_cli passes to subprocess via `--server`. |
 | `NetworkID` | `handleStartRun` via `resolveNetworkID` — three-level fallback `req.NetworkID` → `suite.Topology` → `Config.NetworkID` (#116). Inline runs skip the suite step. | Network identifier in HTTP calls. |
 | `Client` | `connectToServer` | Every `newtron` action HTTP call. |
@@ -745,7 +747,7 @@ type Server struct {
 
 | Field | Default |
 |-------|---------|
-| `SuitesBase` | `newtrun/suites` |
+| `TopologiesBase` | `newtrun/topologies` |
 | `NewtronServer` | `http://127.0.0.1:18080` |
 | `NetworkID` | `default` (final fallback only — file-backed runs default to `suite.Topology` first; see `resolveNetworkID` in [§8 handleStartRun](#8-http-server-package-pkgnewtrunapi)) |
 | `InlineURLPrefix` | empty (no URL restriction enforced by default; see [§8.7](#87-inlinesafetypolicy)) |
@@ -1148,8 +1150,8 @@ The newtrun engine has no main package of its own. `cmd/newt-server/main.go` ins
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--listen` | `127.0.0.1:18080` | Bind address for the composed listener; non-loopback values require `--auth-pam-service` plus `--tls-cert/--tls-key/--tls-ca` to be set. |
-| `--spec-dir` | (required) | Spec directory passed to the newtron engine's `RegisterNetwork`. The newtrun engine reads suites and topologies relative to repo root by default; override with `--suites-base` if needed. |
-| `--suites-base` | `newtrun/suites` | Directory containing suite subdirectories the newtrun engine resolves names against. |
+| `--spec-dir` | (required) | Spec directory passed to the newtron engine's `RegisterNetwork`. The newtrun engine discovers suites by globbing `<topologies-base>/*/suites/<name>/`; override the base with `--topologies-base` if needed. |
+| `--topologies-base` | `newtrun/topologies` | Root of the topologies tree. The newtrun engine resolves suite names by globbing `<base>/*/suites/<name>/`. |
 
 The Config struct backing the newtrun engine has `NewtronServer` and `NetworkID` fields with defaults (`http://127.0.0.1:18080` and `default`), inherited from the composed boundary. Per-request overrides via the `newtron_server` and `network_id` fields on `POST /newtrun/v1/runs` are the supported way to point a run at a non-default newtron-server.
 

@@ -10,7 +10,7 @@
 # rather than reconfiguring the shell on a possibly-real account.
 #
 # Usage:
-#   sudo sh newtrun/suites/1node-vs-auth/create-test-users.sh
+#   sudo sh newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/create-test-users.sh
 #
 # After this script runs, the matching tear-down (e.g. for CI cleanup)
 # is `sudo userdel -r <name>` per user.

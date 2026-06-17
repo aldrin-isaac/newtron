@@ -18,7 +18,6 @@ package newtrun
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 )
 
@@ -56,14 +55,15 @@ func withRunSuiteDepth(ctx context.Context, depth int) context.Context {
 }
 
 // runSuiteExecutor implements ActionRunSuite. It resolves the called
-// suite under Runner.SuitesBase, constructs a child Runner that
+// suite under Runner.TopologiesBase (globbing
+// <base>/<topology>/suites/<name>/), constructs a child Runner that
 // inherits the parent's connections, and runs the child's scenarios
 // inside the same goroutine as the parent step.
 //
 // Failure modes the executor surfaces as step errors (not crashes):
-//   - SuitesBase not configured (top-level entry didn't wire it)
+//   - TopologiesBase not configured (top-level entry didn't wire it)
 //   - depth exceeds MaxRunSuiteDepth
-//   - called suite directory missing or unreadable
+//   - called suite missing or ambiguous across topologies
 //   - any child scenario fails (step status mirrors the worst child status)
 type runSuiteExecutor struct{}
 
@@ -75,9 +75,9 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		Duration: 0,
 	}
 
-	if r.SuitesBase == "" {
+	if r.TopologiesBase == "" {
 		result.Status = StepStatusError
-		result.Message = "run-suite requires Runner.SuitesBase to be configured (top-level entry must wire it)"
+		result.Message = "run-suite requires Runner.TopologiesBase to be configured (top-level entry must wire it)"
 		result.Duration = time.Since(start)
 		return &StepOutput{Result: result}
 	}
@@ -91,10 +91,16 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		return &StepOutput{Result: result}
 	}
 
-	childDir := filepath.Join(r.SuitesBase, step.Suite)
+	childDir, err := ResolveSuiteDir(r.TopologiesBase, step.Suite)
+	if err != nil {
+		result.Status = StepStatusError
+		result.Message = fmt.Sprintf("run-suite %q: %v", step.Suite, err)
+		result.Duration = time.Since(start)
+		return &StepOutput{Result: result}
+	}
 	child := &Runner{
-		ScenariosDir:       childDir,
-		SuitesBase:         r.SuitesBase,
+		SuiteDir:           childDir,
+		TopologiesBase:     r.TopologiesBase,
 		ServerURL:          r.ServerURL,
 		NetworkID:          r.NetworkID,
 		Client:             r.Client,

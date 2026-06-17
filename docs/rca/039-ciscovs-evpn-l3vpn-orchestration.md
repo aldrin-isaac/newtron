@@ -154,8 +154,8 @@ ERR    swss#orchagent: Failed to add dummy vxlan switch svi for decap VRF ..., V
 - `pkg/newtron/network/node/evpn_ops.go` — Experimental `PrepareL3VNI`/`CleanupL3VNI`/
   `DisableEVPNNVO`/`EnableEVPNNVO` added and removed
 - `pkg/newtlab/patches/ciscovs/always/frrcfgd.py.tmpl` — `newtron-vni-poll` retained
-- `newtrun/suites/2node-ngdp-l3vpn/` — Deleted (experimental)
-- `newtrun/suites/2node-ngdp-primitive/70-evpn-l3-routing.yaml` — Deleted (referenced removed actions)
+- `newtrun/topologies/2node-ngdp/suites/2node-ngdp-l3vpn/` — Deleted (experimental)
+- `newtrun/topologies/2node-ngdp/suites/2node-ngdp-primitive/70-evpn-l3-routing.yaml` — Deleted (referenced removed actions)
 
 ## Related
 

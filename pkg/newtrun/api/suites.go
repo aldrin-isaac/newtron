@@ -61,9 +61,13 @@ type CreateSuiteResponse struct {
 	Name string `json:"name"`
 }
 
-// handleListSuites returns the suite names discoverable under SuitesBase.
+// handleListSuites returns every suite name discoverable under
+// TopologiesBase by scanning <base>/*/suites/*. Suite ownership lives
+// in the topology subtree (§27); the API surface stays flat — callers
+// see a single list of suite names regardless of which topology each
+// belongs to.
 func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
-	names, err := listSubdirs(s.cfg.SuitesBase)
+	names, err := newtrun.ListAllSuites(s.cfg.TopologiesBase)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
@@ -91,11 +95,16 @@ func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid topology %q: must match %s", req.Topology, nameRE))
 		return
 	}
-	dir := filepath.Join(s.cfg.SuitesBase, req.Name)
-	if _, err := os.Stat(dir); err == nil {
-		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
+	// Refuse to create a suite whose name already exists under any
+	// topology — suite names are globally unique across the tree
+	// (see resolveSuiteDir). Catching the conflict at create time
+	// gives the operator a 409 with a clear message rather than a
+	// later ambiguous-resolution 500.
+	if existing, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, req.Name); err == nil {
+		httputil.WriteError(w, http.StatusConflict, fmt.Errorf("suite %q already exists at %s", req.Name, existing))
 		return
 	}
+	dir := filepath.Join(s.cfg.TopologiesBase, req.Topology, "suites", req.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
 		return
@@ -119,13 +128,13 @@ func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return
 	}
-	dir := filepath.Join(s.cfg.SuitesBase, suite)
+	dir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	if err != nil {
+		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
-			return
-		}
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -166,7 +175,11 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
 		return
 	}
-	dir := filepath.Join(s.cfg.SuitesBase, suite)
+	dir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	if err != nil {
+		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
+		return
+	}
 	loaded, err := newtrun.LoadSuite(dir)
 	if err != nil {
 		// LoadSuite wraps the underlying file-open error via fmt.Errorf,

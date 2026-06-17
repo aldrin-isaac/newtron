@@ -16,10 +16,19 @@ import (
 
 // Runner is the top-level newtrun orchestrator.
 type Runner struct {
-	ScenariosDir string
-	SuitesBase   string         // directory under which sibling suite dirs live; required for run-suite step composition (issue #27)
-	ServerURL    string         // newtron-server HTTP address
-	NetworkID    string         // network identifier for server operations
+	// SuiteDir is the directory of the suite this runner executes —
+	// holds suite.yaml plus the scenario *.yaml files. The same
+	// concept the HTTP handler (handleStartRun) and ResolveSuiteDir
+	// already call "suite dir"; §13 (Same Concept = Same Name).
+	SuiteDir       string
+	// TopologiesBase is the root under which sibling suites live
+	// (<base>/<topology>/suites/<name>/); required for run-suite step
+	// composition (issue #27) so a step in this suite can invoke a
+	// sibling suite without the parent encoding its sibling's
+	// per-topology location.
+	TopologiesBase string
+	ServerURL      string         // newtron-server HTTP address
+	NetworkID      string         // network identifier for server operations
 	// NewtronClientTLS is the TLS config the runner uses when
 	// constructing its outbound newtron HTTP client at connectToServer
 	// time (auth-design.md L2a). nil keeps the client on plain HTTP —
@@ -131,10 +140,11 @@ type RunOptions struct {
 	Completed map[string]StepStatus // scenario → status from previous run (resume)
 }
 
-// NewRunner creates a new test runner.
-func NewRunner(scenariosDir string) *Runner {
+// NewRunner creates a new test runner bound to the given suite
+// directory (which holds suite.yaml + the scenario YAMLs).
+func NewRunner(suiteDir string) *Runner {
 	return &Runner{
-		ScenariosDir: scenariosDir,
+		SuiteDir: suiteDir,
 	}
 }
 
@@ -155,12 +165,12 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 	// Load the suite: suite.yaml + every scenario file in the dir.
 	// LoadSuite validates all template references against suite-level
 	// declarations and rejects scenarios that set topology/platform.
-	suite, err := LoadSuite(r.ScenariosDir)
+	suite, err := LoadSuite(r.SuiteDir)
 	if err != nil {
 		return nil, err
 	}
 	if len(suite.Scenarios) == 0 {
-		return nil, fmt.Errorf("no scenarios found in %s", r.ScenariosDir)
+		return nil, fmt.Errorf("no scenarios found in %s", r.SuiteDir)
 	}
 	r.suite = suite
 
@@ -202,7 +212,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 			}
 		}
 		if len(scenarios) == 0 {
-			return nil, fmt.Errorf("scenario %q not found in %s", opts.Scenario, r.ScenariosDir)
+			return nil, fmt.Errorf("scenario %q not found in %s", opts.Scenario, r.SuiteDir)
 		}
 	}
 

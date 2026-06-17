@@ -809,7 +809,7 @@ The rule of thumb: if the dimension can hold a service name, IPVPN
 name, MACVPN name, VRF name, ROUTE_POLICY name, QOS_POLICY name, or
 any other name that flows through `util.NormalizeName` at runtime,
 the `where:` pattern must be canonical. Verified end-to-end by the
-`1node-vs-auth` E2E suite (see `newtrun/suites/1node-vs-auth/README.md`
+`1node-vs-auth` E2E suite (see `newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/README.md`
 §"Where-pattern canonical form").
 
 The old shorthand syntax (`"action": ["groups"]`) continues to work —

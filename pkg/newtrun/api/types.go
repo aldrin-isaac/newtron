@@ -294,12 +294,13 @@ type SuiteScenariosResponse struct {
 // flags.
 //
 // The client addresses a suite by *name* — the server resolves the
-// name to bytes under its SuitesBase. Filesystem layout is server-
+// name to bytes via ResolveSuiteDir over its TopologiesBase. Filesystem layout is server-
 // internal and intentionally absent from the wire (§33 Public API
 // Boundary): clients must not learn where suite.yaml lives, and the
 // server must not accept absolute paths from clients.
 type StartRunRequest struct {
-	// Suite is the file-backed suite name under the server's SuitesBase.
+	// Suite is the file-backed suite name resolved by the server via
+	// ResolveSuiteDir across its TopologiesBase.
 	Suite string `json:"suite"`
 
 	// Scenario, if set, runs a single scenario from the suite. Mutually

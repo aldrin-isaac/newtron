@@ -193,7 +193,9 @@ func loadStateAt(dir string) (*RunState, error) {
 }
 
 // ListSuiteStates returns names of all suites with state directories.
-// Only returns suites that have actual suite directories in the suites base directory.
+// Only returns suites whose suite directory still exists on disk under
+// the configured topologies tree (filters out states for suites that
+// were renamed or removed).
 func ListSuiteStates() ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -209,10 +211,12 @@ func ListSuiteStates() ([]string, error) {
 		return nil, fmt.Errorf("newtrun: list suites: %w", err)
 	}
 
-	// Determine suites base directory (env > default)
-	suitesBase := os.Getenv("NEWTRUN_SUITES_BASE")
-	if suitesBase == "" {
-		suitesBase = "newtrun/suites"
+	// Determine topologies base (env > default). Suites live under
+	// <base>/<topology>/suites/<name>/; resolve each candidate via the
+	// shared ResolveSuiteDir helper.
+	topologiesBase := os.Getenv("NEWTRUN_TOPOLOGIES_BASE")
+	if topologiesBase == "" {
+		topologiesBase = "newtrun/topologies"
 	}
 
 	var names []string
@@ -220,9 +224,7 @@ func ListSuiteStates() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		// Check if actual suite directory exists
-		suitePath := filepath.Join(suitesBase, e.Name())
-		if info, err := os.Stat(suitePath); err == nil && info.IsDir() {
+		if _, err := ResolveSuiteDir(topologiesBase, e.Name()); err == nil {
 			names = append(names, e.Name())
 		}
 	}

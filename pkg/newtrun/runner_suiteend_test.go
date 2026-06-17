@@ -72,12 +72,12 @@ steps:
 // renames the err/results returns to local declarations, breaking the
 // closure), the test fails on suiteEndCalled.Load() == false.
 func TestRunner_SuiteEnd_FiresOnConfigError(t *testing.T) {
-	scenariosDir := seedMinimalSuite(t)
+	suiteDir := seedMinimalSuite(t)
 	rep := &reporterEvents{}
 	r := &Runner{
-		ScenariosDir: scenariosDir,
-		Progress:     rep,
-		ServerURL:    "http://127.0.0.1:1", // unreachable — connectToServer fails
+		SuiteDir:  suiteDir,
+		Progress:  rep,
+		ServerURL: "http://127.0.0.1:1", // unreachable — connectToServer fails
 	}
 
 	// All=true so Run gets past the scenario-selection gate. The

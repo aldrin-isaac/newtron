@@ -81,7 +81,7 @@ func TestStartRunSameSuiteRejected409(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-Acquire: %v", err)
 	}
-	writeMinimalSuite(t, srv.cfg.SuitesBase, "blocked-suite", scenarioYAMLBody)
+	writeMinimalSuite(t, suitesRoot(srv), "blocked-suite", scenarioYAMLBody)
 
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
@@ -100,7 +100,7 @@ func TestStartRunSameSuiteRejected409(t *testing.T) {
 func TestStartRunReturns202AndRegistersEntry(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
-	writeMinimalSuite(t, srv.cfg.SuitesBase, "blocked-suite", scenarioYAMLBody)
+	writeMinimalSuite(t, suitesRoot(srv), "blocked-suite", scenarioYAMLBody)
 
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
@@ -138,7 +138,7 @@ func TestStartRunReturns202AndRegistersEntry(t *testing.T) {
 func TestStartRunReturns400OnUnknownTargetsDimension(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
-	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	writeMinimalSuite(t, suitesRoot(srv), "demo-suite", scenarioYAMLBody)
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
@@ -160,11 +160,11 @@ func TestStartRunReturns400OnUnknownTargetsDimension(t *testing.T) {
 func TestStartRunReturns400OnTargetWhitelistViolation(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
-	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	writeMinimalSuite(t, suitesRoot(srv), "demo-suite", scenarioYAMLBody)
 	// Suite needs a declared dimension for the override to even
 	// reach the value-whitelist check. Append it to the suite.yaml
 	// the fixture wrote.
-	suitePath := filepath.Join(srv.cfg.SuitesBase, "demo-suite", "suite.yaml")
+	suitePath := filepath.Join(suitesRoot(srv), "demo-suite", "suite.yaml")
 	manifest, _ := os.ReadFile(suitePath)
 	manifest = append(manifest, []byte("targets:\n  devices: [s1]\n")...)
 	_ = os.WriteFile(suitePath, manifest, 0644)
@@ -190,7 +190,7 @@ func TestStartRunReturns400OnTargetWhitelistViolation(t *testing.T) {
 func TestStartRunReturns400OnUnknownParameterOverride(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
-	writeMinimalSuite(t, srv.cfg.SuitesBase, "demo-suite", scenarioYAMLBody)
+	writeMinimalSuite(t, suitesRoot(srv), "demo-suite", scenarioYAMLBody)
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 

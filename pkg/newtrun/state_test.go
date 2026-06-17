@@ -12,8 +12,8 @@ func TestSuiteName(t *testing.T) {
 		dir  string
 		want string
 	}{
-		{"newtrun/suites/2node-ngdp-incremental", "2node-ngdp-incremental"},
-		{"/home/user/newtrun/suites/4node-ngdp-fabric", "4node-ngdp-fabric"},
+		{"newtrun/topologies/2node-ngdp/suites/2node-ngdp-incremental", "2node-ngdp-incremental"},
+		{"/home/user/newtrun/topologies/4node-ngdp/suites/4node-ngdp-fabric", "4node-ngdp-fabric"},
 		{".", "."},
 	}
 	for _, tt := range tests {
@@ -116,9 +116,11 @@ func TestListSuiteStates(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Point NEWTEST_SUITES_BASE at a temp directory so the suite-dir filter works.
-	suitesBase := filepath.Join(tmpDir, "suites")
-	t.Setenv("NEWTRUN_SUITES_BASE", suitesBase)
+	// Point NEWTRUN_TOPOLOGIES_BASE at a temp directory so the
+	// suite-dir filter (via ResolveSuiteDir glob) resolves seeded
+	// suites under <base>/<topology>/suites/<name>/.
+	topologiesBase := filepath.Join(tmpDir, "topologies")
+	t.Setenv("NEWTRUN_TOPOLOGIES_BASE", topologiesBase)
 
 	// No suites yet
 	names, err := ListSuiteStates()
@@ -129,9 +131,11 @@ func TestListSuiteStates(t *testing.T) {
 		t.Errorf("expected 0 suites, got %d", len(names))
 	}
 
-	// Create two suites — both the state file and the matching suite directory.
+	// Create two suites — both the state file and the matching suite
+	// directory at its per-topology location.
+	suitesRoot := filepath.Join(topologiesBase, "test-topo", "suites")
 	for _, suite := range []string{"suite-a", "suite-b"} {
-		if err := os.MkdirAll(filepath.Join(suitesBase, suite), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(suitesRoot, suite), 0755); err != nil {
 			t.Fatalf("MkdirAll suite dir(%s): %v", suite, err)
 		}
 		state := &RunState{Suite: suite, Status: SuiteStatusComplete}

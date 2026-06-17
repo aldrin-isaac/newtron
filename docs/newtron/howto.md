@@ -2768,7 +2768,7 @@ bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 health check
 bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch2 health check
 
 # Run E2E test suite (uses newtrun)
-bin/newtrun start newtrun/suites/2node-ngdp-primitive
+bin/newtrun start 2node-ngdp-primitive
 ```
 
 ---

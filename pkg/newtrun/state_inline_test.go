@@ -65,7 +65,7 @@ func TestLoadInlineRunStateMissing(t *testing.T) {
 func TestInlineStateDoesNotPolluteSuiteNamespace(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	t.Setenv("NEWTRUN_SUITES_BASE", filepath.Join(tmpDir, "suites"))
+	t.Setenv("NEWTRUN_TOPOLOGIES_BASE", filepath.Join(tmpDir, "topologies"))
 
 	// Save an inline state with an id that matches a hypothetical suite name.
 	state := &RunState{

@@ -155,7 +155,7 @@ The CLI POSTs to `newtrun-server`, which spawns a Runner goroutine and starts st
 
 | Form | Behavior |
 |------|----------|
-| `newtrun start <name>` | Resolves under newtrun-server's `--suites-base` (default `newtrun/suites/<name>`). |
+| `newtrun start <name>` | Resolves under newtrun-server's `--topologies-base` (default: globs `newtrun/topologies/*/suites/<name>/`). |
 | `newtrun start --dir /path/to/suite` | Absolute path to a suite directory; mutually exclusive with the positional name. |
 
 ### 4.3 Scenario selection
@@ -194,7 +194,7 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 | newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server --spec-dir <path> &` |
 | newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Pass `--spec-dir <path>` when starting newt-server |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
-| Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
+| Suite name matches a directory under `--topologies-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
 
 If any precondition fails, the CLI exits with a clear message naming the missing piece.
@@ -269,7 +269,7 @@ Example output for one suite:
 
 ```
 newtrun: 2node-vs-primitive
-  suite:     newtrun/suites/2node-vs-primitive
+  suite:     newtrun/topologies/2node-vs/suites/2node-vs-primitive
   topology:  2node-vs (deployed, 8 nodes running)
   platform:  default
   status:    running
@@ -437,7 +437,7 @@ Scenario CRUD is exposed over HTTP — you can author, edit, and delete suites a
 bin/newtrun suite create my-experiment --topology 1node-vs
 ```
 
-Creates `<suites-base>/my-experiment/` with a minimal `suite.yaml` declaring `name: my-experiment` and `topology: 1node-vs`. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. `--topology` is required. Returns 409 if the suite already exists.
+Creates `<topologies-base>/1node-vs/suites/my-experiment/` with a minimal `suite.yaml` declaring `name: my-experiment` and `topology: 1node-vs` — the suite is colocated with its target topology. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. `--topology` is required. Returns 409 if a suite with this name already exists in any topology (suite names are globally unique across the tree).
 
 For parameterized scenarios (production-rollout shape) edit `suite.yaml` directly to add `targets:` and `parameters:` blocks — see [§10.6 Parameterized scenarios](#106-parameterized-scenarios).
 
@@ -1046,7 +1046,7 @@ Composes scenarios across suites. The called suite runs in the parent's process 
 ```yaml
 - name: apply-then-verify
   action: run-suite
-  suite: verify-service-health        # which suite to call (resolves under server's --suites-base)
+  suite: verify-service-health        # which suite to call (resolves under server's --topologies-base)
   parameters:                         # parameter overrides for the called suite
     service: '{{param.service}}'
   targets:                            # target-dimension overrides
@@ -1056,7 +1056,7 @@ Composes scenarios across suites. The called suite runs in the parent's process 
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `suite` | yes | Sibling suite directory name (no path separators). Resolves under the server's `--suites-base`. |
+| `suite` | yes | Sibling suite directory name (no path separators). Resolves under the server's `--topologies-base`. |
 | `parameters` | no | Per-parameter overrides that fill the called suite's `{{param.X}}` templates. Same shape as `POST /runs`' `parameters` body field. |
 | `targets` | no | Per-dimension target overrides that fill the called suite's `{{target.X}}` templates. Same shape as `POST /runs`' `targets` body field. |
 
@@ -1289,7 +1289,7 @@ Compound commands work — the executor wraps in `sh -c` so pipelines run inside
 
 ### 12.3 Worked example: L2 bridging test
 
-Adapted from the 2node-vs-primitive suite (`newtrun/suites/2node-vs-primitive/10-bridged.yaml`) — the real scenario adds a third tagged member and polls ASIC_DB before the host setup; the example below trims those for readability and focuses on the L2-bridging path itself. The 2node-vs topology wires host1→`switch1:Ethernet4` and host3→`switch1:Ethernet12` (Force10-S6000 stride-4 port naming). The scenario creates VLAN 100, adds the two host-facing ports as untagged members, and verifies L2 connectivity between the hosts:
+Adapted from the 2node-vs-primitive suite (`newtrun/topologies/2node-vs/suites/2node-vs-primitive/10-bridged.yaml`) — the real scenario adds a third tagged member and polls ASIC_DB before the host setup; the example below trims those for readability and focuses on the L2-bridging path itself. The 2node-vs topology wires host1→`switch1:Ethernet4` and host3→`switch1:Ethernet12` (Force10-S6000 stride-4 port naming). The scenario creates VLAN 100, adds the two host-facing ports as untagged members, and verifies L2 connectivity between the hosts:
 
 ```yaml
 # Create VLAN
@@ -1661,4 +1661,4 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 
 ---
 
-*Source-traced against `cmd/newtrun/` and the `bin/newtrun --help` output. CLI command names, flag names, and exit-code mappings are exact. YAML examples are runnable against the suites in `newtrun/suites/`. If you find a discrepancy, the code is the authority — please open an issue or PR.*
+*Source-traced against `cmd/newtrun/` and the `bin/newtrun --help` output. CLI command names, flag names, and exit-code mappings are exact. YAML examples are runnable against the suites in `newtrun/topologies/`. If you find a discrepancy, the code is the authority — please open an issue or PR.*

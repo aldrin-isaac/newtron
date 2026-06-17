@@ -5,10 +5,10 @@
 // knows the parser's accept set, so a bad YAML cannot reach the
 // suites tree and surface later as a confusing run failure.
 //
-// Persistence: <suites-base>/<suite>/<name>.yaml. Writes go through a
-// same-directory tempfile + rename, which is atomic on POSIX
-// filesystems — a partially-written scenario can never be observed by
-// a concurrent suite-loader read.
+// Persistence: <topologies-base>/<topology>/suites/<suite>/<name>.yaml.
+// Writes go through a same-directory tempfile + rename, which is atomic
+// on POSIX filesystems — a partially-written scenario can never be
+// observed by a concurrent suite-loader read.
 package api
 
 import (
@@ -34,7 +34,12 @@ func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := resolveScenarioPath(s.cfg.SuitesBase, suite, name)
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	if err != nil {
+		httputil.WriteError(w, mapFSErrorToStatus(err), err)
+		return
+	}
+	path, err := resolveScenarioPath(suiteDir, name)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), err)
 		return
@@ -69,7 +74,8 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := os.Stat(filepath.Join(s.cfg.SuitesBase, suite)); err != nil {
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
 		return
 	}
@@ -107,7 +113,7 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 	// Pick the destination filename: existing file's basename if
 	// any (preserves operator-authored lexical prefix), else
 	// <name>.yaml for a fresh scenario.
-	destPath, status, err := resolveDestPath(s.cfg.SuitesBase, suite, name)
+	destPath, status, err := resolveDestPath(suiteDir, name)
 	if err != nil {
 		httputil.WriteError(w, http.StatusInternalServerError, err)
 		return
@@ -135,7 +141,12 @@ func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := resolveScenarioPath(s.cfg.SuitesBase, suite, name)
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suite)
+	if err != nil {
+		httputil.WriteError(w, mapFSErrorToStatus(err), err)
+		return
+	}
+	path, err := resolveScenarioPath(suiteDir, name)
 	if err != nil {
 		httputil.WriteError(w, mapFSErrorToStatus(err), err)
 		return
@@ -166,11 +177,13 @@ func requireScenarioParams(w http.ResponseWriter, r *http.Request) (suite, name 
 	return suite, name, true
 }
 
-// resolveScenarioPath finds the on-disk file for a scenario, matching
-// either exact <name>.yaml or *-<name>.yaml (the existing lexical
-// prefix convention). Returns os.ErrNotExist when no candidate matches.
-func resolveScenarioPath(suitesBase, suite, name string) (string, error) {
-	suiteDir := filepath.Join(suitesBase, suite)
+// resolveScenarioPath finds the on-disk file for a scenario inside
+// the given suite directory, matching either exact <name>.yaml or
+// *-<name>.yaml (the existing lexical prefix convention). Returns
+// os.ErrNotExist when no candidate matches. The caller passes the
+// fully-resolved suite directory (from resolveSuiteDir) so the
+// scenario lookup is decoupled from the per-topology layout.
+func resolveScenarioPath(suiteDir, name string) (string, error) {
 	entries, err := os.ReadDir(suiteDir)
 	if err != nil {
 		return "", err
@@ -184,7 +197,7 @@ func resolveScenarioPath(suitesBase, suite, name string) (string, error) {
 			return filepath.Join(suiteDir, e.Name()), nil
 		}
 	}
-	return "", fmt.Errorf("scenario %q not found in suite %q: %w", name, suite, os.ErrNotExist)
+	return "", fmt.Errorf("scenario %q not found in %s: %w", name, suiteDir, os.ErrNotExist)
 }
 
 // resolveDestPath chooses the write destination for PUT. Returns the
@@ -192,16 +205,15 @@ func resolveScenarioPath(suitesBase, suite, name string) (string, error) {
 // prefix) or the fresh-create path <name>.yaml. The status return
 // distinguishes 200 (update) from 201 (create) for the response.
 //
-// Signature mirrors resolveScenarioPath — both take (suitesBase,
-// suite, name) so the caller never has to compose a joined path that
-// the helper then has to split.
-func resolveDestPath(suitesBase, suite, name string) (string, int, error) {
-	path, err := resolveScenarioPath(suitesBase, suite, name)
+// Signature mirrors resolveScenarioPath — both take (suiteDir, name)
+// so the caller resolves the suite once and reuses the result.
+func resolveDestPath(suiteDir, name string) (string, int, error) {
+	path, err := resolveScenarioPath(suiteDir, name)
 	switch {
 	case err == nil:
 		return path, http.StatusOK, nil
 	case errors.Is(err, os.ErrNotExist):
-		return filepath.Join(suitesBase, suite, name+".yaml"), http.StatusCreated, nil
+		return filepath.Join(suiteDir, name+".yaml"), http.StatusCreated, nil
 	default:
 		return "", 0, err
 	}

@@ -4,7 +4,7 @@
 
 **Note (Feb 2026):** The `2node-ngdp-primitive` suite has been replaced by `2node-ngdp-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-ngdp-primitive` in this document refer to the predecessor suite.
 
-**Component**: CiscoVS NGDP (Silicon One network simulator), `newtrun/suites/2node-ngdp-primitive/35-vrf-routing.yaml`
+**Component**: CiscoVS NGDP (Silicon One network simulator), `newtrun/topologies/2node-ngdp/suites/2node-ngdp-primitive/35-vrf-routing.yaml`
 **Affected**: Any test that configures a VRF interface IP and expects a host to reach it immediately
 **Discovered**: 2026-02-19
 

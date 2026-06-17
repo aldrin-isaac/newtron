@@ -13,7 +13,8 @@ import (
 
 // Suite is a collection of scenarios that share a topology and (when
 // the suite is parameterized) a single targets/parameters block.
-// Suites live on disk as a directory: newtrun/suites/<name>/, with a
+// Suites live on disk under their owning topology:
+// newtrun/topologies/<topology>/suites/<name>/, with a
 // suite.yaml declaring the suite metadata + targets/parameters, and
 // NN-<name>.yaml scenario files alongside it.
 //
