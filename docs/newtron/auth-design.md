@@ -960,6 +960,45 @@ only configured grantees can read OR write the grant table.
 **Verified by** the 1node-vs-auth suite's `90-L4-auth-read-gated`
 scenarios (mallory denied, iam-ian granted, root super-bypass).
 
+#### `audit.read` — gating the audit-log inspector
+
+The same engage-when-configured shape extends to the audit-log
+endpoints (`GET /audit/events` and `GET /audit/integrity`, shipped
+in newtron#196). Both are gated by `audit.read`: no entry in the
+grant table means ungated (preserves the CLI-equivalent
+reachability the endpoints shipped with); first entry engages the
+gate and fail-closes on any caller not matched.
+
+```json
+"permissions": {
+  "audit.read": [
+    { "groups": ["iam-team", "audit-team"] },
+    { "groups": ["sre-team"],
+      "where": { "field": "audit_integrity" } }
+  ]
+}
+```
+
+The `field` where-dimension scopes which audit surface a caller
+may read:
+
+- `where: {field: "audit_events"}` — only `GET /audit/events`
+- `where: {field: "audit_integrity"}` — only `GET /audit/integrity`
+- empty `where` (shorthand grant) — both endpoints
+
+The first form is useful when an SRE rotation is meant to monitor
+chain-integrity status (a tamper tripwire) without seeing the
+event content; the operator splits the surface accordingly.
+
+Super-users continue to bypass `audit.read` like every other
+permission. The bootstrap is identical to `auth.read`: edit
+`network.json` on disk, restart (or rely on `--spec-watch` to
+reload), the gate engages.
+
+**Verified by** the 1node-vs-auth suite's `95-L4-audit-read-gated`
+scenarios (mallory denied on both endpoints, iam-ian granted,
+root super-bypass + user-filter exercise).
+
 ### L6 — Operational Hardening (Revocation + Audit Log Integrity)
 
 **Goal.** Two operational properties that production deployments

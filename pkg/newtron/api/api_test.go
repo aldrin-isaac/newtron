@@ -239,6 +239,7 @@ func TestAPICompleteness(t *testing.T) {
 			"InitFromDeviceIntent":   "intent mode initialization — invoked by NodeActor.ensureActuatedIntent",
 			"SaveDeviceIntents":      "intent save — invoked by handleSave via nodeActor.execute",
 			"CheckAuthReadGate":      "auth gate helper invoked by handleGetAuthorization for the engage-when-configured PermAuthRead check (#187); not a request-handled action",
+			"CheckAuditReadGate":     "auth gate helper invoked by handleAuditEvents and handleAuditIntegrity for the engage-when-configured PermAuditRead check (#196); not a request-handled action",
 		},
 		"Node": {
 			"BindsService":         "internal helper for /service/{name}/projection — pre-check before ServiceProjection",

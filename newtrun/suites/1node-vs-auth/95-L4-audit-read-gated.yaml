@@ -1,0 +1,93 @@
+name: L4-audit-read-gated-mallory
+description: |
+  auth-design.md "audit.read": the audit-log inspector endpoints
+  GET /audit/events and GET /audit/integrity are engage-when-configured
+  (same pattern as auth.read, #187/#188). With an audit.read entry
+  in the grant table, mallory (no group) is denied on both. The
+  gate fires BEFORE the underlying log read — denial responses
+  carry no event data.
+
+  This pins the engaged half of the contract on the live
+  --enforce-authorization server. The unengaged half (no
+  audit.read entry → fallback 200) is exercised by the unit tests
+  in handler_audit_test.go because the engaged-vs-fallback toggle
+  is a network.json shape question that the E2E suite can't easily
+  flip mid-run.
+
+requires: [L4-auth-read-gated-root]
+as: mallory
+
+steps:
+  - name: mallory-read-audit-events-denied
+    action: newtron
+    method: GET
+    url: /audit/events
+    expect_failure: true
+
+  - name: mallory-read-audit-integrity-denied
+    action: newtron
+    method: GET
+    url: /audit/integrity
+    expect_failure: true
+
+---
+name: L4-audit-read-gated-iam-ian
+description: |
+  iam-ian (iam-team) is granted audit.read; both audit endpoints
+  return live data. Pins the granted-half of the contract.
+
+  Events endpoint: jq assertion confirms the response carries an
+  events array. Total count is the number of mutations the prior
+  scenarios in this suite produced — non-zero by the time this
+  scenario runs (every L3/L4/L5 mutation step writes one event).
+
+  Integrity endpoint: jq assertion confirms entry_count > 0 and
+  break_at == 0 (clean chain; the suite hasn't tampered with the log).
+
+requires: [L4-audit-read-gated-mallory]
+as: iam-ian
+
+steps:
+  - name: iam-ian-read-audit-events-allowed
+    action: newtron
+    method: GET
+    url: /audit/events
+    expect:
+      jq: '.events | type == "array" and length >= 0'
+
+  - name: iam-ian-read-audit-integrity-allowed
+    action: newtron
+    method: GET
+    url: /audit/integrity
+    expect:
+      jq: '.entry_count >= 0 and .break_at == 0 and .chain_head_hash != null'
+
+---
+name: L4-audit-read-gated-root
+description: |
+  root (super_user) bypasses audit.read like every other
+  permission. Pins the super-user bypass on these two gates so a
+  future change to auth.Checker.isSuperUser semantics doesn't
+  silently regress.
+
+  Also exercises the filter-by-user query param: a known suite
+  identity (alice) should have produced events in earlier
+  scenarios. The response is filtered to only her events.
+
+requires: [L4-audit-read-gated-iam-ian]
+as: root
+
+steps:
+  - name: root-read-audit-events-allowed
+    action: newtron
+    method: GET
+    url: /audit/events
+    expect:
+      jq: '.events | type == "array"'
+
+  - name: root-filter-audit-events-by-alice
+    action: newtron
+    method: GET
+    url: /audit/events?user=alice
+    expect:
+      jq: '.events | all(.user == "alice")'

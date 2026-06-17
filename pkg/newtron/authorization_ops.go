@@ -41,3 +41,15 @@ func (net *Network) GetAuthorization() *AuthorizationDetail {
 func (net *Network) CheckAuthReadGate(ctx context.Context, authCtx *auth.Context) error {
 	return net.checkPermissionIfConfigured(ctx, auth.PermAuthRead, authCtx)
 }
+
+// CheckAuditReadGate engages the PermAuditRead gate under the same
+// engage-when-configured pattern as CheckAuthReadGate: returns nil
+// when no audit.read entry exists in the grant table (preserves the
+// legacy ungated behavior the audit endpoints shipped with),
+// otherwise runs the standard gate. Used by the HTTP handlers for
+// GET /audit/events and GET /audit/integrity. The handler should
+// stamp authCtx.Field with "audit_events" or "audit_integrity" so
+// a where:{field: ...} clause can scope to one surface.
+func (net *Network) CheckAuditReadGate(ctx context.Context, authCtx *auth.Context) error {
+	return net.checkPermissionIfConfigured(ctx, auth.PermAuditRead, authCtx)
+}
