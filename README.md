@@ -79,20 +79,28 @@ service — step by step, with explanations at each stage.
 Or run the steps yourself:
 
 ```bash
-# 1. Get the SONiC community image
+# 1. Get the SONiC community image (pinned to the 202505 stable branch — the
+#    same image scripts/getting-started.sh uses; `branchName=master` may pick
+#    up a build that fails to boot or hasn't been validated by the suites)
 mkdir -p ~/.newtlab/images
-curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
+curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=202505&platform=vs&buildId=1057313&target=target/sonic-vs.img.gz" \
   | gunzip > ~/.newtlab/images/sonic-vs.qcow2
 
 # 2. Build
 make build
 
-# 3. Deploy a single-switch lab
+# 3. Start the aggregated server (newtron + newtrun + newtlab in one process
+#    on :18080). Must start BEFORE the deploy so `newtlab deploy --monitor`
+#    can read live link telemetry — newtlink pushes per-link byte counters
+#    to newt-server every 5 seconds and the deploy monitor renders them.
+bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &
+NEWT_SERVER_PID=$!
+sleep 2 && kill -0 $NEWT_SERVER_PID || { echo "newt-server failed to start"; exit 1; }
+
+# 4. Deploy a single-switch lab
 bin/newtlab deploy 1node-vs --monitor  # live status during deploy
 
-# 4. Start the aggregated server, initialize the device, apply a service
-#    newt-server runs newtron + newtrun + newtlab in one process on :18080.
-bin/newt-server --spec-dir newtrun/topologies/1node-vs/specs &
+# 5. Initialize the device and apply a service
 bin/newtron switch1 init
 bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 ```
