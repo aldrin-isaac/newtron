@@ -153,13 +153,13 @@ func renderSuiteStatus(out io.Writer, suite string, state *newtrun.RunState, det
 	// Header
 	fmt.Fprintf(out, "newtrun: %s\n", suite)
 
-	// Topology info
-	topology := resolveTopologyFromState(state)
-	topoStatus := "unknown"
-	if topology != "" {
-		topoStatus = checkTopologyStatus(topology)
+	// Network info (the deployed network's lab status).
+	network := resolveTopologyFromState(state)
+	netStatus := "unknown"
+	if network != "" {
+		netStatus = checkNetworkStatus(network)
 	}
-	fmt.Fprintf(out, "  network:   %s (%s)\n", topology, topoStatus)
+	fmt.Fprintf(out, "  network:   %s (%s)\n", network, netStatus)
 
 	// Platform
 	platform := state.Platform
@@ -377,13 +377,13 @@ func findRunningSuite(suites []string) string {
 }
 
 
-func checkTopologyStatus(topology string) string {
-	// Topology name is the lab name (per the same convention newtron
-	// uses). Routes through newtlab-server's HTTP client — newtlab
-	// owns LabState (§27), so cmd/newtrun consults it via the API
-	// rather than reading state.json from disk.
+func checkNetworkStatus(network string) string {
+	// The network name is the lab name (PR #116 — the lab's deployment
+	// id IS its network id). Routes through newtlab-server's HTTP
+	// client — newtlab owns LabState (§27), so cmd/newtrun consults it
+	// via the API rather than reading state.json from disk.
 	lc := newNewtlabClient()
-	state, err := lc.LabStatus(context.Background(), topology)
+	state, err := lc.LabStatus(context.Background(), network)
 	if err != nil {
 		return "not deployed"
 	}

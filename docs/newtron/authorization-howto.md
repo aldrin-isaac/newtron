@@ -137,11 +137,13 @@ On `newtron-server` or `newt-server`:
 
 ```sh
 bin/newt-server \
-  --spec-dir networks/1node-vs/specs \
   --audit-log /var/log/newtron-audit.jsonl \
   --audit-caller-header X-Newtron-Caller \
   --enforce-authorization
 ```
+
+(Networks are auto-discovered from `./networks/` — point at a custom
+tree with `--networks-base <path>` if needed.)
 
 The five flags above engage the mutation audit log with header identity
 (auth-design.md L1) and authorization enforcement (auth-design.md L3).

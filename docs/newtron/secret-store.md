@@ -52,12 +52,12 @@ Typical operator setups:
 ```sh
 # Operator-managed store, explicit path
 mkdir -m 700 -p ~/.newtron
-bin/newt-server --spec-dir /etc/newtron/lab \
-                --secret-store ~/.newtron/secrets.json
+bin/newt-server --secret-store ~/.newtron/secrets.json
 
-# Spec-dir convention — secrets.json lives alongside network.json
-bin/newt-server --spec-dir networks/1node-vs/specs
-# loader auto-discovers networks/1node-vs/specs/secrets.json
+# Convention — secrets.json lives alongside network.json under networks/<name>/specs/
+bin/newt-server &
+# loader auto-discovers every networks/<name>/specs/topology.json AND
+# the matching networks/<name>/specs/secrets.json
 ```
 
 When a referenced KEY is missing from the resolved store, the server

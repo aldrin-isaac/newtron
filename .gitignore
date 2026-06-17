@@ -1,7 +1,9 @@
 # Build artifacts
 /bin/
 /newtron
+/newtrun
 /newtlab
+/newt-server
 /newtron-server
 
 # newtrun-generated run reports (CLI default output path)

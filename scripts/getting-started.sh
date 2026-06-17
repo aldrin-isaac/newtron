@@ -10,7 +10,7 @@ set -euo pipefail
 SONIC_VS_URL="https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=202505&platform=vs&buildId=1057313&target=target/sonic-vs.img.gz"
 IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
-SPEC_DIR="networks/1node-vs/specs"
+NETWORK_DIR="networks/1node-vs/specs"  # for displaying spec content; newt-server auto-discovers
 SERVER_PID=""        # newt-server PID (single process running all three engines)
 TOTAL_STEPS=12
 
@@ -276,7 +276,7 @@ echo "  per-link byte counters to newt-server every 5 seconds, and"
 echo -e "  ${BOLD}newtlab status${RESET} reads them via HTTP to populate the link table."
 
 # Kill any leftover newt-server from a previous run
-existing_pid=$(pgrep -f "newt-server.*-spec-dir" || true)
+existing_pid=$(pgrep -f "bin/newt-server" || true)
 if [ -n "$existing_pid" ]; then
     echo ""
     echo -e "  ${GRAY}Stopping leftover newt-server (PID $existing_pid)...${RESET}"
@@ -293,9 +293,9 @@ if ss -tlnH 'sport = :18080' 2>/dev/null | grep -q 8080; then
 fi
 
 echo ""
-echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newt-server --spec-dir $SPEC_DIR &${RESET}"
+echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newt-server &${RESET}"
 echo ""
-bin/newt-server --spec-dir "$SPEC_DIR" > /tmp/newt-server.log 2>&1 &
+bin/newt-server > /tmp/newt-server.log 2>&1 &
 SERVER_PID=$!
 sleep 2
 
@@ -369,8 +369,8 @@ echo ""
 echo -e "  ${BOLD}network.json${RESET} defines services -- abstract descriptions of what"
 echo "  a port should do. This one defines a transit peering service:"
 echo ""
-echo -e "  ${GRAY}$SPEC_DIR/network.json${RESET}"
-cat "$SPEC_DIR/network.json" | sed 's/^/    /'
+echo -e "  ${GRAY}$NETWORK_DIR/network.json${RESET}"
+cat "$NETWORK_DIR/network.json" | sed 's/^/    /'
 echo ""
 echo "  'routed' means L3 -- an IP address on the interface with a BGP peer."
 echo "  'peer_as: request' means the operator provides the peer AS at apply"
@@ -382,8 +382,8 @@ echo ""
 echo -e "  ${BOLD}profiles/switch1.json${RESET} identifies the device -- its ASN, loopback,"
 echo "  management IP, and credentials:"
 echo ""
-echo -e "  ${GRAY}$SPEC_DIR/profiles/switch1.json${RESET}"
-cat "$SPEC_DIR/profiles/switch1.json" | sed 's/^/    /'
+echo -e "  ${GRAY}$NETWORK_DIR/profiles/switch1.json${RESET}"
+cat "$NETWORK_DIR/profiles/switch1.json" | sed 's/^/    /'
 echo ""
 echo "  When you say 'apply transit to Ethernet0 with IP 10.1.0.0/31 and"
 echo -e "  peer AS 65002', ${BLUE_BOLD}newtron${RESET} combines the service spec + device profile"

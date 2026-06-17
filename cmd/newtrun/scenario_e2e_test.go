@@ -46,7 +46,7 @@ func buildCLI(t *testing.T) string {
 // newE2EServer wires the real api.Server into an httptest.Server and
 // returns the httptest.Server plus the topologies base directory the
 // server is configured against. Tests that create suites via the CLI
-// (with --topology X) then assert on-disk state at
+// (with --network X) then assert on-disk state at
 // suiteDirIn(networksBase, X, suiteName).
 //
 // Callers access ts.URL when sending the URL to a subprocess and ts
@@ -68,7 +68,7 @@ func newE2EServer(t *testing.T) (ts *httptest.Server, networksBase string) {
 
 // suiteDirIn returns the on-disk path the production handler would
 // write a suite to given its declared topology. Tests compose this
-// when asserting on-disk state after `suite create --topology X`.
+// when asserting on-disk state after `suite create --network X`.
 func suiteDirIn(networksBase, topology, suite string) string {
 	return filepath.Join(networksBase, topology, "suites", suite)
 }
@@ -103,9 +103,9 @@ func TestE2E_ScenarioLifecycle(t *testing.T) {
 	ts, networksBase := newE2EServer(t)
 
 	const suite = "e2edemo"
-	const topology = "synthetic"
+	const network = "synthetic"
 	const scenario = "smoke"
-	suiteDir := suiteDirIn(networksBase, topology, suite)
+	suiteDir := suiteDirIn(networksBase, network, suite)
 	body := []byte(`name: smoke
 description: e2e smoke test
 steps:
@@ -115,7 +115,7 @@ steps:
 `)
 
 	// suite create
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--network", network); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	if _, err := os.Stat(suiteDir); err != nil {
@@ -177,9 +177,9 @@ func TestE2E_ScenarioPutFromFile(t *testing.T) {
 	binPath := buildCLI(t)
 	ts, networksBase := newE2EServer(t)
 	const suite = "filedemo"
-	const topology = "synthetic"
-	suiteDir := suiteDirIn(networksBase, topology, suite)
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
+	const network = "synthetic"
+	suiteDir := suiteDirIn(networksBase, network, suite)
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--network", network); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	body := []byte(`name: from-file
@@ -214,9 +214,9 @@ func TestE2E_ScenarioPutRejectsBadYAML(t *testing.T) {
 	binPath := buildCLI(t)
 	ts, networksBase := newE2EServer(t)
 	const suite = "rejectdemo"
-	const topology = "synthetic"
-	suiteDir := suiteDirIn(networksBase, topology, suite)
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
+	const network = "synthetic"
+	suiteDir := suiteDirIn(networksBase, network, suite)
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--network", network); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	bad := []byte("not: a valid: scenario yaml: at all\n")

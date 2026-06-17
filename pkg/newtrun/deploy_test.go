@@ -13,33 +13,33 @@ import (
 // return. Satisfies the LabClient contract structurally; production
 // code uses *newtlabclient.Client.
 type fakeLabClient struct {
-	statusFn  func(ctx context.Context, topology string) (*newtlab.LabState, error)
-	deployFn  func(ctx context.Context, topology string, opts api.DeployRequest) error
-	destroyFn func(ctx context.Context, topology string) error
+	statusFn  func(ctx context.Context, lab string) (*newtlab.LabState, error)
+	deployFn  func(ctx context.Context, lab string, opts api.DeployRequest) error
+	destroyFn func(ctx context.Context, lab string) error
 
 	deployCalls  int
 	destroyCalls int
 }
 
-func (f *fakeLabClient) LabStatus(ctx context.Context, topology string) (*newtlab.LabState, error) {
+func (f *fakeLabClient) LabStatus(ctx context.Context, lab string) (*newtlab.LabState, error) {
 	if f.statusFn != nil {
-		return f.statusFn(ctx, topology)
+		return f.statusFn(ctx, lab)
 	}
 	return nil, errors.New("not deployed")
 }
 
-func (f *fakeLabClient) Deploy(ctx context.Context, topology string, opts api.DeployRequest) error {
+func (f *fakeLabClient) Deploy(ctx context.Context, lab string, opts api.DeployRequest) error {
 	f.deployCalls++
 	if f.deployFn != nil {
-		return f.deployFn(ctx, topology, opts)
+		return f.deployFn(ctx, lab, opts)
 	}
 	return nil
 }
 
-func (f *fakeLabClient) Destroy(ctx context.Context, topology string) error {
+func (f *fakeLabClient) Destroy(ctx context.Context, lab string) error {
 	f.destroyCalls++
 	if f.destroyFn != nil {
-		return f.destroyFn(ctx, topology)
+		return f.destroyFn(ctx, lab)
 	}
 	return nil
 }
@@ -64,7 +64,7 @@ func TestDeployTopology_RoutesThroughClient(t *testing.T) {
 func TestDeployTopology_PropagatesError(t *testing.T) {
 	want := errors.New("disk full")
 	fake := &fakeLabClient{
-		deployFn: func(ctx context.Context, topology string, opts api.DeployRequest) error {
+		deployFn: func(ctx context.Context, lab string, opts api.DeployRequest) error {
 			return want
 		},
 	}
@@ -80,9 +80,9 @@ func TestDeployTopology_PropagatesError(t *testing.T) {
 // already-up lab.
 func TestEnsureTopology_ReusesRunningLab(t *testing.T) {
 	fake := &fakeLabClient{
-		statusFn: func(ctx context.Context, topology string) (*newtlab.LabState, error) {
+		statusFn: func(ctx context.Context, lab string) (*newtlab.LabState, error) {
 			return &newtlab.LabState{
-				Name: topology,
+				Name: lab,
 				Nodes: map[string]*newtlab.NodeState{
 					"n1": {Status: "running"},
 					"n2": {Status: "running"},
@@ -104,19 +104,19 @@ func TestEnsureTopology_ReusesRunningLab(t *testing.T) {
 func TestEnsureTopology_RedeploysWhenPartialOrMissing(t *testing.T) {
 	cases := []struct {
 		name    string
-		statusFn func(ctx context.Context, topology string) (*newtlab.LabState, error)
+		statusFn func(ctx context.Context, lab string) (*newtlab.LabState, error)
 	}{
 		{
 			name: "missing",
-			statusFn: func(ctx context.Context, topology string) (*newtlab.LabState, error) {
+			statusFn: func(ctx context.Context, lab string) (*newtlab.LabState, error) {
 				return nil, errors.New("404")
 			},
 		},
 		{
 			name: "partial",
-			statusFn: func(ctx context.Context, topology string) (*newtlab.LabState, error) {
+			statusFn: func(ctx context.Context, lab string) (*newtlab.LabState, error) {
 				return &newtlab.LabState{
-					Name: topology,
+					Name: lab,
 					Nodes: map[string]*newtlab.NodeState{
 						"n1": {Status: "running"},
 						"n2": {Status: "stopped"},

@@ -43,7 +43,7 @@ step progresses.
    ```
 
    (Pin to the `202505` stable branch — the same image `scripts/getting-started.sh` uses. The `master` build at any given moment may fail to boot or include behavior that hasn't been validated by the newtrun suites.)
-4. Start the aggregated server: `bin/newt-server --spec-dir networks/1node-vs/specs &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; see [`docs/newt-server.md`](docs/newt-server.md)). Server must start before the deploy so `bin/newtlab deploy --monitor` can read live link telemetry — `newtlink` pushes per-link byte counters to newt-server every 5 seconds and the deploy monitor renders them. Wait ~2 seconds after the `&` then verify with `kill -0 <pid>` before proceeding.
+4. Start the aggregated server: `bin/newt-server &` (runs newtron + newtrun + newtlab engines in one process on `:18080`; auto-discovers every `networks/<name>/specs/topology.json` and registers each as a network; see [`docs/newt-server.md`](docs/newt-server.md)). Server must start before the deploy so `bin/newtlab deploy --monitor` can read live link telemetry — `newtlink` pushes per-link byte counters to newt-server every 5 seconds and the deploy monitor renders them. Wait ~2 seconds after the `&` then verify with `kill -0 <pid>` before proceeding.
 5. Deploy a single-switch lab: `bin/newtlab deploy 1node-vs --monitor`
 6. Run a first operation to prove it works:
    ```

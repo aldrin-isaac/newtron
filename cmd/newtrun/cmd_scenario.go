@@ -156,32 +156,32 @@ func newSuiteCmd() *cobra.Command {
 }
 
 func newSuiteCreateCmd() *cobra.Command {
-	var topology string
+	var network string
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a suite directory + suite.yaml manifest on the server",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if topology == "" {
-				return fmt.Errorf("--topology is required")
+			if network == "" {
+				return fmt.Errorf("--network is required")
 			}
-			return createSuite(cmd.Context(), args[0], topology)
+			return createSuite(cmd.Context(), args[0], network)
 		},
 	}
-	cmd.Flags().StringVar(&topology, "topology", "", "topology name this suite targets (required)")
-	_ = cmd.MarkFlagRequired("topology")
+	cmd.Flags().StringVar(&network, "network", "", "network name this suite targets (required)")
+	_ = cmd.MarkFlagRequired("network")
 	return cmd
 }
 
-func createSuite(ctx context.Context, name, topology string) error {
+func createSuite(ctx context.Context, name, network string) error {
 	c := newClient()
 	if err := requireServer(ctx, c); err != nil {
 		return err
 	}
-	if err := c.CreateSuite(ctx, name, topology); err != nil {
+	if err := c.CreateSuite(ctx, name, network); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "created suite %s (topology=%s)\n", name, topology)
+	fmt.Fprintf(os.Stderr, "created suite %s (network=%s)\n", name, network)
 	return nil
 }
 

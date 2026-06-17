@@ -74,11 +74,8 @@ scenario overrides this default for every call that scenario makes.
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--listen` | `127.0.0.1:18080` | Bind address. Non-loopback values trigger a startup warning. |
-| `--spec-dir` | `""` | Forwarded to newtron — auto-register as the `default` network. |
-| `--net-id` | `default` | Network ID for `--spec-dir`. |
 | `--idle-timeout` | `5m` | newtron SSH connection idle timeout. |
-| `--networks-base` | `networks` | Forwarded to newtrun. Suites are nested as `<base>/<network>/suites/<suite>/`. |
-| `--networks-base` | `networks` | Used by newtlab for lab-spec resolution (the on-disk path it walks to find a `topology.json` for a deploy). |
+| `--networks-base` | `networks` | Root of the network tree. At boot, every `<base>/<name>/specs/topology.json` is auto-registered as a network with `id=<name>`. Also drives newtrun's suite discovery (`<base>/<name>/suites/<suite>/`) and newtlab's lab-spec resolution. One flag, three engines. |
 | `--scaffold-root` | `""` | Forwarded to newtron. When set, `POST /newtron/v1/networks` accepts `scaffold:true` requests without `spec_dir` and lays them out under `<root>/<id>`. Empty disables this mode — UI clients fall back to passing `spec_dir` explicitly. |
 
 ### Identity (auth-design.md §L1-L2c)

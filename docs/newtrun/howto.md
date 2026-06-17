@@ -63,7 +63,7 @@ The fastest path exercises the CLI's `--loopback` mode against an in-memory abst
 
 ```bash
 # 1. Start newt-server (port 18080 — runs newtron, newtrun, newtlab in one process)
-bin/newt-server --spec-dir networks/1node-vs/specs &
+bin/newt-server &
 
 # 2. Run the loopback suite (--no-deploy skips lab deployment)
 bin/newtrun start 1node-vs-config --no-deploy
@@ -108,7 +108,7 @@ The full lifecycle of a real test, derived from the 2node-vs-primitive suite (21
 bin/newtlab deploy 2node-vs --monitor
 
 # 2. Start newt-server pointing at this network's specs
-bin/newt-server --spec-dir networks/2node-vs/specs &
+bin/newt-server &
 
 # 3. Run the suite (deploys hosts via SSH; ~7 minutes)
 bin/newtrun start 2node-vs-primitive
@@ -191,8 +191,8 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
-| newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server --spec-dir <path> &` |
-| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Pass `--spec-dir <path>` when starting newt-server |
+| newt-server up on `:18080` | `curl http://localhost:18080/newt-server/v1/health` | Start with `bin/newt-server &` (auto-discovers networks/) |
+| newtron route reachable (newt-server has loaded the network) | `curl http://localhost:18080/newtron/v1/networks` | Place specs at `networks/<name>/specs/` (auto-discovered) or `POST /newtron/v1/networks` for non-default layouts |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--networks-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
@@ -1391,7 +1391,7 @@ The 2node-vs-primitive suite uses host-exec steps, so the runner host needs KVM/
 ```yaml
 - name: Start newt-server + deploy lab
   run: |
-    bin/newt-server --spec-dir networks/2node-vs/specs &
+    bin/newt-server &
     sleep 2
     bin/newtlab deploy 2node-vs --monitor
 
@@ -1441,7 +1441,7 @@ NEWTRUN_SERVER=http://other-host:18080 bin/newtrun start <suite>
 Start the server if it isn't running:
 
 ```bash
-bin/newt-server --spec-dir <path-to-specs> &
+bin/newt-server &
 ```
 
 ### 14.2 `infrastructure error: run was aborted (server shut down)`
@@ -1475,7 +1475,7 @@ Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO
 ```bash
 git checkout HEAD -- networks/<name>/specs/network.json
 pkill -KILL -f "bin/newt-server" && sleep 1
-bin/newt-server --spec-dir networks/<name>/specs &
+bin/newt-server &
 ```
 
 ### 14.6 BGP verification times out
