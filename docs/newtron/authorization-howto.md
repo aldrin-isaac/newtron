@@ -137,14 +137,15 @@ On `newtron-server` or `newt-server`:
 
 ```sh
 bin/newt-server \
-  --spec-dir networks/1node-vs/specs \
   --audit-log /var/log/newtron-audit.jsonl \
   --audit-caller-header X-Newtron-Caller \
   --enforce-authorization
 ```
 
-The five flags above engage the mutation audit log with header identity
+The three flags above engage the mutation audit log with header identity
 (auth-design.md L1) and authorization enforcement (auth-design.md L3).
+Networks are auto-discovered from `networks/` at startup; use
+`--networks-base <path>` to point at a different tree.
 For production deployments add `--unix-socket` and `--auth-pam-service`
 (auth-design.md L2b) so the identity surfaces are verified rather than
 self-attested. For TLS, add `--tls-cert`/`--tls-key`/`--tls-ca`

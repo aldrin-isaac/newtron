@@ -65,7 +65,7 @@ Reviewers tell mTLS-authenticated callers apart from PAM-authenticated ones by t
      --listen 0.0.0.0:18443 \
      --audit-log /var/log/newt-server-audit.jsonl \
      --enforce-authorization \
-     --spec-dir /etc/newt-server/specs
+     --networks-base /etc/newt-server/networks
    ```
 
    No `--tls-*` flags needed; env vars are picked up.

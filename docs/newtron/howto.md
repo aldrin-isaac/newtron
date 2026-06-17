@@ -2757,7 +2757,7 @@ make build
 bin/newtlab deploy 2node-ngdp
 
 # Start server pointing at network specs
-bin/newt-server --spec-dir networks/2node-ngdp/specs &
+bin/newt-server &
 
 # Provision switches from topology
 bin/newtron -S networks/2node-ngdp/specs -D switch1 --topology intent reconcile -x
