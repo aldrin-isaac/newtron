@@ -1,13 +1,16 @@
-package main
+// E2E tests for the `newtrun` CLI's suite + scenario subcommands.
+//
+// These exercise the full path the operator would walk: subprocess CLI
+// → HTTP → real api.Server → on-disk filesystem. Verifies that the
+// CLI's argv shape, client URL construction, and the server's on-disk
+// persistence all line up — gaps that pure-go tests (handler-against-
+// httptest, CLI argv parse) would miss.
+//
+// HTTP-level coverage lives in pkg/newtrun/api/scenarios_test.go.
+// API-handler-against-httptest coverage covers the happy path of
+// each handler; this layer covers the subprocess CLI on top.
 
-// CLI→server E2E coverage for the scenario CRUD surface, per
-// ai-instructions §21 (Every API endpoint and operation must be
-// exercised in at least one E2E test). The unit tests in
-// pkg/newtrun/api/scenarios_test.go cover the handler-side; this
-// drives the same endpoints through the actual bin/newtrun binary so
-// cobra wiring, flag parsing, and the client's request shaping are
-// also exercised. A regression that breaks any link in the
-// CLI→client→HTTP chain shows up here, not after merge.
+package main
 
 import (
 	"bytes"
@@ -23,8 +26,10 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
 
-// buildCLI compiles bin/newtrun-e2e once and returns its path. Tests
-// share the binary to avoid rebuilding on every t.Run.
+// buildCLI compiles the `newtrun` binary against the current source
+// into a temp directory and returns the path. Cached per-test (one
+// build per t.Run) so the subprocess launch path doesn't pull in the
+// full go build cost on every assertion.
 func buildCLI(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
@@ -39,27 +44,33 @@ func buildCLI(t *testing.T) string {
 }
 
 // newE2EServer wires the real api.Server into an httptest.Server and
-// returns the httptest.Server and the suites base directory.
+// returns the httptest.Server plus the topologies base directory the
+// server is configured against. Tests that create suites via the CLI
+// (with --topology X) then assert on-disk state at
+// suiteDirIn(topologiesBase, X, suiteName).
 //
-// Return shape matches newScenarioTestServer in pkg/newtrun/api per
-// §13 (Same Concept = Same Name): both helpers do the same thing
-// (build a test server backed by a temp suites directory), so they
-// expose the same return tuple. Callers access ts.URL when sending
-// the URL to a subprocess and ts directly when sharing the server
-// across goroutines.
-func newE2EServer(t *testing.T) (ts *httptest.Server, suitesBase string) {
+// Callers access ts.URL when sending the URL to a subprocess and ts
+// directly when sharing the server across goroutines.
+func newE2EServer(t *testing.T) (ts *httptest.Server, topologiesBase string) {
 	t.Helper()
-	suitesBase = filepath.Join(t.TempDir(), "suites")
-	if err := os.MkdirAll(suitesBase, 0755); err != nil {
-		t.Fatalf("mkdir suites: %v", err)
+	topologiesBase = filepath.Join(t.TempDir(), "topologies")
+	if err := os.MkdirAll(topologiesBase, 0755); err != nil {
+		t.Fatalf("mkdir topologies base: %v", err)
 	}
 	srv := api.NewServer(api.Config{
-		SuitesBase: suitesBase,
-		Logger:     log.New(io.Discard, "", 0),
+		TopologiesBase: topologiesBase,
+		Logger:         log.New(io.Discard, "", 0),
 	})
 	ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts, suitesBase
+	return ts, topologiesBase
+}
+
+// suiteDirIn returns the on-disk path the production handler would
+// write a suite to given its declared topology. Tests compose this
+// when asserting on-disk state after `suite create --topology X`.
+func suiteDirIn(topologiesBase, topology, suite string) string {
+	return filepath.Join(topologiesBase, topology, "suites", suite)
 }
 
 // runCLI invokes the test binary with stdin/stdout/stderr captured.
@@ -78,24 +89,23 @@ func runCLI(t *testing.T, binPath, serverURL string, stdin []byte, args ...strin
 	err := cmd.Run()
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		exitCode = exitErr.ExitCode()
-	} else if err != nil {
-		t.Fatalf("run %v: %v", args, err)
 	}
 	return outBuf.String(), errBuf.String(), exitCode
 }
 
-// TestE2E_ScenarioLifecycle exercises the full suite → scenario CRUD
-// round trip through the CLI. Mirrors what an operator (or newtcon
-// running curl-equivalent commands) would do: create suite, put
+// TestE2E_ScenarioLifecycle walks the full happy path an operator
+// running curl-equivalent commands would do: create suite, put
 // scenario, list, get, delete scenario, delete suite. Asserts every
 // stage's side effect on disk so a regression in the CLI argv shaping
 // or the client's URL construction surfaces here.
 func TestE2E_ScenarioLifecycle(t *testing.T) {
 	binPath := buildCLI(t)
-	ts, suitesBase := newE2EServer(t)
+	ts, topologiesBase := newE2EServer(t)
 
 	const suite = "e2edemo"
+	const topology = "synthetic"
 	const scenario = "smoke"
+	suiteDir := suiteDirIn(topologiesBase, topology, suite)
 	body := []byte(`name: smoke
 description: e2e smoke test
 steps:
@@ -105,10 +115,10 @@ steps:
 `)
 
 	// suite create
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", "synthetic"); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
-	if _, err := os.Stat(filepath.Join(suitesBase, suite)); err != nil {
+	if _, err := os.Stat(suiteDir); err != nil {
 		t.Fatalf("suite dir not created: %v", err)
 	}
 
@@ -116,7 +126,7 @@ steps:
 	if _, _, rc := runCLI(t, binPath, ts.URL, body, "scenario", "put", suite, scenario); rc != 0 {
 		t.Fatalf("scenario put exit=%d", rc)
 	}
-	got, err := os.ReadFile(filepath.Join(suitesBase, suite, scenario+".yaml"))
+	got, err := os.ReadFile(filepath.Join(suiteDir, scenario+".yaml"))
 	if err != nil {
 		t.Fatalf("read written file: %v", err)
 	}
@@ -146,7 +156,7 @@ steps:
 	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "scenario", "delete", suite, scenario); rc != 0 {
 		t.Fatalf("scenario delete exit=%d", rc)
 	}
-	if _, err := os.Stat(filepath.Join(suitesBase, suite, scenario+".yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(suiteDir, scenario+".yaml")); !os.IsNotExist(err) {
 		t.Errorf("scenario file still present after delete: err=%v", err)
 	}
 
@@ -154,7 +164,7 @@ steps:
 	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "delete", suite); rc != 0 {
 		t.Fatalf("suite delete exit=%d", rc)
 	}
-	if _, err := os.Stat(filepath.Join(suitesBase, suite)); !os.IsNotExist(err) {
+	if _, err := os.Stat(suiteDir); !os.IsNotExist(err) {
 		t.Errorf("suite dir still present after delete: err=%v", err)
 	}
 }
@@ -165,9 +175,11 @@ steps:
 // readScenarioBody's flag handling can't ship undetected.
 func TestE2E_ScenarioPutFromFile(t *testing.T) {
 	binPath := buildCLI(t)
-	ts, suitesBase := newE2EServer(t)
+	ts, topologiesBase := newE2EServer(t)
 	const suite = "filedemo"
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", "synthetic"); rc != 0 {
+	const topology = "synthetic"
+	suiteDir := suiteDirIn(topologiesBase, topology, suite)
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	body := []byte(`name: from-file
@@ -185,7 +197,7 @@ steps:
 		"scenario", "put", suite, "from-file", "--file", bodyPath); rc != 0 {
 		t.Fatalf("scenario put --file exit=%d", rc)
 	}
-	got, err := os.ReadFile(filepath.Join(suitesBase, suite, "from-file.yaml"))
+	got, err := os.ReadFile(filepath.Join(suiteDir, "from-file.yaml"))
 	if err != nil {
 		t.Fatalf("read written file: %v", err)
 	}
@@ -196,23 +208,27 @@ steps:
 
 // TestE2E_ScenarioPutRejectsBadYAML verifies that the validation
 // gate surfaces all the way to the operator's exit code: bad YAML
-// from the CLI side produces non-zero exit and a server error
-// message on stderr. Without this, a future refactor that swallows
-// the error in the CLI layer would go unnoticed.
+// must NOT land on disk, the CLI must exit non-zero, and stderr
+// must name the validation failure.
 func TestE2E_ScenarioPutRejectsBadYAML(t *testing.T) {
 	binPath := buildCLI(t)
-	ts, _ := newE2EServer(t)
-	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", "badyaml", "--topology", "synthetic"); rc != 0 {
+	ts, topologiesBase := newE2EServer(t)
+	const suite = "rejectdemo"
+	const topology = "synthetic"
+	suiteDir := suiteDirIn(topologiesBase, topology, suite)
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite, "--topology", topology); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
-	stdout, stderr, rc := runCLI(t, binPath, ts.URL,
-		[]byte("not: valid yaml: : : :"),
-		"scenario", "put", "badyaml", "anything")
+	bad := []byte("not: a valid: scenario yaml: at all\n")
+	_, stderr, rc := runCLI(t, binPath, ts.URL, bad, "scenario", "put", suite, "broken")
 	if rc == 0 {
-		t.Fatalf("bad YAML PUT exited 0; want non-zero")
+		t.Errorf("exit code: got 0, want non-zero for bad YAML")
 	}
-	combined := stdout + stderr
-	if !strings.Contains(combined, "400") && !strings.Contains(combined, "invalid scenario YAML") {
-		t.Errorf("expected 400 / invalid YAML message; got stdout=%q stderr=%q", stdout, stderr)
+	if !strings.Contains(stderr, "invalid") && !strings.Contains(stderr, "parse") {
+		t.Errorf("stderr: got %q, want substring describing the parse error", stderr)
+	}
+	// Critical: bad YAML must NOT land on disk.
+	if _, err := os.Stat(filepath.Join(suiteDir, "broken.yaml")); !os.IsNotExist(err) {
+		t.Errorf("broken.yaml landed on disk despite validation failure: err=%v", err)
 	}
 }

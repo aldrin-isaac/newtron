@@ -67,7 +67,7 @@ Reproducing the run:
 
 ```sh
 # 1. one-time host setup
-sudo sh newtrun/suites/1node-vs-auth/create-test-users.sh
+sudo sh newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/create-test-users.sh
 
 # 2. boot the combined newt-server with the full auth flag set.
 #    PATH must include ./bin so the L6 newtron-cli step (which exec's
@@ -82,7 +82,7 @@ PATH="$(pwd)/bin:$PATH" bin/newt-server \
     --spec-watch &
 
 # 3. cache one session per user
-sh newtrun/suites/1node-vs-auth/login-all.sh
+sh newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/login-all.sh
 
 # 4. submit the run. NEWTRON_USER=root selects root's cached session
 #    as the operator identity; the CLI forwards that Bearer to newt-server
@@ -192,7 +192,7 @@ Create them via the bundled script — every account gets
 interactively; PAM-authentication targets only.
 
 ```sh
-sudo sh newtrun/suites/1node-vs-auth/create-test-users.sh
+sudo sh newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/create-test-users.sh
 ```
 
 The script is idempotent — if a user already exists with `nologin`
@@ -242,7 +242,7 @@ wins over auto-discovery.
 ### 4. Pre-cache a session for every test identity
 
 ```sh
-sh newtrun/suites/1node-vs-auth/login-all.sh
+sh newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/login-all.sh
 ```
 
 The helper logs in as alice, bob, mallory, and the rest of the cast,

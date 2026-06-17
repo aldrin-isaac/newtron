@@ -2,11 +2,8 @@ package api
 
 import (
 	"crypto/tls"
-	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
@@ -15,11 +12,14 @@ import (
 
 // Config is the construction-time configuration for the newtrun server.
 type Config struct {
-	// SuitesBase is the directory under which suite directories live. Defaults
-	// to "newtrun/suites" relative to the working directory. The server reads
-	// it on GET /newtrun/v1/suites and validates file-backed suite names against
-	// it when handling POST /newtrun/v1/runs.
-	SuitesBase string
+	// TopologiesBase is the directory under which per-topology trees
+	// live. Suites are addressed under
+	// <TopologiesBase>/<topology>/suites/<suite>/ — colocated with the
+	// specs they target, per §27 (Single Owner). Defaults to
+	// "newtrun/topologies" relative to the working directory. The
+	// server scans it on GET /newtrun/v1/suites and resolves suite
+	// names against it when handling POST /newtrun/v1/runs.
+	TopologiesBase string
 
 	// NewtronServer is the newtron-server URL the server-side runners
 	// connect to for topology discovery. Per-run NewtronServer in the
@@ -81,8 +81,8 @@ func NewServer(cfg Config) *Server {
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
 	}
-	if cfg.SuitesBase == "" {
-		cfg.SuitesBase = "newtrun/suites"
+	if cfg.TopologiesBase == "" {
+		cfg.TopologiesBase = "newtrun/topologies"
 	}
 	if cfg.NewtronServer == "" {
 		cfg.NewtronServer = "http://127.0.0.1:18080"
@@ -174,23 +174,3 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listSubdirs returns the names of immediate subdirectories. Missing base
-// directories return an empty slice rather than an error — the server may
-// run in deployments without topology/suite trees yet.
-func listSubdirs(base string) ([]string, error) {
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []string{}, nil
-		}
-		return nil, fmt.Errorf("read %s: %w", base, err)
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		names = append(names, filepath.Base(e.Name()))
-	}
-	return names, nil
-}

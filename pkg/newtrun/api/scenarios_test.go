@@ -37,7 +37,7 @@ func newScenarioTestServer(t *testing.T) (*httptest.Server, string) {
 	srv, _ := newTestServer(t)
 	ts := httptest.NewServer(srv.buildHandler())
 	t.Cleanup(ts.Close)
-	suiteDir := filepath.Join(srv.cfg.SuitesBase, "demo")
+	suiteDir := filepath.Join(suitesRoot(srv), "demo")
 	if err := os.MkdirAll(suiteDir, 0755); err != nil {
 		t.Fatalf("mkdir suite: %v", err)
 	}
@@ -328,7 +328,10 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST status: got %d, want 201", resp.StatusCode)
 	}
-	if _, err := os.Stat(filepath.Join(srv.cfg.SuitesBase, "fresh", "suite.yaml")); err != nil {
+	// The POST declared topology "synthetic"; the suite lands under
+	// <topologies-base>/synthetic/suites/<name>/, not the test fixture's
+	// default test-topo subtree.
+	if _, err := os.Stat(filepath.Join(srv.cfg.TopologiesBase, "synthetic", "suites", "fresh", "suite.yaml")); err != nil {
 		t.Errorf("suite.yaml not created: %v", err)
 	}
 

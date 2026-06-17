@@ -54,8 +54,7 @@ func main() {
 	specDir := flag.String("spec-dir", "", "spec directory to auto-register as the 'default' network on newtron")
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
-	suitesBase := flag.String("suites-base", "newtrun/suites", "directory containing suite subdirectories (newtrun)")
-	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing topology subdirectories (newtlab lab-spec resolution)")
+	topologiesBase := flag.String("topologies-base", "newtrun/topologies", "directory containing per-topology subdirectories. Each topology owns its own specs (<base>/<topology>/specs/) and suites (<base>/<topology>/suites/<name>/) — newtrun resolves test-suite names by scanning across topologies; newtlab loads lab specs from the same tree.")
 	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
 	auditLog := flag.String("audit-log", "", "file path for the mutation audit log; empty disables audit emission entirely (default). (auth-design.md L1)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
@@ -181,9 +180,9 @@ func main() {
 	// newtrun-server it's cross-process. Either way newtrun's runner
 	// stays a client of newtlab, never a co-writer.
 	newtrunSrv := newtrunapi.NewServer(newtrunapi.Config{
-		SuitesBase:    *suitesBase,
-		Logger:        logger,
-		NewtlabClient: newtlabClient,
+		TopologiesBase: *topologiesBase,
+		Logger:         logger,
+		NewtlabClient:  newtlabClient,
 	})
 	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
 	// owns spec files). In the composed binary this is an in-process

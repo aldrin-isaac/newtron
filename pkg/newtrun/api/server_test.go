@@ -18,34 +18,51 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
+// testTopology is the placeholder topology name every test fixture
+// nests its suites under. The on-disk layout in tests mirrors the
+// production layout exactly — <topologies-base>/<topology>/suites/<name>/
+// — so the same ResolveSuiteDir glob handles both.
+const testTopology = "test-topo"
+
 // newTestServer builds a Server configured against a temporary directory.
 // HOME is also overridden so newtrun.LoadRunState / SaveRunState route to
-// the same temp directory.
+// the same temp directory. Tests address the suites root via
+// suitesRoot(t, srv) so the per-topology layout stays an implementation
+// detail of the resolver, not something every test has to assemble.
 func newTestServer(t *testing.T) (*Server, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	suitesBase := filepath.Join(tmpDir, "suites")
-	if err := os.MkdirAll(suitesBase, 0755); err != nil {
-		t.Fatalf("mkdir suitesBase: %v", err)
+	topologiesBase := filepath.Join(tmpDir, "topologies")
+	if err := os.MkdirAll(filepath.Join(topologiesBase, testTopology, "suites"), 0755); err != nil {
+		t.Fatalf("mkdir suites root: %v", err)
 	}
-	t.Setenv("NEWTRUN_SUITES_BASE", suitesBase)
+	t.Setenv("NEWTRUN_TOPOLOGIES_BASE", topologiesBase)
 
 	srv := NewServer(Config{
-		SuitesBase: suitesBase,
-		Logger:     log.New(io.Discard, "", 0),
+		TopologiesBase: topologiesBase,
+		Logger:         log.New(io.Discard, "", 0),
 	})
 	return srv, func() {}
 }
 
+// suitesRoot returns the per-topology suites directory the test fixture
+// writes suites into. Equivalent to "where the production server would
+// find suites under the configured topologies base, for the test
+// topology." Helpers that build suites (writeMinimalSuite,
+// newScenarioTestServer) join under this root.
+func suitesRoot(srv *Server) string {
+	return filepath.Join(srv.cfg.TopologiesBase, testTopology, "suites")
+}
+
 // seedSuite writes a state.json for one suite and creates the matching suite
 // directory so ListSuiteStates returns it.
-func seedSuite(t *testing.T, name string, status newtrun.SuiteStatus) {
+func seedSuite(t *testing.T, srv *Server, name string, status newtrun.SuiteStatus) {
 	t.Helper()
 	state := &newtrun.RunState{
 		Suite:    name,
-		Topology: "test-topo",
+		Topology: testTopology,
 		Status:   status,
 		Started:  time.Now().Add(-time.Hour),
 		Updated:  time.Now().Add(-30 * time.Minute),
@@ -56,9 +73,7 @@ func seedSuite(t *testing.T, name string, status newtrun.SuiteStatus) {
 	if err := newtrun.SaveRunState(state); err != nil {
 		t.Fatalf("SaveRunState(%s): %v", name, err)
 	}
-	// Create the corresponding suite directory under the suites base.
-	suitesBase := os.Getenv("NEWTRUN_SUITES_BASE")
-	if err := os.MkdirAll(filepath.Join(suitesBase, name), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(suitesRoot(srv), name), 0755); err != nil {
 		t.Fatalf("mkdir suite dir(%s): %v", name, err)
 	}
 }
@@ -91,8 +106,8 @@ func TestHealth(t *testing.T) {
 func TestListRunsReturnsSeededSuites(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
-	seedSuite(t, "suite-a", newtrun.SuiteStatusComplete)
-	seedSuite(t, "suite-b", newtrun.SuiteStatusRunning)
+	seedSuite(t, srv, "suite-a", newtrun.SuiteStatusComplete)
+	seedSuite(t, srv, "suite-b", newtrun.SuiteStatusRunning)
 
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
@@ -119,7 +134,7 @@ func TestListRunsReturnsSeededSuites(t *testing.T) {
 func TestGetRunReturnsFullState(t *testing.T) {
 	srv, cleanup := newTestServer(t)
 	defer cleanup()
-	seedSuite(t, "suite-a", newtrun.SuiteStatusComplete)
+	seedSuite(t, srv, "suite-a", newtrun.SuiteStatusComplete)
 
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()

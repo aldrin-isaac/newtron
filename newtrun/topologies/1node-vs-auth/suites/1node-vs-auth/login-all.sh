@@ -11,7 +11,7 @@
 # with the password you supply here.
 #
 # Usage:
-#   sh newtrun/suites/1node-vs-auth/login-all.sh [server-url]
+#   sh newtrun/topologies/1node-vs-auth/suites/1node-vs-auth/login-all.sh [server-url]
 #
 # server-url defaults to http://127.0.0.1:18080.
 

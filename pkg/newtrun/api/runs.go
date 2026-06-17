@@ -45,12 +45,14 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve the suite name to an on-disk location. Suite directories
-	// live under SuitesBase by convention; the path itself is server-
-	// internal and is never returned to or accepted from the client.
+	// live under TopologiesBase by convention
+	// (<topologies-base>/<topology>/suites/<suite>/); the path itself
+	// is server-internal and is never returned to or accepted from the
+	// client.
 	suiteKey := req.Suite
-	suiteDir := filepath.Join(s.cfg.SuitesBase, req.Suite)
-	if !isDirectory(suiteDir) {
-		httputil.WriteError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suiteKey))
+	suiteDir, err := newtrun.ResolveSuiteDir(s.cfg.TopologiesBase, suiteKey)
+	if err != nil {
+		httputil.WriteError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suiteKey))
 		return
 	}
 
@@ -164,7 +166,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	// (auth-design.md §L2c). Empty when the request carries no
 	// Bearer (loopback dev mode against a server with no auth).
 	runner := newtrun.NewRunner(suiteDir)
-	runner.SuitesBase = s.cfg.SuitesBase
+	runner.TopologiesBase = s.cfg.TopologiesBase
 	runner.ServerURL = newtronURL
 	runner.NetworkID = networkID
 	runner.NewtronClientTLS = s.cfg.NewtronClientTLS
@@ -295,12 +297,6 @@ func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult
 		// Best-effort: log via the package-level logger if needed.
 		_ = err
 	}
-}
-
-// isDirectory returns true if the path is a directory.
-func isDirectory(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 // operatorBearer extracts the L2c session key from the inbound
@@ -455,7 +451,7 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeInlineScenarioDir stages an inline scenario on disk as a one-
-// scenario suite so the existing Runner.ScenariosDir → LoadSuite
+// scenario suite so the existing Runner.SuiteDir → LoadSuite
 // machinery can load it without a special-case code path. The
 // directory is removed when the run finishes.
 //

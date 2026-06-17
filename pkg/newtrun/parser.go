@@ -216,7 +216,7 @@ var stepValidations = map[StepAction]stepValidation{
 		if step.Suite == "" {
 			return fmt.Errorf("%s: run-suite requires suite", prefix)
 		}
-		// Reject names that could escape SuitesBase via path traversal.
+		// Reject names that could escape the topologies tree via path traversal.
 		// Mirrors pkg/newtrun/api.nameRE — duplicated here so the parser
 		// stays self-contained (and doesn't import its api subpackage).
 		if strings.ContainsAny(step.Suite, "/\\") || step.Suite == "." || step.Suite == ".." {

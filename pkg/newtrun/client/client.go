@@ -199,7 +199,7 @@ func (c *Client) DeleteRun(ctx context.Context, suite string) error {
 }
 
 // ListSuites returns the suite names discoverable under the server's
-// SuitesBase.
+// topologies tree (<TopologiesBase>/*/suites/*/).
 func (c *Client) ListSuites(ctx context.Context) ([]string, error) {
 	var resp api.SuitesResponse
 	if err := c.get(ctx, "/newtrun/v1/suites", &resp); err != nil {

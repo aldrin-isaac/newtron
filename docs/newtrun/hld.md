@@ -52,7 +52,7 @@ newtrun ships as a thin CLI client (`bin/newtrun`). The runtime engine — Runne
 
 ### 3.1 The CLI and the engine
 
-**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to the newtrun engine inside `bin/newt-server`. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or `newtrun/suites/` directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newt-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
+**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to the newtrun engine inside `bin/newt-server`. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or the topologies tree directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newt-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
 
 **The newtrun engine.** Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP routes that expose all of it. Lives in `pkg/newtrun/`; the engine has no main package of its own. Hosted by `cmd/newt-server`, which mounts `/newtrun/v1/...` routes on a shared mux alongside the newtron and newtlab engines. Each `POST /newtrun/v1/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
 
@@ -228,7 +228,7 @@ steps:
     expect: { jq: '.data | all(.status == "established")' }
 ```
 
-Parameterized example (drawn from `newtrun/suites/2node-vs-service/`):
+Parameterized example (drawn from `newtrun/topologies/2node-vs-service/suites/2node-vs-service/`):
 
 ```yaml
 name: rollout-admin-status
@@ -702,7 +702,7 @@ $ NEWTRUN_SERVER=http://127.0.0.1:18080 bin/newtrun start 2node-ngdp-primitive
 ### 12.3 Server-side Runner executes
 
 `pkg/newtrun/runner.go` `Run`:
-1. Parses every scenario YAML under `newtrun/suites/2node-ngdp-primitive/`.
+1. Parses every scenario YAML under `newtrun/topologies/2node-ngdp/suites/2node-ngdp-primitive/`.
 2. Topologically sorts scenarios by `requires` / `after`.
 3. Connects to newtron-server, verifies the server's loaded topology matches `Suite.Topology`, and records the spec directory.
 4. Calls `SuiteStart` — every reporter forwards the event.

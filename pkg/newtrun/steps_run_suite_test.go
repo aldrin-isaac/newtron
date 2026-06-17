@@ -86,12 +86,12 @@ func TestValidateStepFields_SuiteFieldOnlyOnRunSuite(t *testing.T) {
 // Executor: surface errors that don't require a live Runner pipeline
 // ============================================================================
 
-// TestRunSuiteExecutor_MissingSuitesBase fails the step (rather than
-// crashing) when the Runner wasn't wired with SuitesBase. Mirrors how
-// pkg/newtrun is invoked from tests vs. the api server: the api server
-// sets SuitesBase from Config, the CLI doesn't construct a Runner
-// directly, and unit tests need the friendly error.
-func TestRunSuiteExecutor_MissingSuitesBase(t *testing.T) {
+// TestRunSuiteExecutor_MissingTopologiesBase fails the step (rather
+// than crashing) when the Runner wasn't wired with TopologiesBase.
+// Mirrors how pkg/newtrun is invoked from tests vs. the api server:
+// the api server sets TopologiesBase from Config, the CLI doesn't
+// construct a Runner directly, and unit tests need the friendly error.
+func TestRunSuiteExecutor_MissingTopologiesBase(t *testing.T) {
 	r := &Runner{}
 	step := &Step{Name: "x", Action: ActionRunSuite, Suite: "child"}
 	exec := &runSuiteExecutor{}
@@ -99,8 +99,8 @@ func TestRunSuiteExecutor_MissingSuitesBase(t *testing.T) {
 	if out.Result.Status != StepStatusError {
 		t.Errorf("status: got %v, want %v", out.Result.Status, StepStatusError)
 	}
-	if !strings.Contains(out.Result.Message, "SuitesBase") {
-		t.Errorf("message: got %q, want substring %q", out.Result.Message, "SuitesBase")
+	if !strings.Contains(out.Result.Message, "TopologiesBase") {
+		t.Errorf("message: got %q, want substring %q", out.Result.Message, "TopologiesBase")
 	}
 }
 
@@ -109,7 +109,7 @@ func TestRunSuiteExecutor_MissingSuitesBase(t *testing.T) {
 // Going one deeper would put it over MaxRunSuiteDepth — the executor
 // surfaces the limit as a step error.
 func TestRunSuiteExecutor_DepthLimit(t *testing.T) {
-	r := &Runner{SuitesBase: t.TempDir()}
+	r := &Runner{TopologiesBase: t.TempDir()}
 	step := &Step{Name: "x", Action: ActionRunSuite, Suite: "child"}
 	// depth+1 triggers the > MaxRunSuiteDepth check.
 	ctx := withRunSuiteDepth(context.Background(), MaxRunSuiteDepth)
@@ -129,7 +129,7 @@ func TestRunSuiteExecutor_DepthLimit(t *testing.T) {
 // it so the step's Message names the called suite.
 func TestRunSuiteExecutor_MissingChildSuite(t *testing.T) {
 	base := t.TempDir()
-	r := &Runner{SuitesBase: base}
+	r := &Runner{TopologiesBase: base}
 	step := &Step{Name: "x", Action: ActionRunSuite, Suite: "ghost"}
 	exec := &runSuiteExecutor{}
 	out := exec.Execute(context.Background(), r, step)
@@ -139,7 +139,7 @@ func TestRunSuiteExecutor_MissingChildSuite(t *testing.T) {
 	if !strings.Contains(out.Result.Message, "ghost") {
 		t.Errorf("message: got %q, want it to mention the called suite name", out.Result.Message)
 	}
-	// Sanity: SuitesBase wasn't touched (the failure should be in the
+	// Sanity: TopologiesBase wasn't touched (the failure should be in the
 	// child Runner, not a side effect on disk).
 	if _, err := os.Stat(filepath.Join(base, "ghost")); !os.IsNotExist(err) {
 		t.Errorf("ghost suite directory should not exist after the failure path: %v", err)

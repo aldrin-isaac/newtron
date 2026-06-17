@@ -114,7 +114,7 @@ type Step struct {
 	Capture map[string]string `yaml:"capture,omitempty"`
 
 	// run-suite (composition: invoke another suite as a step)
-	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved under SuitesBase)
+	Suite      string              `yaml:"suite,omitempty"`      // suite name to invoke (resolved across the runner's TopologiesBase)
 	Parameters map[string]any      `yaml:"parameters,omitempty"` // parameter overrides for the called suite
 	Targets    map[string][]string `yaml:"targets,omitempty"`    // target-dimension overrides for the called suite
 
