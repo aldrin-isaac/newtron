@@ -152,12 +152,19 @@ existing code. When a specification and the code conflict, the code is wrong.
 
 ## 9. Post-Implementation Conformance Audit — REVIEW
 
-**For diff-review tasks (review a PR, review uncommitted changes, pre-PR
-sanity check), follow the procedural rules in `docs/code-review.md`** —
-review angles, false-positive filter, confidence rubric (only report
-≥ 80), and output format. The principles below cover the conformance
-audit that follows implementation; the code-review.md rules cover
-the operator-facing review pass.
+**For diff-review tasks** (review a PR, review uncommitted changes,
+pre-PR sanity check), follow the procedural rules in
+`docs/code-review.md` — the 5 review angles, per-angle enumeration,
+the skip-only-true-noise filter, and the confidence rubric (report
+≥ 50). Code-review.md is calibrated for broad coverage AND honest
+reporting: every angle is checked explicitly and every real issue is
+surfaced, with severity grouping (Critical / Important / Minor) so the
+operator decides what to act on.
+
+The conformance audit below applies after the review angles run — it's
+the mechanical principle-by-principle verification on the implementer's
+own work. Code-review.md's enumeration discipline matches §9's "list
+every dimension checked, no silent passes."
 
 After completing an implementation, mechanically verify each relevant
 architectural principle against the actual code. For each principle that
