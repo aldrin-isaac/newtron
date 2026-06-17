@@ -23,10 +23,9 @@ import (
 )
 
 // DefaultBaseURL is the default URL the newtrun CLI dials. Points at
-// newtser (port 18080), which fronts every backend by path prefix —
-// the CLI's URLs start with /newtrun/v1/ so newtser routes them to
-// newtrun-server on its loopback port (:19081). For standalone use
-// without newtser, override with --newtrun-server http://127.0.0.1:19081.
+// newt-server on port 18080 — the only entry point for the newtrun
+// engine. URLs are routed by path prefix (/newtrun/v1/...) so all
+// three engines share the one port.
 const DefaultBaseURL = "http://127.0.0.1:18080"
 
 // Client is the HTTP client for newtrun-server.

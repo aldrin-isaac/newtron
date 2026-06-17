@@ -857,9 +857,9 @@ The LLD documents the complete flag set and topology resolution logic.
 
 ### 11.1 HTTP API
 
-`bin/newtlab-server` is a thin HTTP wrapper around the same `pkg/newtlab/` Go API that powers the CLI. It exists so consumers like the newtcon browser frontend can deploy and observe labs without dropping to a shell.
+The newtlab engine (`pkg/newtlab/api/`) is a thin HTTP wrapper around the same `pkg/newtlab/` Go API that powers the CLI. It exists so consumers like the newtcon browser frontend can deploy and observe labs without dropping to a shell.
 
-Default bind: `127.0.0.1:19082` — loopback-only. The standard production stack composes newtlab into `bin/newt-server` on `:18080`; the standalone `bin/newtlab-server` is built for dev iteration on the newtlab engine in isolation. Non-loopback exposure emits a startup warning (no built-in authentication; wrap with a reverse proxy if you need TLS or auth).
+`cmd/newt-server` mounts the engine's routes on `/newtlab/v1/...` alongside the newtron and newtrun engines on a single port (default `127.0.0.1:18080`). Non-loopback exposure requires `--auth-pam-service` plus `--tls-cert/--tls-key/--tls-ca` on `cmd/newt-server` (auth-design.md L2a / L2b) — otherwise the listener serves identity-less plaintext, which is acceptable only on loopback.
 
 | Method | Path | Wraps |
 |---|---|---|

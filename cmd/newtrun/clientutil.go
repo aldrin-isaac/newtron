@@ -91,7 +91,7 @@ func newNewtlabClient() *newtlabclient.Client {
 // disk; the server is the single source of truth.
 func requireServer(ctx context.Context, c *client.Client) error {
 	if _, err := c.Health(ctx); err != nil {
-		return fmt.Errorf("newtrun-server is not running\n\nstart it with: bin/newtrun-server")
+		return fmt.Errorf("newt-server is not running\n\nstart it with: bin/newt-server --spec-dir <path-to-specs>")
 	}
 	return nil
 }

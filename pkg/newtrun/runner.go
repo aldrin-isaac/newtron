@@ -23,7 +23,7 @@ type Runner struct {
 	// NewtronClientTLS is the TLS config the runner uses when
 	// constructing its outbound newtron HTTP client at connectToServer
 	// time (auth-design.md L2a). nil keeps the client on plain HTTP —
-	// the L2a disabled state. Populated by cmd/newtrun-server from its
+	// the L2a disabled state. Populated by cmd/newt-server from its
 	// own --tls-cert/--tls-key/--tls-ca flags; an mTLS-enforced
 	// newtron-server then sees the runner's cert CN as the caller
 	// identity (typically configured as a super_user in network.json
@@ -37,12 +37,11 @@ type Runner struct {
 	// so the operator's identity — verified once by newt-server's
 	// outer auth middleware on the inbound request — flows through
 	// the runner unchanged. Empty when the run was triggered without
-	// a Bearer (cmd/newtrun-server standalone, or cmd/newt-server
-	// without --auth-pam-service) — in that case outbound newtron
-	// calls carry no Authorization header, which is fine against a
-	// newtron engine that doesn't enforce identity. Per-scenario
-	// `as: <user>` overrides this default for every call the
-	// scenario makes via the UserSessions map.
+	// a Bearer (cmd/newt-server without --auth-pam-service) — in
+	// that case outbound newtron calls carry no Authorization header,
+	// which is fine against a newtron engine that doesn't enforce
+	// identity. Per-scenario `as: <user>` overrides this default for
+	// every call the scenario makes via the UserSessions map.
 	OperatorBearer string
 
 	// UserSessions maps a username to the Bearer session key

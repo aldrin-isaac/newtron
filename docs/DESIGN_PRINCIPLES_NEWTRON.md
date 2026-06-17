@@ -717,11 +717,12 @@ into CONFIG_DB entries through an SSH-tunneled Redis connection. newtron
 never talks to two devices at once. Multi-device coordination is not
 its job.
 
-newtron is a client-server system. The server (newtron-server) loads
-specs, maintains device connections, and exposes all operations as an
-HTTP API. The newtron CLI is one thin client; orchestrators are another kind
-of client. Multi-device coordination — deciding what to apply, where,
-in what order — belongs to orchestrators that consume the same API.
+newtron is a client-server system. The newtron engine (inside `bin/newt-server`)
+loads specs, maintains device connections, and exposes all operations
+as an HTTP API. The newtron CLI is one thin client; orchestrators are
+another kind of client. Multi-device coordination — deciding what to
+apply, where, in what order — belongs to orchestrators that consume
+the same API.
 newtrun, the project's E2E test orchestrator, is one: it provisions
 devices through newtron, then asserts correctness across the fabric.
 newtron's observation primitives (`GetRoute`, `RunHealthChecks`)
@@ -2222,7 +2223,7 @@ describes what it does to the database, not what it means.
 
 `pkg/newtron/` is the public API. `network/`, `node/`, and
 `device/sonic/` are internal. All external consumers — the newtron CLI, newtrun,
-newtron-server — import only `pkg/newtron/`.
+the newtron engine inside `cmd/newt-server` — import only `pkg/newtron/`.
 
 This boundary exists because the ChangeSet (§11), the Node (§1), and
 the device layer (§4) must be free to evolve without breaking

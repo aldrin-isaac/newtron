@@ -14,10 +14,11 @@
 // (same process, same goroutine call stack), no registration
 // protocol, no proxy.
 //
-// For dev iteration on a single engine, use the standalone binaries
-// (bin/newtron-server, bin/newtrun-server, bin/newtlab-server) — same
-// engine code, different entry point, separate ports. The route paths
-// are identical; only the port and process boundary differ.
+// newt-server is the only entry point for the three engines. The
+// engine implementations live in pkg/{newtron,newtrun,newtlab}/api
+// as plain api.Server types; this file composes them into one
+// listener and route table. Per-engine standalone binaries were
+// retired — every operational flow routes through newt-server.
 package main
 
 import (

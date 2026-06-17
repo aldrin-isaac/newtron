@@ -61,7 +61,7 @@ type Config struct {
 	// newtron-server sees the runner's cert CN as the caller
 	// identity. nil keeps the runner's newtron client on plain
 	// HTTP — the L2a disabled state on that direction. Composed in
-	// by cmd/newtrun-server alongside NewtlabClient.
+	// by cmd/newt-server alongside NewtlabClient.
 	NewtronClientTLS *tls.Config
 }
 
@@ -155,9 +155,9 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("DELETE /newtrun/v1/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
 	// Identity middleware (L2b PAM, L2c session-key Bearer) lives
-	// at the server boundary in cmd/newt-server, not in the
-	// standalone newtrun-server. Standalone is HTTP-only on
-	// loopback for dev iteration.
+	// at the cmd/newt-server boundary — this engine layer only mounts
+	// the routes themselves and trusts cmd/newt-server's outer chain
+	// to populate the audit caller context.
 	var handler http.Handler = mux
 	handler = httputil.Logger(s.logger)(handler)
 	handler = httputil.RequestID(handler)

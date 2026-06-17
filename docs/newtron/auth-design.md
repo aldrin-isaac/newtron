@@ -265,7 +265,7 @@ plaintext.
 shipped. The encryption work is a separate PR that introduces
 `pkg/newtron/secret/` with a `Store` interface, a file-based default
 backend, and `--secret-store=PATH` config in
-`cmd/newtron-server`/`cmd/newt-server`. Migration tooling for existing
+`cmd/newt-server`. Migration tooling for existing
 plaintext profiles ships alongside.
 
 **Status.** Both deliverables shipped. The threat-model doc is this
@@ -613,7 +613,7 @@ Composition site: `cmd/newt-server` mounts the Store, the
 Bearer/PAM middleware chain, and the routes
 `POST /newt-server/v1/auth/login` + `/auth/logout` at the outer
 layer wrapping every engine mux. The standalone server binaries
-(`cmd/newtron-server`, `cmd/newtrun-server`, `cmd/newtlab-server`)
+(`cmd/newt-server`)
 have no identity middleware — they are loopback dev tools with no
 encryption and no authentication; use `cmd/newt-server` for any
 deployment that needs L2b/L2c. Engines see the verified username
@@ -715,8 +715,8 @@ that a permitted caller succeeds.
 **Scope of changes.** `auth.Context.Caller` field. Public method
 `Network.EnableAuthorization` that constructs an `auth.Checker`
 bound to the live `NetworkSpecFile`. `api.Config.EnforceAuthorization`
-+ `--enforce-authorization` flag on `cmd/newtron-server` and
-`cmd/newt-server`. `Checker.Check` reads `ctx.Caller` (the
++ `--enforce-authorization` flag on `cmd/newt-server`.
+`Checker.Check` reads `ctx.Caller` (the
 `currentUser` field was removed entirely per §40). `ctx
 context.Context` plumbed through the 25 public `Network`
 spec/profile mutation methods so the verified caller travels from
@@ -993,7 +993,7 @@ integrity enabled.
 `pkg/newtron/audit/` (`Event.PrevHash`, `Event.ID = SHA256(prev_hash
 || canonical_json)`, `Verify` walks the file and reports the first
 broken position). `--spec-watch` and `--audit-log-integrity` flags
-on `cmd/newtron-server` and `cmd/newt-server`. CLI verifier:
+on `cmd/newt-server`. CLI verifier:
 `bin/newtron audit verify <path>`. Both halves default off per
 §2.4. New HOWTO sections on the daily revoke flow and the
 verification workflow.
@@ -1030,7 +1030,7 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   emission middlewares (`pkg/newtron/api/caller_middleware.go`,
   `pkg/newtron/api/audit_middleware.go`) live inside the newtron
   engine's handler chain, which runs both under `cmd/newt-server`
-  (production / aggregated deployment) and `cmd/newtron-server`
+  (production / aggregated deployment)
   (standalone dev tool). In standalone mode the only identity
   surface is the L1 self-attested `--audit-caller-header` (and
   Unix peer creds when `--unix-socket` is set); standalone

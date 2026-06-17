@@ -43,7 +43,7 @@ Build the binaries:
 make build
 ```
 
-This produces `bin/newtron`, `bin/newtron-server`, `bin/newtlab`, `bin/newtlab-server`, `bin/newtlink`, `bin/newtrun`, `bin/newtrun-server`, and `bin/newt-server`.
+This produces `bin/newtron` (CLI), `bin/newtlab` (lab manager CLI), `bin/newtrun` (test runner CLI), `bin/newt-server` (the aggregated HTTP server that hosts the newtron + newtrun + newtlab engines on one port), and `bin/newtlink` (the per-host bridge worker).
 
 Download a SONiC community image (one-time):
 
@@ -93,7 +93,7 @@ Exit code 0. Markdown report at `newtrun/.generated/report.md`.
 
 **Why one server?**
 
-`bin/newt-server` runs the newtron, newtrun, and newtlab engines in one process on `:18080`. The aggregator mounts each engine's HTTP handler on a shared mux and dispatches by URL prefix (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). See [`docs/newt-server.md`](../newt-server.md) for the rationale. For dev iteration on a single engine without restarting the others, use the standalone binaries (`bin/newtron-server`, `bin/newtrun-server`, `bin/newtlab-server`) on their loopback defaults (`:19080`, `:19081`, `:19082`).
+`bin/newt-server` is the only entry point for the three engines. It runs the newtron, newtrun, and newtlab engines in one process on `:18080`. The aggregator mounts each engine's HTTP handler on a shared mux and dispatches by URL prefix (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). See [`docs/newt-server.md`](../newt-server.md) for the rationale.
 
 ---
 
@@ -1427,7 +1427,7 @@ The CLI's `requireServer` probe (`GET /newtrun/v1/health`) returned a connection
 
 ```bash
 # Is it running?
-pgrep -f "bin/newtrun-server"
+pgrep -f "bin/newt-server"
 
 # Is the URL correct?
 curl http://localhost:18080/newtrun/v1/health
@@ -1441,7 +1441,7 @@ NEWTRUN_SERVER=http://other-host:18080 bin/newtrun start <suite>
 Start the server if it isn't running:
 
 ```bash
-bin/newtrun-server &
+bin/newt-server --spec-dir <path-to-specs> &
 ```
 
 ### 14.2 `infrastructure error: run was aborted (server shut down)`
@@ -1474,8 +1474,8 @@ Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO
 
 ```bash
 git checkout HEAD -- newtrun/topologies/<name>/specs/network.json
-pkill -KILL -f "bin/newtron-server" && sleep 1
-bin/newtron-server --spec-dir newtrun/topologies/<name>/specs &
+pkill -KILL -f "bin/newt-server" && sleep 1
+bin/newt-server --spec-dir newtrun/topologies/<name>/specs &
 ```
 
 ### 14.6 BGP verification times out

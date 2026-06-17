@@ -25,23 +25,21 @@ type Config struct {
 	// NewtronClientFor returns a newtron SpecClient configured for the
 	// named network ID. newtlab uses one client per lab — by the #116
 	// convention, the network ID equals the lab name, so each lab has
-	// its own newtron registration slot. Composed in by cmd/newtlab-
-	// server or cmd/newt-server, typically wrapping
-	// newtronclient.New(baseURL, networkID).
+	// its own newtron registration slot. Composed in by cmd/newt-server,
+	// typically wrapping newtronclient.New(baseURL, networkID).
 	//
 	// Required for topology lifecycle operations (deploy / status /
 	// start / stop) — newtlab no longer reads spec JSON files directly
 	// per §27.
 	NewtronClientFor func(networkID string) newtlab.SpecClient
 
-	// OrchestratorURL is the publicly-reachable base URL of this
-	// newtlab-server (or the composed newt-server). It is written into
-	// the bridge config sent to each newtlink worker so the worker
-	// can push BridgeStats back here (#118). Composed in by cmd/newt-
-	// server or cmd/newtlab-server from its own listen address (with
-	// a publicly-reachable host substitution when the listener is
-	// bound to 0.0.0.0). Required for Deploy — empty causes the
-	// setupBridges path inside newtlab.Lab.Deploy to fail rather than
+	// OrchestratorURL is the publicly-reachable base URL of newt-server.
+	// It is written into the bridge config sent to each newtlink worker
+	// so the worker can push BridgeStats back here (#118). Composed in
+	// by cmd/newt-server from its own listen address (with a publicly-
+	// reachable host substitution when the listener is bound to
+	// 0.0.0.0). Required for Deploy — empty causes the setupBridges
+	// path inside newtlab.Lab.Deploy to fail rather than
 	// spawn workers that push to nowhere.
 	OrchestratorURL string
 

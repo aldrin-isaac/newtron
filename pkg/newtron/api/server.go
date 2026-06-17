@@ -137,8 +137,8 @@ type Config struct {
 	// RegisterNetwork / ReloadNetwork resolve ${secret:KEY}
 	// references in profile and platform spec values. nil means no
 	// resolution: plaintext spec values pass through, references
-	// become hard errors at load. Composed in by cmd/newtron-server
-	// or cmd/newt-server from a --secret-store=PATH flag.
+	// become hard errors at load. Composed in by cmd/newt-server
+	// from a --secret-store=PATH flag.
 	SecretStore secret.Store
 
 	// TLSConfig enables inter-service mTLS on the TCP listener
@@ -154,7 +154,7 @@ type Config struct {
 	// When false (default), checkPermission remains a no-op —
 	// pre-L3 behavior preserved per the §2.4 enable/disable
 	// contract. Composed in from --enforce-authorization on
-	// cmd/newtron-server.
+	// cmd/newt-server.
 	EnforceAuthorization bool
 
 	// SpecWatch enables the auth-design.md L6 revocation watcher.

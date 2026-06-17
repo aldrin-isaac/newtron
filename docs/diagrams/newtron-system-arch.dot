@@ -1,8 +1,8 @@
 digraph {
     rankdir=TB;
-    "\n  CLI  \n  (cmd/newtron)  \n  HTTP client  \n\n" -> "\n  newtron-server  \n  (pkg/newtron/api/)  \n\n" [label="HTTP\n(REST API)"];
-    "\n  newtrun  \n  (pkg/newtrun/)  \n  HTTP client  \n\n" -> "\n  newtron-server  \n  (pkg/newtron/api/)  \n\n" [label="HTTP\n(REST API)"];
-    "\n  newtron-server  \n  (pkg/newtron/api/)  \n\n" -> "\n  networkEntity  \n  (1 per network)  \n  owns *Network  \n\n";
+    "\n  CLI  \n  (cmd/newtron)  \n  HTTP client  \n\n" -> "\n  newt-server  \n  (newtron engine)  \n\n" [label="HTTP\n(REST API)"];
+    "\n  newtrun  \n  (pkg/newtrun/)  \n  HTTP client  \n\n" -> "\n  newt-server  \n  (newtron engine)  \n\n" [label="HTTP\n(REST API)"];
+    "\n  newt-server  \n  (newtron engine)  \n\n" -> "\n  networkEntity  \n  (1 per network)  \n  owns *Network  \n\n";
     "\n  networkEntity  \n  (1 per network)  \n  owns *Network  \n\n" -> "\n  NodeActor  \n  (1 per device)  \n  caches *Node (SSH conn)  \n\n" [label="manages"];
     "\n  networkEntity  \n  (1 per network)  \n  owns *Network  \n\n" -> "\n  Network Layer  \n  (pkg/newtron/network/)  \n  Spec resolution,  \n  topology provisioning  \n\n";
     "\n  NodeActor  \n  (1 per device)  \n  caches *Node (SSH conn)  \n\n" -> "\n  Node Layer  \n  (pkg/newtron/network/node/)  \n  Node, Interface,  \n  ChangeSet, *_ops.go  \n\n" [label="ConnectTransport()"];

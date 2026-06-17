@@ -2,23 +2,23 @@
 
 Newtron is a network automation tool for SONiC switches. It reads and writes SONiC's Redis databases (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) through SSH-tunneled Redis connections — no CLI scraping, no screen parsing.
 
-All interaction goes through an HTTP API server (`newtron-server`). The CLI and newtrun are HTTP clients — they never connect to devices directly. This means you can run the server close to your devices and operate from anywhere.
+All interaction goes through the newtron engine inside `bin/newt-server`. The CLI and newtrun are HTTP clients — they never connect to devices directly. This means you can run `bin/newt-server` close to your devices and operate from anywhere.
 
 ```
-┌─────────────┐     ┌────────────────┐     ┌────────────┐     ┌──────────────────┐
-│             │     │                │     │            │     │                  │
-│ newtron CLI │     │ newtron-server │     │ SSH tunnel │     │   SONiC Redis    │
-│             │     │ (HTTP :18080)  │     │            │     │ DB 4 (CONFIG_DB) │
-│             │ ──▶ │                │ ──▶ │            │ ──▶ │                  │
-└─────────────┘     └────────────────┘     └────────────┘     └──────────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌────────────┐     ┌──────────────────┐
+│             │     │                  │     │            │     │                  │
+│ newtron CLI │     │   newt-server    │     │ SSH tunnel │     │   SONiC Redis    │
+│             │     │ (newtron engine) │     │            │     │ DB 4 (CONFIG_DB) │
+│             │ ──▶ │                  │ ──▶ │            │ ──▶ │                  │
+└─────────────┘     └──────────────────┘     └────────────┘     └──────────────────┘
                       ▲
                       │
                       │
-                    ┌────────────────┐
-                    │                │
-                    │    newtrun     │
-                    │                │
-                    └────────────────┘
+                    ┌──────────────────┐
+                    │                  │
+                    │     newtrun      │
+                    │                  │
+                    └──────────────────┘
 ```
 
 All write commands default to **dry-run** (preview only). Add `-x` to execute. This applies to both device operations and spec edits.
@@ -62,11 +62,7 @@ For the architectural principles behind this design, see the [HLD](hld.md). For 
 git clone https://github.com/aldrin-isaac/newtron.git
 cd newtron
 
-# Build the CLI and server
-go build -o bin/newtron ./cmd/newtron
-go build -o bin/newtron-server ./cmd/newtron-server
-
-# Optional: build lab tools (newtlab, newtrun)
+# Build all five binaries (newtron CLI, newt-server, newtlab, newtrun, newtlink)
 make build
 ```
 
@@ -2761,7 +2757,7 @@ make build
 bin/newtlab deploy newtrun/topologies/2node-ngdp
 
 # Start server pointing at lab specs
-bin/newtron-server -spec-dir newtrun/topologies/2node-ngdp/specs &
+bin/newt-server --spec-dir newtrun/topologies/2node-ngdp/specs &
 
 # Provision switches from topology
 bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 --topology intent reconcile -x

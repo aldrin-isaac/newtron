@@ -35,9 +35,9 @@ The newtrun HTTP server (`newtrun-server`) is the canonical access point for eve
 
 ### Base URL
 
-`http://127.0.0.1:18080` is the standard URL — `bin/newt-server` hosts the newtrun engine on that port alongside newtron and newtlab. For dev iteration, `bin/newtrun-server` listens on `127.0.0.1:19081` directly. Clients select between the two via `--newtrun-server <url>` or `NEWTRUN_SERVER`.
+`http://127.0.0.1:18080` is the standard URL — `bin/newt-server` hosts the newtrun engine on that port alongside newtron and newtlab. Clients override with `--newtrun-server <url>` or `NEWTRUN_SERVER` when newt-server runs on a non-default host or port.
 
-Non-loopback binds require an explicit `--listen` value on the chosen server and emit a startup warning that there is no built-in authentication. Wrap with a reverse proxy if you need TLS or auth.
+Non-loopback binds require an explicit `--listen` value on newt-server. Wrap with TLS via `--tls-cert/--tls-key/--tls-ca` (auth-design.md L2a) or a reverse proxy.
 
 ### Envelope
 

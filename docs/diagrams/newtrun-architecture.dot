@@ -4,16 +4,16 @@ digraph newtrun {
   edge [fontname="Helvetica", fontsize=10];
 
   cli   [label="\n  bin/newtrun  \n  (CLI client)  \n\n"];
-  srv   [label="\n  bin/newtrun-server  \n  (engine)  \n\n"];
+  srv   [label="\n  bin/newt-server  \n  (newtrun engine)  \n\n"];
   runner[label="\n  Runner  \n  (per run, in goroutine)  \n\n"];
-  ntr   [label="\n  newtron-server  \n  (HTTP API)  \n\n"];
-  ntlab [label="\n  newtlab  \n  (Go API)  \n\n"];
+  ntr   [label="\n  bin/newt-server  \n  (newtron engine)  \n\n"];
+  ntlab [label="\n  bin/newt-server  \n  (newtlab engine)  \n\n"];
   vms   [label="\n  QEMU VMs  \n  (SONiC + hosts)  \n\n"];
 
-  cli -> srv [label="HTTP\n/api/runs etc"];
+  cli -> srv [label="HTTP\n/newtrun/v1/runs etc"];
   srv -> runner [label="spawn"];
-  runner -> ntr [label="HTTP"];
-  runner -> ntlab [label="Go API"];
+  runner -> ntr [label="in-process Go call"];
+  runner -> ntlab [label="in-process Go call"];
   runner -> vms [label="SSH\n(host VMs only)"];
   ntlab -> vms [label="QEMU"];
   ntr -> vms [label="SSH\n(SONiC switches)"];

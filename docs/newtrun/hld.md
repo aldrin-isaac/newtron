@@ -24,37 +24,37 @@ newtrun sits between two tools that each do one thing well. Understanding the bo
 
 ## 3. Architecture
 
-newtrun is split into two binaries: a thin HTTP client (`bin/newtrun`) and a long-lived server (`bin/newtrun-server`). The server owns scenario execution; the client is the operator entry point.
+newtrun ships as a thin CLI client (`bin/newtrun`). The runtime engine — Runners, run registry, scenario execution — lives in `pkg/newtrun/` and is hosted by `bin/newt-server`, which composes the newtron, newtrun, and newtlab engines into one process on a single port. Every operational flow routes through `bin/newt-server`; there is no per-engine standalone binary.
 
 ```
-                                                                                              SSH
-                                                                                              (host VMs only)
-                                                                    ┌────────────────────────────────────────────────────────────────────┐
-                                                                    │                                                                    ▼
-┌──────────────┐                  ┌────────────────────┐          ┌─────────────────────────┐                     ┌──────────┐         ┌─────────────────┐
-│              │                  │                    │          │                         │                     │          │         │                 │
-│ bin/newtrun  │  HTTP            │ bin/newtrun-server │          │         Runner          │                     │ newtlab  │         │    QEMU VMs     │
-│ (CLI client) │  /newtrun/v1/runs etc   │      (engine)      │  spawn   │ (per run, in goroutine) │  Go API             │ (Go API) │  QEMU   │ (SONiC + hosts) │
-│              │ ───────────────▶ │                    │ ───────▶ │                         │ ──────────────────▶ │          │ ──────▶ │                 │
-└──────────────┘                  └────────────────────┘          └─────────────────────────┘                     └──────────┘         └─────────────────┘
-                                                                    │                                                                    ▲
-                                                                    │ HTTP                                                               │
-                                                                    ▼                                                                    │
-                                                                  ┌─────────────────────────┐                                            │
-                                                                  │                         │                                            │
-                                                                  │     newtron-server      │  SSH                                       │
-                                                                  │       (HTTP API)        │  (SONiC switches)                          │
-                                                                  │                         │ ───────────────────────────────────────────┘
-                                                                  └─────────────────────────┘
+                                                                                                   SSH
+                                                                                                   (host VMs only)
+                                                                         ┌──────────────────────────────────────────────────────────────────────────────┐
+                                                                         │                                                                              ▼
+┌──────────────┐                         ┌──────────────────┐          ┌─────────────────────────┐                       ┌──────────────────┐         ┌─────────────────┐
+│              │                         │                  │          │                         │                       │                  │         │                 │
+│ bin/newtrun  │  HTTP                   │ bin/newt-server  │          │         Runner          │                       │ bin/newt-server  │         │    QEMU VMs     │
+│ (CLI client) │  /newtrun/v1/runs etc   │ (newtrun engine) │  spawn   │ (per run, in goroutine) │  in-process Go call   │ (newtlab engine) │  QEMU   │ (SONiC + hosts) │
+│              │ ──────────────────────▶ │                  │ ───────▶ │                         │ ────────────────────▶ │                  │ ──────▶ │                 │
+└──────────────┘                         └──────────────────┘          └─────────────────────────┘                       └──────────────────┘         └─────────────────┘
+                                                                         │                                                                              ▲
+                                                                         │ in-process Go call                                                           │
+                                                                         ▼                                                                              │
+                                                                       ┌─────────────────────────┐                                                      │
+                                                                       │                         │                                                      │
+                                                                       │     bin/newt-server     │  SSH                                                 │
+                                                                       │    (newtron engine)     │  (SONiC switches)                                    │
+                                                                       │                         │ ─────────────────────────────────────────────────────┘
+                                                                       └─────────────────────────┘
 ```
 
 *Diagram source: [`docs/diagrams/newtrun-architecture.dot`](../diagrams/newtrun-architecture.dot).*
 
-### 3.1 Two binaries, two roles
+### 3.1 The CLI and the engine
 
-**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to newtrun-server. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or `newtrun/suites/` directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newtrun-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
+**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to the newtrun engine inside `bin/newt-server`. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or `newtrun/suites/` directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newt-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
 
-**`bin/newtrun-server` — the engine.** A long-lived process. Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP server that exposes all of it. Each `POST /newtrun/v1/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
+**The newtrun engine.** Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP routes that expose all of it. Lives in `pkg/newtrun/`; the engine has no main package of its own. Hosted by `cmd/newt-server`, which mounts `/newtrun/v1/...` routes on a shared mux alongside the newtron and newtlab engines. Each `POST /newtrun/v1/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
 
 ### 3.2 The Runner
 
@@ -62,13 +62,15 @@ A Runner is a per-run orchestrator. Server-side, one Runner exists per in-flight
 
 | Field | Type | Talks to |
 |-------|------|----------|
-| `r.Client` | `*newtron-client.Client` | newtron-server over HTTP |
-| `r.NewtlabClient` | `newtrun.LabClient` (production: `*newtlab-client.Client`) | newtlab-server over HTTP — deploy / destroy / status |
+| `r.Client` | `*newtron-client.Client` | newtron engine inside `bin/newt-server` over HTTP |
+| `r.NewtlabClient` | `newtrun.LabClient` (production: `*newtlab-client.Client`) | newtlab engine inside `bin/newt-server` over HTTP — deploy / destroy / status |
 | `r.HostConns` | `map[string]*ssh.Client` | host VMs over SSH (for data-plane testing) |
 
-**All SONiC operations go through HTTP.** The Runner creates a newtron HTTP client, registers the network spec directory with newtron-server, and every subsequent operation — provisioning, service lifecycle, health checks, route verification — is an HTTP request. newtron-server manages SSH connections to SONiC devices; newtrun never connects to them directly.
+**All SONiC operations go through HTTP.** The Runner creates a newtron HTTP client, registers the network spec directory with the newtron engine, and every subsequent operation — provisioning, service lifecycle, health checks, route verification — is an HTTP request. The newtron engine manages SSH connections to SONiC devices; newtrun never connects to them directly.
 
-**Topology lifecycle also goes through HTTP.** Per §27 (Single Owner): newtlab owns `LabState`. The Runner reaches it via `newtlab-server`'s HTTP surface — `Deploy` / `Destroy` / `LabStatus` — never via in-process `newtlab.NewLab`. `EnsureTopology` reuses running VMs if all nodes are healthy, avoiding a full redeploy between iterations.
+**Topology lifecycle also goes through HTTP.** Per §27 (Single Owner): newtlab owns `LabState`. The Runner reaches it via the newtlab engine's HTTP surface — `Deploy` / `Destroy` / `LabStatus` — never via in-process `newtlab.NewLab`. `EnsureTopology` reuses running VMs if all nodes are healthy, avoiding a full redeploy between iterations.
+
+Both the newtron and newtlab engines run inside the same `bin/newt-server` process the newtrun engine itself runs in. The HTTP hops are loopback round-trips on a shared port; the per-hop cost is small and the audit story is uniform — every request flows through one identity-middleware chain at the server boundary.
 
 **Host devices use direct SSH.** The `host-exec` action runs commands inside network namespaces on host VMs. These are plain Linux VMs, not SONiC devices.
 
@@ -84,19 +86,21 @@ The server tracks active runs in an in-memory `RunRegistry` keyed by run identit
 - **Different suites concurrent.** No contention between distinct suites.
 - **Inline runs always concurrent.** Each `POST /newtrun/v1/runs/inline` allocates a fresh UUID; UUIDs never collide.
 
-When `newtrun-server` shuts down, the registry cancels every in-flight runner's context and waits up to 5 seconds for them to drain before the HTTP listener stops.
+When `bin/newt-server` shuts down, the registry cancels every in-flight runner's context and waits up to 5 seconds for them to drain before the HTTP listener stops.
 
 ### 3.4 URL resolution
 
-The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:18080`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /newtrun/v1/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:18080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
+The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:18080`). The flag name predates the unified `bin/newt-server` shape and is kept for backward compatibility; it points at whichever `bin/newt-server` instance is hosting the newtrun engine.
 
-The standard production stack runs `bin/newt-server` on `127.0.0.1:18080`. newt-server hosts the newtron, newtrun, and newtlab engines in one process; consumers (including this CLI) target `:18080` and the aggregator routes by URL prefix (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). For dev iteration on a single engine, the standalone binaries (`bin/newtron-server`, `bin/newtrun-server`, `bin/newtlab-server`) are still built and serve their own loopback ports (`:19080`, `:19081`, `:19082`); point the CLI at one via `--newtrun-server http://127.0.0.1:19081`. See [`docs/newt-server.md`](../newt-server.md) for the composition rationale.
+Inside the runner, the newtron-server URL is resolved per-request: the `newtron_server` field on the `POST /newtrun/v1/runs` body wins, otherwise the runner's configured default applies. Operators who need a non-default newtron-server set it per request, or compose `bin/newt-server` with a custom `--newtron-server` value.
 
-Non-loopback exposure (any binding other than `127.0.0.1`) on any server emits a startup warning since there is no built-in authentication. Operators who need TLS or auth wrap newt-server with a reverse proxy — one bind point, one termination point.
+The standard production stack runs `bin/newt-server` on `127.0.0.1:18080`. It hosts the newtron, newtrun, and newtlab engines in one process; consumers (including this CLI) target `:18080` and the aggregator routes by URL prefix (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). See [`docs/newt-server.md`](../newt-server.md) for the composition rationale.
+
+Non-loopback exposure (any binding other than `127.0.0.1`) requires `bin/newt-server` to be invoked with `--auth-pam-service` plus `--tls-cert / --tls-key / --tls-ca` (auth-design.md L2a / L2b); otherwise the listener serves identity-less plaintext, which is acceptable only on loopback.
 
 ## 4. Directory Structure
 
-newtrun's code lives in three places: CLI client (`cmd/newtrun/`), server entry point (`cmd/newtrun-server/`), and core library (`pkg/newtrun/` plus `pkg/newtrun/newtrun/v1/` and `pkg/newtrun/client/`). Test assets live at the repo root under `newtrun/`.
+newtrun's code lives in two places: CLI client (`cmd/newtrun/`) and core library (`pkg/newtrun/` plus `pkg/newtrun/api/` for the HTTP surface and `pkg/newtrun/client/` for the in-process client type). The engine has no main package of its own — `cmd/newt-server` mounts `pkg/newtrun/api`'s routes alongside the newtron and newtlab engines. Test assets live at the repo root under `newtrun/`.
 
 ```
 newtron/
@@ -115,8 +119,8 @@ newtron/
 │   │   ├── cmd_topologies.go     # GET/POST /newtron/v1/networks (delegates to newtron)
 │   │   ├── cmd_actions.go        # static action vocabulary help
 │   │   └── scenario_e2e_test.go  # CLI→server E2E: scenario lifecycle, bad-YAML rejection
-│   └── newtrun-server/           # Server entry point
-│       └── main.go               # --listen, --suites-base
+│   └── newt-server/              # Composed server that hosts all three engines
+│       └── main.go               # --listen, --spec-dir, --auth-pam-service, --tls-*
 │
 ├── pkg/newtrun/                  # Engine (the orchestration core)
 │   ├── scenario.go               # Scenario, Step, StepAction, ExpectBlock, BatchCall

@@ -2,10 +2,10 @@ graph { flow: south; }
 
 # README architecture — deployment side-channel.
 #
-# newtlab puts SONiC VMs on the network (creates QEMU processes, wires
-# socket links) and exits. specs feed newtron-server at load time.
+# The newtlab engine puts SONiC VMs on the network (creates QEMU processes,
+# wires socket links) and exits. specs feed the newtron engine at load time.
 # Neither path runs during normal operation — these are setup/lifecycle
 # concerns.
 
-[ specs ]       --> [ newtron-server ]
+[ specs ]       --> [ newt-server\n(newtron engine) ]
 [ newtlab CLI ] --> { label: deploy, wire; } [ SONiC VM ]
