@@ -207,9 +207,24 @@ func TestInlineStagesAsLoadableSuite(t *testing.T) {
 	ts := httptest.NewServer(srv.buildHandler())
 	defer ts.Close()
 
+	// This test inspects the staging dir contents the goroutine writes
+	// during the run; once the run completes, the goroutine RemoveAlls
+	// the dir. The 10ms inlineScenarioWait races with that cleanup on
+	// slow CI runners — by the time os.Stat fires the dir is already
+	// gone. Use a longer-wait scenario inline so the dir persists long
+	// enough for the test to inspect it.
+	const longWaitScenario = `
+name: inline-test
+description: smoke test
+network: test-topo
+steps:
+  - name: long-pause
+    action: wait
+    duration: 2s
+`
 	resp, env := postInline(t, ts, InlineRunRequest{
-		ScenarioYAML:   inlineScenarioWait,
-		TimeoutSeconds: 5,
+		ScenarioYAML:   longWaitScenario,
+		TimeoutSeconds: 10,
 	})
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("status: got %d, want 202; error: %s", resp.StatusCode, env.Error)
