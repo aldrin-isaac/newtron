@@ -350,8 +350,11 @@ func (s *Server) getNetwork(id string) *networkEntity {
 	return s.networks[id]
 }
 
-// listNetworks returns info about all registered networks.
-func (s *Server) listNetworks() []NetworkInfo {
+// ListNetworks returns info about all registered networks. Exposed
+// so cmd/newt-server can introspect the registry after auto-discovery
+// for tests + startup banners; the HTTP list handler calls the same
+// method (§27 Single Owner — no duplicate "what's registered?" logic).
+func (s *Server) ListNetworks() []NetworkInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]NetworkInfo, 0, len(s.networks))

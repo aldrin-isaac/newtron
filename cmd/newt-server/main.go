@@ -51,10 +51,8 @@ const defaultListen = "127.0.0.1:18080"
 
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
-	specDir := flag.String("spec-dir", "", "spec directory to auto-register as the 'default' network on newtron")
-	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
-	networksBase := flag.String("networks-base", "networks", "directory containing per-topology subdirectories. Each topology owns its own specs (<base>/<topology>/specs/) and suites (<base>/<topology>/suites/<name>/) — newtrun resolves test-suite names by scanning across topologies; newtlab loads lab specs from the same tree.")
+	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own specs (<base>/<name>/specs/) and suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/specs/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
 	scaffoldRoot := flag.String("scaffold-root", "", "on-disk root for derived-spec_dir scaffolds on newtron (#122); empty disables the derived-path mode of POST /newtron/v1/networks. When set, scaffold:true with no spec_dir lays out <root>/<id>")
 	auditLog := flag.String("audit-log", "", "file path for the mutation audit log; empty disables audit emission entirely (default). (auth-design.md L1)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
@@ -169,11 +167,22 @@ func main() {
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,
 	})
-	if *specDir != "" {
-		if err := newtronSrv.RegisterNetwork(*netID, *specDir); err != nil {
-			logger.Fatalf("failed to register network '%s' from %s: %v", *netID, *specDir, err)
-		}
-	}
+	// Auto-discovery: every <networks-base>/<name>/specs/topology.json
+	// on disk is pre-registered as a network with id=<name>. Mirrors the
+	// long-standing newtlab behavior (cmd/newtlab/main.go:282 scans for
+	// the same shape to resolve deploy targets) — newtron's registry was
+	// previously the only consumer of this layout that didn't auto-load,
+	// requiring an explicit --spec-dir or POST /networks for every slot.
+	// After auto-discovery, `bin/newt-server &` (no flags) makes every
+	// network in the tree addressable as /networks/<name>/... immediately.
+	//
+	// Explicit POST /newtron/v1/networks remains for the lab-as-network
+	// case (network id ≠ basename, e.g. `bin/newtlab deploy alice-lab`
+	// binds id "alice-lab" to a spec_dir under one of the templates here).
+	// In that case Server.RegisterNetwork is idempotent on a matching
+	// spec_dir, so the deploy path doesn't conflict with the pre-registered
+	// template slot.
+	discoverAndRegisterNetworks(newtronSrv, *networksBase, logger)
 	// newtrun reaches newtlab via HTTP (§27 — newtlab owns LabState).
 	// In the composed binary the call is an in-process loopback to
 	// the newtlab handler mounted on the same mux; in standalone
