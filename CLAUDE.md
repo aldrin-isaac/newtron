@@ -21,6 +21,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newt-server | `docs/newt-server.md` | Aggregated HTTP entry point — composes the three engines on one port |
 | RCA index | `docs/rca/` | root-cause analyses — SONiC pitfalls and workarounds |
 | AI Instructions | `docs/ai-instructions.md` | Behavioral directives scoped by activity phase |
+| Code Review | `docs/code-review.md` | Procedural rules for diff-review tasks — angles, false-positive filter, confidence rubric |
 | Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
 
 When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.

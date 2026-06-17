@@ -152,6 +152,13 @@ existing code. When a specification and the code conflict, the code is wrong.
 
 ## 9. Post-Implementation Conformance Audit — REVIEW
 
+**For diff-review tasks (review a PR, review uncommitted changes, pre-PR
+sanity check), follow the procedural rules in `docs/code-review.md`** —
+review angles, false-positive filter, confidence rubric (only report
+≥ 80), and output format. The principles below cover the conformance
+audit that follows implementation; the code-review.md rules cover
+the operator-facing review pass.
+
 After completing an implementation, mechanically verify each relevant
 architectural principle against the actual code. For each principle that
 prescribes a structural rule, grep or trace the code to confirm compliance.
