@@ -1182,6 +1182,53 @@ func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
 	return n.persistSpec()
 }
 
+// UpdateFilterRule atomically replaces a filter rule's fields, optionally
+// rotating its sequence number. Returns an error if the filter doesn't
+// exist, the rule at the current sequence doesn't exist, or the requested
+// new sequence collides with another rule. When newSequence is nil the
+// rule keeps its current sequence; when non-nil the rule's sequence
+// rotates to that value (renumber). Issue #209.
+func (n *Network) UpdateFilterRule(filter string, currentSeq int, newRule *spec.FilterRule) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	filter = util.NormalizeName(filter)
+	f, ok := n.spec.Filters[filter]
+	if !ok {
+		return fmt.Errorf("filter '%s' not found", filter)
+	}
+	// Locate the rule by its current sequence.
+	var target *spec.FilterRule
+	for _, r := range f.Rules {
+		if r.Sequence == currentSeq {
+			target = r
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("rule with priority %d not found in filter '%s'", currentSeq, filter)
+	}
+	// If the rule is being renumbered, ensure the target sequence isn't
+	// already occupied by another rule.
+	if newRule.Sequence != currentSeq {
+		for _, r := range f.Rules {
+			if r.Sequence == newRule.Sequence {
+				return fmt.Errorf("rule with priority %d already exists in filter '%s'", newRule.Sequence, filter)
+			}
+		}
+	}
+	// Replace target's fields with newRule's. Done in place (same pointer)
+	// so any external references stay valid; the slice doesn't need to
+	// rebuild.
+	*target = *newRule
+	// Re-sort by sequence — the rule may have rotated to a different slot.
+	sort.Slice(f.Rules, func(i, j int) bool {
+		return f.Rules[i].Sequence < f.Rules[j].Sequence
+	})
+	return n.persistSpec()
+}
+
 // RemoveFilterRule atomically removes a rule from a filter by sequence
 // number. Returns an error if the filter or rule doesn't exist.
 func (n *Network) RemoveFilterRule(filter string, sequence int) error {

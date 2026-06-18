@@ -90,6 +90,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-filter", s.handleCreateFilter)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-filter", s.handleDeleteFilter)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/add-filter-rule", s.handleAddFilterRule)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-filter-rule", s.handleUpdateFilterRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/remove-filter-rule", s.handleRemoveFilterRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-prefix-list", s.handleCreatePrefixList)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-prefix-list", s.handleDeletePrefixList)

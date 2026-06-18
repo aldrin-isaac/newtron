@@ -72,6 +72,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/add-qos-queue` | Add queue to QoS policy |
 | POST | `/networks/{n}/remove-qos-queue` | Remove queue from QoS policy |
 | POST | `/networks/{n}/add-filter-rule` | Add rule to filter |
+| POST | `/networks/{n}/update-filter-rule` | Update rule in filter (incl. renumber) |
 | POST | `/networks/{n}/remove-filter-rule` | Remove rule from filter |
 | POST | `/networks/{n}/add-prefix-list-entry` | Add entry to prefix list |
 | POST | `/networks/{n}/remove-prefix-list-entry` | Remove entry from prefix list |
@@ -1366,6 +1367,42 @@ Add a rule to a filter.
 {"data": {"seq": 10}}
 ```
 
+#### POST /newtron/v1/networks/{netID}/update-filter-rule
+
+Update an existing rule in a filter. `seq` identifies the rule; `new_seq` is optional — when present, the rule's sequence rotates to that value (renumber). Remaining fields replace the rule's current values.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `filter` | string | yes | Filter name |
+| `seq` | integer | yes | Sequence number of the existing rule |
+| `new_seq` | integer | no | New sequence number — present only when renumbering |
+| `action` | string | yes | `"permit"` or `"deny"` |
+| `src_ip` | string | no | Source IP/prefix |
+| `dst_ip` | string | no | Destination IP/prefix |
+| `src_prefix_list` | string | no | Source prefix list reference |
+| `dst_prefix_list` | string | no | Destination prefix list reference |
+| `protocol` | string | no | IP protocol (e.g., `"tcp"`, `"udp"`, `"6"`) |
+| `src_port` | string | no | Source port or range |
+| `dst_port` | string | no | Destination port or range |
+| `dscp` | string | no | DSCP match value |
+| `cos` | string | no | CoS match value |
+
+**Response (200):**
+
+```json
+{"data": {"seq": 5}}
+```
+
+The response's `seq` is the resulting sequence — equals `new_seq` when present, equals `seq` otherwise.
+
+**Errors:**
+- 400: rule at `seq` does not exist in the filter; or `new_seq` collides with another rule's sequence
+- 403: caller lacks `PermSpecAuthor` on `filters/{filter}`
+
 #### POST /newtron/v1/networks/{netID}/remove-filter-rule
 
 Remove a rule from a filter.
@@ -1377,7 +1414,7 @@ Remove a rule from a filter.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `filter` | string | yes | Filter name |
-| `sequence` | integer | yes | Sequence number to remove |
+| `seq` | integer | yes | Sequence number to remove |
 
 **Response (200):**
 

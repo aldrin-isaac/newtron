@@ -499,6 +499,13 @@ func (c *Client) AddFilterRule(req newtron.AddFilterRuleRequest, opts newtron.Ex
 	return c.doPost(c.networkPath()+"/add-filter-rule"+execQuery(opts), req, nil)
 }
 
+// UpdateFilterRule updates an existing rule in a filter. The body's
+// Sequence field identifies the existing rule; NewSequence (when non-nil)
+// rotates the rule's sequence number. Issue #209.
+func (c *Client) UpdateFilterRule(req newtron.UpdateFilterRuleRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/update-filter-rule"+execQuery(opts), req, nil)
+}
+
 // RemoveFilterRule removes a rule from a filter.
 func (c *Client) RemoveFilterRule(filter string, seq int, opts newtron.ExecOpts) error {
 	body := struct {

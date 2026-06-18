@@ -408,6 +408,58 @@ func (net *Network) AddFilterRule(ctx context.Context, req AddFilterRuleRequest,
 	return net.internal.AddFilterRule(req.Filter, rule)
 }
 
+// UpdateFilterRule replaces an existing filter rule's fields and
+// optionally rotates its sequence number. Sequence (req.Sequence)
+// identifies the existing rule; NewSequence (req.NewSequence) is
+// optional — when non-nil the rule's sequence rotates to that value.
+// Issue #209.
+func (net *Network) UpdateFilterRule(ctx context.Context, req UpdateFilterRuleRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(req.Filter)); err != nil {
+			return err
+		}
+	}
+	// Compute the resulting sequence (used for both preflight and execute).
+	newSeq := req.Sequence
+	if req.NewSequence != nil {
+		newSeq = *req.NewSequence
+	}
+	if !opts.Execute {
+		fs, err := net.internal.GetFilter(req.Filter)
+		if err != nil {
+			return err
+		}
+		foundCurrent := false
+		for _, r := range fs.Rules {
+			if r.Sequence == req.Sequence {
+				foundCurrent = true
+				continue
+			}
+			if r.Sequence == newSeq && newSeq != req.Sequence {
+				return fmt.Errorf("rule with priority %d already exists in filter '%s'", newSeq, req.Filter)
+			}
+		}
+		if !foundCurrent {
+			return fmt.Errorf("rule with priority %d not found in filter '%s'", req.Sequence, req.Filter)
+		}
+		return nil
+	}
+	rule := &spec.FilterRule{
+		Sequence:      newSeq,
+		Action:        req.Action,
+		SrcIP:         req.SrcIP,
+		DstIP:         req.DstIP,
+		SrcPrefixList: req.SrcPrefixList,
+		DstPrefixList: req.DstPrefixList,
+		Protocol:      req.Protocol,
+		SrcPort:       req.SrcPort,
+		DstPort:       req.DstPort,
+		DSCP:          req.DSCP,
+		CoS:           req.CoS,
+	}
+	return net.internal.UpdateFilterRule(req.Filter, req.Sequence, rule)
+}
+
 // RemoveFilterRule removes a rule from a filter template by sequence number.
 func (net *Network) RemoveFilterRule(ctx context.Context, filter string, seq int, opts ExecOpts) error {
 	if opts.Execute {
