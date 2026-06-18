@@ -1327,6 +1327,43 @@ func (n *Network) AddRuleToRoutePolicy(policy string, rule *spec.RoutePolicyRule
 	return n.persistSpec()
 }
 
+// UpdateRuleInRoutePolicy atomically replaces a route-policy rule's
+// fields, optionally rotating its sequence. Mirrors UpdateFilterRule's
+// contract. Issue #210.
+func (n *Network) UpdateRuleInRoutePolicy(policy string, currentSeq int, newRule *spec.RoutePolicyRule) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	rp, ok := n.spec.RoutePolicies[policy]
+	if !ok {
+		return fmt.Errorf("route policy '%s' not found", policy)
+	}
+	var target *spec.RoutePolicyRule
+	for _, r := range rp.Rules {
+		if r.Sequence == currentSeq {
+			target = r
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", currentSeq, policy)
+	}
+	if newRule.Sequence != currentSeq {
+		for _, r := range rp.Rules {
+			if r.Sequence == newRule.Sequence {
+				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newRule.Sequence, policy)
+			}
+		}
+	}
+	*target = *newRule
+	sort.Slice(rp.Rules, func(i, j int) bool {
+		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+	})
+	return n.persistSpec()
+}
+
 // RemoveRuleFromRoutePolicy atomically removes a rule from a route policy
 // by sequence number. Returns an error if the policy or rule doesn't exist.
 func (n *Network) RemoveRuleFromRoutePolicy(policy string, sequence int) error {

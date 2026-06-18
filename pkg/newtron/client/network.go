@@ -364,6 +364,12 @@ func (c *Client) AddRoutePolicyRule(req newtron.AddRoutePolicyRuleRequest, opts 
 	return c.doPost(c.networkPath()+"/add-route-policy-rule"+execQuery(opts), req, nil)
 }
 
+// UpdateRoutePolicyRule updates an existing rule in a route policy.
+// Mirrors UpdateFilterRule's semantics. Issue #210.
+func (c *Client) UpdateRoutePolicyRule(req newtron.UpdateRoutePolicyRuleRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/update-route-policy-rule"+execQuery(opts), req, nil)
+}
+
 // RemoveRoutePolicyRule removes a rule from a route policy.
 func (c *Client) RemoveRoutePolicyRule(policy string, seq int, opts newtron.ExecOpts) error {
 	body := struct {

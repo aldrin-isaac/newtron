@@ -418,3 +418,91 @@ func TestUpdateFilterRule_FilterNotFound(t *testing.T) {
 		t.Fatalf("expected error for missing filter; got status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+// seedRoutePolicyWithRule scaffolds a route policy "rp" with one rule
+// at seq=10. Mirrors seedFilterWithRule. Issue #210.
+func seedRoutePolicyWithRule(t *testing.T, s *Server) {
+	t.Helper()
+	if w := post(t, s, "/newtron/v1/networks/default/create-route-policy", map[string]any{
+		"name": "rp",
+	}); w.Code != http.StatusCreated {
+		t.Fatalf("create-route-policy: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := post(t, s, "/newtron/v1/networks/default/add-route-policy-rule", map[string]any{
+		"policy": "rp",
+		"seq":    10,
+		"action": "permit",
+	}); w.Code >= 400 {
+		t.Fatalf("add-route-policy-rule seed: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateRoutePolicyRule_HappyPath(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedRoutePolicyWithRule(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-route-policy-rule", map[string]any{
+		"policy": "rp",
+		"seq":    10,
+		"action": "deny",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-route-policy-rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateRoutePolicyRule_Renumber(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedRoutePolicyWithRule(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-route-policy-rule", map[string]any{
+		"policy":  "rp",
+		"seq":     10,
+		"new_seq": 5,
+		"action":  "permit",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-route-policy-rule renumber: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]int `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data["seq"] != 5 {
+		t.Errorf("response seq: got %d, want 5", resp.Data["seq"])
+	}
+}
+
+func TestUpdateRoutePolicyRule_Collision(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedRoutePolicyWithRule(t, s)
+	if w := post(t, s, "/newtron/v1/networks/default/add-route-policy-rule", map[string]any{
+		"policy": "rp",
+		"seq":    20,
+		"action": "permit",
+	}); w.Code >= 400 {
+		t.Fatalf("add second rule: %d %s", w.Code, w.Body.String())
+	}
+	w := post(t, s, "/newtron/v1/networks/default/update-route-policy-rule", map[string]any{
+		"policy":  "rp",
+		"seq":     10,
+		"new_seq": 20,
+		"action":  "permit",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateRoutePolicyRule_NotFound(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedRoutePolicyWithRule(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-route-policy-rule", map[string]any{
+		"policy": "rp",
+		"seq":    999,
+		"action": "deny",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}

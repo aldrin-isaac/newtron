@@ -750,6 +750,18 @@ type AddFilterRuleRequest struct {
 	CoS           string `json:"cos,omitempty"`
 }
 
+// UpdateRoutePolicyRuleRequest is the request for updating an existing
+// rule in a route policy. Mirrors UpdateFilterRuleRequest. Issue #210.
+type UpdateRoutePolicyRuleRequest struct {
+	Policy      string              `json:"policy"`
+	Sequence    int                 `json:"seq"`
+	NewSequence *int                `json:"new_seq,omitempty"`
+	Action      string              `json:"action"`
+	PrefixList  string              `json:"prefix_list,omitempty"`
+	Community   string              `json:"community,omitempty"`
+	Set         *RoutePolicySetSpec `json:"set,omitempty"`
+}
+
 // UpdateFilterRuleRequest is the request for updating an existing rule in
 // a filter. Sequence identifies the existing rule (matches RemoveFilterRule
 // semantics). NewSequence is optional — when present and non-zero, the
