@@ -368,7 +368,7 @@ func (c *Client) AddRoutePolicyRule(req newtron.AddRoutePolicyRuleRequest, opts 
 func (c *Client) RemoveRoutePolicyRule(policy string, seq int, opts newtron.ExecOpts) error {
 	body := struct {
 		Policy   string `json:"policy"`
-		Sequence int    `json:"sequence"`
+		Sequence int    `json:"seq"`
 	}{Policy: policy, Sequence: seq}
 	return c.doPost(c.networkPath()+"/remove-route-policy-rule"+execQuery(opts), body, nil)
 }
@@ -503,7 +503,7 @@ func (c *Client) AddFilterRule(req newtron.AddFilterRuleRequest, opts newtron.Ex
 func (c *Client) RemoveFilterRule(filter string, seq int, opts newtron.ExecOpts) error {
 	body := struct {
 		Filter   string `json:"filter"`
-		Sequence int    `json:"sequence"`
+		Sequence int    `json:"seq"`
 	}{Filter: filter, Sequence: seq}
 	return c.doPost(c.networkPath()+"/remove-filter-rule"+execQuery(opts), body, nil)
 }
