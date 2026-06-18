@@ -771,3 +771,104 @@ func TestRoundTrip_AddRemoveTrunkVLAN(t *testing.T) {
 		t.Error("trunk-vlan intent should be cleared after RemoveTrunkVLAN")
 	}
 }
+
+// ============================================================================
+// ConfigureInterface within-mode field diff (#228) — no orphan IP subentries
+// when the same VRF is kept but the IP changes or is dropped.
+// ============================================================================
+
+// routedSetup creates a node with VRF "Vrf_CUST1" and Ethernet0 already
+// configured as routed {vrf:Vrf_CUST1, ip:10.0.0.1/31}. Saves the
+// boilerplate for the within-mode-diff tests.
+func routedSetup(t *testing.T) (*Node, *Interface) {
+	t.Helper()
+	n := newTestAbstractNode()
+	ctx := context.Background()
+	if _, err := n.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{}); err != nil {
+		t.Fatalf("CreateVRF: %v", err)
+	}
+	iface, err := n.GetInterface("Ethernet0")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_CUST1", IP: "10.0.0.1/31"}); err != nil {
+		t.Fatalf("ConfigureInterface (prerequisite): %v", err)
+	}
+	return n, iface
+}
+
+func TestConfigureInterface_RoutedIPSwap_NoOrphan(t *testing.T) {
+	n, iface := routedSetup(t)
+	ctx := context.Background()
+
+	// Within-mode swap: same VRF, change IP from 10.0.0.1/31 → 10.0.0.2/31.
+	cs, err := iface.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_CUST1", IP: "10.0.0.2/31"})
+	if err != nil {
+		t.Fatalf("ConfigureInterface (within-mode swap): %v", err)
+	}
+
+	// The old IP subentry must be deleted in this ChangeSet.
+	assertChange(t, cs, "INTERFACE", "Ethernet0|10.0.0.1/31", ChangeDelete)
+	// And the new IP subentry must be added.
+	assertChange(t, cs, "INTERFACE", "Ethernet0|10.0.0.2/31", ChangeAdd)
+
+	// Sanity: intent record reflects the new IP only.
+	intent := n.GetIntent("interface|Ethernet0")
+	if intent == nil {
+		t.Fatal("interface intent missing")
+	}
+	if got := intent.Params["ip"]; got != "10.0.0.2/31" {
+		t.Errorf("intent ip = %q, want 10.0.0.2/31", got)
+	}
+}
+
+func TestConfigureInterface_RoutedIPDrop_NoOrphan(t *testing.T) {
+	n, iface := routedSetup(t)
+	ctx := context.Background()
+
+	// Within-mode drop: keep VRF, omit IP. The previous IP must not orphan.
+	cs, err := iface.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_CUST1"})
+	if err != nil {
+		t.Fatalf("ConfigureInterface (IP drop): %v", err)
+	}
+
+	assertChange(t, cs, "INTERFACE", "Ethernet0|10.0.0.1/31", ChangeDelete)
+
+	intent := n.GetIntent("interface|Ethernet0")
+	if intent == nil {
+		t.Fatal("interface intent missing")
+	}
+	if got := intent.Params["ip"]; got != "" {
+		t.Errorf("intent should have no ip after drop; got %q", got)
+	}
+}
+
+func TestConfigureInterface_RoutedIPAdd_NoSpuriousDelete(t *testing.T) {
+	n := newTestAbstractNode()
+	ctx := context.Background()
+
+	if _, err := n.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{}); err != nil {
+		t.Fatalf("CreateVRF: %v", err)
+	}
+	iface, err := n.GetInterface("Ethernet0")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	// First call binds VRF only (no IP).
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_CUST1"}); err != nil {
+		t.Fatalf("ConfigureInterface VRF-only: %v", err)
+	}
+
+	// Second call adds an IP. The diff pass must not synthesize a phantom
+	// delete (there was no prior IP).
+	cs, err := iface.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_CUST1", IP: "10.0.0.1/31"})
+	if err != nil {
+		t.Fatalf("ConfigureInterface (add IP): %v", err)
+	}
+	assertChange(t, cs, "INTERFACE", "Ethernet0|10.0.0.1/31", ChangeAdd)
+	for _, c := range cs.Changes {
+		if c.Table == "INTERFACE" && c.Type == ChangeDelete {
+			t.Errorf("unexpected delete on pure IP add: %+v", c)
+		}
+	}
+}

@@ -33,7 +33,12 @@ func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string
 			return fmt.Errorf("writeIntent %q: parents mismatch (existing %v, requested %v) — delete and recreate to change parents",
 				resource, existingParents, parents)
 		}
-		// Same parents — idempotent update: replace params, preserve _children
+		// Same parents — idempotent update: replace record (DEL+HSET) so
+		// dropped params don't orphan in projection / CONFIG_DB. Without
+		// the DEL, mergeHydrator leaves any field that the existing record
+		// had but the new params dropped, surfacing as intent-vs-state
+		// divergence. CLAUDE.md "CONFIG_DB Replace Semantics (DEL+HSET)".
+		// Issue #228.
 		intent := &sonic.Intent{
 			Resource:  resource,
 			Operation: op,
@@ -43,7 +48,15 @@ func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string
 			Params:    params,
 		}
 		fields := intent.ToFields()
+		// Prepend ADD first so it sits at position 0; then prepend the
+		// DELETE before it so the apply order is DEL → SET. Two prepends
+		// reverse: second goes BEFORE first.
 		cs.Prepend("NEWTRON_INTENT", resource, fields)
+		cs.Changes = append([]Change{{Table: "NEWTRON_INTENT", Key: resource, Type: ChangeDelete}}, cs.Changes...)
+		// Clear the in-memory projection so the subsequent renderIntent's
+		// mergeHydrator starts from a fresh map — mirrors the DEL the
+		// CONFIG_DB will see.
+		delete(n.configDB.NewtronIntent, resource)
 		n.renderIntent(sonic.Entry{Table: "NEWTRON_INTENT", Key: resource, Fields: fields})
 		n.unsavedIntents = true
 		return nil

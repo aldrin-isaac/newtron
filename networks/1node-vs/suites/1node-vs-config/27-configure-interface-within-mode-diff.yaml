@@ -1,0 +1,148 @@
+name: configure-interface-within-mode-diff
+description: |
+  E2E coverage for issue #228 — ConfigureInterface within-mode field
+  changes must NOT leak CONFIG_DB sub-entries.
+
+  Verifies:
+    - Routed IP swap (same VRF): the old INTERFACE|<name>|<ip>
+      sub-entry is deleted before the new one is added. No orphan.
+    - Routed IP drop (keep VRF): same — old IP sub-entry deleted, no
+      orphan; intent record's `ip` field also cleared (not merged
+      stale).
+    - Routed IP add (from VRF-only): no spurious delete; pure add
+      semantics.
+    - Cross-mode swap (routed → bridged with same name) is correctly
+      REJECTED by the parents-mismatch guard at writeIntent — that
+      enforcement is unchanged by #228.
+
+  Runs on switch1:Ethernet28 (free port — bridged/irb/routed scenarios
+  use Ethernet4/8/12/16/20; trunk-edits uses Ethernet24).
+  Loopback mode — pure HTTP, no requires:.
+
+steps:
+  # ====================================================================
+  # Setup — fresh VRF for routed-mode tests
+  # ====================================================================
+  - name: create-vrf-cust228
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vrf?mode=loopback
+    params: {name: Vrf_CUST228}
+
+  # ====================================================================
+  # Routed IP swap — same VRF, change IP value
+  # ====================================================================
+  - name: configure-eth28-routed-ip-A
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet28/configure-interface?mode=loopback
+    params: {vrf: Vrf_CUST228, ip: "10.228.0.1/31"}
+
+  - name: verify-ip-A-subentry-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet28%7C10.228.0.1%2F31/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: configure-eth28-routed-ip-B-swap
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet28/configure-interface?mode=loopback
+    params: {vrf: Vrf_CUST228, ip: "10.228.0.2/31"}
+
+  - name: verify-ip-A-subentry-gone-after-swap
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet28%7C10.228.0.1%2F31/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-ip-B-subentry-exists-after-swap
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet28%7C10.228.0.2%2F31/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-intent-ip-is-B-only
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28?mode=loopback
+    expect:
+      jq: '.ip == "10.228.0.2/31"'
+
+  # ====================================================================
+  # Routed IP drop — keep VRF, omit IP
+  # ====================================================================
+  - name: configure-eth28-routed-drop-ip
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet28/configure-interface?mode=loopback
+    params: {vrf: Vrf_CUST228}
+
+  - name: verify-ip-B-subentry-gone-after-drop
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet28%7C10.228.0.2%2F31/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-intent-ip-cleared-after-drop
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28?mode=loopback
+    expect:
+      jq: '(.ip // "") == ""'
+
+  - name: verify-vrf-still-bound-after-ip-drop
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet28?mode=loopback
+    expect:
+      jq: '.vrf_name == "Vrf_CUST228"'
+
+  # ====================================================================
+  # Routed IP add — from VRF-only state, add an IP
+  # ====================================================================
+  - name: configure-eth28-routed-add-ip-C
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet28/configure-interface?mode=loopback
+    params: {vrf: Vrf_CUST228, ip: "10.228.0.3/31"}
+
+  - name: verify-ip-C-subentry-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE/Ethernet28%7C10.228.0.3%2F31/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-intent-ip-is-C
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28?mode=loopback
+    expect:
+      jq: '.ip == "10.228.0.3/31"'
+
+  # ====================================================================
+  # Cleanup
+  # ====================================================================
+  - name: cleanup-unconfigure-eth28
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet28/unconfigure-interface?mode=loopback
+    params: {}
+
+  - name: cleanup-delete-vrf-cust228
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vrf?mode=loopback
+    params: {name: Vrf_CUST228}

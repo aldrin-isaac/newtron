@@ -232,6 +232,20 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	if i.IsPortChannel() {
 		parents = append(parents, "portchannel|"+i.name)
 	}
+	// Within-mode field diff: when the parents match (writeIntent will
+	// accept) and a CONFIG_DB-sub-entry-owning field changes value or is
+	// dropped, the previous value's sub-entry would orphan in CONFIG_DB
+	// because the cs.Adds below only writes the NEW state. Read the
+	// existing record once and emit the corresponding cs.Deletes for
+	// any field that's about to change. Cross-mode swaps land different
+	// parents and are rejected at writeIntent — those don't reach this
+	// pass. Issue #228.
+	if existing := n.GetIntent("interface|" + i.name); existing != nil {
+		oldIP := existing.Params[sonic.FieldIntfIP]
+		if oldIP != "" && oldIP != cfg.IP {
+			cs.Deletes(deleteInterfaceIPConfig(i.name, oldIP))
+		}
+	}
 	if err := i.node.writeIntent(cs, sonic.OpConfigureInterface, "interface|"+i.name, configureIntentParams, parents); err != nil {
 		return nil, err
 	}
