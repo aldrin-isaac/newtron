@@ -738,7 +738,7 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 	}
 	var req struct {
 		Filter   string `json:"filter"`
-		Sequence int    `json:"sequence"`
+		Sequence int    `json:"seq"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -928,7 +928,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 	}
 	var req struct {
 		Policy   string `json:"policy"`
-		Sequence int    `json:"sequence"`
+		Sequence int    `json:"seq"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
