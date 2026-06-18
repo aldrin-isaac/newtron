@@ -2507,6 +2507,43 @@ Add a rule to an ACL table.
 
 **Response (201):** `WriteResult`
 
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/update-acl-rule
+
+Atomically update an ACL rule under the per-device intent lock. Closes
+the packet-leak window remove + add exposes today: the prior `ACL_RULE`
+entry and the new one are written in a single ChangeSet, so any traffic
+hitting the port during the mutation matches either the old rule or the
+new rule — never neither. Issue #227.
+
+Optional `new_rule_name` re-keys the rule (rename) without going through
+delete + add. The new key must not already exist; collision returns 409.
+Priority changes are field changes (no re-key needed) — pass the new
+priority and the old `rule_name`.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `acl` | string | yes | ACL table name |
+| `rule_name` | string | yes | Existing rule to update |
+| `priority` | integer | yes | New priority |
+| `action` | string | yes | `"FORWARD"` or `"DROP"` |
+| `src_ip` | string | no | Source IP/prefix |
+| `dst_ip` | string | no | Destination IP/prefix |
+| `protocol` | string | no | IP protocol |
+| `src_port` | string | no | Source port |
+| `dst_port` | string | no | Destination port |
+| `new_rule_name` | string | no | Rename: new rule name (re-key under the same ACL table) |
+
+**Behaviors:**
+
+- 404 if `rule_name` doesn't exist in the ACL table.
+- 409 if `new_rule_name` already names a different rule in the same table.
+
+**Response (200):** `WriteResult`
+
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-acl-rule
 
 Remove a rule from an ACL table.

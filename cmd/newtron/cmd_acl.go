@@ -190,6 +190,49 @@ Examples:
 	},
 }
 
+var (
+	ruleNewName string
+)
+
+var aclUpdateRuleCmd = &cobra.Command{
+	Use:   "update-rule <acl-name> <rule-name>",
+	Short: "Atomically update an ACL rule",
+	Long: `Atomically update an ACL rule. Closes the packet-leak window that
+delete-rule + add-rule exposes today by mutating the rule in place under
+the per-device intent lock. Issue #227.
+
+--new-rule-name renames the rule (re-key) without going through delete+add.
+Priority changes are field changes (no re-key needed).
+
+Requires -D (device) flag.
+
+Examples:
+  newtron -D leaf1 acl update-rule CUSTOM-ACL RULE_10 --priority 5000 --action permit -x
+  newtron -D leaf1 acl update-rule CUSTOM-ACL RULE_10 --new-rule-name RULE_50 --priority 5000 --action permit -x`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		aclName := args[0]
+		ruleName := args[1]
+		if ruleAction == "" {
+			return fmt.Errorf("--action is required (permit, deny)")
+		}
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.UpdateACLRule(app.deviceName, aclName, newtron.ACLRuleUpdateRequest{
+			RuleName:    ruleName,
+			Priority:    rulePriority,
+			SrcIP:       ruleSrcIP,
+			DstIP:       ruleDstIP,
+			Protocol:    ruleProtocol,
+			SrcPort:     ruleSrcPort,
+			DstPort:     ruleDstPort,
+			Action:      ruleAction,
+			NewRuleName: ruleNewName,
+		}, execOpts()))
+	},
+}
+
 var aclDeleteRuleCmd = &cobra.Command{
 	Use:   "delete-rule <acl-name> <rule-name>",
 	Short: "Delete a rule from an ACL table",
@@ -296,6 +339,15 @@ func init() {
 	aclCmd.AddCommand(aclShowCmd)
 	aclCmd.AddCommand(aclCreateCmd)
 	aclCmd.AddCommand(aclAddRuleCmd)
+	aclUpdateRuleCmd.Flags().IntVar(&rulePriority, "priority", 9999, "Rule priority (higher = evaluated first)")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleSrcIP, "src-ip", "", "Source IP/CIDR")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleDstIP, "dst-ip", "", "Destination IP/CIDR")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleProtocol, "protocol", "", "IP protocol (tcp, udp, icmp, or number)")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleSrcPort, "src-port", "", "Source port or range")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleDstPort, "dst-port", "", "Destination port or range")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleAction, "action", "", "Action (permit, deny)")
+	aclUpdateRuleCmd.Flags().StringVar(&ruleNewName, "new-rule-name", "", "Rename the rule to this name (re-key)")
+	aclCmd.AddCommand(aclUpdateRuleCmd)
 	aclCmd.AddCommand(aclDeleteRuleCmd)
 	aclCmd.AddCommand(aclDeleteCmd)
 	aclCmd.AddCommand(aclBindCmd)

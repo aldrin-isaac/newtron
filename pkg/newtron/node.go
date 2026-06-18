@@ -619,6 +619,27 @@ func (n *Node) AddACLRule(ctx context.Context, acl, ruleName string, config ACLR
 	return err
 }
 
+// UpdateACLRule atomically mutates an existing ACL rule. Optional newRuleName
+// re-keys the rule (rename) without going through delete + add. §15 mirror of
+// AddACLRule that closes the packet-leak window the remove+add sequence
+// exposes today (#227).
+func (n *Node) UpdateACLRule(ctx context.Context, acl, ruleName string, config ACLRuleConfig, newRuleName string) error {
+	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
+		return err
+	}
+	cs, err := n.internal.UpdateACLRule(ctx, acl, ruleName, node.ACLRuleConfig{
+		Priority: config.Priority,
+		Action:   config.Action,
+		SrcIP:    config.SrcIP,
+		DstIP:    config.DstIP,
+		Protocol: config.Protocol,
+		SrcPort:  config.SrcPort,
+		DstPort:  config.DstPort,
+	}, newRuleName)
+	n.appendPending(cs)
+	return err
+}
+
 // RemoveACLRule removes a rule from an ACL table.
 func (n *Node) RemoveACLRule(ctx context.Context, acl, ruleName string) error {
 	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
