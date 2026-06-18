@@ -1028,35 +1028,54 @@ List/show pairs for all spec types. Response types from §3.9.
 
 ### 4.3 Network Spec Writes
 
-RPC-style POST endpoints. Each creates or deletes a spec object and persists to disk. Request types from §3.8.
+RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or one of its sub-collection items) and persists to disk. Request types from §3.8.
+
+> **Ground truth is `pkg/newtron/api/handler.go` (route registration) + `pkg/newtron/api/handler_network.go` (decode targets).** The table below is a snapshot updated as endpoints are added; if it disagrees with the handler source, the handler wins.
+>
+> Two patterns appear in the Update verbs:
+> - Full-replacement Updates on top-level specs (the **#152 family**) reuse their `Create*Request` type — the request body fully replaces the prior spec under the same name. The handler decodes the Create type even though the action is Update.
+> - Per-item Updates on sub-collections (rules, queues, entries) use a dedicated `Update*Request` type that adds an optional `new_seq` / `new_queue_id` / required `new_prefix` field for renumbering or value-swap.
 
 | Method | Path | Request Type |
 |--------|------|-------------|
 | POST | `.../create-service` | `CreateServiceRequest` |
+| POST | `.../update-service` | `CreateServiceRequest` (full-replacement; #152) |
 | POST | `.../delete-service` | `{name}` |
 | POST | `.../create-ipvpn` | `CreateIPVPNRequest` |
+| POST | `.../update-ipvpn` | `CreateIPVPNRequest` (full-replacement; #152) |
 | POST | `.../delete-ipvpn` | `{name}` |
 | POST | `.../create-macvpn` | `CreateMACVPNRequest` |
+| POST | `.../update-macvpn` | `CreateMACVPNRequest` (full-replacement; #152) |
 | POST | `.../delete-macvpn` | `{name}` |
 | POST | `.../create-qos-policy` | `CreateQoSPolicyRequest` |
+| POST | `.../update-qos-policy` | `CreateQoSPolicyRequest` (full-replacement; preserves `queues` sub-collection — see §5 of `api.md`; #152) |
 | POST | `.../delete-qos-policy` | `{name}` |
 | POST | `.../add-qos-queue` | `AddQoSQueueRequest` |
+| POST | `.../update-qos-queue` | `UpdateQoSQueueRequest` — atomic per-queue mutation; optional `new_queue_id` renumbers (#211) |
 | POST | `.../remove-qos-queue` | `{policy, queue_id}` |
 | POST | `.../create-filter` | `CreateFilterRequest` |
+| POST | `.../update-filter` | `CreateFilterRequest` (full-replacement; preserves `rules` sub-collection; #152) |
 | POST | `.../delete-filter` | `{name}` |
 | POST | `.../add-filter-rule` | `AddFilterRuleRequest` |
+| POST | `.../update-filter-rule` | `UpdateFilterRuleRequest` — atomic per-rule mutation; optional `new_seq` renumbers (#209) |
 | POST | `.../remove-filter-rule` | `{filter, seq}` |
 | POST | `.../create-prefix-list` | `CreatePrefixListRequest` |
+| POST | `.../update-prefix-list` | `CreatePrefixListRequest` (full-replacement; `prefixes` is in the request shape so Update replaces it; #152) |
 | POST | `.../delete-prefix-list` | `{name}` |
 | POST | `.../add-prefix-list-entry` | `AddPrefixListEntryRequest` |
+| POST | `.../update-prefix-list-entry` | `UpdatePrefixListEntryRequest` — atomic single-entry swap; required `new_prefix` (#220) |
 | POST | `.../remove-prefix-list-entry` | `{prefix_list, prefix}` |
 | POST | `.../create-route-policy` | `CreateRoutePolicyRequest` |
+| POST | `.../update-route-policy` | `CreateRoutePolicyRequest` (full-replacement; preserves `rules` sub-collection; #152) |
 | POST | `.../delete-route-policy` | `{name}` |
 | POST | `.../add-route-policy-rule` | `AddRoutePolicyRuleRequest` |
+| POST | `.../update-route-policy-rule` | `UpdateRoutePolicyRuleRequest` — atomic per-rule mutation; optional `new_seq` renumbers (#210) |
 | POST | `.../remove-route-policy-rule` | `{policy, seq}` |
 | POST | `.../create-profile` | `CreateDeviceProfileRequest` |
+| POST | `.../update-profile` | `CreateDeviceProfileRequest` (full-replacement; #152) |
 | POST | `.../delete-profile` | `{name, force}` — `force=true` cascades through topology devices referencing the profile (§15 cascade-refusal pattern); default refuses with 409 `ConflictError` |
 | POST | `.../create-zone` | `CreateZoneRequest` |
+| POST | `.../update-zone` | `CreateZoneRequest` (full-replacement; #152) |
 | POST | `.../delete-zone` | `{name}` |
 | POST | `.../topology/create-node` | `TopologyNodeCreateRequest` — creates topology device (auto-creates matching profile by filename) |
 | DELETE | `.../topology/nodes/{name}` | `?force=true` to cascade-delete the matching profile + remove links wired to this device; default refuses if links remain (409) |
