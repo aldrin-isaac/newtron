@@ -167,6 +167,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/bind-ipvpn", s.handleBindIPVPN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/unbind-ipvpn", s.handleUnbindIPVPN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/add-static-route", s.handleAddStaticRoute)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/update-static-route", s.handleUpdateStaticRoute)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/remove-static-route", s.handleRemoveStaticRoute)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/create-acl", s.handleCreateACL)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/delete-acl", s.handleDeleteACL)

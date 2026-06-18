@@ -1021,6 +1021,90 @@ func TestRoundTrip_AddRemoveStaticRoute(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// UpdateStaticRoute (#227) — atomic per-route mutation
+// ============================================================================
+
+func staticRouteSetup(t *testing.T) *Node {
+	t.Helper()
+	n := newTestAbstract()
+	ctx := context.Background()
+	if _, err := n.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{}); err != nil {
+		t.Fatalf("CreateVRF: %v", err)
+	}
+	if _, err := n.AddStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.1", 0); err != nil {
+		t.Fatalf("seed AddStaticRoute: %v", err)
+	}
+	return n
+}
+
+func TestUpdateStaticRoute_NextHopSwap(t *testing.T) {
+	n := staticRouteSetup(t)
+	ctx := context.Background()
+
+	cs, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.2", 0, "")
+	if err != nil {
+		t.Fatalf("UpdateStaticRoute next-hop swap: %v", err)
+	}
+
+	assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeDelete)
+	c := assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeAdd)
+	assertField(t, c, "nexthop", "10.1.0.2")
+
+	intent := n.GetIntent("route|Vrf_CUST1|10.0.0.0/24")
+	if intent == nil {
+		t.Fatal("route intent missing after update")
+	}
+	if got := intent.Params["next_hop"]; got != "10.1.0.2" {
+		t.Errorf("intent next_hop = %q, want 10.1.0.2", got)
+	}
+}
+
+func TestUpdateStaticRoute_RekeyPrefix(t *testing.T) {
+	n := staticRouteSetup(t)
+	ctx := context.Background()
+
+	cs, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.1", 0, "10.0.0.0/16")
+	if err != nil {
+		t.Fatalf("UpdateStaticRoute rekey: %v", err)
+	}
+
+	assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeDelete)
+	assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/16", ChangeAdd)
+	assertChange(t, cs, "NEWTRON_INTENT", "route|Vrf_CUST1|10.0.0.0/24", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "route|Vrf_CUST1|10.0.0.0/16", ChangeAdd)
+
+	if n.GetIntent("route|Vrf_CUST1|10.0.0.0/24") != nil {
+		t.Error("old route intent should be deleted on rekey")
+	}
+	if n.GetIntent("route|Vrf_CUST1|10.0.0.0/16") == nil {
+		t.Error("new route intent should exist after rekey")
+	}
+}
+
+func TestUpdateStaticRoute_NotFound(t *testing.T) {
+	n := staticRouteSetup(t)
+	ctx := context.Background()
+
+	_, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "192.168.0.0/24", "10.1.0.1", 0, "")
+	if err == nil {
+		t.Fatal("expected error for missing route")
+	}
+}
+
+func TestUpdateStaticRoute_RekeyCollision(t *testing.T) {
+	n := staticRouteSetup(t)
+	ctx := context.Background()
+	if _, err := n.AddStaticRoute(ctx, "Vrf_CUST1", "192.168.0.0/16", "10.1.0.5", 0); err != nil {
+		t.Fatalf("seed second route: %v", err)
+	}
+
+	_, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.1", 0, "192.168.0.0/16")
+	if err == nil {
+		t.Fatal("expected collision error for rekey to existing route")
+	}
+}
+
 func TestRoundTrip_BindUnbindMACVPN(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()

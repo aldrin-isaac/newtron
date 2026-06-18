@@ -426,6 +426,37 @@ Examples:
 	},
 }
 
+var (
+	vrfRouteNewPrefix string
+)
+
+var vrfUpdateRouteCmd = &cobra.Command{
+	Use:   "update-route <vrf-name> <prefix> <next-hop>",
+	Short: "Atomically update a static route",
+	Long: `Atomically update an existing static route. Closes the forwarding
+black hole that remove-route + add-route exposes today by mutating the
+route under the per-device intent lock. Issue #227.
+
+--new-prefix re-keys the route to a different prefix (same VRF) without
+going through remove+add.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 vrf update-route Vrf_CUST1 10.0.0.0/8 10.1.1.2 -x
+  newtron leaf1 vrf update-route Vrf_CUST1 10.0.0.0/8 10.1.1.1 --new-prefix 10.0.0.0/16 -x`,
+	Args: cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vrfName := args[0]
+		prefix := args[1]
+		nextHop := args[2]
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.UpdateStaticRoute(app.deviceName, vrfName, prefix, nextHop, vrfRouteMetric, vrfRouteNewPrefix, execOpts()))
+	},
+}
+
 var vrfRemoveRouteCmd = &cobra.Command{
 	Use:   "remove-route <vrf-name> <prefix>",
 	Short: "Remove a static route from a VRF",
@@ -456,6 +487,8 @@ func init() {
 	vrfAddNeighborCmd.Flags().StringVar(&vrfNeighborDescription, "description", "", "Neighbor description")
 
 	vrfAddRouteCmd.Flags().IntVar(&vrfRouteMetric, "metric", 0, "Route metric")
+	vrfUpdateRouteCmd.Flags().IntVar(&vrfRouteMetric, "metric", 0, "Route metric")
+	vrfUpdateRouteCmd.Flags().StringVar(&vrfRouteNewPrefix, "new-prefix", "", "Re-key the route to this new prefix (same VRF)")
 
 	vrfCmd.AddCommand(vrfListCmd)
 	vrfCmd.AddCommand(vrfShowCmd)
@@ -469,5 +502,6 @@ func init() {
 	vrfCmd.AddCommand(vrfAddNeighborCmd)
 	vrfCmd.AddCommand(vrfRemoveNeighborCmd)
 	vrfCmd.AddCommand(vrfAddRouteCmd)
+	vrfCmd.AddCommand(vrfUpdateRouteCmd)
 	vrfCmd.AddCommand(vrfRemoveRouteCmd)
 }

@@ -355,6 +355,15 @@ func (c *Client) AddStaticRoute(device, vrf, prefix, nexthop string, metric int,
 	return c.nodeWrite(device, "add-static-route", body, opts)
 }
 
+// UpdateStaticRoute atomically mutates a static route under the
+// per-device intent lock. Optional newPrefix re-keys (same VRF,
+// different prefix). Closes the forwarding black hole remove + add
+// exposes today (#227).
+func (c *Client) UpdateStaticRoute(device, vrf, prefix, nexthop string, metric int, newPrefix string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.StaticRouteUpdateRequest{VRF: vrf, Prefix: prefix, NextHop: nexthop, Metric: metric, NewPrefix: newPrefix}
+	return c.nodeWrite(device, "update-static-route", body, opts)
+}
+
 // RemoveStaticRoute removes a static route from a VRF.
 func (c *Client) RemoveStaticRoute(device, vrf, prefix string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {

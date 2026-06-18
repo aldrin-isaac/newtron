@@ -537,6 +537,20 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrf, prefix, nexthop string, 
 	return err
 }
 
+// UpdateStaticRoute atomically mutates an existing static route. Optional
+// newPrefix re-keys (the route covers a different prefix under the same
+// VRF) without going through remove + add. §15 mirror of AddStaticRoute
+// that closes the forwarding black hole the remove + add sequence
+// exposes today (#227).
+func (n *Node) UpdateStaticRoute(ctx context.Context, vrf, prefix, nexthop string, metric int, newPrefix string) error {
+	if err := n.gate(ctx, auth.PermVRFRoute, vrf); err != nil {
+		return err
+	}
+	cs, err := n.internal.UpdateStaticRoute(ctx, vrf, prefix, nexthop, metric, newPrefix)
+	n.appendPending(cs)
+	return err
+}
+
 // RemoveStaticRoute removes a static route from a VRF.
 func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error {
 	if err := n.gate(ctx, auth.PermVRFRoute, vrf); err != nil {

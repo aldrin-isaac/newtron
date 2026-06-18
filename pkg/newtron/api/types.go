@@ -258,6 +258,18 @@ type StaticRouteRequest struct {
 	Metric  int    `json:"metric,omitempty"`
 }
 
+// StaticRouteUpdateRequest is the body for POST .../update-static-route.
+// Optional NewPrefix re-keys the route (same VRF, different prefix).
+// Closes the forwarding black hole that remove + add exposes today
+// (#227).
+type StaticRouteUpdateRequest struct {
+	VRF       string `json:"vrf"`
+	Prefix    string `json:"prefix"`
+	NextHop   string `json:"nexthop"`
+	Metric    int    `json:"metric,omitempty"`
+	NewPrefix string `json:"new_prefix,omitempty"`
+}
+
 // RestartDaemonRequest is the body for POST .../restart-daemon.
 type RestartDaemonRequest struct {
 	Daemon string `json:"daemon"`

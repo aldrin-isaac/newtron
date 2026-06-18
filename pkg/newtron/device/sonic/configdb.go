@@ -84,6 +84,7 @@ const (
 	OpCreatePortChannel  = "create-portchannel"
 	OpConfigureIRB       = "configure-irb"
 	OpAddStaticRoute     = "add-static-route"
+	OpUpdateStaticRoute  = "update-static-route" // atomic per-route mutation (#227)
 	OpSetProperty        = "set-property"
 	OpClearProperty      = "clear-property"
 	OpConfigureInterface = "configure-interface"

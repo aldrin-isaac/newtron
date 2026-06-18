@@ -1,0 +1,155 @@
+name: update-static-route
+description: |
+  E2E coverage for issue #227 update-static-route — atomic per-route
+  mutation for device CONFIG_DB static routes. Closes the forwarding
+  black hole the remove + add sequence exposes today (traffic destined
+  to the prefix has no next-hop during the gap).
+
+  Verifies:
+    - Next-hop swap (same prefix, different next-hop) writes a single
+      DEL+ADD pair for the STATIC_ROUTE entry; intent record's nexthop
+      param reflects the new value.
+    - Re-key (new_prefix) relocates both STATIC_ROUTE and
+      NEWTRON_INTENT atomically — old key deleted, new key added.
+    - Re-key to occupied prefix fails (409).
+    - Missing route fails (404).
+
+  Loopback mode — pure HTTP.
+
+steps:
+  # ====================================================================
+  # Setup — VRF + two seed routes
+  # ====================================================================
+  - name: create-vrf-227-r
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vrf?mode=loopback
+    params: {name: Vrf_CUST227R}
+
+  - name: add-route-10
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-static-route?mode=loopback
+    params:
+      vrf: Vrf_CUST227R
+      prefix: "10.0.0.0/24"
+      nexthop: "10.1.0.1"
+
+  - name: add-route-192
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-static-route?mode=loopback
+    params:
+      vrf: Vrf_CUST227R
+      prefix: "192.168.0.0/16"
+      nexthop: "10.1.0.5"
+
+  # ====================================================================
+  # Next-hop swap — same prefix, change nexthop
+  # ====================================================================
+  - name: update-route-10-nexthop-swap
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-static-route?mode=loopback
+    params:
+      vrf: Vrf_CUST227R
+      prefix: "10.0.0.0/24"
+      nexthop: "10.1.0.2"
+
+  - name: verify-route-10-nexthop-updated
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_CUST227R%7C10.0.0.0%2F24?mode=loopback
+    expect:
+      jq: '.nexthop == "10.1.0.2"'
+
+  - name: verify-route-10-intent-nexthop-updated
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F24?mode=loopback
+    expect:
+      jq: '.next_hop == "10.1.0.2"'
+
+  - name: verify-route-192-untouched
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_CUST227R%7C192.168.0.0%2F16?mode=loopback
+    expect:
+      jq: '.nexthop == "10.1.0.5"'
+
+  # ====================================================================
+  # Re-key — change prefix
+  # ====================================================================
+  - name: update-route-10-rekey-to-16
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-static-route?mode=loopback
+    params:
+      vrf: Vrf_CUST227R
+      prefix: "10.0.0.0/24"
+      nexthop: "10.1.0.2"
+      new_prefix: "10.0.0.0/16"
+
+  - name: verify-route-10-24-key-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_CUST227R%7C10.0.0.0%2F24/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-route-10-16-key-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_CUST227R%7C10.0.0.0%2F16/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-route-10-24-intent-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F24/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-route-10-16-intent-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F16/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-route-10-16-intent-nexthop
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F16?mode=loopback
+    expect:
+      jq: '.next_hop == "10.1.0.2" and .prefix == "10.0.0.0/16"'
+
+  # ====================================================================
+  # Cleanup
+  # ====================================================================
+  - name: cleanup-remove-route-16
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-static-route?mode=loopback
+    params: {vrf: Vrf_CUST227R, prefix: "10.0.0.0/16"}
+
+  - name: cleanup-remove-route-192
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-static-route?mode=loopback
+    params: {vrf: Vrf_CUST227R, prefix: "192.168.0.0/16"}
+
+  - name: cleanup-delete-vrf
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vrf?mode=loopback
+    params: {name: Vrf_CUST227R}
