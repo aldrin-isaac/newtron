@@ -2674,6 +2674,32 @@ L2VPN EVPN address family exchange.
 
 **Response (201):** `WriteResult`
 
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/update-bgp-evpn-peer
+
+Atomically update an existing BGP EVPN overlay peer under the per-device
+intent lock. Closes the EVPN session blip that remove-bgp-evpn-peer +
+add-bgp-evpn-peer exposes today: EVPN session drop triggers MAC withdraw
+across the fabric and forces a full route re-exchange after
+re-establishment. Issue #227.
+
+Optional `new_neighbor_ip` re-keys both the BGP_NEIGHBOR row and the
+intent resource (`evpn-peer|<ip>`) atomically. 404 if no peer exists at
+`neighbor_ip`; 409 if `new_neighbor_ip` already names a different BGP
+peer on this device.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `neighbor_ip` | string | yes | Existing peer's neighbor IP |
+| `remote_as` | integer | yes | New remote AS |
+| `description` | string | no | New description |
+| `new_neighbor_ip` | string | no | Re-key the peer to this new IP |
+
+**Response (200):** `WriteResult`
+
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-bgp-evpn-peer
 
 Remove a BGP EVPN overlay peer.

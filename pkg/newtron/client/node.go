@@ -271,6 +271,24 @@ func (c *Client) AddBGPEVPNPeer(device string, config newtron.BGPNeighborConfig,
 	return c.nodeWrite(device, "add-bgp-evpn-peer", config, opts)
 }
 
+// UpdateBGPEVPNPeer atomically mutates an existing EVPN BGP peer.
+// Optional newNeighborIP re-keys the peer. Closes the EVPN session blip
+// remove + add exposes today (#227).
+func (c *Client) UpdateBGPEVPNPeer(device, neighborIP string, config newtron.BGPNeighborConfig, newNeighborIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := struct {
+		NeighborIP    string `json:"neighbor_ip"`
+		RemoteAS      int    `json:"remote_as"`
+		Description   string `json:"description,omitempty"`
+		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+	}{
+		NeighborIP:    neighborIP,
+		RemoteAS:      config.RemoteAS,
+		Description:   config.Description,
+		NewNeighborIP: newNeighborIP,
+	}
+	return c.nodeWrite(device, "update-bgp-evpn-peer", body, opts)
+}
+
 // RemoveBGPEVPNPeer removes an EVPN BGP neighbor by IP.
 func (c *Client) RemoveBGPEVPNPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {

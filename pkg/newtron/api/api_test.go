@@ -185,6 +185,7 @@ func TestAPICompleteness(t *testing.T) {
 			"QueryStateDB":        true,
 			// Write operations
 			"AddBGPEVPNPeer":          true,
+			"UpdateBGPEVPNPeer":       true,
 			"RemoveBGPEVPNPeer":       true,
 			"BindMACVPN":              true,
 			"UnbindMACVPN":            true,
@@ -337,6 +338,7 @@ func TestAPICompleteness(t *testing.T) {
 		},
 		"Node": {
 			"AddBGPEVPNPeer":          auth.PermEVPNPeer,
+			"UpdateBGPEVPNPeer":       auth.PermEVPNPeer,
 			"RemoveBGPEVPNPeer":       auth.PermEVPNPeer,
 			"BindMACVPN":              auth.PermEVPNMACVPN,
 			"UnbindMACVPN":            auth.PermEVPNMACVPN,
