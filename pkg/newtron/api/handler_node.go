@@ -890,6 +890,33 @@ func (s *Server) handleAddStaticRoute(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
+func (s *Server) handleUpdateStaticRoute(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var req struct {
+		VRF       string `json:"vrf"`
+		Prefix    string `json:"prefix"`
+		NextHop   string `json:"nexthop"`
+		Metric    int    `json:"metric"`
+		NewPrefix string `json:"new_prefix,omitempty"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		return n.UpdateStaticRoute(ctx, req.VRF, req.Prefix, req.NextHop, req.Metric, req.NewPrefix)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleRemoveStaticRoute(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

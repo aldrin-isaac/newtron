@@ -2436,6 +2436,36 @@ Add a static route.
 
 **Response (201):** `WriteResult`
 
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/update-static-route
+
+Atomically update a static route under the per-device intent lock.
+Closes the forwarding black hole that remove-static-route +
+add-static-route exposes today (traffic destined to the prefix has no
+next-hop during the DEL → ADD window). Issue #227.
+
+Optional `new_prefix` re-keys the route (same VRF, different prefix)
+without going through delete + add. The new prefix must not already
+have a route in this VRF; collision returns 409.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vrf` | string | yes | VRF name |
+| `prefix` | string | yes | Existing route prefix |
+| `nexthop` | string | yes | New next-hop IP |
+| `metric` | integer | no | Route metric/distance |
+| `new_prefix` | string | no | Re-key the route to this prefix (same VRF) |
+
+**Behaviors:**
+
+- 404 if no route exists at `(vrf, prefix)`.
+- 409 if `new_prefix` already names a different route in the same VRF.
+
+**Response (200):** `WriteResult`
+
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/remove-static-route
 
 Remove a static route.

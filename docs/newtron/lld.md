@@ -1140,6 +1140,7 @@ Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Ex
 | POST | `.../nodes/{device}/bind-ipvpn` | `BindIPVPN` |
 | POST | `.../nodes/{device}/unbind-ipvpn` | `UnbindIPVPN` |
 | POST | `.../nodes/{device}/add-static-route` | `AddStaticRoute` |
+| POST | `.../nodes/{device}/update-static-route` | `UpdateStaticRoute` — atomic per-route mutation; optional `new_prefix` re-keys (#227) |
 | POST | `.../nodes/{device}/remove-static-route` | `RemoveStaticRoute` |
 | POST | `.../nodes/{device}/create-acl` | `CreateACL` |
 | POST | `.../nodes/{device}/delete-acl` | `DeleteACL` |
