@@ -1101,8 +1101,11 @@ this PR brings the spec kinds in line with it (issue #152).
 that the Create request shape doesn't transport — `update-filter`
 preserves the existing filter's `rules`, `update-route-policy`
 preserves the policy's `rules`, `update-qos-policy` preserves the
-policy's `queues`. Operators who want to rewrite a rule list use
-the existing `add-X-rule` / `remove-X-rule` verbs alongside Update.
+policy's `queues`. Operators who want to mutate a single sub-rule
+in place — change its fields or rotate its sequence number — use
+the per-item update verbs `update-filter-rule`, `update-route-policy-rule`,
+`update-qos-queue` (issues #209, #210, #211). The
+`add-X-rule` / `remove-X-rule` verbs remain for list growth and shrinkage.
 
 The other 6 kinds (`update-service`, `update-ipvpn`,
 `update-macvpn`, `update-prefix-list`, `update-profile`,
@@ -1110,6 +1113,18 @@ The other 6 kinds (`update-service`, `update-ipvpn`,
 directly. `update-prefix-list` is the exception that proves the
 rule: its sub-collection (`prefixes`) IS in the request shape, so
 Update replaces it.
+
+**No `update-prefix-list-entry` verb.** Prefix-list entries are the
+outlier among the four sub-rule families: a single entry has no
+fields beyond the prefix CIDR itself (`PrefixLists` is
+`map[string][]string`). Mid-life mutation of an entry — change its
+value or remove it — is equivalent to `remove-prefix-list-entry`
+followed by `add-prefix-list-entry`, with no atomicity loss because
+there's only one field to change atomically. Bulk replace of the
+entire list is covered by `update-prefix-list`. A per-entry update
+verb would have nothing to do beyond rename, which delete+add
+already accomplishes. Issue #212 documents this asymmetry as
+intentional.
 
 **Auth gate**: `spec.author` with `field = "<kind plural>"` and
 `resource = "<name>"`. An operator who can `create-X` or
