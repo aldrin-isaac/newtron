@@ -1116,17 +1116,40 @@ directly. `update-prefix-list` is the exception that proves the
 rule: its sub-collection (`prefixes`) IS in the request shape, so
 Update replaces it.
 
-**No `update-prefix-list-entry` verb.** Prefix-list entries are the
-outlier among the four sub-rule families: a single entry has no
-fields beyond the prefix CIDR itself (`PrefixLists` is
-`map[string][]string`). Mid-life mutation of an entry — change its
-value or remove it — is equivalent to `remove-prefix-list-entry`
-followed by `add-prefix-list-entry`, with no atomicity loss because
-there's only one field to change atomically. Bulk replace of the
-entire list is covered by `update-prefix-list`. A per-entry update
-verb would have nothing to do beyond rename, which delete+add
-already accomplishes. Issue #212 documents this asymmetry as
-intentional.
+**Prefix-list-entry mutation.** Prefix-list entries are the outlier
+among the four sub-rule families: a single entry has no fields
+beyond the prefix CIDR itself (`PrefixLists` is `map[string][]string`).
+Mid-life mutation works differently from the other three sub-rule
+families.
+
+For prefix-lists **NOT yet referenced** by any rule, the
+`add-prefix-list-entry` / `remove-prefix-list-entry` pair is fine
+for setup and teardown. For prefix-lists **in use** by any filter
+rule or route-policy rule, `add` + `remove` is the wrong pattern —
+during the window between remove and add, rules referencing the
+list see a transiently-incorrect match set, and cascading reference
+semantics may even force the operator to delete and re-add the
+referring rules. **Use `update-prefix-list` (bulk replace) for any
+in-use list.** It atomically swaps the full entry list; no
+intermediate state is observable, no traffic blip on referring
+rules.
+
+For single-entry mutation of in-use lists, the `update-prefix-list`
+bulk-replace path has an operator-level read-modify-write race: a
+client that reads the current list, modifies one entry, and posts
+the result can lose a concurrent operator's update. Issue #220
+tracks adding an atomic single-entry `update-prefix-list-entry`
+verb that closes this race; until that lands, clients that need
+single-entry edits on potentially-contended lists should either
+(a) accept the optimistic-concurrency window or (b) serialize edits
+client-side.
+
+A per-entry update verb was previously documented (in PR #218) as
+unnecessary because field atomicity is trivial. That was wrong —
+field atomicity is one of several atomicity concerns, and the
+match-set atomicity for in-use lists is the operationally important
+one. Correction tracked in this commit; issue #220 covers the
+remaining race-elimination gap.
 
 **Auth gate**: `spec.author` with `field = "<kind plural>"` and
 `resource = "<name>"`. An operator who can `create-X` or
