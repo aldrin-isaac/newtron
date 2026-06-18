@@ -224,6 +224,14 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 		})
 		return err
 
+	case sonic.OpAddTrunkVLAN:
+		vlanID := paramInt(p, "vlan_id")
+		if vlanID == 0 {
+			return fmt.Errorf("add-trunk-vlan: missing 'vlan_id' param")
+		}
+		_, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: vlanID, Tagged: true})
+		return err
+
 	case "add-bgp-peer":
 		asn := paramInt(p, "remote_as")
 		if asn == 0 {

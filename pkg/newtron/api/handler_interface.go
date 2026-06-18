@@ -291,6 +291,36 @@ func (s *Server) handleApplyInterfaceQoS(w http.ResponseWriter, r *http.Request)
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+func (s *Server) handleRemoveTrunkVLAN(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	ifName := interfaceName(r)
+	var req RemoveTrunkVLANRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.VLAN <= 0 {
+		writeError(w, &newtron.ValidationError{Field: "vlan_id", Message: "must be positive"})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		iface, err := n.Interface(ifName)
+		if err != nil {
+			return err
+		}
+		return iface.RemoveTrunkVLAN(ctx, req.VLAN)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleConfigureInterface(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

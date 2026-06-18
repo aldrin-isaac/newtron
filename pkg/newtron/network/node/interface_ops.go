@@ -173,9 +173,44 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		if n.GetIntent(fmt.Sprintf("vlan|%d", cfg.VLAN)) == nil {
 			return nil, fmt.Errorf("VLAN %d does not exist", cfg.VLAN)
 		}
-		cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, cfg.Tagged))
+		// Trunk membership is multi-valued per interface — each VLAN gets its
+		// own intent record so add/remove are reference-aware §15 mirrors and
+		// replay reconstructs the full trunk set (#224, Intent Round-Trip
+		// Completeness). Access mode stays singleton on the base record.
+		if cfg.Tagged {
+			if err := i.ensureInterfaceIntent(cs); err != nil {
+				return nil, err
+			}
+			trunkResource := fmt.Sprintf("interface|%s|trunk-vlan|%d", i.name, cfg.VLAN)
+			if n.GetIntent(trunkResource) != nil {
+				// Already a trunk member — idempotent no-op.
+				cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(cfg.VLAN)}
+				if err := n.render(cs); err != nil {
+					return nil, err
+				}
+				return cs, nil
+			}
+			cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, true))
+			trunkParams := map[string]string{
+				sonic.FieldVLANID: strconv.Itoa(cfg.VLAN),
+				sonic.FieldTagged: "true",
+			}
+			parents := []string{"interface|" + i.name, fmt.Sprintf("vlan|%d", cfg.VLAN)}
+			if err := n.writeIntent(cs, sonic.OpAddTrunkVLAN, trunkResource, trunkParams, parents); err != nil {
+				return nil, err
+			}
+			cs.ReverseOp = "interface." + sonic.OpRemoveTrunkVLAN
+			cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(cfg.VLAN)}
+			if err := n.render(cs); err != nil {
+				return nil, err
+			}
+			util.WithDevice(n.Name()).Infof("Added trunk VLAN %d on %s", cfg.VLAN, i.name)
+			return cs, nil
+		}
+		// Access mode — singleton, lives on the base interface record.
+		cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, false))
 		configureIntentParams[sonic.FieldVLANID] = strconv.Itoa(cfg.VLAN)
-		configureIntentParams[sonic.FieldTagged] = strconv.FormatBool(cfg.Tagged)
+		configureIntentParams[sonic.FieldTagged] = "false"
 	}
 
 	// Routed mode — VRF binding and/or IP address
@@ -230,10 +265,45 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	return cs, nil
 }
 
+// RemoveTrunkVLAN removes a single VLAN from this interface's trunk membership.
+// Atomic — only the named VLAN's `VLAN_MEMBER` entry and the matching
+// `interface|{name}|trunk-vlan|{vlan_id}` intent record are deleted. Other
+// trunk VLANs, the access VLAN (if any), VRF/IP bindings, BGP peers, QoS,
+// and ACL bindings on this interface are untouched.
+//
+// Reverse mirror of ConfigureInterface(tagged=true) per §15 — closes the
+// gap where the only previous removal path was the full-teardown
+// UnconfigureInterface (#224).
+func (i *Interface) RemoveTrunkVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	n := i.node
+	if err := n.precondition(sonic.OpRemoveTrunkVLAN, i.name).Result(); err != nil {
+		return nil, err
+	}
+	if vlanID <= 0 {
+		return nil, fmt.Errorf("vlan_id must be positive")
+	}
+	resource := fmt.Sprintf("interface|%s|trunk-vlan|%d", i.name, vlanID)
+	if n.GetIntent(resource) == nil {
+		return nil, fmt.Errorf("interface %s is not a trunk member of VLAN %d", i.name, vlanID)
+	}
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpRemoveTrunkVLAN)
+	cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
+	if err := n.deleteIntent(cs, resource); err != nil {
+		return nil, err
+	}
+	cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(vlanID)}
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.Name()).Infof("Removed trunk VLAN %d from %s", vlanID, i.name)
+	return cs, nil
+}
+
 // UnconfigureInterface is the reverse of ConfigureInterface. Performs a complete
-// teardown: removes all sub-resources (BGP peer, QoS, ACL bindings, properties),
-// then removes the interface role (VLAN membership or VRF/IP binding).
-// Parameterless — the intent records are self-sufficient for teardown.
+// teardown: removes all sub-resources (BGP peer, QoS, ACL bindings, properties,
+// trunk VLAN memberships), then removes the interface role (access VLAN or
+// VRF/IP binding). Parameterless — the intent records are self-sufficient for
+// teardown.
 func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error) {
 	n := i.node
 
@@ -284,6 +354,20 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 		case sonic.OpSetProperty:
 			// Properties are simple value overrides — just delete the intent.
 			// The CONFIG_DB field persists as device reality.
+			if err := n.deleteIntent(cs, childKey); err != nil {
+				return nil, err
+			}
+
+		case sonic.OpAddTrunkVLAN:
+			// Trunk membership — delete VLAN_MEMBER entry and the per-VLAN
+			// intent record. The CONFIG_DB writes are added directly here
+			// rather than calling RemoveTrunkVLAN, which would render its
+			// own ChangeSet (we want a single merged ChangeSet for unconfigure).
+			vlanStr := childIntent.Params[sonic.FieldVLANID]
+			vlanID, _ := strconv.Atoi(vlanStr)
+			if vlanID > 0 {
+				cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
+			}
 			if err := n.deleteIntent(cs, childKey); err != nil {
 				return nil, err
 			}

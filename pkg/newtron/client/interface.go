@@ -97,3 +97,10 @@ func (c *Client) UnconfigureInterface(device, iface string, opts newtron.ExecOpt
 	return c.interfaceWrite(device, iface, "unconfigure-interface", nil, opts)
 }
 
+// RemoveTrunkVLAN strips one VLAN from an interface's trunk membership
+// without affecting other VLANs or the rest of the port configuration.
+// Reverse mirror of ConfigureInterface(tagged=true) per §15 (#224).
+func (c *Client) RemoveTrunkVLAN(device, iface string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.interfaceWrite(device, iface, "remove-trunk-vlan", api.RemoveTrunkVLANRequest{VLAN: vlanID}, opts)
+}
+
