@@ -216,6 +216,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/set-property", s.handleInterfaceSet)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/clear-property", s.handleClearProperty)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/configure-interface", s.handleConfigureInterface)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-trunk-vlan", s.handleRemoveTrunkVLAN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos", s.handleApplyInterfaceQoS)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 

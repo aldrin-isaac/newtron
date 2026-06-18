@@ -184,6 +184,22 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
 	return nil
 }
 
+// RemoveTrunkVLAN removes one VLAN from this interface's trunk membership.
+// Reverse mirror of ConfigureInterface(tagged=true) per §15 — closes the
+// gap where unconfigure-interface was the only removal path and tore
+// down everything on the port (#224).
+func (i *Interface) RemoveTrunkVLAN(ctx context.Context, vlanID int) error {
+	if err := i.gate(ctx, auth.PermInterfaceModify, ""); err != nil {
+		return err
+	}
+	cs, err := i.internal.RemoveTrunkVLAN(ctx, vlanID)
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}
+
 // ConfigureInterface sets forwarding mode on an interface. Routed mode (VRF+IP)
 // and bridged mode (VLAN membership) are mutually exclusive.
 func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) error {

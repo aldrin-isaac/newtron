@@ -1182,7 +1182,8 @@ Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `Wri
 | POST | `.../interfaces/{name}/apply-service` | `ApplyService` |
 | POST | `.../interfaces/{name}/remove-service` | `RemoveService` |
 | POST | `.../interfaces/{name}/refresh-service` | `RefreshService` |
-| POST | `.../interfaces/{name}/configure-interface` | `ConfigureInterface` |
+| POST | `.../interfaces/{name}/configure-interface` | `ConfigureInterface` (trunk-tagged: additive per-VLAN intent, #224) |
+| POST | `.../interfaces/{name}/remove-trunk-vlan` | `RemoveTrunkVLAN` — atomic single-VLAN strip from trunk, body `{vlan_id}` (#224) |
 | POST | `.../interfaces/{name}/unconfigure-interface` | `UnconfigureInterface` |
 | POST | `.../interfaces/{name}/set-property` | `SetProperty` |
 | POST | `.../interfaces/{name}/clear-property` | `ClearProperty` |

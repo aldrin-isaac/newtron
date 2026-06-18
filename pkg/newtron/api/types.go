@@ -107,6 +107,14 @@ type ConfigureInterfaceRequest struct {
 	Tagged bool   `json:"tagged,omitempty"`
 }
 
+// RemoveTrunkVLANRequest is the body for POST .../remove-trunk-vlan.
+// The interface name comes from the URL; vlan_id identifies which trunk
+// membership to strip. Atomic — other VLANs and the rest of the interface
+// configuration are untouched. Issue #224.
+type RemoveTrunkVLANRequest struct {
+	VLAN int `json:"vlan_id"`
+}
+
 // NodeBindMACVPNRequest is the body for POST .../bind-macvpn (node-level, maps VLAN to L2VNI).
 type NodeBindMACVPNRequest struct {
 	VlanID int    `json:"vlan_id"`

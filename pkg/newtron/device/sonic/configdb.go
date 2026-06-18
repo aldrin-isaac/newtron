@@ -87,6 +87,8 @@ const (
 	OpSetProperty        = "set-property"
 	OpClearProperty      = "clear-property"
 	OpConfigureInterface = "configure-interface"
+	OpAddTrunkVLAN       = "add-trunk-vlan"    // per-VLAN intent record op (#224)
+	OpRemoveTrunkVLAN    = "remove-trunk-vlan" // wire verb tag; no intent (#224)
 	OpAddBGPPeer         = "add-bgp-peer"
 	OpApplyService       = "apply-service"
 	OpBindACL            = "bind-acl"

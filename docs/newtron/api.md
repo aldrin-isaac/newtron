@@ -167,7 +167,8 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | Path suffix | What it does |
 |-------------|--------------|
 | `/apply-service`, `/remove-service`, `/refresh-service` | Service lifecycle |
-| `/configure-interface`, `/unconfigure-interface` | Configure/unconfigure interface |
+| `/configure-interface`, `/unconfigure-interface` | Configure/unconfigure interface (trunk-tagged: additive per-VLAN intent, #224) |
+| `/remove-trunk-vlan` | Atomic single-VLAN strip from a trunk port (#224) |
 | `/bind-acl`, `/unbind-acl` | ACL binding |
 | `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
 | `/apply-qos`, `/remove-qos` | QoS policy |
@@ -2981,7 +2982,7 @@ Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethe
 | Category | Endpoints | Key params |
 |----------|-----------|------------|
 | Service | `apply-service`, `remove-service`, `refresh-service` | `service`, `ip_address`, `vlan`, `peer_as` |
-| Interface config | `configure-interface`, `unconfigure-interface` | `vrf`, `ip`, `vlan_id`, `tagged` |
+| Interface config | `configure-interface`, `unconfigure-interface`, `remove-trunk-vlan` | `vrf`, `ip`, `vlan_id`, `tagged` |
 | ACL | `bind-acl`, `unbind-acl` | `acl`, `direction` |
 | BGP | `add-bgp-peer`, `remove-bgp-peer` | `neighbor_ip`, `remote_as` |
 | QoS | `apply-qos`, `remove-qos` | `policy` |
@@ -3084,8 +3085,18 @@ without manual remove+apply.
 
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/configure-interface
 
-Configure an interface in routed mode (VRF + IP) or bridged mode (VLAN membership).
-The two modes are mutually exclusive.
+Configure an interface in routed mode (VRF + IP), bridged access mode (single
+VLAN, `tagged: false`), or bridged trunk mode (one tagged VLAN per call,
+`tagged: true`). Routed and bridged are mutually exclusive.
+
+**Trunk additivity (#224)**: each call with `tagged: true` adds one VLAN to
+the trunk and creates a per-VLAN intent record at
+`NEWTRON_INTENT|interface|{name}|trunk-vlan|{vlan_id}`. Repeated calls for
+different VLANs accumulate — the second call does not clobber the first.
+Repeating the same VLAN is an idempotent no-op. Access mode (`tagged:
+false`) stays singleton on the base `interface|{name}` record. This change
+restores Intent Round-Trip Completeness for trunk ports: replay of the
+intent log reconstructs the full trunk-membership set.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -3096,14 +3107,46 @@ The two modes are mutually exclusive.
 | `vrf` | string | no | VRF binding (routed mode) |
 | `ip` | string | no | IP address in CIDR (routed mode) |
 | `vlan_id` | integer | no | VLAN ID (bridged mode) |
-| `tagged` | boolean | no | Tagged membership (bridged mode) |
+| `tagged` | boolean | no | Tagged trunk membership (bridged mode). `false` = access; `true` = additive trunk |
+
+**Response (200):** `WriteResult`
+
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-trunk-vlan
+
+Atomically strip a single tagged VLAN from a trunk port. The named VLAN's
+`VLAN_MEMBER` entry and its `interface|{name}|trunk-vlan|{vlan_id}` intent
+record are deleted; other trunk VLANs, the access VLAN (if any), VRF/IP
+bindings, BGP peers, QoS bindings, and ACL bindings on this interface are
+untouched.
+
+Reverse mirror of `configure-interface` with `tagged: true` per §15 —
+closes the gap where `unconfigure-interface` (full-teardown) was the only
+removal path. Issue #224.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vlan_id` | integer | yes | The trunk VLAN to remove |
+
+**Behaviors:**
+
+- 404 if the interface is not a trunk member of the specified VLAN.
+- 400 if `vlan_id` is missing or non-positive.
+- Atomic — under the per-device intent lock.
 
 **Response (200):** `WriteResult`
 
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unconfigure-interface
 
-Remove all configuration from an interface (VRF binding, IP addresses, VLAN
-membership). Returns the interface to its unconfigured state.
+Remove all configuration from an interface (VRF binding, IP addresses, access
+VLAN, all trunk VLAN memberships, BGP peers, QoS, ACL bindings, property
+overrides). Returns the interface to its unconfigured state.
+
+For removing one trunk VLAN without affecting the rest of the port, use
+`remove-trunk-vlan` instead (issue #224).
 
 **Query parameters:** `dry_run`, `no_save`
 

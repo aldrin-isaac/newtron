@@ -594,3 +594,180 @@ func TestRoundTrip_BindUnbindACL(t *testing.T) {
 		t.Error("acl binding intent should be removed")
 	}
 }
+
+// ============================================================================
+// Trunk VLAN membership (#224) — per-VLAN intent records + RemoveTrunkVLAN
+// ============================================================================
+
+// trunkSetup creates an abstract node with two VLANs (100, 200) ready for
+// trunk-membership tests. Saves repeating the boilerplate in every test.
+func trunkSetup(t *testing.T) (*Node, *Interface) {
+	t.Helper()
+	n := newTestAbstractNode()
+	ctx := context.Background()
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN 100: %v", err)
+	}
+	if _, err := n.CreateVLAN(ctx, 200, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN 200: %v", err)
+	}
+	iface, err := n.GetInterface("Ethernet0")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	return n, iface
+}
+
+func TestConfigureInterface_Trunk_WritesPerVLANRecord(t *testing.T) {
+	n, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	_, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true})
+	if err != nil {
+		t.Fatalf("ConfigureInterface VLAN 100 tagged: %v", err)
+	}
+
+	// Per-VLAN record exists; base interface record has NO vlan_id stuffed.
+	trunkIntent := n.GetIntent("interface|Ethernet0|trunk-vlan|100")
+	if trunkIntent == nil {
+		t.Fatal("expected interface|Ethernet0|trunk-vlan|100 intent")
+	}
+	if trunkIntent.Operation != "add-trunk-vlan" {
+		t.Errorf("trunk intent op = %q, want add-trunk-vlan", trunkIntent.Operation)
+	}
+	if trunkIntent.Params["vlan_id"] != "100" {
+		t.Errorf("trunk intent vlan_id = %q, want 100", trunkIntent.Params["vlan_id"])
+	}
+	baseIntent := n.GetIntent("interface|Ethernet0")
+	if baseIntent != nil && baseIntent.Params["vlan_id"] != "" {
+		t.Errorf("base interface record should not carry vlan_id for trunk; got %q", baseIntent.Params["vlan_id"])
+	}
+}
+
+func TestConfigureInterface_Trunk_Accumulates(t *testing.T) {
+	n, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 100: %v", err)
+	}
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 200, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 200: %v", err)
+	}
+
+	// Both records present — adding the second VLAN does not clobber the first.
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") == nil {
+		t.Error("trunk-vlan|100 should still exist after adding 200")
+	}
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|200") == nil {
+		t.Error("trunk-vlan|200 should exist after second add")
+	}
+}
+
+func TestConfigureInterface_Trunk_Idempotent(t *testing.T) {
+	_, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 100 (first): %v", err)
+	}
+	cs, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true})
+	if err != nil {
+		t.Fatalf("trunk add 100 (second, expected idempotent): %v", err)
+	}
+	// Second call should produce no CONFIG_DB changes (the record already exists).
+	for _, c := range cs.Changes {
+		if c.Table == "VLAN_MEMBER" {
+			t.Errorf("idempotent re-add should not write VLAN_MEMBER; got change %+v", c)
+		}
+	}
+}
+
+func TestRemoveTrunkVLAN_StripsOneLeavesOthers(t *testing.T) {
+	n, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 100: %v", err)
+	}
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 200, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 200: %v", err)
+	}
+
+	cs, err := iface.RemoveTrunkVLAN(ctx, 100)
+	if err != nil {
+		t.Fatalf("RemoveTrunkVLAN 100: %v", err)
+	}
+
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") != nil {
+		t.Error("trunk-vlan|100 should be deleted")
+	}
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|200") == nil {
+		t.Error("trunk-vlan|200 should survive (reference-aware strip)")
+	}
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|trunk-vlan|100", ChangeDelete)
+}
+
+func TestRemoveTrunkVLAN_NotAMember(t *testing.T) {
+	_, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 100: %v", err)
+	}
+
+	_, err := iface.RemoveTrunkVLAN(ctx, 200)
+	if err == nil {
+		t.Fatal("expected error removing VLAN 200 that was never added")
+	}
+}
+
+func TestUnconfigureInterface_ClearsAllTrunkChildren(t *testing.T) {
+	n, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 100: %v", err)
+	}
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 200, Tagged: true}); err != nil {
+		t.Fatalf("trunk add 200: %v", err)
+	}
+
+	cs, err := iface.UnconfigureInterface(ctx)
+	if err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") != nil {
+		t.Error("trunk-vlan|100 should be cleared by unconfigure-interface")
+	}
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|200") != nil {
+		t.Error("trunk-vlan|200 should be cleared by unconfigure-interface")
+	}
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan200|Ethernet0", ChangeDelete)
+}
+
+func TestRoundTrip_AddRemoveTrunkVLAN(t *testing.T) {
+	n, iface := trunkSetup(t)
+	ctx := context.Background()
+
+	cs1, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true})
+	if err != nil {
+		t.Fatalf("ConfigureInterface trunk: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "interface|Ethernet0|trunk-vlan|100", ChangeAdd)
+	assertChange(t, cs1, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeAdd)
+
+	cs2, err := iface.RemoveTrunkVLAN(ctx, 100)
+	if err != nil {
+		t.Fatalf("RemoveTrunkVLAN: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "interface|Ethernet0|trunk-vlan|100", ChangeDelete)
+	assertChange(t, cs2, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
+
+	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") != nil {
+		t.Error("trunk-vlan intent should be cleared after RemoveTrunkVLAN")
+	}
+}

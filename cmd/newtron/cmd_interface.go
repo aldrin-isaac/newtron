@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -423,6 +424,34 @@ Examples:
 	},
 }
 
+var interfaceRemoveTrunkVlanCmd = &cobra.Command{
+	Use:   "remove-trunk-vlan <interface> <vlan-id>",
+	Short: "Remove one VLAN from an interface's trunk membership",
+	Long: `Atomically strip a single tagged VLAN from a trunk port.
+
+Other VLANs on the trunk, the access VLAN (if any), VRF/IP bindings,
+BGP peers, QoS, and ACL bindings are untouched. Use this instead of
+unconfigure-interface (which tears down the entire port) when you only
+want to remove one VLAN. Issue #224.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron -D leaf1 interface remove-trunk-vlan Ethernet0 20 -x`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		intfName := args[0]
+		vlanID, err := strconv.Atoi(args[1])
+		if err != nil || vlanID <= 0 {
+			return fmt.Errorf("vlan-id must be a positive integer")
+		}
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemoveTrunkVLAN(app.deviceName, intfName, vlanID, execOpts()))
+	},
+}
+
 func init() {
 	interfaceCmd.AddCommand(interfaceListCmd)
 	interfaceCmd.AddCommand(interfaceShowCmd)
@@ -432,4 +461,5 @@ func init() {
 	interfaceCmd.AddCommand(interfaceBindingCmd)
 	interfaceCmd.AddCommand(interfaceListAclsCmd)
 	interfaceCmd.AddCommand(interfaceListMembersCmd)
+	interfaceCmd.AddCommand(interfaceRemoveTrunkVlanCmd)
 }

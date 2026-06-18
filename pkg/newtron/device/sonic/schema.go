@@ -516,7 +516,7 @@ var Schema = map[string]TableSchema{
 				OpSetupDevice, OpCreateVRF, OpBindIPVPN, OpCreateVLAN,
 				OpBindMACVPN, OpCreateACL, OpAddBGPEVPNPeer,
 				OpCreatePortChannel, OpConfigureIRB, OpAddStaticRoute,
-				OpSetProperty, OpConfigureInterface, OpAddBGPPeer,
+				OpSetProperty, OpConfigureInterface, OpAddTrunkVLAN, OpAddBGPPeer,
 				OpApplyService, OpBindACL, OpApplyQoS,
 				OpAddACLRule, OpAddPortChannelMember, OpInterfaceInit, OpDeployService,
 			}},
