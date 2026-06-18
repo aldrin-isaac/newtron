@@ -1154,6 +1154,7 @@ Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Ex
 | POST | `.../nodes/{device}/bind-macvpn` | `BindMACVPN` |
 | POST | `.../nodes/{device}/unbind-macvpn` | `UnbindMACVPN` |
 | POST | `.../nodes/{device}/add-bgp-evpn-peer` | `AddBGPEVPNPeer` |
+| POST | `.../nodes/{device}/update-bgp-evpn-peer` | `UpdateBGPEVPNPeer` — atomic per-overlay-peer mutation; optional `new_neighbor_ip` re-keys (#227) |
 | POST | `.../nodes/{device}/remove-bgp-evpn-peer` | `RemoveBGPEVPNPeer` |
 | POST | `.../nodes/{device}/reload-config` | `ConfigReload` (SONiC config reload) |
 | POST | `.../nodes/{device}/save-config` | `SaveConfig` (SONiC config save) |

@@ -961,6 +961,96 @@ func TestRoundTrip_AddRemoveBGPEVPNPeer(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// UpdateBGPEVPNPeer (#227) — atomic per-overlay-peer mutation
+// ============================================================================
+
+func evpnPeerSetup(t *testing.T) *Node {
+	t.Helper()
+	n := newTestAbstract()
+	ctx := context.Background()
+	if err := ReplayStep(ctx, n, spec.TopologyStep{
+		URL: "/setup-device",
+		Params: map[string]any{
+			"fields":    map[string]any{"hostname": "test", "bgp_asn": "65001"},
+			"source_ip": "10.0.0.1",
+		},
+	}); err != nil {
+		t.Fatalf("setup-device: %v", err)
+	}
+	if _, err := n.AddBGPEVPNPeer(ctx, "10.0.0.2", 65002, "old-peer", true); err != nil {
+		t.Fatalf("seed AddBGPEVPNPeer: %v", err)
+	}
+	return n
+}
+
+func TestUpdateBGPEVPNPeer_InPlaceASChange(t *testing.T) {
+	n := evpnPeerSetup(t)
+	ctx := context.Background()
+
+	cs, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65099, "new-desc", true, "")
+	if err != nil {
+		t.Fatalf("UpdateBGPEVPNPeer: %v", err)
+	}
+
+	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeDelete)
+	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeAdd)
+	assertField(t, c, "asn", "65099")
+
+	intent := n.GetIntent("evpn-peer|10.0.0.2")
+	if intent == nil {
+		t.Fatal("intent missing")
+	}
+	if got := intent.Params[sonic.FieldASN]; got != "65099" {
+		t.Errorf("intent asn = %q, want 65099", got)
+	}
+}
+
+func TestUpdateBGPEVPNPeer_RekeyNeighborIP(t *testing.T) {
+	n := evpnPeerSetup(t)
+	ctx := context.Background()
+
+	cs, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65002, "old-peer", true, "10.0.0.5")
+	if err != nil {
+		t.Fatalf("UpdateBGPEVPNPeer rekey: %v", err)
+	}
+
+	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeDelete)
+	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.5", ChangeAdd)
+	assertChange(t, cs, "NEWTRON_INTENT", "evpn-peer|10.0.0.2", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "evpn-peer|10.0.0.5", ChangeAdd)
+
+	if n.GetIntent("evpn-peer|10.0.0.2") != nil {
+		t.Error("old intent should be deleted")
+	}
+	if n.GetIntent("evpn-peer|10.0.0.5") == nil {
+		t.Error("new intent should exist")
+	}
+}
+
+func TestUpdateBGPEVPNPeer_NotFound(t *testing.T) {
+	n := evpnPeerSetup(t)
+	ctx := context.Background()
+
+	_, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.99", 65099, "x", true, "")
+	if err == nil {
+		t.Fatal("expected error for missing peer")
+	}
+}
+
+func TestUpdateBGPEVPNPeer_RekeyCollision(t *testing.T) {
+	n := evpnPeerSetup(t)
+	ctx := context.Background()
+	if _, err := n.AddBGPEVPNPeer(ctx, "10.0.0.7", 65007, "", true); err != nil {
+		t.Fatalf("seed second peer: %v", err)
+	}
+
+	_, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65002, "x", true, "10.0.0.7")
+	if err == nil {
+		t.Fatal("expected collision error")
+	}
+}
+
 func TestRoundTrip_ConfigureUnconfigureIRB(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()

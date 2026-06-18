@@ -846,6 +846,36 @@ func (s *Server) handleAddBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusCreated, val)
 }
 
+func (s *Server) handleUpdateBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var req struct {
+		NeighborIP    string `json:"neighbor_ip"`
+		RemoteAS      int    `json:"remote_as"`
+		Description   string `json:"description,omitempty"`
+		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		return n.UpdateBGPEVPNPeer(ctx, req.NeighborIP, newtron.BGPNeighborConfig{
+			NeighborIP:  req.NeighborIP,
+			RemoteAS:    req.RemoteAS,
+			Description: req.Description,
+		}, req.NewNeighborIP)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleRemoveBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

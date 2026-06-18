@@ -172,6 +172,80 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, neighborIP string, asn int, d
 	return cs, nil
 }
 
+// UpdateBGPEVPNPeer atomically mutates an existing EVPN overlay peer under
+// the per-device intent lock — closes the EVPN session blip the
+// RemoveBGPEVPNPeer + AddBGPEVPNPeer sequence exposes today. EVPN session
+// drops trigger MAC withdraw across the fabric; rebuilding it forces a
+// full route exchange.
+//
+// Reads the existing intent record at evpn-peer|<old_ip>, validates, and
+// emits a single ChangeSet that deletes the prior BGP_NEIGHBOR row and
+// writes the new one. The intent record is replaced via writeIntent's
+// idempotent path (DEL+HSET — #228 fix).
+//
+// When newNeighborIP is supplied and differs from neighborIP, the operation
+// is a re-key: the intent resource changes from evpn-peer|<old> to
+// evpn-peer|<new>. The new key must not already exist (collision 409).
+// Issue #227.
+func (n *Node) UpdateBGPEVPNPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool, newNeighborIP string) (*ChangeSet, error) {
+	if err := n.precondition(sonic.OpUpdateBGPEVPNPeer, neighborIP).Result(); err != nil {
+		return nil, err
+	}
+	resource := "evpn-peer|" + neighborIP
+	existing := n.GetIntent(resource)
+	if existing == nil {
+		return nil, fmt.Errorf("EVPN peer %s not found", neighborIP)
+	}
+	targetIP := neighborIP
+	if newNeighborIP != "" && newNeighborIP != neighborIP {
+		if !util.IsValidIPv4(newNeighborIP) {
+			return nil, fmt.Errorf("invalid new neighbor IP: %s", newNeighborIP)
+		}
+		if n.BGPNeighborExists(newNeighborIP) {
+			return nil, fmt.Errorf("BGP peer %s already exists", newNeighborIP)
+		}
+		targetIP = newNeighborIP
+	}
+
+	config := CreateBGPNeighborConfig(targetIP, asn, "", BGPNeighborOpts{
+		Description:  description,
+		PeerGroup:    "EVPN",
+		ActivateEVPN: evpn,
+	})
+	cs := buildChangeSet(n.name, "device."+sonic.OpUpdateBGPEVPNPeer, config, ChangeAdd)
+	// Delete prior BGP_NEIGHBOR row before writing the new one — when
+	// neighbor IP changes the CONFIG_DB key is different, so the old row
+	// would orphan; when it stays the same, DEL+HSET cleanly replaces.
+	cs.Deletes(DeleteBGPNeighborConfig("default", neighborIP))
+
+	intentParams := map[string]string{
+		sonic.FieldNeighborIP:  targetIP,
+		sonic.FieldASN:         strconv.Itoa(asn),
+		sonic.FieldDescription: description,
+	}
+	if evpn {
+		intentParams[sonic.FieldEVPN] = "true"
+	}
+	if targetIP != neighborIP {
+		if err := n.deleteIntent(cs, resource); err != nil {
+			return nil, err
+		}
+		if err := n.writeIntent(cs, sonic.OpAddBGPEVPNPeer, "evpn-peer|"+targetIP, intentParams, []string{"device"}); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := n.writeIntent(cs, sonic.OpAddBGPEVPNPeer, resource, intentParams, []string{"device"}); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.name).Infof("Updated EVPN BGP peer %s (AS %d)", targetIP, asn)
+	return cs, nil
+}
+
 // RemoveBGPEVPNPeer removes an EVPN BGP peer from the device.
 // Also used internally by Interface.RemoveBGPPeer for direct peer removal
 // (the CONFIG_DB operation — deleting BGP_NEIGHBOR entries — is identical).

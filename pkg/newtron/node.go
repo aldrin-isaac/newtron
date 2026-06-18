@@ -513,6 +513,20 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) err
 	return err
 }
 
+// UpdateBGPEVPNPeer atomically mutates an existing EVPN overlay peer.
+// Optional newNeighborIP re-keys the peer (changes the destination IP)
+// without going through remove + add. §15 mirror of AddBGPEVPNPeer that
+// closes the EVPN session blip the remove + add sequence exposes today
+// (#227).
+func (n *Node) UpdateBGPEVPNPeer(ctx context.Context, neighborIP string, config BGPNeighborConfig, newNeighborIP string) error {
+	if err := n.gate(ctx, auth.PermEVPNPeer, neighborIP); err != nil {
+		return err
+	}
+	cs, err := n.internal.UpdateBGPEVPNPeer(ctx, neighborIP, config.RemoteAS, config.Description, false, newNeighborIP)
+	n.appendPending(cs)
+	return err
+}
+
 // RemoveBGPEVPNPeer removes an EVPN BGP peer by IP.
 func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, ip string) error {
 	if err := n.gate(ctx, auth.PermEVPNPeer, ip); err != nil {

@@ -80,7 +80,8 @@ const (
 	OpCreateVLAN         = "create-vlan"
 	OpBindMACVPN         = "bind-macvpn"
 	OpCreateACL          = "create-acl"
-	OpAddBGPEVPNPeer = "add-bgp-evpn-peer"
+	OpAddBGPEVPNPeer    = "add-bgp-evpn-peer"
+	OpUpdateBGPEVPNPeer = "update-bgp-evpn-peer" // atomic per-overlay-peer mutation (#227)
 	OpCreatePortChannel  = "create-portchannel"
 	OpConfigureIRB       = "configure-irb"
 	OpAddStaticRoute     = "add-static-route"
