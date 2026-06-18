@@ -240,3 +240,181 @@ func TestUpdateProfile_RoundTrip(t *testing.T) {
 		t.Errorf("on-disk mgmt_ip: got %q, want 10.0.0.99", mgmt)
 	}
 }
+
+// seedFilterWithRule scaffolds a filter at "blocklist" with one rule at
+// seq=10 (action=deny, src_ip=10.0.0.0/8). Returned for chaining in the
+// UpdateFilterRule tests below; isolates the setup that's identical across
+// every TestUpdateFilterRule_* variant.
+func seedFilterWithRule(t *testing.T, s *Server) {
+	t.Helper()
+	if w := post(t, s, "/newtron/v1/networks/default/create-filter", map[string]any{
+		"name": "blocklist",
+		"type": "ipv4",
+	}); w.Code != http.StatusCreated {
+		t.Fatalf("create-filter: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := post(t, s, "/newtron/v1/networks/default/add-filter-rule", map[string]any{
+		"filter": "blocklist",
+		"seq":    10,
+		"action": "deny",
+		"src_ip": "10.0.0.0/8",
+	}); w.Code >= 400 {
+		t.Fatalf("add-filter-rule seed: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// readFilterRules issues GET /filters/{name} and returns the response's
+// rules slice. Used by the UpdateFilterRule tests to verify post-state
+// without re-parsing the full filter envelope each time.
+func readFilterRules(t *testing.T, s *Server, name string) []map[string]any {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/filters/"+name, nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("show: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Rules []map[string]any `json:"rules"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, w.Body.String())
+	}
+	return env.Data.Rules
+}
+
+// TestUpdateFilterRule_HappyPath verifies the basic edit path: change a
+// rule's action field and confirm the new value lands without affecting
+// the sequence number. Issue #209.
+func TestUpdateFilterRule_HappyPath(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s)
+
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter": "blocklist",
+		"seq":    10,
+		"action": "permit",
+		"src_ip": "10.0.0.0/8",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-filter-rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	rules := readFilterRules(t, s, "BLOCKLIST")
+	if len(rules) != 1 {
+		t.Fatalf("rules.length: got %d, want 1", len(rules))
+	}
+	if rules[0]["seq"].(float64) != 10 {
+		t.Errorf("seq: got %v, want 10 (no renumber requested)", rules[0]["seq"])
+	}
+	if rules[0]["action"].(string) != "permit" {
+		t.Errorf("action: got %q, want 'permit'", rules[0]["action"])
+	}
+}
+
+// TestUpdateFilterRule_RenumberOnly verifies that supplying new_seq
+// rotates the rule's sequence and re-sorts the rule list, leaving the
+// other fields unchanged.
+func TestUpdateFilterRule_RenumberOnly(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s)
+
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter":  "blocklist",
+		"seq":     10,
+		"new_seq": 5,
+		"action":  "deny", // same as seeded; verifies non-PK fields unchanged
+		"src_ip":  "10.0.0.0/8",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-filter-rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]int `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, w.Body.String())
+	}
+	if resp.Data["seq"] != 5 {
+		t.Errorf("response seq: got %d, want 5", resp.Data["seq"])
+	}
+	rules := readFilterRules(t, s, "BLOCKLIST")
+	if rules[0]["seq"].(float64) != 5 {
+		t.Errorf("on-disk seq: got %v, want 5 (renumber)", rules[0]["seq"])
+	}
+}
+
+// TestUpdateFilterRule_RenumberAndEdit verifies that a renumber and a
+// field change happen in one atomic call.
+func TestUpdateFilterRule_RenumberAndEdit(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s)
+
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter":  "blocklist",
+		"seq":     10,
+		"new_seq": 5,
+		"action":  "permit",
+		"src_ip":  "172.16.0.0/12",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-filter-rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	rules := readFilterRules(t, s, "BLOCKLIST")
+	if rules[0]["seq"].(float64) != 5 || rules[0]["action"].(string) != "permit" || rules[0]["src_ip"].(string) != "172.16.0.0/12" {
+		t.Errorf("rule after renumber+edit: %+v", rules[0])
+	}
+}
+
+// TestUpdateFilterRule_NewSeqCollides verifies rejection when the target
+// renumber slot is occupied by another rule.
+func TestUpdateFilterRule_NewSeqCollides(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s) // rule at seq=10
+	if w := post(t, s, "/newtron/v1/networks/default/add-filter-rule", map[string]any{
+		"filter": "blocklist",
+		"seq":    20,
+		"action": "permit",
+	}); w.Code >= 400 {
+		t.Fatalf("add second rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter":  "blocklist",
+		"seq":     10,
+		"new_seq": 20,
+		"action":  "permit",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error on collision; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateFilterRule_RuleNotFound verifies rejection when the
+// identified rule doesn't exist.
+func TestUpdateFilterRule_RuleNotFound(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter": "blocklist",
+		"seq":    999,
+		"action": "deny",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error for missing rule; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateFilterRule_FilterNotFound verifies rejection when the
+// parent filter doesn't exist.
+func TestUpdateFilterRule_FilterNotFound(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter": "nonexistent",
+		"seq":    10,
+		"action": "deny",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error for missing filter; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}

@@ -750,6 +750,28 @@ type AddFilterRuleRequest struct {
 	CoS           string `json:"cos,omitempty"`
 }
 
+// UpdateFilterRuleRequest is the request for updating an existing rule in
+// a filter. Sequence identifies the existing rule (matches RemoveFilterRule
+// semantics). NewSequence is optional — when present and non-zero, the
+// rule's sequence rotates to that value (renumber); when absent, the
+// rule keeps its current sequence. Remaining fields replace the rule's
+// current values. Issue #209.
+type UpdateFilterRuleRequest struct {
+	Filter        string `json:"filter"`
+	Sequence      int    `json:"seq"`
+	NewSequence   *int   `json:"new_seq,omitempty"`
+	Action        string `json:"action"`
+	SrcIP         string `json:"src_ip,omitempty"`
+	DstIP         string `json:"dst_ip,omitempty"`
+	SrcPrefixList string `json:"src_prefix_list,omitempty"`
+	DstPrefixList string `json:"dst_prefix_list,omitempty"`
+	Protocol      string `json:"protocol,omitempty"`
+	SrcPort       string `json:"src_port,omitempty"`
+	DstPort       string `json:"dst_port,omitempty"`
+	DSCP          string `json:"dscp,omitempty"`
+	CoS           string `json:"cos,omitempty"`
+}
+
 // CreatePrefixListRequest is the request for creating a prefix list.
 type CreatePrefixListRequest struct {
 	Name     string   `json:"name"`

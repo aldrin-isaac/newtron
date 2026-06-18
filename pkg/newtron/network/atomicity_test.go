@@ -200,3 +200,42 @@ func TestAddFilterRule_AtomicAgainstConcurrentAdds(t *testing.T) {
 		t.Errorf("got %d rules, want %d — rules were lost to a TOCTOU race", len(got.Rules), N)
 	}
 }
+
+// TestUpdateFilterRule_AtomicAgainstConcurrentUpdates pins the same
+// read-modify-write contract for UpdateFilterRule. Concurrent updates
+// to distinct rules must all land; concurrent updates to the SAME rule
+// must serialize (one wins, the other reads the updated state). Issue #209.
+func TestUpdateFilterRule_AtomicAgainstConcurrentUpdates(t *testing.T) {
+	n := loadTestNetwork(t)
+	if err := n.CreateFilter("parent", &spec.FilterSpec{}); err != nil {
+		t.Fatalf("seed CreateFilter: %v", err)
+	}
+	const N = 32
+	for i := 1; i <= N; i++ {
+		if err := n.AddFilterRule("parent", &spec.FilterRule{Sequence: i, Action: "permit"}); err != nil {
+			t.Fatalf("seed AddFilterRule: %v", err)
+		}
+	}
+	// Each goroutine updates a distinct sequence number to flip action to "deny".
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 1; i <= N; i++ {
+		go func(seq int) {
+			defer wg.Done()
+			_ = n.UpdateFilterRule("parent", seq, &spec.FilterRule{Sequence: seq, Action: "deny"})
+		}(i)
+	}
+	wg.Wait()
+	got, err := n.GetFilter("parent")
+	if err != nil {
+		t.Fatalf("GetFilter: %v", err)
+	}
+	if len(got.Rules) != N {
+		t.Errorf("got %d rules after concurrent updates, want %d", len(got.Rules), N)
+	}
+	for _, r := range got.Rules {
+		if r.Action != "deny" {
+			t.Errorf("rule seq=%d: action=%q, want 'deny' (concurrent update was lost)", r.Sequence, r.Action)
+		}
+	}
+}
