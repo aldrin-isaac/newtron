@@ -478,6 +478,13 @@ func (c *Client) AddQoSQueue(req newtron.AddQoSQueueRequest, opts newtron.ExecOp
 	return c.doPost(c.networkPath()+"/add-qos-queue"+execQuery(opts), req, nil)
 }
 
+// UpdateQoSQueue updates an existing queue in a QoS policy. The body's
+// QueueID identifies the existing queue; NewQueueID (when non-nil)
+// rotates the queue to that slot. Mirrors UpdateFilterRule. Issue #211.
+func (c *Client) UpdateQoSQueue(req newtron.UpdateQoSQueueRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/update-qos-queue"+execQuery(opts), req, nil)
+}
+
 // RemoveQoSQueue removes a queue from a QoS policy.
 func (c *Client) RemoveQoSQueue(policy string, queueID int, opts newtron.ExecOpts) error {
 	body := struct {

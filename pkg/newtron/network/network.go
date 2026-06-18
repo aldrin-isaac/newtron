@@ -1133,6 +1133,45 @@ func (n *Network) AddQoSQueueToPolicy(policy string, queueID int, queue *spec.Qo
 	return n.persistSpec()
 }
 
+// UpdateQoSQueueInPolicy atomically replaces a QoS queue's fields and
+// optionally relocates it to a different queue slot. currentID is the
+// existing slot; the queue's resulting QueueID may match or differ
+// (slot rotation). Issue #211.
+func (n *Network) UpdateQoSQueueInPolicy(policy string, currentID int, newQueueID int, newQueue *spec.QoSQueue) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+
+	policy = util.NormalizeName(policy)
+	p, ok := n.spec.QoSPolicies[policy]
+	if !ok {
+		return fmt.Errorf("QoS policy '%s' not found", policy)
+	}
+	if currentID < 0 || currentID >= len(p.Queues) || p.Queues[currentID] == nil {
+		return fmt.Errorf("queue %d not found in policy '%s'", currentID, policy)
+	}
+	if newQueueID != currentID {
+		// Ensure the target slot is empty before relocating.
+		if newQueueID >= 0 && newQueueID < len(p.Queues) && p.Queues[newQueueID] != nil {
+			return fmt.Errorf("queue %d already exists in policy '%s'", newQueueID, policy)
+		}
+		// Grow the slice to accommodate the new slot if needed.
+		for len(p.Queues) <= newQueueID {
+			p.Queues = append(p.Queues, nil)
+		}
+		p.Queues[currentID] = nil
+		p.Queues[newQueueID] = newQueue
+		// Trim trailing nils that may now be at the tail.
+		for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
+			p.Queues = p.Queues[:len(p.Queues)-1]
+		}
+	} else {
+		// In-place edit.
+		p.Queues[currentID] = newQueue
+	}
+	return n.persistSpec()
+}
+
 // RemoveQoSQueueFromPolicy atomically removes a QoS queue at the given
 // index from a QoS policy. Returns an error if the policy doesn't exist
 // or the index is out of range / empty. Trims trailing nil slots after

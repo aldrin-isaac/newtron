@@ -1278,6 +1278,35 @@ Add a queue to a QoS policy.
 {"data": {"queue_id": 0}}
 ```
 
+#### POST /newtron/v1/networks/{netID}/update-qos-queue
+
+Update an existing queue in a QoS policy. `queue_id` identifies the queue; `new_queue_id` is optional — when present, the queue rotates to that slot (0–7). Mirrors `update-filter-rule`'s semantics. Issue #211.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `policy` | string | yes | Policy name |
+| `queue_id` | integer | yes | Existing queue ID (0–7) |
+| `new_queue_id` | integer | no | New queue ID — present only when rotating slot |
+| `name` | string | yes | Queue name |
+| `type` | string | yes | `"strict"` or `"dwrr"` |
+| `weight` | integer | no | DWRR weight |
+| `dscp` | array<integer> | no | DSCP values mapped to this queue |
+| `ecn` | boolean | no | Enable ECN/WRED |
+
+**Response (200):**
+
+```json
+{"data": {"queue_id": 4}}
+```
+
+**Errors:**
+- 400: queue at `queue_id` not found; or `new_queue_id` already occupied; or either ID outside 0–7
+- 403: caller lacks `PermSpecAuthor` on `qos_policies/{policy}`
+
 #### POST /newtron/v1/networks/{netID}/remove-qos-queue
 
 Remove a queue from a QoS policy.

@@ -506,3 +506,99 @@ func TestUpdateRoutePolicyRule_NotFound(t *testing.T) {
 		t.Fatalf("expected error; got status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+// seedQoSPolicyWithQueue scaffolds a QoS policy "qp" with one queue at
+// queue_id=2 (name=voice, type=strict). Issue #211.
+func seedQoSPolicyWithQueue(t *testing.T, s *Server) {
+	t.Helper()
+	if w := post(t, s, "/newtron/v1/networks/default/create-qos-policy", map[string]any{
+		"name": "qp",
+	}); w.Code != http.StatusCreated {
+		t.Fatalf("create-qos-policy: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := post(t, s, "/newtron/v1/networks/default/add-qos-queue", map[string]any{
+		"policy":   "qp",
+		"queue_id": 2,
+		"name":     "voice",
+		"type":     "strict",
+	}); w.Code >= 400 {
+		t.Fatalf("add-qos-queue seed: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateQoSQueue_HappyPath(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedQoSPolicyWithQueue(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-qos-queue", map[string]any{
+		"policy":   "qp",
+		"queue_id": 2,
+		"name":     "voice",
+		"type":     "dwrr",
+		"weight":   50,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-qos-queue: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateQoSQueue_Relocate(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedQoSPolicyWithQueue(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-qos-queue", map[string]any{
+		"policy":       "qp",
+		"queue_id":     2,
+		"new_queue_id": 4,
+		"name":         "voice",
+		"type":         "strict",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-qos-queue relocate: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]int `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data["queue_id"] != 4 {
+		t.Errorf("response queue_id: got %d, want 4", resp.Data["queue_id"])
+	}
+}
+
+func TestUpdateQoSQueue_RelocateCollides(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedQoSPolicyWithQueue(t, s)
+	if w := post(t, s, "/newtron/v1/networks/default/add-qos-queue", map[string]any{
+		"policy":   "qp",
+		"queue_id": 4,
+		"name":     "video",
+		"type":     "dwrr",
+		"weight":   30,
+	}); w.Code >= 400 {
+		t.Fatalf("add second queue: %d %s", w.Code, w.Body.String())
+	}
+	w := post(t, s, "/newtron/v1/networks/default/update-qos-queue", map[string]any{
+		"policy":       "qp",
+		"queue_id":     2,
+		"new_queue_id": 4,
+		"name":         "voice",
+		"type":         "strict",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateQoSQueue_NotFound(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedQoSPolicyWithQueue(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-qos-queue", map[string]any{
+		"policy":   "qp",
+		"queue_id": 7,
+		"name":     "ghost",
+		"type":     "strict",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error for missing queue; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}

@@ -86,6 +86,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-qos-policy", s.handleCreateQoSPolicy)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-qos-policy", s.handleDeleteQoSPolicy)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/add-qos-queue", s.handleAddQoSQueue)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-qos-queue", s.handleUpdateQoSQueue)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/remove-qos-queue", s.handleRemoveQoSQueue)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-filter", s.handleCreateFilter)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-filter", s.handleDeleteFilter)
