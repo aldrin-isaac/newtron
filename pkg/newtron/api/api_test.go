@@ -107,6 +107,7 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateRoutePolicy":    true,
 			"DeleteRoutePolicy":    true,
 			"AddRoutePolicyRule":   true,
+			"UpdateRoutePolicyRule": true,
 			"RemoveRoutePolicyRule": true,
 			// Profiles and Zones
 			"ListProfiles":  true,
@@ -301,6 +302,7 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateRoutePolicy":     auth.PermSpecAuthor,
 			"DeleteRoutePolicy":     auth.PermSpecAuthor,
 			"AddRoutePolicyRule":    auth.PermSpecAuthor,
+			"UpdateRoutePolicyRule": auth.PermSpecAuthor,
 			"RemoveRoutePolicyRule": auth.PermSpecAuthor,
 			"CreateProfile":         auth.PermSpecAuthor,
 			"DeleteProfile":         auth.PermSpecAuthor,

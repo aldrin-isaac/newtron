@@ -99,6 +99,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-route-policy", s.handleCreateRoutePolicy)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-route-policy", s.handleDeleteRoutePolicy)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/add-route-policy-rule", s.handleAddRoutePolicyRule)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-route-policy-rule", s.handleUpdateRoutePolicyRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/remove-route-policy-rule", s.handleRemoveRoutePolicyRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-profile", s.handleCreateProfile)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-profile", s.handleDeleteProfile)

@@ -943,6 +943,28 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 	httputil.WriteJSON(w, http.StatusCreated, map[string]int{"seq": req.Sequence})
 }
 
+func (s *Server) handleUpdateRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.UpdateRoutePolicyRuleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	if err := ne.net.UpdateRoutePolicyRule(r.Context(), req, opts); err != nil {
+		writeError(w, err)
+		return
+	}
+	resultSeq := req.Sequence
+	if req.NewSequence != nil {
+		resultSeq = *req.NewSequence
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]int{"seq": resultSeq})
+}
+
 func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {

@@ -1556,6 +1556,34 @@ Add a rule to a route policy.
 {"data": {"seq": 10}}
 ```
 
+#### POST /newtron/v1/networks/{netID}/update-route-policy-rule
+
+Update an existing rule in a route policy. `seq` identifies the rule; `new_seq` is optional — when present, the rule's sequence rotates to that value (renumber). Mirrors `update-filter-rule`'s semantics. Issue #210.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `policy` | string | yes | Route policy name |
+| `seq` | integer | yes | Sequence number of the existing rule |
+| `new_seq` | integer | no | New sequence number — present only when renumbering |
+| `action` | string | yes | `"permit"` or `"deny"` |
+| `prefix_list` | string | no | Prefix list reference for match |
+| `community` | string | no | Community match |
+| `set` | object | no | Set-actions (local_pref, community, med) |
+
+**Response (200):**
+
+```json
+{"data": {"seq": 5}}
+```
+
+**Errors:**
+- 400: rule at `seq` does not exist; or `new_seq` collides with another rule
+- 403: caller lacks `PermSpecAuthor` on `route_policies/{policy}`
+
 #### POST /newtron/v1/networks/{netID}/remove-route-policy-rule
 
 Remove a rule from a route policy.
@@ -1567,7 +1595,7 @@ Remove a rule from a route policy.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `policy` | string | yes | Route policy name |
-| `sequence` | integer | yes | Sequence number to remove |
+| `seq` | integer | yes | Sequence number to remove |
 
 **Response (200):**
 

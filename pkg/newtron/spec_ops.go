@@ -687,6 +687,57 @@ func (net *Network) AddRoutePolicyRule(ctx context.Context, req AddRoutePolicyRu
 	return net.internal.AddRuleToRoutePolicy(req.Policy, rule)
 }
 
+// UpdateRoutePolicyRule replaces an existing rule's fields and optionally
+// rotates its sequence number. Sequence (req.Sequence) identifies the
+// existing rule; NewSequence (req.NewSequence) is optional — when non-nil
+// the rule's sequence rotates to that value. Mirrors UpdateFilterRule.
+// Issue #210.
+func (net *Network) UpdateRoutePolicyRule(ctx context.Context, req UpdateRoutePolicyRuleRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Policy)); err != nil {
+			return err
+		}
+	}
+	newSeq := req.Sequence
+	if req.NewSequence != nil {
+		newSeq = *req.NewSequence
+	}
+	if !opts.Execute {
+		rp, err := net.internal.GetRoutePolicy(req.Policy)
+		if err != nil {
+			return err
+		}
+		foundCurrent := false
+		for _, r := range rp.Rules {
+			if r.Sequence == req.Sequence {
+				foundCurrent = true
+				continue
+			}
+			if r.Sequence == newSeq && newSeq != req.Sequence {
+				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newSeq, req.Policy)
+			}
+		}
+		if !foundCurrent {
+			return fmt.Errorf("rule with sequence %d not found in route policy '%s'", req.Sequence, req.Policy)
+		}
+		return nil
+	}
+	rule := &spec.RoutePolicyRule{
+		Sequence:   newSeq,
+		Action:     req.Action,
+		PrefixList: req.PrefixList,
+		Community:  req.Community,
+	}
+	if req.Set != nil {
+		rule.Set = &spec.RoutePolicySet{
+			LocalPref: req.Set.LocalPref,
+			Community: req.Set.Community,
+			MED:       req.Set.MED,
+		}
+	}
+	return net.internal.UpdateRuleInRoutePolicy(req.Policy, req.Sequence, rule)
+}
+
 // RemoveRoutePolicyRule removes a rule from a route policy by sequence number.
 func (net *Network) RemoveRoutePolicyRule(ctx context.Context, policy string, seq int, opts ExecOpts) error {
 	if opts.Execute {
