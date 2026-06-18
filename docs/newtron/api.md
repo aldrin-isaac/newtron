@@ -3098,6 +3098,30 @@ false`) stays singleton on the base `interface|{name}` record. This change
 restores Intent Round-Trip Completeness for trunk ports: replay of the
 intent log reconstructs the full trunk-membership set.
 
+**Cross-mode swaps are rejected.** Calling configure-interface with a
+different mode than the existing intent (routed → access, access vlan N
+→ access vlan M, access → routed, routed vrf X → routed vrf Y) returns
+500 with `writeIntent ...: parents mismatch (existing [<old>], requested
+[<new>]) — delete and recreate to change parents`. Call
+`unconfigure-interface` first to clear the existing mode, then
+configure-interface for the new one. The check is at the intent DAG
+parents-mismatch guard — the interface record's `_parents` encodes mode
+(`vrf|<vrf>` for routed, `vlan|<id>` for access, `device` for empty).
+
+**Within-mode field changes (#228)**: when the new call keeps the same
+parents but changes a sub-entry-owning field (today: the IP in routed
+mode), the prior CONFIG_DB sub-entry for that field is deleted before
+the new one is written. The intent record's params are also fully
+replaced (DEL+HSET semantics) so dropped fields don't survive as ghost
+data. Concretely:
+
+- Routed IP swap (`{vrf:X, ip:A}` → `{vrf:X, ip:B}`): `INTERFACE|<name>|A`
+  is deleted; `INTERFACE|<name>|B` is added; intent's `ip` reflects B.
+- Routed IP drop (`{vrf:X, ip:A}` → `{vrf:X}`): `INTERFACE|<name>|A` is
+  deleted; intent's `ip` field is cleared (not merged stale).
+- Routed IP add (`{vrf:X}` → `{vrf:X, ip:A}`): `INTERFACE|<name>|A` is
+  added; no spurious delete.
+
 **Query parameters:** `dry_run`, `no_save`
 
 **Request body:**
