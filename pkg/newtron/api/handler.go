@@ -96,6 +96,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-prefix-list", s.handleCreatePrefixList)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-prefix-list", s.handleDeletePrefixList)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/add-prefix-list-entry", s.handleAddPrefixListEntry)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-prefix-list-entry", s.handleUpdatePrefixListEntry)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/remove-prefix-list-entry", s.handleRemovePrefixListEntry)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-route-policy", s.handleCreateRoutePolicy)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-route-policy", s.handleDeleteRoutePolicy)

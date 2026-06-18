@@ -328,6 +328,13 @@ func (c *Client) AddPrefixListEntry(req newtron.AddPrefixListEntryRequest, opts 
 	return c.doPost(c.networkPath()+"/add-prefix-list-entry"+execQuery(opts), req, nil)
 }
 
+// UpdatePrefixListEntry atomically swaps one prefix for another in a
+// prefix list — see issue #220 for why this exists alongside the bulk
+// update-prefix-list path.
+func (c *Client) UpdatePrefixListEntry(req newtron.UpdatePrefixListEntryRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/update-prefix-list-entry"+execQuery(opts), req, nil)
+}
+
 // RemovePrefixListEntry removes an entry from a prefix list.
 func (c *Client) RemovePrefixListEntry(prefixList, prefix string, opts newtron.ExecOpts) error {
 	body := struct {
