@@ -750,6 +750,21 @@ type AddFilterRuleRequest struct {
 	CoS           string `json:"cos,omitempty"`
 }
 
+// UpdateQoSQueueRequest is the request for updating an existing queue
+// in a QoS policy. Mirrors UpdateFilterRuleRequest. QueueID identifies
+// the existing queue (matches RemoveQoSQueue's parameter); NewQueueID
+// is optional — when non-nil the queue rotates to that slot. Issue #211.
+type UpdateQoSQueueRequest struct {
+	Policy     string `json:"policy"`
+	QueueID    int    `json:"queue_id"`
+	NewQueueID *int   `json:"new_queue_id,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Weight     int    `json:"weight,omitempty"`
+	DSCP       []int  `json:"dscp,omitempty"`
+	ECN        bool   `json:"ecn,omitempty"`
+}
+
 // UpdateRoutePolicyRuleRequest is the request for updating an existing
 // rule in a route policy. Mirrors UpdateFilterRuleRequest. Issue #210.
 type UpdateRoutePolicyRuleRequest struct {

@@ -654,6 +654,28 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusCreated, map[string]int{"queue_id": req.QueueID})
 }
 
+func (s *Server) handleUpdateQoSQueue(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.UpdateQoSQueueRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	if err := ne.net.UpdateQoSQueue(r.Context(), req, opts); err != nil {
+		writeError(w, err)
+		return
+	}
+	resultID := req.QueueID
+	if req.NewQueueID != nil {
+		resultID = *req.NewQueueID
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]int{"queue_id": resultID})
+}
+
 func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {

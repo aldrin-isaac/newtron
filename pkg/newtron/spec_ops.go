@@ -295,6 +295,50 @@ func (net *Network) AddQoSQueue(ctx context.Context, req AddQoSQueueRequest, opt
 	return net.internal.AddQoSQueueToPolicy(req.Policy, req.QueueID, queue)
 }
 
+// UpdateQoSQueue replaces an existing queue's fields and optionally
+// relocates it to a different queue_id slot. QueueID (req.QueueID)
+// identifies the existing queue; NewQueueID (req.NewQueueID) is
+// optional — when non-nil the queue rotates to that slot. Mirrors
+// UpdateFilterRule / UpdateRoutePolicyRule. Issue #211.
+func (net *Network) UpdateQoSQueue(ctx context.Context, req UpdateQoSQueueRequest, opts ExecOpts) error {
+	if req.QueueID < 0 || req.QueueID > 7 {
+		return &ValidationError{Field: "queue_id", Message: "must be 0-7"}
+	}
+	newID := req.QueueID
+	if req.NewQueueID != nil {
+		newID = *req.NewQueueID
+		if newID < 0 || newID > 7 {
+			return &ValidationError{Field: "new_queue_id", Message: "must be 0-7"}
+		}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(req.Policy)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		policy, err := net.internal.GetQoSPolicy(req.Policy)
+		if err != nil {
+			return err
+		}
+		if req.QueueID >= len(policy.Queues) || policy.Queues[req.QueueID] == nil {
+			return fmt.Errorf("queue %d not found in policy '%s'", req.QueueID, req.Policy)
+		}
+		if newID != req.QueueID && newID < len(policy.Queues) && policy.Queues[newID] != nil {
+			return fmt.Errorf("queue %d already exists in policy '%s'", newID, req.Policy)
+		}
+		return nil
+	}
+	queue := &spec.QoSQueue{
+		Name:   req.Name,
+		Type:   req.Type,
+		Weight: req.Weight,
+		DSCP:   req.DSCP,
+		ECN:    req.ECN,
+	}
+	return net.internal.UpdateQoSQueueInPolicy(req.Policy, req.QueueID, newID, queue)
+}
+
 // RemoveQoSQueue removes a queue from a QoS policy.
 func (net *Network) RemoveQoSQueue(ctx context.Context, policy string, queueID int, opts ExecOpts) error {
 	if opts.Execute {
