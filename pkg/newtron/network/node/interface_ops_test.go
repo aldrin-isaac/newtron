@@ -548,6 +548,118 @@ func TestRoundTrip_AddRemoveBGPPeer(t *testing.T) {
 	assertChange(t, cs2, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeDelete)
 }
 
+// ============================================================================
+// UpdateBGPPeer (#227) — atomic per-peer mutation
+// ============================================================================
+
+// bgpPeerSetup builds a node with an existing BGP peer on Ethernet0.
+func bgpPeerSetup(t *testing.T) (*Node, *Interface) {
+	t.Helper()
+	d, intf := testInterface()
+	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"ip":        "10.1.0.0/31",
+	}
+	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
+	ctx := context.Background()
+	if _, err := intf.AddBGPPeer(ctx, DirectBGPPeerConfig{
+		RemoteAS: 65002, Description: "old-peer",
+	}); err != nil {
+		t.Fatalf("seed AddBGPPeer: %v", err)
+	}
+	// Simulate apply so subsequent reads see the BGP_NEIGHBOR row.
+	d.configDB.BGPNeighbor["default|10.1.0.1"] = sonic.BGPNeighborEntry{ASN: "65002", LocalAddr: "10.1.0.0"}
+	return d, intf
+}
+
+func TestUpdateBGPPeer_InPlaceASChange(t *testing.T) {
+	d, intf := bgpPeerSetup(t)
+	ctx := context.Background()
+
+	cs, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{
+		RemoteAS: 65099, Description: "new-peer",
+	}, "")
+	if err != nil {
+		t.Fatalf("UpdateBGPPeer: %v", err)
+	}
+
+	// CONFIG_DB: old BGP_NEIGHBOR row deleted, new one added at same key.
+	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeDelete)
+	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeAdd)
+	assertField(t, c, "asn", "65099")
+
+	intent := d.GetIntent("interface|Ethernet0|bgp-peer")
+	if intent == nil {
+		t.Fatal("intent record missing after update")
+	}
+	if got := intent.Params[sonic.FieldRemoteAS]; got != "65099" {
+		t.Errorf("intent remote_as = %q, want 65099", got)
+	}
+	if got := intent.Params[sonic.FieldNeighborIP]; got != "10.1.0.1" {
+		t.Errorf("intent neighbor_ip = %q (should be unchanged)", got)
+	}
+}
+
+func TestUpdateBGPPeer_RekeyNeighborIP(t *testing.T) {
+	d, intf := bgpPeerSetup(t)
+	ctx := context.Background()
+
+	cs, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{
+		RemoteAS: 65002, Description: "old-peer",
+	}, "10.1.0.5")
+	if err != nil {
+		t.Fatalf("UpdateBGPPeer rekey: %v", err)
+	}
+
+	// Old neighbor IP row deleted, new one added.
+	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeDelete)
+	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.5", ChangeAdd)
+
+	intent := d.GetIntent("interface|Ethernet0|bgp-peer")
+	if intent == nil {
+		t.Fatal("intent record missing after rekey")
+	}
+	if got := intent.Params[sonic.FieldNeighborIP]; got != "10.1.0.5" {
+		t.Errorf("intent neighbor_ip = %q, want 10.1.0.5", got)
+	}
+}
+
+func TestUpdateBGPPeer_NoExistingPeer(t *testing.T) {
+	d, intf := testInterface()
+	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"ip":        "10.1.0.0/31",
+	}
+	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
+	ctx := context.Background()
+
+	_, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65002}, "")
+	if err == nil {
+		t.Fatal("expected error when no BGP peer exists")
+	}
+}
+
+func TestUpdateBGPPeer_RekeyCollision(t *testing.T) {
+	d, intf := bgpPeerSetup(t)
+	// Seed a sibling BGP peer intent at the would-be target IP — mirrors
+	// what AddBGPPeer would write for a second interface peering the
+	// same neighbor. BGPNeighborExists scans intents (not raw configDB).
+	d.configDB.NewtronIntent["interface|Ethernet4|bgp-peer"] = map[string]string{
+		"operation":           sonic.OpAddBGPPeer,
+		"_parents":            "interface|Ethernet4",
+		sonic.FieldNeighborIP: "10.1.0.7",
+		sonic.FieldRemoteAS:   "65500",
+	}
+	ctx := context.Background()
+
+	_, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65002}, "10.1.0.7")
+	if err == nil {
+		t.Fatal("expected collision error when target IP already has a BGP peer")
+	}
+}
+
 func TestRoundTrip_BindUnbindACL(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()

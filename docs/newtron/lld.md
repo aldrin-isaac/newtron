@@ -1192,6 +1192,7 @@ Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `Wri
 | POST | `.../interfaces/{name}/bind-acl` | `BindACL` |
 | POST | `.../interfaces/{name}/unbind-acl` | `UnbindACL` |
 | POST | `.../interfaces/{name}/add-bgp-peer` | `AddBGPPeer` |
+| POST | `.../interfaces/{name}/update-bgp-peer` | `UpdateBGPPeer` — atomic per-peer mutation; optional `new_neighbor_ip` re-keys BGP_NEIGHBOR row (#227) |
 | POST | `.../interfaces/{name}/remove-bgp-peer` | `RemoveBGPPeer` |
 | POST | `.../interfaces/{name}/apply-qos` | `ApplyQoS` |
 | POST | `.../interfaces/{name}/remove-qos` | `RemoveQoS` |

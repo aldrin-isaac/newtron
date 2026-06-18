@@ -3308,6 +3308,34 @@ Add a BGP peer scoped to this interface.
 
 **Response (201):** `WriteResult`
 
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/update-bgp-peer
+
+Atomically update the existing BGP peer on this interface under the
+per-device intent lock. Closes the session-blip window that
+remove-bgp-peer + add-bgp-peer exposes (BGP session tears down and
+re-establishes during the gap). Issue #227.
+
+Optional `new_neighbor_ip` re-keys the BGP_NEIGHBOR row to a different
+neighbor IP without going through delete + add. The intent record's
+resource is unchanged (`interface|<name>|bgp-peer` is a singleton); only
+its `neighbor_ip` param updates. 404 if no BGP peer exists on the
+interface. 409 if `new_neighbor_ip` already names a different BGP peer
+on this device.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `neighbor_ip` | string | no | Current neighbor IP (informational; the existing peer is read from intent) |
+| `remote_as` | integer | yes | New remote AS number |
+| `description` | string | no | New description |
+| `multihop` | integer | no | New eBGP multihop TTL |
+| `new_neighbor_ip` | string | no | Re-key the BGP_NEIGHBOR row to this IP |
+
+**Response (200):** `WriteResult`
+
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-bgp-peer
 
 Remove the BGP peer from this interface.

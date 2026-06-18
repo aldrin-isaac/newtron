@@ -366,6 +366,49 @@ Examples:
 	},
 }
 
+var (
+	vrfNeighborNewIP string
+)
+
+var vrfUpdateNeighborCmd = &cobra.Command{
+	Use:   "update-neighbor <vrf-name> <interface> <remote-asn>",
+	Short: "Atomically update an existing BGP neighbor on a VRF interface",
+	Long: `Atomically update an existing BGP neighbor's parameters on a VRF
+interface. Closes the BGP session blip that remove-neighbor + add-neighbor
+exposes today by mutating the peer under the per-device intent lock.
+
+--new-neighbor changes the BGP destination IP (re-keys BGP_NEIGHBOR
+CONFIG_DB row). Other fields (remote_as, description, multihop) are
+field updates.
+
+Issue #227.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 vrf update-neighbor Vrf_CUST1 Ethernet4 65300 --description "new ISP" -x
+  newtron leaf1 vrf update-neighbor Vrf_CUST1 Ethernet4 65200 --new-neighbor 10.1.1.5 -x`,
+	Args: cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vrfName := args[0]
+		intfName := args[1]
+		asn, err := strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid ASN: %s", args[2])
+		}
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.InterfaceUpdateBGPPeer(app.deviceName, intfName, newtron.BGPNeighborConfig{
+			VRF:         vrfName,
+			Interface:   intfName,
+			NeighborIP:  vrfNeighborIP,
+			RemoteAS:    asn,
+			Description: vrfNeighborDescription,
+		}, vrfNeighborNewIP, execOpts()))
+	},
+}
+
 var vrfRemoveNeighborCmd = &cobra.Command{
 	Use:   "remove-neighbor <vrf-name> <interface|ip>",
 	Short: "Remove a BGP neighbor from a VRF",
@@ -485,6 +528,9 @@ func init() {
 
 	vrfAddNeighborCmd.Flags().StringVar(&vrfNeighborIP, "neighbor", "", "Neighbor IP (auto-derived for /30, /31 if not specified)")
 	vrfAddNeighborCmd.Flags().StringVar(&vrfNeighborDescription, "description", "", "Neighbor description")
+	vrfUpdateNeighborCmd.Flags().StringVar(&vrfNeighborIP, "neighbor", "", "Existing neighbor IP (auto-derived if not specified)")
+	vrfUpdateNeighborCmd.Flags().StringVar(&vrfNeighborDescription, "description", "", "Neighbor description")
+	vrfUpdateNeighborCmd.Flags().StringVar(&vrfNeighborNewIP, "new-neighbor", "", "Re-key the BGP peer to this new neighbor IP")
 
 	vrfAddRouteCmd.Flags().IntVar(&vrfRouteMetric, "metric", 0, "Route metric")
 	vrfUpdateRouteCmd.Flags().IntVar(&vrfRouteMetric, "metric", 0, "Route metric")
@@ -500,6 +546,7 @@ func init() {
 	vrfCmd.AddCommand(vrfBindIPVPNCmd)
 	vrfCmd.AddCommand(vrfUnbindIPVPNCmd)
 	vrfCmd.AddCommand(vrfAddNeighborCmd)
+	vrfCmd.AddCommand(vrfUpdateNeighborCmd)
 	vrfCmd.AddCommand(vrfRemoveNeighborCmd)
 	vrfCmd.AddCommand(vrfAddRouteCmd)
 	vrfCmd.AddCommand(vrfUpdateRouteCmd)
