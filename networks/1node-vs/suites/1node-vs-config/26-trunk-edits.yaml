@@ -1,0 +1,169 @@
+name: trunk-edits
+description: |
+  E2E coverage for issue #224 — per-VLAN trunk intent records + atomic
+  remove-trunk-vlan verb.
+
+  Verifies:
+    - configure-interface tagged:true writes a per-VLAN intent record at
+      NEWTRON_INTENT|interface|{name}|trunk-vlan|{vlan_id} (not on the base
+      interface|{name} record). This is the Intent Round-Trip Completeness
+      fix.
+    - A second tagged-VLAN call on the same port creates a second record
+      WITHOUT clobbering the first (the bug pre-#224: vlan_id was stuffed
+      on the base record and only the last call survived in intent).
+    - remove-trunk-vlan strips exactly one VLAN — other trunk VLANs, the
+      access VLAN (if any), VRF/IP, BGP, QoS, ACLs untouched. §15
+      Operational Symmetry restored.
+
+  Loopback mode — uses Ethernet24 on switch1. Independent of device setup
+  since loopback create-vlan implicitly creates the setup-device intent
+  as a side effect. No requires: — runs against the in-memory projection.
+
+steps:
+  # ====================================================================
+  # Setup — fresh VLANs not used by other scenarios
+  # ====================================================================
+  - name: create-vlan-110
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 110}
+
+  - name: create-vlan-120
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 120}
+
+  # ====================================================================
+  # Add first trunk VLAN — verify per-VLAN intent record + VLAN_MEMBER
+  # ====================================================================
+  - name: configure-eth24-trunk-vlan-110
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet24/configure-interface?mode=loopback
+    params: {vlan_id: 110, tagged: true}
+
+  - name: verify-trunk-vlan-110-intent-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-trunk-vlan-110-intent-operation
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110?mode=loopback
+    expect:
+      jq: '.operation == "add-trunk-vlan" and .vlan_id == "110"'
+
+  - name: verify-vlan-member-110-eth24-tagged
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan110%7CEthernet24?mode=loopback
+    expect:
+      jq: '.tagging_mode == "tagged"'
+
+  # ====================================================================
+  # Add second trunk VLAN — verify additivity (first record survives)
+  # ====================================================================
+  - name: configure-eth24-trunk-vlan-120
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet24/configure-interface?mode=loopback
+    params: {vlan_id: 120, tagged: true}
+
+  - name: verify-trunk-vlan-120-intent-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C120/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-trunk-vlan-110-still-exists-after-second-add
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-vlan-member-120-eth24-tagged
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan120%7CEthernet24?mode=loopback
+    expect:
+      jq: '.tagging_mode == "tagged"'
+
+  - name: verify-vlan-member-110-still-exists-after-second-add
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan110%7CEthernet24/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  # ====================================================================
+  # remove-trunk-vlan — strip VLAN 110, VLAN 120 must survive
+  # ====================================================================
+  - name: remove-trunk-vlan-110
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet24/remove-trunk-vlan?mode=loopback
+    params: {vlan_id: 110}
+
+  - name: verify-trunk-vlan-110-intent-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-vlan-member-110-eth24-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan110%7CEthernet24/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-trunk-vlan-120-survives-reference-aware-strip
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C120/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-vlan-member-120-survives-reference-aware-strip
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan120%7CEthernet24/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  # ====================================================================
+  # Cleanup — strip remaining trunk VLAN, delete VLANs
+  # ====================================================================
+  - name: cleanup-remove-trunk-vlan-120
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet24/remove-trunk-vlan?mode=loopback
+    params: {vlan_id: 120}
+
+  - name: cleanup-delete-vlan-110
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 110}
+
+  - name: cleanup-delete-vlan-120
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 120}
