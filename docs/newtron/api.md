@@ -70,6 +70,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/update-platform` | Replace platform in place — full-replacement |
 | POST | `/networks/{n}/delete-platform` | Delete platform (409 if any profile references it) |
 | POST | `/networks/{n}/add-qos-queue` | Add queue to QoS policy |
+| POST | `/networks/{n}/update-qos-queue` | Update queue in QoS policy (incl. slot rotation) |
 | POST | `/networks/{n}/remove-qos-queue` | Remove queue from QoS policy |
 | POST | `/networks/{n}/add-filter-rule` | Add rule to filter |
 | POST | `/networks/{n}/update-filter-rule` | Update rule in filter (incl. renumber) |
@@ -77,6 +78,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/add-prefix-list-entry` | Add entry to prefix list |
 | POST | `/networks/{n}/remove-prefix-list-entry` | Remove entry from prefix list |
 | POST | `/networks/{n}/add-route-policy-rule` | Add rule to route policy |
+| POST | `/networks/{n}/update-route-policy-rule` | Update rule in route policy (incl. renumber) |
 | POST | `/networks/{n}/remove-route-policy-rule` | Remove rule from route policy |
 
 **Provisioning** (S6)
