@@ -214,6 +214,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-acl", s.handleBindACL)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-acl", s.handleUnbindACL)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/add-bgp-peer", s.handleAddBGPPeer)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/update-bgp-peer", s.handleUpdateBGPPeer)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-bgp-peer", s.handleRemoveBGPPeer)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/set-property", s.handleInterfaceSet)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/clear-property", s.handleClearProperty)

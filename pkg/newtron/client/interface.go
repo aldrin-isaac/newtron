@@ -57,6 +57,26 @@ func (c *Client) InterfaceAddBGPPeer(device, iface string, config newtron.BGPNei
 	return c.interfaceWrite(device, iface, "add-bgp-peer", config, opts)
 }
 
+// InterfaceUpdateBGPPeer atomically mutates the BGP peer on an interface.
+// Optional newNeighborIP re-keys the BGP_NEIGHBOR row. Closes the
+// session-blip window remove + add exposes today (#227).
+func (c *Client) InterfaceUpdateBGPPeer(device, iface string, config newtron.BGPNeighborConfig, newNeighborIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := struct {
+		NeighborIP    string `json:"neighbor_ip"`
+		RemoteAS      int    `json:"remote_as"`
+		Description   string `json:"description,omitempty"`
+		Multihop      int    `json:"multihop,omitempty"`
+		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+	}{
+		NeighborIP:    config.NeighborIP,
+		RemoteAS:      config.RemoteAS,
+		Description:   config.Description,
+		Multihop:      config.Multihop,
+		NewNeighborIP: newNeighborIP,
+	}
+	return c.interfaceWrite(device, iface, "update-bgp-peer", body, opts)
+}
+
 // InterfaceRemoveBGPPeer removes a BGP peer from an interface.
 // The neighbor IP is read from the intent record on the device.
 func (c *Client) InterfaceRemoveBGPPeer(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {

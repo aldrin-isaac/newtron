@@ -165,6 +165,29 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 	return nil
 }
 
+// UpdateBGPPeer atomically mutates the existing BGP peer on this interface.
+// Optional newNeighborIP re-keys the BGP_NEIGHBOR CONFIG_DB row (changes
+// the destination IP); the intent resource stays at the singleton key.
+// §15 mirror of AddBGPPeer that closes the session-blip window
+// remove + add exposes today (#227).
+func (i *Interface) UpdateBGPPeer(ctx context.Context, config BGPNeighborConfig, newNeighborIP string) error {
+	peerIP := i.internal.DirectBGPPeerIP()
+	if err := i.gate(ctx, auth.PermBGPPeer, peerIP); err != nil {
+		return err
+	}
+	cs, err := i.internal.UpdateBGPPeer(ctx, node.DirectBGPPeerConfig{
+		NeighborIP:  config.NeighborIP,
+		RemoteAS:    config.RemoteAS,
+		Description: config.Description,
+		Multihop:    config.Multihop,
+	}, newNeighborIP)
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}
+
 // RemoveBGPPeer removes a direct BGP peer from this interface.
 // The neighbor IP is recovered from the intent record before gating
 // so `where: {resource: "<peer-ip>"}` clauses scope this reverse op
