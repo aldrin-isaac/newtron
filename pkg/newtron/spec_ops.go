@@ -622,6 +622,42 @@ func (net *Network) AddPrefixListEntry(ctx context.Context, req AddPrefixListEnt
 	return net.internal.AddPrefixToPrefixList(req.PrefixList, req.Prefix)
 }
 
+// UpdatePrefixListEntry atomically swaps one prefix for another in a
+// prefix list. Closes the match-set-atomicity gap that the bulk
+// update-prefix-list path has between concurrent single-entry edits.
+// Issue #220.
+func (net *Network) UpdatePrefixListEntry(ctx context.Context, req UpdatePrefixListEntryRequest, opts ExecOpts) error {
+	if req.NewPrefix == "" {
+		return &ValidationError{Field: "new_prefix", Message: "required"}
+	}
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(req.PrefixList)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		prefixes, err := net.internal.GetPrefixList(req.PrefixList)
+		if err != nil {
+			return err
+		}
+		foundCurrent := false
+		for _, p := range prefixes {
+			if p == req.Prefix {
+				foundCurrent = true
+				continue
+			}
+			if p == req.NewPrefix && req.NewPrefix != req.Prefix {
+				return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", req.NewPrefix, req.PrefixList)
+			}
+		}
+		if !foundCurrent {
+			return fmt.Errorf("prefix '%s' not found in prefix list '%s'", req.Prefix, req.PrefixList)
+		}
+		return nil
+	}
+	return net.internal.UpdatePrefixInPrefixList(req.PrefixList, req.Prefix, req.NewPrefix)
+}
+
 // RemovePrefixListEntry removes a prefix from a prefix list.
 func (net *Network) RemovePrefixListEntry(ctx context.Context, prefixList, prefix string, opts ExecOpts) error {
 	if opts.Execute {
