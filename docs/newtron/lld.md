@@ -1144,6 +1144,7 @@ Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Ex
 | POST | `.../nodes/{device}/create-acl` | `CreateACL` |
 | POST | `.../nodes/{device}/delete-acl` | `DeleteACL` |
 | POST | `.../nodes/{device}/add-acl-rule` | `AddACLRule` |
+| POST | `.../nodes/{device}/update-acl-rule` | `UpdateACLRule` — atomic per-rule mutation; optional `new_rule_name` re-keys (#227) |
 | POST | `.../nodes/{device}/remove-acl-rule` | `DeleteACLRule` |
 | POST | `.../nodes/{device}/create-portchannel` | `CreatePortChannel` |
 | POST | `.../nodes/{device}/delete-portchannel` | `DeletePortChannel` |

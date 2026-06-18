@@ -94,6 +94,7 @@ const (
 	OpBindACL            = "bind-acl"
 	OpApplyQoS              = "apply-qos"
 	OpAddACLRule            = "add-acl-rule"
+	OpUpdateACLRule         = "update-acl-rule" // atomic per-rule mutation (#227)
 	OpAddPortChannelMember  = "add-pc-member"
 	OpInterfaceInit         = "interface-init"
 	OpDeployService         = "deploy-service"

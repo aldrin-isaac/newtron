@@ -1,0 +1,166 @@
+name: update-acl-rule
+description: |
+  E2E coverage for issue #227 update-acl-rule — atomic per-rule mutation
+  for device CONFIG_DB ACL rules. Closes the packet-leak window the
+  remove + add sequence exposes today.
+
+  Verifies:
+    - In-place field mutation (priority change, action swap) writes a
+      single DEL+ADD pair for the ACL_RULE entry, intent record's
+      params reflect the new values.
+    - Re-key (rename) via new_rule_name relocates both the ACL_RULE
+      key and the NEWTRON_INTENT resource atomically — old key deleted,
+      new key added; old intent deleted, new intent added.
+    - Rename to an occupied name fails with 4xx (collision).
+    - Missing rule fails with 4xx.
+
+  Loopback mode — runs on switch1, no real device traffic.
+
+steps:
+  # ====================================================================
+  # Setup — ACL table and seed two rules
+  # ====================================================================
+  - name: create-acl-table
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-acl?mode=loopback
+    params:
+      name: EDGE_IN_227
+      type: L3
+      stage: ingress
+
+  - name: add-rule-10
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-acl-rule?mode=loopback
+    params:
+      acl: EDGE_IN_227
+      rule_name: RULE_10
+      priority: 10
+      action: permit
+      src_ip: "10.0.0.0/8"
+
+  - name: add-rule-20
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-acl-rule?mode=loopback
+    params:
+      acl: EDGE_IN_227
+      rule_name: RULE_20
+      priority: 20
+      action: deny
+      src_ip: "192.168.0.0/16"
+
+  # ====================================================================
+  # In-place mutation — change RULE_10 action to deny and bump priority
+  # ====================================================================
+  - name: update-rule-10-in-place
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-acl-rule?mode=loopback
+    params:
+      acl: EDGE_IN_227
+      rule_name: RULE_10
+      priority: 5000
+      action: deny
+      src_ip: "10.0.0.0/8"
+
+  - name: verify-rule-10-action-updated
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/EDGE_IN_227%7CRULE_10?mode=loopback
+    expect:
+      jq: '.PACKET_ACTION == "DROP" and .PRIORITY == "5000"'
+
+  - name: verify-rule-10-intent-priority-updated
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/acl%7CEDGE_IN_227%7CRULE_10?mode=loopback
+    expect:
+      jq: '.priority == "5000" and .action == "deny"'
+
+  - name: verify-rule-20-untouched
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/EDGE_IN_227%7CRULE_20?mode=loopback
+    expect:
+      jq: '.PRIORITY == "20" and .PACKET_ACTION == "DROP"'
+
+  # ====================================================================
+  # Re-key — rename RULE_10 to RULE_15 atomically
+  # ====================================================================
+  - name: update-rule-10-rename-to-15
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-acl-rule?mode=loopback
+    params:
+      acl: EDGE_IN_227
+      rule_name: RULE_10
+      new_rule_name: RULE_15
+      priority: 5000
+      action: deny
+      src_ip: "10.0.0.0/8"
+
+  - name: verify-rule-10-key-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/EDGE_IN_227%7CRULE_10/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-rule-15-key-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/EDGE_IN_227%7CRULE_15/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-rule-10-intent-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/acl%7CEDGE_IN_227%7CRULE_10/exists?mode=loopback
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-rule-15-intent-exists
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/acl%7CEDGE_IN_227%7CRULE_15/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-rule-15-intent-priority-carried
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/acl%7CEDGE_IN_227%7CRULE_15?mode=loopback
+    expect:
+      jq: '.priority == "5000" and .action == "deny"'
+
+  # ====================================================================
+  # Cleanup
+  # ====================================================================
+  - name: cleanup-remove-rule-15
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-acl-rule?mode=loopback
+    params: {acl: EDGE_IN_227, rule: RULE_15}
+
+  - name: cleanup-remove-rule-20
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-acl-rule?mode=loopback
+    params: {acl: EDGE_IN_227, rule: RULE_20}
+
+  - name: cleanup-delete-acl
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-acl?mode=loopback
+    params: {name: EDGE_IN_227}

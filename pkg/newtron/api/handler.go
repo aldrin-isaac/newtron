@@ -171,6 +171,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/create-acl", s.handleCreateACL)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/delete-acl", s.handleDeleteACL)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/add-acl-rule", s.handleAddACLRule)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/update-acl-rule", s.handleUpdateACLRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/remove-acl-rule", s.handleRemoveACLRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/create-portchannel", s.handleCreatePortChannel)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/delete-portchannel", s.handleDeletePortChannel)

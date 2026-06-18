@@ -521,6 +521,107 @@ func TestAddACLRule(t *testing.T) {
 }
 
 // ============================================================================
+// UpdateACLRule (#227) — atomic per-rule mutation
+// ============================================================================
+
+func aclSetup(t *testing.T) *Node {
+	t.Helper()
+	d := testDevice()
+	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{Type: "L3", Stage: "ingress"}
+	d.configDB.NewtronIntent["acl|EDGE_IN"] = map[string]string{
+		"operation": "create-acl",
+		"state":     "actuated",
+	}
+	ctx := context.Background()
+	if _, err := d.AddACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
+		Priority: 10, Action: "permit", SrcIP: "10.0.0.0/8",
+	}); err != nil {
+		t.Fatalf("seed AddACLRule: %v", err)
+	}
+	return d
+}
+
+func TestUpdateACLRule_InPlace(t *testing.T) {
+	d := aclSetup(t)
+	ctx := context.Background()
+
+	cs, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
+		Priority: 5000, Action: "deny", SrcIP: "192.168.0.0/16",
+	}, "")
+	if err != nil {
+		t.Fatalf("UpdateACLRule: %v", err)
+	}
+
+	// CONFIG_DB: prior ACL_RULE entry deleted, new one added.
+	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
+	c := assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeAdd)
+	assertField(t, c, "PRIORITY", "5000")
+	assertField(t, c, "SRC_IP", "192.168.0.0/16")
+
+	// Intent record still keyed at acl|EDGE_IN|RULE_10 — params reflect new state.
+	intent := d.GetIntent("acl|EDGE_IN|RULE_10")
+	if intent == nil {
+		t.Fatal("intent record missing after in-place update")
+	}
+	if got := intent.Params["priority"]; got != "5000" {
+		t.Errorf("intent priority = %q, want 5000", got)
+	}
+}
+
+func TestUpdateACLRule_RenameRekey(t *testing.T) {
+	d := aclSetup(t)
+	ctx := context.Background()
+
+	cs, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
+		Priority: 10, Action: "permit", SrcIP: "10.0.0.0/8",
+	}, "RULE_50")
+	if err != nil {
+		t.Fatalf("UpdateACLRule rename: %v", err)
+	}
+
+	// CONFIG_DB: old key gone, new key present.
+	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
+	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_50", ChangeAdd)
+	// Intent: old resource deleted, new resource added.
+	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_10", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_50", ChangeAdd)
+
+	if d.GetIntent("acl|EDGE_IN|RULE_10") != nil {
+		t.Error("old intent should be deleted after rename")
+	}
+	if d.GetIntent("acl|EDGE_IN|RULE_50") == nil {
+		t.Error("new intent should exist after rename")
+	}
+}
+
+func TestUpdateACLRule_NotFound(t *testing.T) {
+	d := aclSetup(t)
+	ctx := context.Background()
+
+	_, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_99", ACLRuleConfig{
+		Priority: 99, Action: "permit",
+	}, "")
+	if err == nil {
+		t.Fatal("expected error for missing rule")
+	}
+}
+
+func TestUpdateACLRule_RenameCollision(t *testing.T) {
+	d := aclSetup(t)
+	ctx := context.Background()
+	if _, err := d.AddACLRule(ctx, "EDGE_IN", "RULE_20", ACLRuleConfig{Priority: 20, Action: "permit"}); err != nil {
+		t.Fatalf("seed second rule: %v", err)
+	}
+
+	_, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
+		Priority: 10, Action: "permit",
+	}, "RULE_20") // collision with seeded second rule
+	if err == nil {
+		t.Fatal("expected collision error for rename to existing rule")
+	}
+}
+
+// ============================================================================
 // EVPN/VXLAN Operation Tests
 // ============================================================================
 

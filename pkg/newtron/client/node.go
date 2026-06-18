@@ -404,6 +404,36 @@ func (c *Client) AddACLRule(device, acl string, config newtron.ACLRuleAddRequest
 	return c.nodeWrite(device, "add-acl-rule", body, opts)
 }
 
+// UpdateACLRule atomically mutates an ACL rule under the per-device
+// intent lock. Optional NewRuleName re-keys the rule (rename). Closes
+// the packet-leak window remove + add exposes today (#227).
+func (c *Client) UpdateACLRule(device, acl string, config newtron.ACLRuleUpdateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := struct {
+		ACL         string `json:"acl"`
+		RuleName    string `json:"rule_name"`
+		Priority    int    `json:"priority"`
+		Action      string `json:"action"`
+		SrcIP       string `json:"src_ip"`
+		DstIP       string `json:"dst_ip"`
+		Protocol    string `json:"protocol"`
+		SrcPort     string `json:"src_port"`
+		DstPort     string `json:"dst_port"`
+		NewRuleName string `json:"new_rule_name,omitempty"`
+	}{
+		ACL:         acl,
+		RuleName:    config.RuleName,
+		Priority:    config.Priority,
+		Action:      config.Action,
+		SrcIP:       config.SrcIP,
+		DstIP:       config.DstIP,
+		Protocol:    config.Protocol,
+		SrcPort:     config.SrcPort,
+		DstPort:     config.DstPort,
+		NewRuleName: config.NewRuleName,
+	}
+	return c.nodeWrite(device, "update-acl-rule", body, opts)
+}
+
 // RemoveACLRule removes a rule from an ACL.
 func (c *Client) RemoveACLRule(device, acl, rule string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
