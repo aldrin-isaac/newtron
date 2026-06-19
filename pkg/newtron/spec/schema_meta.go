@@ -26,6 +26,7 @@
 package spec
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -49,6 +50,51 @@ type FieldMeta struct {
 	Max       *int   `json:"max,omitempty"`       // inclusive upper bound for type=int
 	Format    string `json:"format,omitempty"`    // semantic hint — "cidr", "ipv4", "ipv6", "mac", "asn"
 	Immutable bool   `json:"immutable,omitempty"` // value is fixed at create time — UI suppresses edit affordance in update-mode forms
+
+	// RequiredWhen declares a predicate over sibling field values that —
+	// when true — makes this field required even though the static
+	// `required` is false. UIs evaluate against the live form state and
+	// toggle the input's required affordance. Newtron does NOT evaluate
+	// this server-side at request time; the existing 400 on missing
+	// required field is the back-stop. See type RequiredWhen.
+	RequiredWhen *RequiredWhen `json:"required_when,omitempty"`
+}
+
+// RequiredWhen is a conditional-required predicate evaluated against the
+// form's sibling field values. Scope is the current SchemaMeta — nested
+// forms (RoutingSpec inside ServiceSpec) evaluate against their own
+// sibling set, not the parent's.
+//
+// One of two shapes per node — never both:
+//
+//	Atomic.    Field names a sibling on the same SchemaMeta. Exactly
+//	           one of Equals / NotEquals / In / NotIn is set; the
+//	           predicate compares the sibling's current form value
+//	           against that operand.
+//
+//	Combinator. Exactly one of AllOf / AnyOf is set. The condition is
+//	           the conjunction / disjunction of the listed sub-conditions.
+//
+// `required: true` wins over `required_when` — the evaluator only
+// consults RequiredWhen when the static Required is false, so the two
+// never contradict.
+//
+// When the referenced sibling has no value yet (operator hasn't filled
+// it in), atomic conditions evaluate against the field's zero value
+// for its declared type. So a `service_type in ("evpn-irb")` predicate
+// reads as `false` for an unfilled `service_type` — required-ness
+// can't trigger on an unspecified state.
+type RequiredWhen struct {
+	// Atomic shape — Field references a sibling by wire name.
+	Field     string `json:"field,omitempty"`
+	Equals    any    `json:"equals,omitempty"`
+	NotEquals any    `json:"not_equals,omitempty"`
+	In        []any  `json:"in,omitempty"`
+	NotIn     []any  `json:"not_in,omitempty"`
+
+	// Combinator shape — exactly one of AllOf / AnyOf is set.
+	AllOf []*RequiredWhen `json:"all_of,omitempty"`
+	AnyOf []*RequiredWhen `json:"any_of,omitempty"`
 }
 
 // SchemaPaths declares the HTTP path templates a UI uses to drive a kind
@@ -123,6 +169,15 @@ type SchemaRegistration struct {
 	IdentifierField *FieldMeta
 	ParentRef       string
 	Paths           SchemaPaths
+
+	// RequiredWhen maps a target wire field name (e.g. "ipvpn") to the
+	// conditional-required predicate UIs evaluate against the form's
+	// sibling values. Init-time validation walks the map and panics on
+	// any unknown field reference — both the map key and every Field
+	// referenced inside the predicate must exist as a wire name on the
+	// kind's Sample struct (or as the synthetic IdentifierField). Typos
+	// fail at server start rather than silently in the UI.
+	RequiredWhen map[string]*RequiredWhen
 }
 
 // schemaKind carries a registered kind's reflect.Type plus the static
@@ -136,6 +191,7 @@ type schemaKind struct {
 	identifierField *FieldMeta
 	parentRef       string
 	paths           SchemaPaths
+	requiredWhen    map[string]*RequiredWhen
 }
 
 // schemaRegistry holds every spec kind that participates in the schema
@@ -168,6 +224,9 @@ func RegisterSchemaKind(reg SchemaRegistration) {
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
+	if len(reg.RequiredWhen) > 0 {
+		validateRequiredWhen(reg, t)
+	}
 	schemaRegistry[reg.Kind] = schemaKind{
 		t:               t,
 		label:           reg.Label,
@@ -176,7 +235,137 @@ func RegisterSchemaKind(reg SchemaRegistration) {
 		identifierField: reg.IdentifierField,
 		parentRef:       reg.ParentRef,
 		paths:           reg.Paths,
+		requiredWhen:    reg.RequiredWhen,
 	}
+}
+
+// validateRequiredWhen walks reg.RequiredWhen at registration time and
+// panics on any reference to a wire field name that doesn't exist on
+// the kind's Sample struct (plus its synthetic IdentifierField if set).
+// Atomic-vs-combinator shape XOR is enforced too. Panics carry the kind
+// name and the bad reference so the operator-facing message points at
+// the broken registration site, not a generic "unknown field" deep in
+// the UI.
+//
+// The validator runs ONCE at init() time when RegisterSchemaKind is
+// called. Per the agreement with newtcon, newtron does not evaluate
+// RequiredWhen at request time — this init pass is the only server-side
+// safety net catching typos before the UI does.
+func validateRequiredWhen(reg SchemaRegistration, t reflect.Type) {
+	known := wireNames(t)
+	if reg.IdentifierField != nil {
+		known[reg.IdentifierField.Name] = struct{}{}
+	}
+	for target, cond := range reg.RequiredWhen {
+		if _, ok := known[target]; !ok {
+			panic(schemaRegistrationError(reg.Kind, "RequiredWhen[%q]: target field is not a wire name on %s",
+				target, t.Name()))
+		}
+		if cond == nil {
+			panic(schemaRegistrationError(reg.Kind, "RequiredWhen[%q]: nil condition", target))
+		}
+		if err := validateRequiredWhenCondition(cond, known); err != "" {
+			panic(schemaRegistrationError(reg.Kind, "RequiredWhen[%q]: %s", target, err))
+		}
+	}
+}
+
+// validateRequiredWhenCondition returns "" when the condition is well-formed,
+// or an actionable error message describing the first problem found.
+// Walks combinators recursively against the same `known` field set —
+// nested conditions still reference siblings on the OUTER form (newtcon's
+// "scope is current form's siblings" rule).
+func validateRequiredWhenCondition(c *RequiredWhen, known map[string]struct{}) string {
+	if c == nil {
+		return "nil condition"
+	}
+	atomic := c.Field != "" || c.Equals != nil || c.NotEquals != nil || c.In != nil || c.NotIn != nil
+	combinator := len(c.AllOf) > 0 || len(c.AnyOf) > 0
+	switch {
+	case !atomic && !combinator:
+		return "empty condition (must set Field+operand, AllOf, or AnyOf)"
+	case atomic && combinator:
+		return "mixed shape (cannot set both atomic Field/operand and combinator AllOf/AnyOf on the same node)"
+	case atomic:
+		if c.Field == "" {
+			return "atomic condition missing Field"
+		}
+		if _, ok := known[c.Field]; !ok {
+			return "atomic condition references unknown field " + c.Field
+		}
+		operands := 0
+		if c.Equals != nil {
+			operands++
+		}
+		if c.NotEquals != nil {
+			operands++
+		}
+		if c.In != nil {
+			operands++
+		}
+		if c.NotIn != nil {
+			operands++
+		}
+		switch operands {
+		case 0:
+			return "atomic condition missing operand (set one of Equals / NotEquals / In / NotIn)"
+		case 1:
+			return ""
+		default:
+			return "atomic condition has multiple operands (set exactly one of Equals / NotEquals / In / NotIn)"
+		}
+	default: // combinator
+		if len(c.AllOf) > 0 && len(c.AnyOf) > 0 {
+			return "combinator mixes AllOf and AnyOf on the same node"
+		}
+		children := c.AllOf
+		if len(c.AnyOf) > 0 {
+			children = c.AnyOf
+		}
+		for i, sub := range children {
+			if msg := validateRequiredWhenCondition(sub, known); msg != "" {
+				return fmt.Sprintf("child %d: %s", i, msg)
+			}
+		}
+		return ""
+	}
+}
+
+// wireNames collects the JSON wire names of every exported, json-tagged
+// field on a struct type. Embedded structs are flattened the same way
+// extractFields() flattens them.
+func wireNames(t reflect.Type) map[string]struct{} {
+	out := make(map[string]struct{})
+	collectWireNames(t, out)
+	return out
+}
+
+func collectWireNames(t reflect.Type, out map[string]struct{}) {
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+		if sf.Anonymous {
+			collectWireNames(sf.Type, out)
+			continue
+		}
+		if !sf.IsExported() {
+			continue
+		}
+		jsonTag := sf.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+		name, _ := parseJSONTag(jsonTag, sf.Name)
+		if name != "" {
+			out[name] = struct{}{}
+		}
+	}
+}
+
+func schemaRegistrationError(kind, format string, args ...any) string {
+	return fmt.Sprintf("RegisterSchemaKind(%s): ", kind) + fmt.Sprintf(format, args...)
 }
 
 // ListSchemaKinds returns every registered kind's name, sorted for stable
@@ -213,6 +402,15 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 	// QoSQueue's queue_id is the array index, not a struct field).
 	if sk.identifierField != nil {
 		fields = append([]FieldMeta{*sk.identifierField}, fields...)
+	}
+	// Attach RequiredWhen predicates to their target fields. Validated at
+	// registration time, so every key here matches a real field.
+	if len(sk.requiredWhen) > 0 {
+		for i := range fields {
+			if cond, ok := sk.requiredWhen[fields[i].Name]; ok {
+				fields[i].RequiredWhen = cond
+			}
+		}
 	}
 	meta := SchemaMeta{
 		Kind:        sk.t.Name(),

@@ -56,6 +56,22 @@ func init() {
 			Update: "/newtron/v1/networks/{netID}/update-service",
 			Delete: "/newtron/v1/networks/{netID}/delete-service",
 		},
+		// Conditional-required surface — UI evaluates against the form's
+		// service_type value and toggles each ref-field's required
+		// affordance accordingly. Server's 400-on-missing-required at
+		// ApplyService stays as the back-stop; this is pure UX so the
+		// operator sees the constraint before submitting.
+		//
+		//   evpn-irb     → ipvpn + macvpn (overlay L2+L3)
+		//   evpn-routed  → ipvpn          (overlay L3 only)
+		//   evpn-bridged → macvpn         (overlay L2 only)
+		//
+		// The local types (irb / bridged / routed) take vpn references at
+		// apply time, not via the spec — no conditional required there.
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn":  {Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
+			"macvpn": {Field: "service_type", In: []any{"evpn-irb", "evpn-bridged"}},
+		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "IPVPNSpec",
