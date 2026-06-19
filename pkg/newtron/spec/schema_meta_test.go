@@ -2,6 +2,7 @@ package spec
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -198,6 +199,250 @@ func TestHumanizeName(t *testing.T) {
 		if got := humanizeName(c.in); got != c.want {
 			t.Errorf("humanizeName(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// RequiredWhen — extractor wiring, init-time validation, panic shapes
+// ----------------------------------------------------------------------------
+
+type fixSvc struct {
+	Type        string `json:"service_type" enum:"evpn-irb,evpn-bridged,evpn-routed,irb,bridged,routed"`
+	IPVPN       string `json:"ipvpn,omitempty" ref:"IPVPNSpec"`
+	MACVPN      string `json:"macvpn,omitempty" ref:"MACVPNSpec"`
+	ARPSuppress bool   `json:"arp_suppression,omitempty"`
+}
+
+func swapRegistry(t *testing.T) {
+	t.Helper()
+	saved := schemaRegistry
+	schemaRegistry = map[string]schemaKind{}
+	t.Cleanup(func() { schemaRegistry = saved })
+}
+
+// TestRequiredWhen_AttachedToTargetField verifies a registered
+// RequiredWhen predicate is attached to the named field's FieldMeta in
+// the returned SchemaMeta — UIs see it on the field they evaluate
+// against.
+func TestRequiredWhen_AttachedToTargetField(t *testing.T) {
+	swapRegistry(t)
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Label:  "Service Fixture",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn":  {Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
+			"macvpn": {Field: "service_type", In: []any{"evpn-irb", "evpn-bridged"}},
+		},
+	})
+	meta := LookupSchema("FixSvc")
+	if meta == nil {
+		t.Fatal("LookupSchema(FixSvc) returned nil")
+	}
+	byName := make(map[string]FieldMeta, len(meta.Fields))
+	for _, f := range meta.Fields {
+		byName[f.Name] = f
+	}
+	ipvpn := byName["ipvpn"]
+	if ipvpn.RequiredWhen == nil {
+		t.Fatal("ipvpn.required_when is nil")
+	}
+	if ipvpn.RequiredWhen.Field != "service_type" {
+		t.Errorf("ipvpn.required_when.field = %q, want service_type", ipvpn.RequiredWhen.Field)
+	}
+	if len(ipvpn.RequiredWhen.In) != 2 {
+		t.Errorf("ipvpn.required_when.in length = %d, want 2", len(ipvpn.RequiredWhen.In))
+	}
+	// Non-targeted fields stay clear.
+	if byName["arp_suppression"].RequiredWhen != nil {
+		t.Error("arp_suppression should not carry a required_when (none was registered)")
+	}
+}
+
+// TestRequiredWhen_PanicsOnUnknownTargetField confirms the init-time
+// validator catches a typo'd map key — the canonical case the agreement
+// with newtcon called out (`{"servce_type": ...}` instead of
+// `{"service_type": ...}`).
+func TestRequiredWhen_PanicsOnUnknownTargetField(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on unknown target field; got none")
+		} else {
+			msg, _ := r.(string)
+			if msg == "" {
+				if e, ok := r.(error); ok {
+					msg = e.Error()
+				}
+			}
+			if msg == "" {
+				t.Fatalf("panic value not stringable: %v (%T)", r, r)
+			}
+			if !strings.Contains(msg, "not_a_field") || !strings.Contains(msg, "FixSvc") {
+				t.Errorf("panic message should name the bad field and the kind; got %q", msg)
+			}
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"not_a_field": {Field: "service_type", Equals: "evpn-irb"},
+		},
+	})
+}
+
+// TestRequiredWhen_PanicsOnUnknownConditionField catches a typo INSIDE
+// the condition — the target key is real but it references a sibling
+// that doesn't exist.
+func TestRequiredWhen_PanicsOnUnknownConditionField(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on unknown condition field; got none")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {Field: "servce_type", Equals: "evpn-irb"}, // typo
+		},
+	})
+}
+
+// TestRequiredWhen_PanicsOnMixedShape pins the atomic-vs-combinator XOR
+// invariant. A single node cannot set Field+operand AND AllOf/AnyOf.
+func TestRequiredWhen_PanicsOnMixedShape(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on mixed atomic+combinator shape; got none")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {
+				Field:  "service_type",
+				Equals: "evpn-irb",
+				AllOf:  []*RequiredWhen{{Field: "arp_suppression", Equals: false}},
+			},
+		},
+	})
+}
+
+// TestRequiredWhen_PanicsOnMultipleOperands confirms an atomic node
+// can carry at most one of Equals / NotEquals / In / NotIn — readers
+// otherwise can't tell which operand wins.
+func TestRequiredWhen_PanicsOnMultipleOperands(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on multiple operands; got none")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {Field: "service_type", Equals: "evpn-irb", In: []any{"evpn-routed"}},
+		},
+	})
+}
+
+// TestRequiredWhen_PanicsOnEmptyCondition catches a registration that
+// supplies a non-nil condition with no actual content.
+func TestRequiredWhen_PanicsOnEmptyCondition(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on empty condition; got none")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {}, // no field, no combinator
+		},
+	})
+}
+
+// TestRequiredWhen_CombinatorValidatesChildren verifies the validator
+// recurses into AllOf / AnyOf children. The combinator wrapper looks
+// well-formed but contains an invalid atomic child — registration must
+// still panic.
+func TestRequiredWhen_CombinatorValidatesChildren(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on invalid child in combinator; got none")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {AllOf: []*RequiredWhen{
+				{Field: "service_type", Equals: "evpn-irb"},
+				{Field: "nonexistent", Equals: true}, // bad child
+			}},
+		},
+	})
+}
+
+// TestRequiredWhen_CombinatorAccepts confirms a well-formed combinator
+// registers without panic — newtcon's `!arp_suppression` example.
+func TestRequiredWhen_CombinatorAccepts(t *testing.T) {
+	swapRegistry(t)
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {AllOf: []*RequiredWhen{
+				{Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
+				{Field: "arp_suppression", Equals: false},
+			}},
+		},
+	})
+	meta := LookupSchema("FixSvc")
+	if meta == nil {
+		t.Fatal("LookupSchema returned nil")
+	}
+	byName := make(map[string]FieldMeta, len(meta.Fields))
+	for _, f := range meta.Fields {
+		byName[f.Name] = f
+	}
+	cond := byName["ipvpn"].RequiredWhen
+	if cond == nil || len(cond.AllOf) != 2 {
+		t.Errorf("AllOf not propagated: %+v", cond)
+	}
+}
+
+// TestRequiredWhen_SyntheticIdentifierAllowed confirms a RequiredWhen
+// can reference the synthetic IdentifierField — for top-level kinds the
+// "name" field is virtual but participates in the form, so it's a valid
+// sibling reference.
+func TestRequiredWhen_SyntheticIdentifierAllowed(t *testing.T) {
+	swapRegistry(t)
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		IdentifierField: &FieldMeta{
+			Name:     "name",
+			Label:    "Name",
+			Type:     "string",
+			Required: true,
+		},
+		RequiredWhen: map[string]*RequiredWhen{
+			"ipvpn": {Field: "name", Equals: "primary"},
+		},
+	})
+	meta := LookupSchema("FixSvc")
+	if meta == nil {
+		t.Fatal("LookupSchema returned nil")
 	}
 }
 

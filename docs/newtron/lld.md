@@ -159,6 +159,19 @@ omits Update (per §47 the prefix IS the entry, no other mutable fields);
 embedded-only kinds (RoutingSpec, RoutePolicySet, EVPNConfig) omit the entire
 `paths` object via `json:"paths,omitzero"`.
 
+Conditional-required predicates (`required_when`) live as Go literals on
+`SchemaRegistration.RequiredWhen` — a `map[wireFieldName]*RequiredWhen`. The
+shape is structured (atomic with `Field` + one of `Equals` / `NotEquals` /
+`In` / `NotIn`, or combinator with `AllOf` / `AnyOf`), not a DSL string, so
+every UI walks the same JSON tree without a parser. Newtron validates every
+field reference against the sample struct at registration time and panics on
+typos — a misspelled `Field: "servce_type"` fails server start, not silently
+in the UI. The server does not evaluate `required_when` at request time; the
+existing 400-on-missing-required behaviour is the back-stop. ServiceSpec
+carries the canonical example (`ipvpn` required when `service_type` is
+`evpn-irb` or `evpn-routed`; `macvpn` required when `service_type` is
+`evpn-irb` or `evpn-bridged`).
+
 ```
 cmd/newtron/                          # CLI — one file per noun, dispatched via commands map
     main.go                           # App struct, commands map, dispatch

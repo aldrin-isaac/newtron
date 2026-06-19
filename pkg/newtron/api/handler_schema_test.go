@@ -283,6 +283,84 @@ func TestSchemaShow_NotFound(t *testing.T) {
 	}
 }
 
+// TestSchemaShow_ServiceSpecRequiredWhen pins the contract for newtcon
+// PR2: ServiceSpec's ipvpn and macvpn ref fields surface required_when
+// predicates on the wire. The shape must match what newtcon's
+// evaluator walks — atomic node with `field` + `in`, no DSL string.
+func TestSchemaShow_ServiceSpecRequiredWhen(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/ServiceSpec", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var env struct {
+		Data spec.SchemaMeta `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byName := make(map[string]spec.FieldMeta, len(env.Data.Fields))
+	for _, f := range env.Data.Fields {
+		byName[f.Name] = f
+	}
+	ipvpn, ok := byName["ipvpn"]
+	if !ok {
+		t.Fatal("ipvpn field missing")
+	}
+	if ipvpn.RequiredWhen == nil {
+		t.Fatal("ipvpn.required_when nil — PR2 expected the predicate on this field")
+	}
+	if ipvpn.RequiredWhen.Field != "service_type" {
+		t.Errorf("ipvpn.required_when.field = %q, want service_type", ipvpn.RequiredWhen.Field)
+	}
+	gotIn := stringSet(ipvpn.RequiredWhen.In)
+	wantIn := map[string]bool{"evpn-irb": true, "evpn-routed": true}
+	if !setsEqual(gotIn, wantIn) {
+		t.Errorf("ipvpn.required_when.in = %v, want %v", gotIn, wantIn)
+	}
+	macvpn, ok := byName["macvpn"]
+	if !ok {
+		t.Fatal("macvpn field missing")
+	}
+	if macvpn.RequiredWhen == nil {
+		t.Fatal("macvpn.required_when nil")
+	}
+	gotMac := stringSet(macvpn.RequiredWhen.In)
+	wantMac := map[string]bool{"evpn-irb": true, "evpn-bridged": true}
+	if !setsEqual(gotMac, wantMac) {
+		t.Errorf("macvpn.required_when.in = %v, want %v", gotMac, wantMac)
+	}
+	// Non-conditional fields must not carry the predicate.
+	desc := byName["description"]
+	if desc.RequiredWhen != nil {
+		t.Errorf("description.required_when should be nil; got %+v", desc.RequiredWhen)
+	}
+}
+
+func stringSet(values []any) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			out[s] = true
+		}
+	}
+	return out
+}
+
+func setsEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestSchemaShow_QoSQueue pins the enum + required-from-no-omitempty
 // contract on a second kind, so a regression that breaks one kind without
 // breaking ServiceSpec still trips a test.

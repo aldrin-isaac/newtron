@@ -599,12 +599,58 @@ kind:
 | `max` | int | Inclusive upper bound for `type: int` |
 | `format` | string | Semantic hint — `cidr`, `ipv4`, `ipv6`, `mac`, `asn` (UI picks a format-specific input widget) |
 | `immutable` | bool | Value is fixed at create time — UI suppresses the edit affordance in update-mode forms |
+| `required_when` | object | Conditional-required predicate — see "Conditional required" below |
 
 **Synthetic identifier fields**: top-level kinds (`ServiceSpec`, `IPVPNSpec`, …)
 get a synthetic `name` field prepended to `fields` because the name lives in the
 create-X request body, not on the spec struct. `QoSQueue` gets a synthetic
 `queue_id` field for the same reason (the slot index is implicit in the
 `QoSPolicy.Queues` array position).
+
+**Conditional required (`required_when`)**: a structured predicate the UI
+evaluates against the form's sibling field values. When the predicate is true,
+the field is required even though the static `required` is `false`. Use it for
+the common pattern where one enum value drives whether another field is
+required — `ServiceSpec.ipvpn` is required when `service_type` is `evpn-irb` or
+`evpn-routed`, and similarly for `macvpn`.
+
+```json
+{
+  "name": "ipvpn",
+  "type": "ref",
+  "required": false,
+  "required_when": {"field": "service_type", "in": ["evpn-irb", "evpn-routed"]},
+  "ref_kind": "IPVPNSpec"
+}
+```
+
+The shape is structured, not a DSL string — UIs walk the JSON tree directly:
+
+| Shape | Fields | Meaning |
+|-------|--------|---------|
+| **Atomic** | `field` + exactly one of `equals` / `not_equals` / `in` / `not_in` | Compare the named sibling's current value against the operand |
+| **Combinator** | exactly one of `all_of` / `any_of` (array of nested conditions) | Conjunction / disjunction of sub-conditions |
+
+Atomic and combinator shapes are mutually exclusive per node — a single
+`required_when` object never carries both kinds of fields.
+
+Semantics:
+
+- **Scope is sibling fields on the same SchemaMeta.** Nested forms (RoutingSpec
+  inside ServiceSpec) evaluate against their own sibling set, not the parent's.
+- **`required: true` wins.** When the static `required` is true, `required_when`
+  is meaningless — the evaluator only consults it when `required` is false, so
+  they never contradict.
+- **Unfilled sibling values evaluate against the field's zero value.** A
+  `service_type in [...]` predicate is `false` for an unfilled `service_type` —
+  required-ness can't trigger on an unspecified state.
+- **Server-side enforcement.** The server does NOT evaluate `required_when` at
+  request time; the existing 400-on-missing-required behaviour is the back-stop.
+  `required_when` is UX so the operator sees the constraint before submitting.
+- **Init-time validation.** Newtron walks every registered `required_when` at
+  server start and panics on any reference to a field that doesn't exist on the
+  kind's sample struct. A typo (`servce_type`) fails server start, not silently
+  in the UI.
 
 **Errors:**
 - 404: `kind` is not a registered spec type
