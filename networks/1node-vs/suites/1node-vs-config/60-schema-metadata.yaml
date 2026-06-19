@@ -1,0 +1,301 @@
+name: schema-metadata
+description: |
+  E2E coverage for the schema metadata endpoints (newtron #240).
+
+  Two read-only endpoints expose presentation + URL + identity + validation
+  metadata for the spec authoring types. UIs consume them to render forms
+  whose vocabulary stays consistent across every authoring surface.
+
+  Verifies (against a live `bin/newt-server`):
+    - GET /schema returns the kinds list, alphabetically ordered, with the
+      expected representative kinds present.
+    - GET /schema/ServiceSpec returns the canonical top-level kind contract:
+      identifier, full paths (list/show/create/update/delete), and the
+      synthetic `name` field with pattern + immutable.
+    - GET /schema/FilterRule returns the canonical sub-rule kind contract:
+      identifier=seq, parent_ref=filter, paths use add/update/remove verbs,
+      no list/show.
+    - GET /schema/QoSQueue returns the synthetic-identifier-field contract:
+      queue_id is prepended to fields with min=0, max=7, immutable=true.
+    - GET /schema/PlatformSpec returns the read-only contract: list+show
+      paths populated, create/update/delete absent.
+    - GET /schema/RoutingSpec returns the embedded-only contract: no paths
+      object at all (omitzero on the empty SchemaPaths).
+
+  (Negative cases — unknown kind 404 — are unit-tested in
+  pkg/newtron/api/handler_schema_test.go; the newtron action in newtrun
+  treats non-2xx responses as step failures, so they're not exercised
+  here.)
+
+  No device or network state required — the schema endpoints are global
+  to the newtron install. No `requires:` — independent of any device
+  setup, runs in any order.
+
+steps:
+  # ====================================================================
+  # GET /schema — kind list
+  # ====================================================================
+  - name: schema-list-returns-200
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | length > 0'
+
+  - name: schema-list-has-ServiceSpec
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | map(.kind) | contains(["ServiceSpec"])'
+
+  - name: schema-list-has-FilterRule
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | map(.kind) | contains(["FilterRule"])'
+
+  - name: schema-list-has-PlatformSpec
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | map(.kind) | contains(["PlatformSpec"])'
+
+  - name: schema-list-has-PrefixListEntry
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | map(.kind) | contains(["PrefixListEntry"])'
+
+  - name: schema-list-is-alphabetical
+    action: newtron
+    url: /schema
+    expect:
+      # Kinds must come back in stable sorted order — UIs sort against
+      # this slice, not under their own rules.
+      jq: '(.kinds | map(.kind)) == (.kinds | map(.kind) | sort)'
+
+  # ====================================================================
+  # GET /schema/ServiceSpec — top-level kind contract
+  # ====================================================================
+  - name: schema-show-ServiceSpec
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: '.kind == "ServiceSpec" and .label == "Service"'
+
+  - name: schema-ServiceSpec-identifier
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: '.identifier == "name"'
+
+  - name: schema-ServiceSpec-no-parent-ref
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: '.parent_ref == null or .parent_ref == ""'
+
+  - name: schema-ServiceSpec-paths
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: |
+        .paths.list   == "/newtron/v1/networks/{netID}/services" and
+        .paths.show   == "/newtron/v1/networks/{netID}/services/{name}" and
+        .paths.create == "/newtron/v1/networks/{netID}/create-service" and
+        .paths.update == "/newtron/v1/networks/{netID}/update-service" and
+        .paths.delete == "/newtron/v1/networks/{netID}/delete-service"
+
+  - name: schema-ServiceSpec-synthetic-name-field
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      # The first field MUST be the synthesized `name` — top-level kinds
+      # get it prepended because the name lives in the request body, not
+      # on the spec struct.
+      jq: |
+        .fields[0].name == "name" and
+        .fields[0].immutable == true and
+        .fields[0].pattern == "^[A-Za-z0-9_-]+$"
+
+  - name: schema-ServiceSpec-service_type-enum
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "service_type")) | .[0]) as $f |
+        $f.type == "enum" and
+        ($f.enum | length) == 6 and
+        ($f.enum | contains(["evpn-irb", "evpn-bridged", "evpn-routed", "irb", "bridged", "routed"]))
+
+  - name: schema-ServiceSpec-ipvpn-ref
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "ipvpn")) | .[0]) as $f |
+        $f.type == "ref" and $f.ref_kind == "IPVPNSpec"
+
+  # ====================================================================
+  # GET /schema/FilterRule — sub-rule contract
+  # ====================================================================
+  - name: schema-show-FilterRule
+    action: newtron
+    url: /schema/FilterRule
+    expect:
+      jq: '.kind == "FilterRule"'
+
+  - name: schema-FilterRule-identifier-and-parent-ref
+    action: newtron
+    url: /schema/FilterRule
+    expect:
+      jq: '.identifier == "seq" and .parent_ref == "filter"'
+
+  - name: schema-FilterRule-paths-no-list-or-show
+    action: newtron
+    url: /schema/FilterRule
+    expect:
+      jq: |
+        (.paths.list == null or .paths.list == "") and
+        (.paths.show == null or .paths.show == "")
+
+  - name: schema-FilterRule-paths-add-update-remove
+    action: newtron
+    url: /schema/FilterRule
+    expect:
+      jq: |
+        .paths.create == "/newtron/v1/networks/{netID}/add-filter-rule" and
+        .paths.update == "/newtron/v1/networks/{netID}/update-filter-rule" and
+        .paths.delete == "/newtron/v1/networks/{netID}/remove-filter-rule"
+
+  - name: schema-FilterRule-sequence-bounds
+    action: newtron
+    url: /schema/FilterRule
+    expect:
+      jq: |
+        (.fields | map(select(.name == "seq")) | .[0]) as $f |
+        $f.min == 1 and $f.max == 65535
+
+  # ====================================================================
+  # GET /schema/QoSQueue — synthetic identifier field contract
+  # ====================================================================
+  - name: schema-show-QoSQueue
+    action: newtron
+    url: /schema/QoSQueue
+    expect:
+      jq: '.kind == "QoSQueue" and .identifier == "queue_id" and .parent_ref == "policy"'
+
+  - name: schema-QoSQueue-synthetic-queue_id
+    action: newtron
+    url: /schema/QoSQueue
+    expect:
+      # queue_id is the slot in QoSPolicy.Queues — NOT a struct field on
+      # QoSQueue. The registry synthesizes it as the first form field.
+      jq: |
+        .fields[0].name == "queue_id" and
+        .fields[0].immutable == true and
+        .fields[0].min == 0 and
+        .fields[0].max == 7
+
+  - name: schema-QoSQueue-type-enum
+    action: newtron
+    url: /schema/QoSQueue
+    expect:
+      jq: |
+        (.fields | map(select(.name == "type")) | .[0]) as $f |
+        $f.type == "enum" and ($f.enum | sort) == ["dwrr", "strict"]
+
+  # ====================================================================
+  # GET /schema/PrefixListEntry — sub-rule, no update verb (per §47)
+  # ====================================================================
+  - name: schema-show-PrefixListEntry
+    action: newtron
+    url: /schema/PrefixListEntry
+    expect:
+      jq: |
+        .kind == "PrefixListEntry" and
+        .identifier == "prefix" and
+        .parent_ref == "prefix_list"
+
+  - name: schema-PrefixListEntry-no-update
+    action: newtron
+    url: /schema/PrefixListEntry
+    expect:
+      # Per §47, prefix IS the entry — there are no other mutable fields,
+      # so no update verb. UIs must use remove + add for any change.
+      jq: |
+        .paths.create == "/newtron/v1/networks/{netID}/add-prefix-list-entry" and
+        .paths.delete == "/newtron/v1/networks/{netID}/remove-prefix-list-entry" and
+        (.paths.update == null or .paths.update == "")
+
+  - name: schema-PrefixListEntry-prefix-format
+    action: newtron
+    url: /schema/PrefixListEntry
+    expect:
+      jq: '.fields[0].name == "prefix" and .fields[0].format == "cidr"'
+
+  # ====================================================================
+  # GET /schema/PlatformSpec — read-only top-level kind
+  # ====================================================================
+  - name: schema-PlatformSpec-list-and-show-only
+    action: newtron
+    url: /schema/PlatformSpec
+    expect:
+      # Platform support is deeply tied to the backend — the schema is
+      # exposed so UIs can render a read-only view, but Create/Update/
+      # Delete paths are absent. UIs must not render authoring affordances
+      # for platforms.
+      jq: |
+        .paths.list != null and .paths.list != "" and
+        .paths.show != null and .paths.show != "" and
+        (.paths.create == null or .paths.create == "") and
+        (.paths.update == null or .paths.update == "") and
+        (.paths.delete == null or .paths.delete == "")
+
+  # ====================================================================
+  # GET /schema/RoutingSpec — embedded-only kind, no paths object
+  # ====================================================================
+  - name: schema-RoutingSpec-no-paths
+    action: newtron
+    url: /schema/RoutingSpec
+    expect:
+      # Embedded kinds are reached via the parent's item_kind; they're
+      # never addressed independently, so the whole paths object is
+      # omitted via json:"paths,omitzero".
+      jq: '.kind == "RoutingSpec" and (.paths == null or .paths == {})'
+
+  - name: schema-RoutingSpec-no-identifier
+    action: newtron
+    url: /schema/RoutingSpec
+    expect:
+      jq: '.identifier == null or .identifier == ""'
+
+  # ====================================================================
+  # Validation-tag flow through to wire shape
+  # ====================================================================
+  - name: schema-MACVPNSpec-vlan-bounds
+    action: newtron
+    url: /schema/MACVPNSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "vlan_id")) | .[0]) as $f |
+        $f.min == 1 and $f.max == 4094
+
+  - name: schema-MACVPNSpec-anycast-formats
+    action: newtron
+    url: /schema/MACVPNSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "anycast_ip")) | .[0].format) == "cidr" and
+        (.fields | map(select(.name == "anycast_mac")) | .[0].format) == "mac"
+
+  - name: schema-DeviceProfile-loopback-cidr
+    action: newtron
+    url: /schema/DeviceProfile
+    expect:
+      jq: |
+        (.fields | map(select(.name == "loopback_ip")) | .[0].format) == "cidr"
+
+  # 404 on unknown kind is covered by the API unit test
+  # (TestSchemaShow_NotFound in handler_schema_test.go); newtrun's
+  # newtron action treats non-2xx responses as step failures and has
+  # no ExpectBlock.status field, so the negative case is unit-only.

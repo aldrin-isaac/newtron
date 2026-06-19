@@ -243,17 +243,23 @@ func evalJQ(expr string, data json.RawMessage, method, path string) (string, err
 // prefix is always implicit — URLs are relative to the network
 // (e.g., /nodes/{{device}}/create-vlan).
 //
-// Two URL templates are server-scoped, not network-scoped, and bypass
-// the per-network prefix: /auth/login and /auth/logout. These are
-// identity routes mounted at /newt-server/v1/auth/{login,logout} by
-// cmd/newt-server's outer middleware (auth-design.md §L2c) — they
-// carry no network context, so a per-network prefix would not
-// resolve. Both networkID and device are path-escaped for
-// consistency with client.nodePath/interfacePath.
+// Server-scoped routes bypass the per-network prefix:
+//   - /auth/login, /auth/logout — identity routes mounted at
+//     /newt-server/v1/auth/{login,logout} by cmd/newt-server's outer
+//     middleware (auth-design.md §L2c).
+//   - /schema, /schema/{kind} — spec authoring metadata, global to
+//     the newtron install (api.md §3 schema-metadata). These map to
+//     /newtron/v1/schema/...
+//
+// Both networkID and device are path-escaped for consistency with
+// client.nodePath / interfacePath.
 func expandURL(urlTemplate, networkID, device string) string {
 	path := strings.ReplaceAll(urlTemplate, "{{device}}", url.PathEscape(device))
 	if path == "/auth/login" || path == "/auth/logout" {
 		return "/newt-server/v1" + path
+	}
+	if path == "/schema" || strings.HasPrefix(path, "/schema/") {
+		return "/newtron/v1" + path
 	}
 	return "/newtron/v1/networks/" + url.PathEscape(networkID) + path
 }
