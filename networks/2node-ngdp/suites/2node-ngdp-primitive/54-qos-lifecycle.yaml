@@ -1,7 +1,7 @@
 name: qos-lifecycle
 description: |
   Self-contained QoS lifecycle on sw1:Ethernet11 (config-only, no host wired).
-  Tests apply-qos and remove-qos primitives with CONFIG_DB verification for
+  Tests bind-qos and unbind-qos primitives with CONFIG_DB verification for
   per-interface (PORT_QOS_MAP) and device-wide (DSCP_TO_TC_MAP) entries.
 requires: [setup-device]
 
@@ -13,11 +13,11 @@ steps:
     method: POST
     url: /nodes/{{device}}/interfaces/Ethernet11/configure-interface
 
-  - name: apply-qos-ethernet11
+  - name: bind-qos-ethernet11
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet11/apply-qos
+    url: /nodes/{{device}}/interfaces/Ethernet11/bind-qos
     params: {policy: test-4q}
 
   - name: verify-port-qos-map
@@ -34,11 +34,11 @@ steps:
     expect:
       jq: '.exists == true'
 
-  - name: remove-qos-ethernet11
+  - name: unbind-qos-ethernet11
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet11/remove-qos
+    url: /nodes/{{device}}/interfaces/Ethernet11/unbind-qos
 
   - name: verify-port-qos-map-removed
     action: newtron

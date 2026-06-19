@@ -1124,11 +1124,13 @@ the per-entry verbs are append and delete:
 - `add-prefix-list-entry` — atomic append.
 - `remove-prefix-list-entry` — atomic delete.
 
-Per §47 the prefix IS the entry's identity; relocating the entry to
-a different prefix is remove + add, not update. For multi-entry
-mid-life edits (replacing several prefixes in one shot, reordering,
-full-list rewrite) under a single lock, `update-prefix-list` is the
-right verb — it atomically swaps the full entry list.
+The prefix IS the entry's identity; there are no other fields to
+update, so the verb that would have changed the prefix was structurally
+a swap-named-update. Relocating the entry to a different prefix is
+remove + add. For multi-entry mid-life edits (replacing several
+prefixes in one shot, reordering, full-list rewrite) under a single
+lock, `update-prefix-list` is the right verb — it atomically swaps
+the full entry list.
 
 **Auth gate**: `spec.author` with `field = "<kind plural>"` and
 `resource = "<name>"`. An operator who can `create-X` or
