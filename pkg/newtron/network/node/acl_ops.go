@@ -153,8 +153,8 @@ func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts 
 // When newRuleName is supplied and differs from ruleName, the operation is
 // a re-key: the intent record's resource changes from acl|<table>|<old>
 // to acl|<table>|<new>. The new key must not already exist. Mirrors the
-// new_seq / new_queue_id / new_prefix pattern used by the spec-level
-// update verbs (#209/#210/#211/#220). Issue #227.
+// in-place field mutation pattern used by the spec-level update verbs
+// (#209/#210/#211). Issue #227.
 func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig, newRuleName string) (*ChangeSet, error) {
 	resource := "acl|" + tableName + "|" + ruleName
 	existing := n.GetIntent(resource)

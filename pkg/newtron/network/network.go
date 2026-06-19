@@ -1133,11 +1133,9 @@ func (n *Network) AddQoSQueueToPolicy(policy string, queueID int, queue *spec.Qo
 	return n.persistSpec()
 }
 
-// UpdateQoSQueueInPolicy atomically replaces a QoS queue's fields and
-// optionally relocates it to a different queue slot. currentID is the
-// existing slot; the queue's resulting QueueID may match or differ
-// (slot rotation). Issue #211.
-func (n *Network) UpdateQoSQueueInPolicy(policy string, currentID int, newQueueID int, newQueue *spec.QoSQueue) error {
+// UpdateQoSQueueInPolicy atomically replaces a QoS queue's fields in
+// place. Per §47 the slot (queueID) is the queue's identity. Issue #211.
+func (n *Network) UpdateQoSQueueInPolicy(policy string, queueID int, newQueue *spec.QoSQueue) error {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
 	defer mu.Unlock()
@@ -1147,28 +1145,10 @@ func (n *Network) UpdateQoSQueueInPolicy(policy string, currentID int, newQueueI
 	if !ok {
 		return fmt.Errorf("QoS policy '%s' not found", policy)
 	}
-	if currentID < 0 || currentID >= len(p.Queues) || p.Queues[currentID] == nil {
-		return fmt.Errorf("queue %d not found in policy '%s'", currentID, policy)
+	if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
+		return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
 	}
-	if newQueueID != currentID {
-		// Ensure the target slot is empty before relocating.
-		if newQueueID >= 0 && newQueueID < len(p.Queues) && p.Queues[newQueueID] != nil {
-			return fmt.Errorf("queue %d already exists in policy '%s'", newQueueID, policy)
-		}
-		// Grow the slice to accommodate the new slot if needed.
-		for len(p.Queues) <= newQueueID {
-			p.Queues = append(p.Queues, nil)
-		}
-		p.Queues[currentID] = nil
-		p.Queues[newQueueID] = newQueue
-		// Trim trailing nils that may now be at the tail.
-		for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
-			p.Queues = p.Queues[:len(p.Queues)-1]
-		}
-	} else {
-		// In-place edit.
-		p.Queues[currentID] = newQueue
-	}
+	p.Queues[queueID] = newQueue
 	return n.persistSpec()
 }
 
@@ -1221,12 +1201,9 @@ func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
 	return n.persistSpec()
 }
 
-// UpdateFilterRule atomically replaces a filter rule's fields, optionally
-// rotating its sequence number. Returns an error if the filter doesn't
-// exist, the rule at the current sequence doesn't exist, or the requested
-// new sequence collides with another rule. When newSequence is nil the
-// rule keeps its current sequence; when non-nil the rule's sequence
-// rotates to that value (renumber). Issue #209.
+// UpdateFilterRule atomically replaces a filter rule's fields in place.
+// Per §47 the sequence number is the rule's identity (newRule.Sequence
+// must equal currentSeq); renumbering is remove + add. Issue #209.
 func (n *Network) UpdateFilterRule(filter string, currentSeq int, newRule *spec.FilterRule) error {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
@@ -1237,35 +1214,13 @@ func (n *Network) UpdateFilterRule(filter string, currentSeq int, newRule *spec.
 	if !ok {
 		return fmt.Errorf("filter '%s' not found", filter)
 	}
-	// Locate the rule by its current sequence.
-	var target *spec.FilterRule
 	for _, r := range f.Rules {
 		if r.Sequence == currentSeq {
-			target = r
-			break
+			*r = *newRule
+			return n.persistSpec()
 		}
 	}
-	if target == nil {
-		return fmt.Errorf("rule with priority %d not found in filter '%s'", currentSeq, filter)
-	}
-	// If the rule is being renumbered, ensure the target sequence isn't
-	// already occupied by another rule.
-	if newRule.Sequence != currentSeq {
-		for _, r := range f.Rules {
-			if r.Sequence == newRule.Sequence {
-				return fmt.Errorf("rule with priority %d already exists in filter '%s'", newRule.Sequence, filter)
-			}
-		}
-	}
-	// Replace target's fields with newRule's. Done in place (same pointer)
-	// so any external references stay valid; the slice doesn't need to
-	// rebuild.
-	*target = *newRule
-	// Re-sort by sequence — the rule may have rotated to a different slot.
-	sort.Slice(f.Rules, func(i, j int) bool {
-		return f.Rules[i].Sequence < f.Rules[j].Sequence
-	})
-	return n.persistSpec()
+	return fmt.Errorf("rule with priority %d not found in filter '%s'", currentSeq, filter)
 }
 
 // RemoveFilterRule atomically removes a rule from a filter by sequence
@@ -1367,8 +1322,9 @@ func (n *Network) AddRuleToRoutePolicy(policy string, rule *spec.RoutePolicyRule
 }
 
 // UpdateRuleInRoutePolicy atomically replaces a route-policy rule's
-// fields, optionally rotating its sequence. Mirrors UpdateFilterRule's
-// contract. Issue #210.
+// fields in place. Per §47 the sequence number is the rule's identity
+// (newRule.Sequence must equal currentSeq); renumbering is remove + add.
+// Issue #210.
 func (n *Network) UpdateRuleInRoutePolicy(policy string, currentSeq int, newRule *spec.RoutePolicyRule) error {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
@@ -1379,28 +1335,13 @@ func (n *Network) UpdateRuleInRoutePolicy(policy string, currentSeq int, newRule
 	if !ok {
 		return fmt.Errorf("route policy '%s' not found", policy)
 	}
-	var target *spec.RoutePolicyRule
 	for _, r := range rp.Rules {
 		if r.Sequence == currentSeq {
-			target = r
-			break
+			*r = *newRule
+			return n.persistSpec()
 		}
 	}
-	if target == nil {
-		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", currentSeq, policy)
-	}
-	if newRule.Sequence != currentSeq {
-		for _, r := range rp.Rules {
-			if r.Sequence == newRule.Sequence {
-				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newRule.Sequence, policy)
-			}
-		}
-	}
-	*target = *newRule
-	sort.Slice(rp.Rules, func(i, j int) bool {
-		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
-	})
-	return n.persistSpec()
+	return fmt.Errorf("rule with sequence %d not found in route policy '%s'", currentSeq, policy)
 }
 
 // RemoveRuleFromRoutePolicy atomically removes a rule from a route policy

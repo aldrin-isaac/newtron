@@ -669,11 +669,7 @@ func (s *Server) handleUpdateQoSQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	resultID := req.QueueID
-	if req.NewQueueID != nil {
-		resultID = *req.NewQueueID
-	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]int{"queue_id": resultID})
+	httputil.WriteJSON(w, http.StatusOK, map[string]int{"queue_id": req.QueueID})
 }
 
 func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
@@ -768,11 +764,7 @@ func (s *Server) handleUpdateFilterRule(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	resultSeq := req.Sequence
-	if req.NewSequence != nil {
-		resultSeq = *req.NewSequence
-	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]int{"seq": resultSeq})
+	httputil.WriteJSON(w, http.StatusOK, map[string]int{"seq": req.Sequence})
 }
 
 func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) {
@@ -980,11 +972,7 @@ func (s *Server) handleUpdateRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		writeError(w, err)
 		return
 	}
-	resultSeq := req.Sequence
-	if req.NewSequence != nil {
-		resultSeq = *req.NewSequence
-	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]int{"seq": resultSeq})
+	httputil.WriteJSON(w, http.StatusOK, map[string]int{"seq": req.Sequence})
 }
 
 func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Request) {

@@ -295,21 +295,12 @@ func (net *Network) AddQoSQueue(ctx context.Context, req AddQoSQueueRequest, opt
 	return net.internal.AddQoSQueueToPolicy(req.Policy, req.QueueID, queue)
 }
 
-// UpdateQoSQueue replaces an existing queue's fields and optionally
-// relocates it to a different queue_id slot. QueueID (req.QueueID)
-// identifies the existing queue; NewQueueID (req.NewQueueID) is
-// optional — when non-nil the queue rotates to that slot. Mirrors
-// UpdateFilterRule / UpdateRoutePolicyRule. Issue #211.
+// UpdateQoSQueue replaces an existing queue's fields in place. Per §47
+// the slot (queue_id) is the queue's identity; relocating to a different
+// slot is remove + add. Issue #211.
 func (net *Network) UpdateQoSQueue(ctx context.Context, req UpdateQoSQueueRequest, opts ExecOpts) error {
 	if req.QueueID < 0 || req.QueueID > 7 {
 		return &ValidationError{Field: "queue_id", Message: "must be 0-7"}
-	}
-	newID := req.QueueID
-	if req.NewQueueID != nil {
-		newID = *req.NewQueueID
-		if newID < 0 || newID > 7 {
-			return &ValidationError{Field: "new_queue_id", Message: "must be 0-7"}
-		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(req.Policy)); err != nil {
@@ -324,9 +315,6 @@ func (net *Network) UpdateQoSQueue(ctx context.Context, req UpdateQoSQueueReques
 		if req.QueueID >= len(policy.Queues) || policy.Queues[req.QueueID] == nil {
 			return fmt.Errorf("queue %d not found in policy '%s'", req.QueueID, req.Policy)
 		}
-		if newID != req.QueueID && newID < len(policy.Queues) && policy.Queues[newID] != nil {
-			return fmt.Errorf("queue %d already exists in policy '%s'", newID, req.Policy)
-		}
 		return nil
 	}
 	queue := &spec.QoSQueue{
@@ -336,7 +324,7 @@ func (net *Network) UpdateQoSQueue(ctx context.Context, req UpdateQoSQueueReques
 		DSCP:   req.DSCP,
 		ECN:    req.ECN,
 	}
-	return net.internal.UpdateQoSQueueInPolicy(req.Policy, req.QueueID, newID, queue)
+	return net.internal.UpdateQoSQueueInPolicy(req.Policy, req.QueueID, queue)
 }
 
 // RemoveQoSQueue removes a queue from a QoS policy.
@@ -452,44 +440,34 @@ func (net *Network) AddFilterRule(ctx context.Context, req AddFilterRuleRequest,
 	return net.internal.AddFilterRule(req.Filter, rule)
 }
 
-// UpdateFilterRule replaces an existing filter rule's fields and
-// optionally rotates its sequence number. Sequence (req.Sequence)
-// identifies the existing rule; NewSequence (req.NewSequence) is
-// optional — when non-nil the rule's sequence rotates to that value.
-// Issue #209.
+// UpdateFilterRule replaces fields on an existing filter rule. Per §47
+// the sequence number is the rule's identity; renumbering is
+// remove + add. Issue #209.
 func (net *Network) UpdateFilterRule(ctx context.Context, req UpdateFilterRuleRequest, opts ExecOpts) error {
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(req.Filter)); err != nil {
 			return err
 		}
 	}
-	// Compute the resulting sequence (used for both preflight and execute).
-	newSeq := req.Sequence
-	if req.NewSequence != nil {
-		newSeq = *req.NewSequence
-	}
 	if !opts.Execute {
 		fs, err := net.internal.GetFilter(req.Filter)
 		if err != nil {
 			return err
 		}
-		foundCurrent := false
+		found := false
 		for _, r := range fs.Rules {
 			if r.Sequence == req.Sequence {
-				foundCurrent = true
-				continue
-			}
-			if r.Sequence == newSeq && newSeq != req.Sequence {
-				return fmt.Errorf("rule with priority %d already exists in filter '%s'", newSeq, req.Filter)
+				found = true
+				break
 			}
 		}
-		if !foundCurrent {
+		if !found {
 			return fmt.Errorf("rule with priority %d not found in filter '%s'", req.Sequence, req.Filter)
 		}
 		return nil
 	}
 	rule := &spec.FilterRule{
-		Sequence:      newSeq,
+		Sequence:      req.Sequence,
 		Action:        req.Action,
 		SrcIP:         req.SrcIP,
 		DstIP:         req.DstIP,
@@ -731,43 +709,34 @@ func (net *Network) AddRoutePolicyRule(ctx context.Context, req AddRoutePolicyRu
 	return net.internal.AddRuleToRoutePolicy(req.Policy, rule)
 }
 
-// UpdateRoutePolicyRule replaces an existing rule's fields and optionally
-// rotates its sequence number. Sequence (req.Sequence) identifies the
-// existing rule; NewSequence (req.NewSequence) is optional — when non-nil
-// the rule's sequence rotates to that value. Mirrors UpdateFilterRule.
-// Issue #210.
+// UpdateRoutePolicyRule replaces an existing rule's fields in place.
+// Per §47 the sequence number is the rule's identity; renumbering is
+// remove + add. Issue #210.
 func (net *Network) UpdateRoutePolicyRule(ctx context.Context, req UpdateRoutePolicyRuleRequest, opts ExecOpts) error {
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Policy)); err != nil {
 			return err
 		}
 	}
-	newSeq := req.Sequence
-	if req.NewSequence != nil {
-		newSeq = *req.NewSequence
-	}
 	if !opts.Execute {
 		rp, err := net.internal.GetRoutePolicy(req.Policy)
 		if err != nil {
 			return err
 		}
-		foundCurrent := false
+		found := false
 		for _, r := range rp.Rules {
 			if r.Sequence == req.Sequence {
-				foundCurrent = true
-				continue
-			}
-			if r.Sequence == newSeq && newSeq != req.Sequence {
-				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newSeq, req.Policy)
+				found = true
+				break
 			}
 		}
-		if !foundCurrent {
+		if !found {
 			return fmt.Errorf("rule with sequence %d not found in route policy '%s'", req.Sequence, req.Policy)
 		}
 		return nil
 	}
 	rule := &spec.RoutePolicyRule{
-		Sequence:   newSeq,
+		Sequence:   req.Sequence,
 		Action:     req.Action,
 		PrefixList: req.PrefixList,
 		Community:  req.Community,
