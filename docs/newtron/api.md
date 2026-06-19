@@ -44,6 +44,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 |--------|------|--------------|
 | POST | `/networks` | Register a network |
 | GET | `/networks` | List networks |
+| GET | `/schema` | List every spec authoring kind with label/description |
+| GET | `/schema/{kind}` | Field metadata for one kind (label, tooltip, type, required, enum, ref) |
 | POST | `/networks/{n}/unregister` | Unregister a network |
 | POST | `/networks/{n}/reload` | Reload specs from disk |
 | GET | `/networks/{n}/services` | List services (also: `/ipvpns`, `/macvpns`, `/qos-policies`, `/filters`, `/platforms`, `/route-policies`, `/prefix-lists`) |
@@ -449,6 +451,113 @@ These endpoints register and unregister networks. A network must be registered
 before any spec reads, device operations, or provisioning can occur. Registration
 loads the network directory (network.json, device profiles, service definitions) into
 memory.
+
+### Schema metadata endpoints
+
+Two read-only endpoints expose human-facing presentation metadata (label, tooltip,
+type hint, required-ness, enum values, refs to other kinds) for every spec authoring
+type. UIs consume these to render forms whose vocabulary stays consistent across
+newtcon, the CLI's HTML preview, and any future authoring surface.
+
+The metadata is derived at boot from struct tags on the spec types themselves —
+the field definition is the single source of truth, so labels cannot drift from
+the schema they describe.
+
+These endpoints sit at the root of `/newtron/v1/` (not under `/networks/{netID}/`)
+because the metadata is global to the newtron install, not per-network.
+
+#### GET /newtron/v1/schema
+
+List every registered spec authoring kind, with its label and description so a UI
+can render a "pick the type to author" picker without fetching each kind
+individually.
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "kinds": [
+      {
+        "kind": "ServiceSpec",
+        "label": "Service",
+        "description": "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces."
+      },
+      {
+        "kind": "QoSPolicy",
+        "label": "QoS Policy",
+        "description": "A declarative queue policy — strict / DWRR scheduling, DSCP mapping, optional ECN."
+      }
+    ]
+  }
+}
+```
+
+The `kinds` array is alphabetically ordered by `kind` — UIs sort against the
+returned slice rather than re-sorting under their own rules.
+
+#### GET /newtron/v1/schema/{kind}
+
+Return the metadata document for one kind. The `kind` path component is the Go
+type name (e.g. `ServiceSpec`, not `Service`).
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "kind": "ServiceSpec",
+    "label": "Service",
+    "description": "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces.",
+    "fields": [
+      {
+        "name": "description",
+        "label": "Description",
+        "description": "Operator-facing description of this service",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "service_type",
+        "label": "Service Type",
+        "description": "How the service is delivered: EVPN overlay (evpn-*) or local-only (irb/bridged/routed)",
+        "type": "enum",
+        "required": true,
+        "enum": ["evpn-irb", "evpn-bridged", "evpn-routed", "irb", "bridged", "routed"]
+      },
+      {
+        "name": "ipvpn",
+        "label": "IP-VPN",
+        "description": "Reference to an ipvpn definition (required for evpn-irb / evpn-routed)",
+        "type": "ref",
+        "required": false,
+        "ref_kind": "IPVPNSpec"
+      }
+    ]
+  }
+}
+```
+
+**Field-meta shape**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Wire name (matches the `json:` tag on the spec type) |
+| `label` | string | Human-readable form-field label |
+| `description` | string | Tooltip / extended help text (omitted if not set) |
+| `type` | string | `string` \| `int` \| `float` \| `bool` \| `enum` \| `array` \| `map` \| `object` \| `ref` |
+| `required` | bool | False if the JSON tag has `,omitempty` or the Go type is a pointer |
+| `enum` | string[] | For `type: enum` — the allowed values in canonical order |
+| `ref_kind` | string | For `type: ref` — the kind this field references (UI renders a dropdown) |
+| `item_type` | string | For `type: array` or `map` of primitives — the element type |
+| `item_kind` | string | For `type: array` or `map` of objects — the element kind name |
+
+**Errors:**
+- 404: `kind` is not a registered spec type
+
+**i18n**: per-locale label/tooltip overrides stay at the UI layer — the backend
+is not in the translation business. A UI that needs localized labels overlays its
+own translations on top of the canonical English labels this endpoint returns.
 
 ### POST /newtron/v1/networks
 

@@ -117,7 +117,19 @@ pkg/newtron/device/sonic/             # SONiC device layer — Redis clients, sc
 pkg/newtron/spec/                     # Spec types and file I/O
     types.go                          # All spec types (ServiceSpec, DeviceProfile, TopologySpecFile, etc.)
     loader.go                         # Load/save network.json, profiles, platforms, topology
+    schema_meta.go                    # FieldMeta + SchemaMeta + reflection-based tag extractor
+    schema_registry.go                # init() registers every spec authoring kind for /schema endpoints
 ```
+
+Field metadata for UIs (form labels, tooltips, enum lists, refs to other kinds)
+lives as `label:`, `tooltip:`, `enum:`, and `ref:` struct tags on the spec types
+themselves. The `/newtron/v1/schema` and `/newtron/v1/schema/{kind}` endpoints
+expose this metadata; UIs consume it to render forms whose vocabulary stays
+consistent across newtcon, the CLI HTML preview, and any future authoring
+surface. The struct tag is the single source of truth (§27) — adding a new field
+without a `label:` tag still works (the extractor humanizes the JSON name as a
+fallback), but the label is then implicit; explicit `label:` tags carry the
+operator-facing vocabulary.
 
 ```
 cmd/newtron/                          # CLI — one file per noun, dispatched via commands map

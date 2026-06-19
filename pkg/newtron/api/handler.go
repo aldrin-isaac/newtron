@@ -22,6 +22,13 @@ func (s *Server) buildMux() http.Handler {
 	// ====================================================================
 	mux.HandleFunc("POST /newtron/v1/networks", s.handleRegisterNetwork)
 	mux.HandleFunc("GET /newtron/v1/networks", s.handleListNetworks)
+
+	// ====================================================================
+	// Schema metadata — human labels, tooltips, enums, refs for spec
+	// authoring UIs (see handler_schema.go)
+	// ====================================================================
+	mux.HandleFunc("GET /newtron/v1/schema", s.handleSchemaList)
+	mux.HandleFunc("GET /newtron/v1/schema/{kind}", s.handleSchemaShow)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/unregister", s.handleUnregisterNetwork)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/reload", s.handleReloadNetwork)
 
