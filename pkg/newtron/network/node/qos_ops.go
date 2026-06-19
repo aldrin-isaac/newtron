@@ -13,24 +13,28 @@ import (
 // QoS Operations (Per-Interface)
 // ============================================================================
 
-// ApplyQoS applies a QoS policy to this interface (device-wide maps + per-interface bindings).
-func (i *Interface) ApplyQoS(ctx context.Context, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
+// BindQoS binds a QoS policy to this interface — creates device-wide
+// maps (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE) on
+// first reference and per-interface entries (PORT_QOS_MAP, QUEUE) every
+// time. §24: shared device-wide policy lifecycle, last-consumer cleanup
+// on UnbindQoS. §16 verb vocabulary: bind/unbind, mirror of BindACL.
+func (i *Interface) BindQoS(ctx context.Context, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition(sonic.OpApplyQoS, i.name).Result(); err != nil {
+	if err := n.precondition(sonic.OpBindQoS, i.name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.Name(), "interface."+sonic.OpApplyQoS)
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpBindQoS)
 	if err := i.ensureInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
-	if err := i.node.writeIntent(cs, sonic.OpApplyQoS, "interface|"+i.name+"|qos",
+	if err := i.node.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
 		map[string]string{sonic.FieldQoSPolicy: policyName},
 		[]string{"interface|" + i.name}); err != nil {
 		return nil, err
 	}
-	cs.ReverseOp = "interface.remove-qos"
+	cs.ReverseOp = "interface." + sonic.OpUnbindQoS
 	cs.OperationParams = map[string]string{"interface": i.name}
 
 	// Generate device-wide entries (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE)
@@ -42,17 +46,18 @@ func (i *Interface) ApplyQoS(ctx context.Context, policyName string, policy *spe
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.Name()).Infof("Applied QoS policy '%s' to interface %s", policyName, i.name)
+	util.WithDevice(n.Name()).Infof("Bound QoS policy '%s' to interface %s", policyName, i.name)
 	return cs, nil
 }
 
-// RemoveQoS removes QoS configuration from this interface.
-// If this is the last interface referencing the QoS policy, device-wide entries
-// (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE) are also removed.
-func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
+// UnbindQoS unbinds the QoS policy from this interface. If this is the
+// last interface referencing the policy, the device-wide entries
+// (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE) are also
+// removed (§24 last-consumer cleanup).
+func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("remove-qos", i.name).Result(); err != nil {
+	if err := n.precondition(sonic.OpUnbindQoS, i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -74,7 +79,7 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	cs := buildChangeSet(n.Name(), "interface.remove-qos", unbindQosConfig(i.name, queueCount), ChangeDelete)
+	cs := buildChangeSet(n.Name(), "interface."+sonic.OpUnbindQoS, unbindQosConfig(i.name, queueCount), ChangeDelete)
 
 	// Clean up device-wide entries if no other interface references this policy
 	if policyName != "" && !n.isQoSPolicyReferenced(policyName, i.name) {
@@ -87,7 +92,7 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.Name()).Infof("Removed QoS from interface %s", i.name)
+	util.WithDevice(n.Name()).Infof("Unbound QoS from interface %s", i.name)
 	return cs, nil
 }
 

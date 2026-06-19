@@ -263,17 +263,17 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 		_, err := iface.BindACL(ctx, aclName, direction)
 		return err
 
-	case "apply-qos":
+	case "bind-qos":
 		policyName := paramString(p, "policy")
 		if policyName == "" {
-			return fmt.Errorf("apply-qos: missing 'policy' param")
+			return fmt.Errorf("bind-qos: missing 'policy' param")
 		}
 		n := iface.Node()
 		policy, err := n.GetQoSPolicy(util.NormalizeName(policyName))
 		if err != nil {
-			return fmt.Errorf("apply-qos: %w", err)
+			return fmt.Errorf("bind-qos: %w", err)
 		}
-		_, err = iface.ApplyQoS(ctx, util.NormalizeName(policyName), policy)
+		_, err = iface.BindQoS(ctx, util.NormalizeName(policyName), policy)
 		return err
 
 	default:
@@ -451,7 +451,7 @@ func intentParamsToStepParams(op string, intent *sonic.Intent) map[string]any {
 // of their parent operation during replay. These are skipped in IntentsToSteps
 // because replaying the parent re-creates the child intents automatically.
 var skipInReconstruct = map[string]bool{
-	sonic.OpInterfaceInit: true,  // Auto-created by sub-resource ops (SetProperty, BindACL, ApplyQoS)
+	sonic.OpInterfaceInit: true,  // Auto-created by sub-resource ops (SetProperty, BindACL, BindQoS)
 	sonic.OpDeployService: true,  // Auto-created by first ApplyService for a service
 }
 

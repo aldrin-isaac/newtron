@@ -170,7 +170,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/remove-trunk-vlan` | Atomic single-VLAN strip from a trunk port (#224) |
 | `/bind-acl`, `/unbind-acl` | ACL binding |
 | `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
-| `/apply-qos`, `/remove-qos` | QoS policy |
+| `/bind-qos`, `/unbind-qos` | QoS policy |
 | `/set-property`, `/clear-property` | Set/clear port property |
 
 ---
@@ -2663,14 +2663,14 @@ Remove a BGP EVPN overlay peer.
 
 ### QoS at the node level (substrate-only annotation)
 
-Newtron does NOT expose node-level `POST /nodes/{device}/apply-qos` or
-`POST /nodes/{device}/remove-qos` endpoints. QoS apply/remove is an
+Newtron does NOT expose node-level `POST /nodes/{device}/bind-qos` or
+`POST /nodes/{device}/unbind-qos` endpoints. QoS bind/unbind is an
 interface-scoped operation (per `DESIGN_PRINCIPLES_NEWTRON.md` §6: "The
 interface is the point of service delivery, unit of lifecycle"). The
 wired endpoints are:
 
-- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos`
-- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos`
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-qos`
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-qos`
 
 See §QoS Bindings (Interface-Level) below for the canonical interfaces.
 
@@ -3025,7 +3025,7 @@ Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethe
 | Interface config | `configure-interface`, `unconfigure-interface`, `remove-trunk-vlan` | `vrf`, `ip`, `vlan_id`, `tagged` |
 | ACL | `bind-acl`, `unbind-acl` | `acl`, `direction` |
 | BGP | `add-bgp-peer`, `remove-bgp-peer` | `neighbor_ip`, `remote_as` |
-| QoS | `apply-qos`, `remove-qos` | `policy` |
+| QoS | `bind-qos`, `unbind-qos` | `policy` |
 | Port property | `set-property`, `clear-property` | `property`, `value` (set only) |
 
 All endpoints use `POST` method.
@@ -3321,9 +3321,9 @@ Remove the BGP peer from this interface.
 
 ### QoS
 
-#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-qos
 
-Apply a QoS policy to this interface.
+Bind a QoS policy to this interface.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -3335,9 +3335,9 @@ Apply a QoS policy to this interface.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-qos
 
-Remove the QoS policy from this interface.
+Unbind the QoS policy from this interface.
 
 **Query parameters:** `dry_run`, `no_save`
 

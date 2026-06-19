@@ -144,8 +144,8 @@ type NodeUnbindMACVPNRequest struct {
 	VlanID int `json:"vlan_id"`
 }
 
-// ApplyQoSRequest is the body for POST .../apply-qos.
-type ApplyQoSRequest struct {
+// BindQoSRequest is the body for POST .../bind-qos.
+type BindQoSRequest struct {
 	Policy string `json:"policy"`
 }
 

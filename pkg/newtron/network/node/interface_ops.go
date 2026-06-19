@@ -135,7 +135,7 @@ type InterfaceConfig struct {
 }
 
 // ensureInterfaceIntent lazily creates the interface|INTF intent if it doesn't
-// exist. Sub-resource operations (SetProperty, BindACL, ApplyQoS) call this so
+// exist. Sub-resource operations (SetProperty, BindACL, BindQoS) call this so
 // they work on interfaces that haven't had ConfigureInterface called.
 func (i *Interface) ensureInterfaceIntent(cs *ChangeSet) error {
 	resource := "interface|" + i.name
@@ -350,10 +350,10 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 			}
 			cs.Merge(subCS)
 
-		case sonic.OpApplyQoS:
-			subCS, err := i.RemoveQoS(ctx)
+		case sonic.OpBindQoS:
+			subCS, err := i.UnbindQoS(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("remove qos on %s: %w", i.name, err)
+				return nil, fmt.Errorf("unbind qos on %s: %w", i.name, err)
 			}
 			cs.Merge(subCS)
 

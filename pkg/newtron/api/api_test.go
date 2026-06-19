@@ -233,8 +233,8 @@ func TestAPICompleteness(t *testing.T) {
 			"ConfigureInterface":   true,
 			"RemoveTrunkVLAN":      true,
 			"UnconfigureInterface": true,
-			"ApplyQoS":             true,
-			"RemoveQoS":            true,
+			"BindQoS":              true,
+			"UnbindQoS":            true,
 		},
 	}
 
@@ -381,8 +381,8 @@ func TestAPICompleteness(t *testing.T) {
 			"ConfigureInterface":   auth.PermInterfaceModify,
 			"RemoveTrunkVLAN":      auth.PermInterfaceModify,
 			"UnconfigureInterface": auth.PermInterfaceModify,
-			"ApplyQoS":             auth.PermQoSModify,
-			"RemoveQoS":            auth.PermQoSModify,
+			"BindQoS":              auth.PermQoSModify,
+			"UnbindQoS":            auth.PermQoSModify,
 		},
 	}
 

@@ -27,7 +27,7 @@ func TestParseStepURL(t *testing.T) {
 		{"/interfaces/Ethernet12/add-bgp-peer", "add-bgp-peer", "Ethernet12"},
 		{"/interfaces/Ethernet0/set-property", "set-property", "Ethernet0"},
 		{"/interfaces/Ethernet0/bind-acl", "bind-acl", "Ethernet0"},
-		{"/interfaces/Ethernet0/apply-qos", "apply-qos", "Ethernet0"},
+		{"/interfaces/Ethernet0/bind-qos", "bind-qos", "Ethernet0"},
 		// No leading slash
 		{"setup-device", "setup-device", ""},
 		{"interfaces/Ethernet0/apply-service", "apply-service", "Ethernet0"},
