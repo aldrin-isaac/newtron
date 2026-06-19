@@ -8,11 +8,15 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// ListPlatforms returns the canonical PlatformSpecFile (§46). Consumers
-// (CLI, newtrun, newtlab) read whatever subset of fields they need.
-func (net *Network) ListPlatforms() *spec.PlatformSpecFile {
-	platforms := net.internal.Platforms()
-	return &spec.PlatformSpecFile{Platforms: platforms}
+// ListPlatforms returns the platforms map keyed by name. Consumers
+// (CLI, newtrun, newtlab, UI schema-driven dropdowns) get details inline
+// — those that only need names extract `.keys()`. Returning the file
+// shape `*PlatformSpecFile` (which wraps the map under a `platforms`
+// key alongside a `version` field) was an §46 misapplication: §46 says
+// the wire shape mirrors the canonical type, but the canonical type for
+// a list is the contents, not the on-disk file envelope.
+func (net *Network) ListPlatforms() map[string]*spec.PlatformSpec {
+	return net.internal.Platforms()
 }
 
 // ShowPlatform returns the canonical PlatformSpec (§46) for a single

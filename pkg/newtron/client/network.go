@@ -264,13 +264,17 @@ func (c *Client) ShowFilter(name string) (*newtron.FilterDetail, error) {
 	return &result, nil
 }
 
-// ListPlatforms returns the canonical *spec.PlatformSpecFile (§46).
-func (c *Client) ListPlatforms() (*spec.PlatformSpecFile, error) {
-	var result spec.PlatformSpecFile
+// ListPlatforms returns the platforms map keyed by name. Each value is
+// the full canonical *spec.PlatformSpec — newtlab uses the details
+// (HWSKU, VM image, VM resources) to provision; UIs that only need the
+// names extract `.keys()`. §46 — wire shape mirrors the canonical type
+// (the map), not the on-disk file envelope.
+func (c *Client) ListPlatforms() (map[string]*spec.PlatformSpec, error) {
+	var result map[string]*spec.PlatformSpec
 	if err := c.doGet(c.networkPath()+"/platforms", &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	return result, nil
 }
 
 // ShowPlatform returns the canonical *spec.PlatformSpec (§46) for a

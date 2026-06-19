@@ -1052,8 +1052,8 @@ List/show pairs for all spec types. Response types from §3.9.
 | GET | `/networks/{netID}/route-policies/{name}` | `RoutePolicyDetail` |
 | GET | `/networks/{netID}/prefix-lists` | `[]PrefixListDetail` |
 | GET | `/networks/{netID}/prefix-lists/{name}` | `PrefixListDetail` |
-| GET | `/networks/{netID}/platforms` | `[]PlatformDetail` |
-| GET | `/networks/{netID}/platforms/{name}` | `PlatformDetail` |
+| GET | `/networks/{netID}/platforms` | `map[string]*spec.PlatformSpec` — keyed by name; each value is the full canonical spec |
+| GET | `/networks/{netID}/platforms/{name}` | `*spec.PlatformSpec` |
 | GET | `/networks/{netID}/profiles` | `[]DeviceProfileDetail` |
 | GET | `/networks/{netID}/nodes/{name}` | `DeviceProfileDetail` |
 | GET | `/networks/{netID}/zones` | `[]ZoneDetail` |
