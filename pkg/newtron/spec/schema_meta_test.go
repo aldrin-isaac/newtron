@@ -38,8 +38,9 @@ type fixMap struct {
 	Strings  map[string]string     `json:"strings,omitempty"`
 }
 
+// nolint:unused — fields are referenced by the reflection extractor under test
 type fixHidden struct {
-	private string `json:"private"`         //nolint:unused
+	private string                           //nolint:unused // tests unexported filter
 	Skip    string `json:"-"`               // explicitly hidden
 	Real    string `json:"real" label:"Real"`
 }
