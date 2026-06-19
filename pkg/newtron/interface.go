@@ -165,12 +165,11 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 	return nil
 }
 
-// UpdateBGPPeer atomically mutates the existing BGP peer on this interface.
-// Optional newNeighborIP re-keys the BGP_NEIGHBOR CONFIG_DB row (changes
-// the destination IP); the intent resource stays at the singleton key.
-// §15 mirror of AddBGPPeer that closes the session-blip window
-// remove + add exposes today (#227).
-func (i *Interface) UpdateBGPPeer(ctx context.Context, config BGPNeighborConfig, newNeighborIP string) error {
+// UpdateBGPPeer atomically mutates fields on the existing BGP peer on
+// this interface. Per §47 the key (vrf, neighbor_ip) is immutable;
+// to change the neighbor IP, remove and re-add. §15 mirror of AddBGPPeer
+// that closes the session-blip window remove + add exposes today (#227).
+func (i *Interface) UpdateBGPPeer(ctx context.Context, config BGPNeighborConfig) error {
 	peerIP := i.internal.DirectBGPPeerIP()
 	if err := i.gate(ctx, auth.PermBGPPeer, peerIP); err != nil {
 		return err
@@ -180,7 +179,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, config BGPNeighborConfig,
 		RemoteAS:    config.RemoteAS,
 		Description: config.Description,
 		Multihop:    config.Multihop,
-	}, newNeighborIP)
+	})
 	if err != nil {
 		return err
 	}

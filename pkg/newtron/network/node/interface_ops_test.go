@@ -579,7 +579,7 @@ func TestUpdateBGPPeer_InPlaceASChange(t *testing.T) {
 
 	cs, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{
 		RemoteAS: 65099, Description: "new-peer",
-	}, "")
+	})
 	if err != nil {
 		t.Fatalf("UpdateBGPPeer: %v", err)
 	}
@@ -601,30 +601,6 @@ func TestUpdateBGPPeer_InPlaceASChange(t *testing.T) {
 	}
 }
 
-func TestUpdateBGPPeer_RekeyNeighborIP(t *testing.T) {
-	d, intf := bgpPeerSetup(t)
-	ctx := context.Background()
-
-	cs, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{
-		RemoteAS: 65002, Description: "old-peer",
-	}, "10.1.0.5")
-	if err != nil {
-		t.Fatalf("UpdateBGPPeer rekey: %v", err)
-	}
-
-	// Old neighbor IP row deleted, new one added.
-	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeDelete)
-	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.5", ChangeAdd)
-
-	intent := d.GetIntent("interface|Ethernet0|bgp-peer")
-	if intent == nil {
-		t.Fatal("intent record missing after rekey")
-	}
-	if got := intent.Params[sonic.FieldNeighborIP]; got != "10.1.0.5" {
-		t.Errorf("intent neighbor_ip = %q, want 10.1.0.5", got)
-	}
-}
-
 func TestUpdateBGPPeer_NoExistingPeer(t *testing.T) {
 	d, intf := testInterface()
 	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
@@ -635,28 +611,9 @@ func TestUpdateBGPPeer_NoExistingPeer(t *testing.T) {
 	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
 	ctx := context.Background()
 
-	_, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65002}, "")
+	_, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65002})
 	if err == nil {
 		t.Fatal("expected error when no BGP peer exists")
-	}
-}
-
-func TestUpdateBGPPeer_RekeyCollision(t *testing.T) {
-	d, intf := bgpPeerSetup(t)
-	// Seed a sibling BGP peer intent at the would-be target IP — mirrors
-	// what AddBGPPeer would write for a second interface peering the
-	// same neighbor. BGPNeighborExists scans intents (not raw configDB).
-	d.configDB.NewtronIntent["interface|Ethernet4|bgp-peer"] = map[string]string{
-		"operation":           sonic.OpAddBGPPeer,
-		"_parents":            "interface|Ethernet4",
-		sonic.FieldNeighborIP: "10.1.0.7",
-		sonic.FieldRemoteAS:   "65500",
-	}
-	ctx := context.Background()
-
-	_, err := intf.UpdateBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65002}, "10.1.0.7")
-	if err == nil {
-		t.Fatal("expected collision error when target IP already has a BGP peer")
 	}
 }
 

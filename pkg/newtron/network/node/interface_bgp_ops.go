@@ -119,10 +119,9 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 // record is replaced via writeIntent's idempotent path (DEL+HSET — #228
 // fix) so dropped params don't ghost.
 //
-// When newNeighborIP is supplied and differs from the current value, the
-// BGP_NEIGHBOR CONFIG_DB key changes (vrf|<new_ip>); the intent resource
-// stays at interface|<name>|bgp-peer (singleton). Issue #227.
-func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig, newNeighborIP string) (*ChangeSet, error) {
+// Per §47 (CONFIG_DB Composite Key Is the Identity) the key
+// (vrf, neighbor_ip) is immutable. Issue #227.
+func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*ChangeSet, error) {
 	n := i.node
 
 	if err := n.precondition(sonic.OpUpdateBGPPeer, i.name).Result(); err != nil {
@@ -137,20 +136,9 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig, 
 	if existing == nil {
 		return nil, fmt.Errorf("no BGP peer intent for %s — use add-bgp-peer first", i.name)
 	}
-	oldNeighborIP := existing.Params[sonic.FieldNeighborIP]
-	if oldNeighborIP == "" {
+	neighborIP := existing.Params[sonic.FieldNeighborIP]
+	if neighborIP == "" {
 		return nil, fmt.Errorf("existing intent for %s has no neighbor IP", i.name)
-	}
-
-	targetNeighborIP := oldNeighborIP
-	if newNeighborIP != "" && newNeighborIP != oldNeighborIP {
-		if !util.IsValidIPv4(newNeighborIP) {
-			return nil, fmt.Errorf("invalid new neighbor IP: %s", newNeighborIP)
-		}
-		if n.BGPNeighborExists(newNeighborIP) {
-			return nil, fmt.Errorf("BGP peer %s already exists", newNeighborIP)
-		}
-		targetNeighborIP = newNeighborIP
 	}
 
 	// Interface must still have an IP (used as update-source).
@@ -162,7 +150,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig, 
 
 	// Build the new BGP neighbor config under the interface's current VRF.
 	vrf := i.VRF()
-	newConfig := CreateBGPNeighborConfig(targetNeighborIP, cfg.RemoteAS, localIPOnly, BGPNeighborOpts{
+	newConfig := CreateBGPNeighborConfig(neighborIP, cfg.RemoteAS, localIPOnly, BGPNeighborOpts{
 		VRF:          vrf,
 		Description:  cfg.Description,
 		EBGPMultihop: cfg.Multihop > 0,
@@ -170,15 +158,16 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig, 
 		ActivateIPv4: true,
 	})
 
-	cs := buildChangeSet(n.Name(), "interface."+sonic.OpUpdateBGPPeer, newConfig, ChangeAdd)
-	// Delete the prior BGP_NEIGHBOR row first — when the neighbor IP
-	// changes the CONFIG_DB key is different, so the old row would
-	// orphan; when the IP stays the same, this is a no-op for the
-	// dataplane but ensures the row is fully replaced (DEL+HSET).
-	cs.Deletes(DeleteBGPNeighborConfig(vrf, oldNeighborIP))
+	// CONFIG_DB: DEL+ADD same (vrf, neighbor_ip) key. The neighbor IP
+	// is the row's identity (§47); a re-IP would be remove + add via
+	// separate verbs. DEL must precede ADD so Redis processes the
+	// delete first.
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpUpdateBGPPeer)
+	cs.Deletes(DeleteBGPNeighborConfig(vrf, neighborIP))
+	cs.Adds(newConfig)
 
 	intentParams := map[string]string{
-		sonic.FieldNeighborIP: targetNeighborIP,
+		sonic.FieldNeighborIP: neighborIP,
 		sonic.FieldRemoteAS:   strconv.Itoa(cfg.RemoteAS),
 	}
 	if cfg.Description != "" {
@@ -191,13 +180,13 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig, 
 		return nil, err
 	}
 	cs.ReverseOp = "device.remove-bgp-peer"
-	cs.OperationParams = map[string]string{"interface": i.name, "neighbor_ip": targetNeighborIP}
+	cs.OperationParams = map[string]string{"interface": i.name, "neighbor_ip": neighborIP}
 
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
 	util.WithDevice(n.Name()).Infof("Updated BGP peer on interface %s (neighbor=%s, AS=%d)",
-		i.name, targetNeighborIP, cfg.RemoteAS)
+		i.name, neighborIP, cfg.RemoteAS)
 	return cs, nil
 }
 

@@ -57,22 +57,20 @@ func (c *Client) InterfaceAddBGPPeer(device, iface string, config newtron.BGPNei
 	return c.interfaceWrite(device, iface, "add-bgp-peer", config, opts)
 }
 
-// InterfaceUpdateBGPPeer atomically mutates the BGP peer on an interface.
-// Optional newNeighborIP re-keys the BGP_NEIGHBOR row. Closes the
-// session-blip window remove + add exposes today (#227).
-func (c *Client) InterfaceUpdateBGPPeer(device, iface string, config newtron.BGPNeighborConfig, newNeighborIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// InterfaceUpdateBGPPeer atomically mutates the BGP peer's fields on
+// an interface. The composite key (vrf + neighbor_ip) is the row's
+// identity (§47); a re-IP is remove + add via separate verbs. #227.
+func (c *Client) InterfaceUpdateBGPPeer(device, iface string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
-		NeighborIP    string `json:"neighbor_ip"`
-		RemoteAS      int    `json:"remote_as"`
-		Description   string `json:"description,omitempty"`
-		Multihop      int    `json:"multihop,omitempty"`
-		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+		NeighborIP  string `json:"neighbor_ip"`
+		RemoteAS    int    `json:"remote_as"`
+		Description string `json:"description,omitempty"`
+		Multihop    int    `json:"multihop,omitempty"`
 	}{
-		NeighborIP:    config.NeighborIP,
-		RemoteAS:      config.RemoteAS,
-		Description:   config.Description,
-		Multihop:      config.Multihop,
-		NewNeighborIP: newNeighborIP,
+		NeighborIP:  config.NeighborIP,
+		RemoteAS:    config.RemoteAS,
+		Description: config.Description,
+		Multihop:    config.Multihop,
 	}
 	return c.interfaceWrite(device, iface, "update-bgp-peer", body, opts)
 }

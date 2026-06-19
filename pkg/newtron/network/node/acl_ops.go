@@ -143,32 +143,19 @@ func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts 
 // DeleteACLRule + AddACLRule exposes today (packet leak during the rebuild
 // window, plus rule ordering renumbers required the remove+add dance).
 //
-// Reads the existing intent record by ruleName, validates that the new
-// values don't collide with siblings (only on priority change — rule_name
-// stays as the dictionary key unless newRuleName is supplied), and emits
-// a single ChangeSet that deletes the prior ACL_RULE entry and writes the
-// new one. The intent record is replaced via writeIntent's idempotent path
+// Reads the existing intent record by ruleName and emits a single
+// ChangeSet that deletes the prior ACL_RULE entry and writes the new one.
+// The intent record is replaced via writeIntent's idempotent path
 // (DEL+HSET — #228) so dropped params don't ghost.
 //
-// When newRuleName is supplied and differs from ruleName, the operation is
-// a re-key: the intent record's resource changes from acl|<table>|<old>
-// to acl|<table>|<new>. The new key must not already exist. Mirrors the
-// new_seq / new_queue_id / new_prefix pattern used by the spec-level
-// update verbs (#209/#210/#211/#220). Issue #227.
-func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig, newRuleName string) (*ChangeSet, error) {
+// Per §47 (CONFIG_DB Composite Key Is the Identity) the key
+// (acl_table, rule_name) is immutable. Renaming a rule is remove + add,
+// not update. Issue #227.
+func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
 	resource := "acl|" + tableName + "|" + ruleName
 	existing := n.GetIntent(resource)
 	if existing == nil {
 		return nil, fmt.Errorf("rule %s not found in ACL table %s", ruleName, tableName)
-	}
-	// Re-key validation: target must be free.
-	targetRule := ruleName
-	if newRuleName != "" && newRuleName != ruleName {
-		targetResource := "acl|" + tableName + "|" + newRuleName
-		if n.GetIntent(targetResource) != nil {
-			return nil, fmt.Errorf("rule %s already exists in ACL table %s", newRuleName, tableName)
-		}
-		targetRule = newRuleName
 	}
 
 	cs, err := n.op(sonic.OpUpdateACLRule, tableName, ChangeAdd,
@@ -178,17 +165,13 @@ func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, op
 		return nil, err
 	}
 
-	// CONFIG_DB: delete prior entry, write new one. When the rule_name
-	// changes, the CONFIG_DB key changes too — the prior ACL_RULE row
-	// vanishes by the same DEL.
+	// CONFIG_DB: DEL+ADD same key. The rule_name is the row's identity
+	// (§47); a rename would be remove + add via separate verbs.
 	cs.Deletes(deleteAclRuleConfig(tableName, ruleName))
-	cs.Adds(createAclRuleConfig(tableName, targetRule, opts))
+	cs.Adds(createAclRuleConfig(tableName, ruleName, opts))
 
-	// Intent: when re-keying, the old resource is deleted and a fresh
-	// resource is created. Otherwise the existing resource is updated
-	// in place via writeIntent's idempotent-update path.
 	intentParams := map[string]string{
-		sonic.FieldName: targetRule,
+		sonic.FieldName: ruleName,
 		"acl":           tableName,
 	}
 	if opts.Priority > 0 {
@@ -212,25 +195,14 @@ func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, op
 	if opts.DstPort != "" {
 		intentParams["dst_port"] = opts.DstPort
 	}
-	if targetRule != ruleName {
-		if err := n.deleteIntent(cs, resource); err != nil {
-			return nil, err
-		}
-		if err := n.writeIntent(cs, sonic.OpAddACLRule, "acl|"+tableName+"|"+targetRule,
-			intentParams,
-			[]string{"acl|" + tableName}); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := n.writeIntent(cs, sonic.OpAddACLRule, resource,
-			intentParams,
-			[]string{"acl|" + tableName}); err != nil {
-			return nil, err
-		}
+	if err := n.writeIntent(cs, sonic.OpAddACLRule, resource,
+		intentParams,
+		[]string{"acl|" + tableName}); err != nil {
+		return nil, err
 	}
 
-	cs.OperationParams = map[string]string{"table_name": tableName, "rule_name": targetRule}
-	util.WithDevice(n.name).Infof("Updated rule %s in ACL table %s", targetRule, tableName)
+	cs.OperationParams = map[string]string{"table_name": tableName, "rule_name": ruleName}
+	util.WithDevice(n.name).Infof("Updated rule %s in ACL table %s", ruleName, tableName)
 	return cs, nil
 }
 

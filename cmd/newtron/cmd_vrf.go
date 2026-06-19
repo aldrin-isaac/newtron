@@ -366,28 +366,22 @@ Examples:
 	},
 }
 
-var (
-	vrfNeighborNewIP string
-)
-
 var vrfUpdateNeighborCmd = &cobra.Command{
 	Use:   "update-neighbor <vrf-name> <interface> <remote-asn>",
-	Short: "Atomically update an existing BGP neighbor on a VRF interface",
-	Long: `Atomically update an existing BGP neighbor's parameters on a VRF
-interface. Closes the BGP session blip that remove-neighbor + add-neighbor
-exposes today by mutating the peer under the per-device intent lock.
+	Short: "Atomically update a BGP neighbor's fields on a VRF interface",
+	Long: `Atomically update a BGP neighbor's fields (remote AS, description,
+multihop) on a VRF interface. The composite key (vrf + neighbor IP)
+identifies the row; this verb mutates fields only.
 
---new-neighbor changes the BGP destination IP (re-keys BGP_NEIGHBOR
-CONFIG_DB row). Other fields (remote_as, description, multihop) are
-field updates.
+To change the BGP destination IP, use remove-neighbor + add-neighbor —
+changing the IP changes the row's identity at the CONFIG_DB layer (§47).
 
 Issue #227.
 
 Requires -D (device) flag.
 
 Examples:
-  newtron leaf1 vrf update-neighbor Vrf_CUST1 Ethernet4 65300 --description "new ISP" -x
-  newtron leaf1 vrf update-neighbor Vrf_CUST1 Ethernet4 65200 --new-neighbor 10.1.1.5 -x`,
+  newtron leaf1 vrf update-neighbor Vrf_CUST1 Ethernet4 65300 --description "new ISP" -x`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
@@ -405,7 +399,7 @@ Examples:
 			NeighborIP:  vrfNeighborIP,
 			RemoteAS:    asn,
 			Description: vrfNeighborDescription,
-		}, vrfNeighborNewIP, execOpts()))
+		}, execOpts()))
 	},
 }
 
@@ -469,25 +463,23 @@ Examples:
 	},
 }
 
-var (
-	vrfRouteNewPrefix string
-)
-
 var vrfUpdateRouteCmd = &cobra.Command{
 	Use:   "update-route <vrf-name> <prefix> <next-hop>",
-	Short: "Atomically update a static route",
-	Long: `Atomically update an existing static route. Closes the forwarding
-black hole that remove-route + add-route exposes today by mutating the
-route under the per-device intent lock. Issue #227.
+	Short: "Atomically update a static route's fields",
+	Long: `Atomically update a static route's fields (nexthop, metric).
+The composite key (vrf + prefix) identifies the row; this verb mutates
+fields only.
 
---new-prefix re-keys the route to a different prefix (same VRF) without
-going through remove+add.
+To change the prefix, use remove-route + add-route — changing the
+prefix changes the row's identity at the CONFIG_DB layer (§47).
+
+Issue #227.
 
 Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf update-route Vrf_CUST1 10.0.0.0/8 10.1.1.2 -x
-  newtron leaf1 vrf update-route Vrf_CUST1 10.0.0.0/8 10.1.1.1 --new-prefix 10.0.0.0/16 -x`,
+  newtron leaf1 vrf update-route Vrf_CUST1 10.0.0.0/8 10.1.1.1 --metric 100 -x`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
@@ -496,7 +488,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.UpdateStaticRoute(app.deviceName, vrfName, prefix, nextHop, vrfRouteMetric, vrfRouteNewPrefix, execOpts()))
+		return displayWriteResult(app.client.UpdateStaticRoute(app.deviceName, vrfName, prefix, nextHop, vrfRouteMetric, execOpts()))
 	},
 }
 
@@ -530,11 +522,9 @@ func init() {
 	vrfAddNeighborCmd.Flags().StringVar(&vrfNeighborDescription, "description", "", "Neighbor description")
 	vrfUpdateNeighborCmd.Flags().StringVar(&vrfNeighborIP, "neighbor", "", "Existing neighbor IP (auto-derived if not specified)")
 	vrfUpdateNeighborCmd.Flags().StringVar(&vrfNeighborDescription, "description", "", "Neighbor description")
-	vrfUpdateNeighborCmd.Flags().StringVar(&vrfNeighborNewIP, "new-neighbor", "", "Re-key the BGP peer to this new neighbor IP")
 
 	vrfAddRouteCmd.Flags().IntVar(&vrfRouteMetric, "metric", 0, "Route metric")
 	vrfUpdateRouteCmd.Flags().IntVar(&vrfRouteMetric, "metric", 0, "Route metric")
-	vrfUpdateRouteCmd.Flags().StringVar(&vrfRouteNewPrefix, "new-prefix", "", "Re-key the route to this new prefix (same VRF)")
 
 	vrfCmd.AddCommand(vrfListCmd)
 	vrfCmd.AddCommand(vrfShowCmd)

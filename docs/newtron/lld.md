@@ -1140,12 +1140,12 @@ Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Ex
 | POST | `.../nodes/{device}/bind-ipvpn` | `BindIPVPN` |
 | POST | `.../nodes/{device}/unbind-ipvpn` | `UnbindIPVPN` |
 | POST | `.../nodes/{device}/add-static-route` | `AddStaticRoute` |
-| POST | `.../nodes/{device}/update-static-route` | `UpdateStaticRoute` — atomic per-route mutation; optional `new_prefix` re-keys (#227) |
+| POST | `.../nodes/{device}/update-static-route` | `UpdateStaticRoute` — atomic per-route field mutation; key (vrf, prefix) is immutable (§47, #227) |
 | POST | `.../nodes/{device}/remove-static-route` | `RemoveStaticRoute` |
 | POST | `.../nodes/{device}/create-acl` | `CreateACL` |
 | POST | `.../nodes/{device}/delete-acl` | `DeleteACL` |
 | POST | `.../nodes/{device}/add-acl-rule` | `AddACLRule` |
-| POST | `.../nodes/{device}/update-acl-rule` | `UpdateACLRule` — atomic per-rule mutation; optional `new_rule_name` re-keys (#227) |
+| POST | `.../nodes/{device}/update-acl-rule` | `UpdateACLRule` — atomic per-rule field mutation; key (table, rule_name) is immutable (§47, #227) |
 | POST | `.../nodes/{device}/remove-acl-rule` | `DeleteACLRule` |
 | POST | `.../nodes/{device}/create-portchannel` | `CreatePortChannel` |
 | POST | `.../nodes/{device}/delete-portchannel` | `DeletePortChannel` |
@@ -1154,7 +1154,7 @@ Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Ex
 | POST | `.../nodes/{device}/bind-macvpn` | `BindMACVPN` |
 | POST | `.../nodes/{device}/unbind-macvpn` | `UnbindMACVPN` |
 | POST | `.../nodes/{device}/add-bgp-evpn-peer` | `AddBGPEVPNPeer` |
-| POST | `.../nodes/{device}/update-bgp-evpn-peer` | `UpdateBGPEVPNPeer` — atomic per-overlay-peer mutation; optional `new_neighbor_ip` re-keys (#227) |
+| POST | `.../nodes/{device}/update-bgp-evpn-peer` | `UpdateBGPEVPNPeer` — atomic per-overlay-peer field mutation; key (default, neighbor_ip) is immutable (§47, #227) |
 | POST | `.../nodes/{device}/remove-bgp-evpn-peer` | `RemoveBGPEVPNPeer` |
 | POST | `.../nodes/{device}/reload-config` | `ConfigReload` (SONiC config reload) |
 | POST | `.../nodes/{device}/save-config` | `SaveConfig` (SONiC config save) |
@@ -1193,7 +1193,7 @@ Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `Wri
 | POST | `.../interfaces/{name}/bind-acl` | `BindACL` |
 | POST | `.../interfaces/{name}/unbind-acl` | `UnbindACL` |
 | POST | `.../interfaces/{name}/add-bgp-peer` | `AddBGPPeer` |
-| POST | `.../interfaces/{name}/update-bgp-peer` | `UpdateBGPPeer` — atomic per-peer mutation; optional `new_neighbor_ip` re-keys BGP_NEIGHBOR row (#227) |
+| POST | `.../interfaces/{name}/update-bgp-peer` | `UpdateBGPPeer` — atomic per-peer field mutation; key (vrf, neighbor_ip) is immutable (§47, #227) |
 | POST | `.../interfaces/{name}/remove-bgp-peer` | `RemoveBGPPeer` |
 | POST | `.../interfaces/{name}/apply-qos` | `ApplyQoS` |
 | POST | `.../interfaces/{name}/remove-qos` | `RemoveQoS` |

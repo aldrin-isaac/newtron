@@ -259,15 +259,14 @@ type StaticRouteRequest struct {
 }
 
 // StaticRouteUpdateRequest is the body for POST .../update-static-route.
-// Optional NewPrefix re-keys the route (same VRF, different prefix).
-// Closes the forwarding black hole that remove + add exposes today
-// (#227).
+// Updates fields of an existing static route. The composite key
+// (vrf + prefix) is the row's identity (§47) and is not mutable
+// through this verb — relocate via remove + add. #227.
 type StaticRouteUpdateRequest struct {
-	VRF       string `json:"vrf"`
-	Prefix    string `json:"prefix"`
-	NextHop   string `json:"nexthop"`
-	Metric    int    `json:"metric,omitempty"`
-	NewPrefix string `json:"new_prefix,omitempty"`
+	VRF     string `json:"vrf"`
+	Prefix  string `json:"prefix"`
+	NextHop string `json:"nexthop"`
+	Metric  int    `json:"metric,omitempty"`
 }
 
 // RestartDaemonRequest is the body for POST .../restart-daemon.

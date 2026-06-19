@@ -550,26 +550,22 @@ Examples:
 	},
 }
 
-var evpnPeerNewNeighbor string
-
 var evpnUpdatePeerCmd = &cobra.Command{
 	Use:   "update-peer",
-	Short: "Atomically update an EVPN overlay peer",
-	Long: `Atomically update an existing EVPN overlay peer's parameters.
-Closes the EVPN session blip that remove-peer + add-peer exposes today
-by mutating the peer under the per-device intent lock.
+	Short: "Atomically update an EVPN overlay peer's fields",
+	Long: `Atomically update an EVPN overlay peer's fields (remote AS,
+description). The composite key (default + neighbor IP) identifies the
+row; this verb mutates fields only.
 
-The --neighbor flag identifies the existing peer; other flags (--remote-as,
---description) become the new values. --new-neighbor re-keys the
-BGP_NEIGHBOR row to a different IP.
+To change the BGP destination IP, use remove-peer + add-peer — changing
+the IP changes the row's identity at the CONFIG_DB layer (§47).
 
 Issue #227.
 
 Requires -D (device) flag.
 
 Examples:
-  newtron leaf1 evpn update-peer --neighbor 10.0.0.2 --remote-as 65099 --description "new ISP" -x
-  newtron leaf1 evpn update-peer --neighbor 10.0.0.2 --remote-as 65002 --new-neighbor 10.0.0.5 -x`,
+  newtron leaf1 evpn update-peer --neighbor 10.0.0.2 --remote-as 65099 --description "new ISP" -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -584,7 +580,7 @@ Examples:
 			NeighborIP:  evpnPeerNeighbor,
 			RemoteAS:    evpnPeerRemoteAS,
 			Description: evpnPeerDescription,
-		}, evpnPeerNewNeighbor, execOpts()))
+		}, execOpts()))
 	},
 }
 
@@ -642,7 +638,6 @@ func init() {
 	evpnUpdatePeerCmd.Flags().StringVar(&evpnPeerNeighbor, "neighbor", "", "Existing neighbor IP (required)")
 	evpnUpdatePeerCmd.Flags().IntVar(&evpnPeerRemoteAS, "remote-as", 0, "New remote AS number (required)")
 	evpnUpdatePeerCmd.Flags().StringVar(&evpnPeerDescription, "description", "", "New peer description")
-	evpnUpdatePeerCmd.Flags().StringVar(&evpnPeerNewNeighbor, "new-neighbor", "", "Re-key the peer to this new neighbor IP")
 
 	// evpn subcommands
 	evpnCmd.AddCommand(evpnStatusCmd)
