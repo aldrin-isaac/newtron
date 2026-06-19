@@ -342,11 +342,11 @@ func (i *Interface) DirectBGPPeerIP() string {
 
 // QoSPolicyName returns the QoS policy bound to this interface, or
 // "" if no policy is bound. Reads the `interface|<name>|qos` intent
-// record — the same key ApplyQoS/RemoveQoS write and consume.
+// record — the same key BindQoS/UnbindQoS write and consume.
 //
-// Used by the public Interface.RemoveQoS wrapper to recover the
+// Used by the public Interface.UnbindQoS wrapper to recover the
 // policy name before the auth gate runs, so `where: {resource: "..."}`
-// clauses scope the reverse op symmetrically with ApplyQoS (#163).
+// clauses scope the reverse op symmetrically with BindQoS (#163).
 func (i *Interface) QoSPolicyName() string {
 	intent := i.node.GetIntent("interface|" + i.name + "|qos")
 	if intent == nil {

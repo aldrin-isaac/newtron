@@ -870,24 +870,6 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"prefix": req.Prefix})
 }
 
-func (s *Server) handleUpdatePrefixListEntry(w http.ResponseWriter, r *http.Request) {
-	ne := s.requireNetwork(w, r)
-	if ne == nil {
-		return
-	}
-	var req newtron.UpdatePrefixListEntryRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	if err := ne.net.UpdatePrefixListEntry(r.Context(), req, opts); err != nil {
-		writeError(w, err)
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"prefix": req.NewPrefix})
-}
-
 func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {

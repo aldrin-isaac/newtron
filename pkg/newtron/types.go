@@ -811,16 +811,6 @@ type AddPrefixListEntryRequest struct {
 	Prefix     string `json:"prefix"`
 }
 
-// UpdatePrefixListEntryRequest is the request for atomically swapping
-// one prefix for another in a prefix list. NewPrefix is required (not
-// optional) because a single-field entry has no other mutation path —
-// an update without a new value would be a no-op. Issue #220.
-type UpdatePrefixListEntryRequest struct {
-	PrefixList string `json:"prefix_list"`
-	Prefix     string `json:"prefix"`     // identifies the existing entry
-	NewPrefix  string `json:"new_prefix"` // required — the new CIDR value
-}
-
 // PrefixListDetail is the detail response for a prefix list.
 type PrefixListDetail struct {
 	Name     string   `json:"name"`

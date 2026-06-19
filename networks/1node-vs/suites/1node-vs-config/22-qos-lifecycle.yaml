@@ -1,7 +1,7 @@
 name: qos-lifecycle
 description: |
-  QoS policy spec authoring + device apply/remove.
-  Spec ops are network-scoped; apply/remove are device-scoped.
+  QoS policy spec authoring + device bind/unbind.
+  Spec ops are network-scoped; bind/unbind are device-scoped.
 requires: [setup-device]
 
 steps:
@@ -27,26 +27,26 @@ steps:
     command: "qos add-queue TEST_QOS 1 --type dwrr --weight 80 --dscp 0 --name best-effort --loopback"
 
   # ====================================================================
-  # QoS device apply/remove
+  # QoS device bind/unbind
   # ====================================================================
-  - name: apply-qos
+  - name: bind-qos
     action: newtron-cli
     devices: [switch1]
-    command: "qos apply Ethernet20 TEST_QOS --loopback"
+    command: "qos bind Ethernet20 TEST_QOS --loopback"
 
-  - name: verify-qos-applied
+  - name: verify-qos-bound
     action: newtron-cli
     devices: [switch1]
     command: "configdb exists PORT_QOS_MAP Ethernet20 --loopback"
     expect:
       jq: '.exists == true'
 
-  - name: remove-qos
+  - name: unbind-qos
     action: newtron-cli
     devices: [switch1]
-    command: "qos remove Ethernet20 --loopback"
+    command: "qos unbind Ethernet20 --loopback"
 
-  - name: verify-qos-removed
+  - name: verify-qos-unbound
     action: newtron-cli
     devices: [switch1]
     command: "configdb exists PORT_QOS_MAP Ethernet20 --loopback"

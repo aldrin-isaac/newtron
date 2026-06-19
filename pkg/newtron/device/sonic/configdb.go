@@ -95,7 +95,8 @@ const (
 	OpUpdateBGPPeer      = "update-bgp-peer" // atomic per-peer mutation (#227)
 	OpApplyService       = "apply-service"
 	OpBindACL            = "bind-acl"
-	OpApplyQoS              = "apply-qos"
+	OpBindQoS               = "bind-qos"
+	OpUnbindQoS             = "unbind-qos"
 	OpAddACLRule            = "add-acl-rule"
 	OpUpdateACLRule         = "update-acl-rule" // atomic per-rule mutation (#227)
 	OpAddPortChannelMember  = "add-pc-member"

@@ -76,7 +76,6 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/update-filter-rule` | Update rule in filter (incl. renumber) |
 | POST | `/networks/{n}/remove-filter-rule` | Remove rule from filter |
 | POST | `/networks/{n}/add-prefix-list-entry` | Add entry to prefix list |
-| POST | `/networks/{n}/update-prefix-list-entry` | Atomically swap one entry for another (issue #220) |
 | POST | `/networks/{n}/remove-prefix-list-entry` | Remove entry from prefix list |
 | POST | `/networks/{n}/add-route-policy-rule` | Add rule to route policy |
 | POST | `/networks/{n}/update-route-policy-rule` | Update rule in route policy (incl. renumber) |
@@ -171,7 +170,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/remove-trunk-vlan` | Atomic single-VLAN strip from a trunk port (#224) |
 | `/bind-acl`, `/unbind-acl` | ACL binding |
 | `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
-| `/apply-qos`, `/remove-qos` | QoS policy |
+| `/bind-qos`, `/unbind-qos` | QoS policy |
 | `/set-property`, `/clear-property` | Set/clear port property |
 
 ---
@@ -1118,39 +1117,20 @@ directly. `update-prefix-list` is the exception that proves the
 rule: its sub-collection (`prefixes`) IS in the request shape, so
 Update replaces it.
 
-**Prefix-list-entry mutation.** Prefix-list entries are the outlier
-among the four sub-rule families: a single entry has no fields
-beyond the prefix CIDR itself (`PrefixLists` is `map[string][]string`).
-Mid-life mutation works differently from the other three sub-rule
-families.
+**Prefix-list-entry mutation.** A prefix-list entry has no fields
+beyond the CIDR itself (`PrefixLists` is `map[string][]string`), so
+the per-entry verbs are append and delete:
 
-Three verbs cover the spectrum:
+- `add-prefix-list-entry` — atomic append.
+- `remove-prefix-list-entry` — atomic delete.
 
-- `add-prefix-list-entry` — atomic append. Fine for any list, in use or not.
-- `remove-prefix-list-entry` — atomic delete. Same.
-- `update-prefix-list-entry` — atomic single-entry swap (issue #220).
-  Preferred path for swapping one CIDR for another on **any** list,
-  whether in use or not. Under the network-spec lock, so two
-  concurrent operators editing different entries cannot lose each
-  other's writes. Referring rules never observe an intermediate
-  match set.
-
-For multi-entry mid-life edits (replacing several prefixes in one
-shot, reordering, full-list rewrite), `update-prefix-list` is the
-right verb — it atomically swaps the full entry list.
-
-`add` + `remove` is NOT a substitute for `update-prefix-list-entry`
-on in-use lists: the window between the two requests leaves rules
-referencing the list with a transiently-incorrect match set, and
-cascading reference semantics can force the operator to delete and
-re-add the referring rules too. Use the dedicated update verb.
-
-A per-entry update verb was previously documented (in PR #218) as
-unnecessary because field atomicity is trivial. That was wrong —
-field atomicity is one of several atomicity concerns, and the
-match-set atomicity for in-use lists is the operationally important
-one. PR #218's framing was corrected in PR #221, and the actual
-verb landed in this commit (issue #220).
+The prefix IS the entry's identity; there are no other fields to
+update, so the verb that would have changed the prefix was structurally
+a swap-named-update. Relocating the entry to a different prefix is
+remove + add. For multi-entry mid-life edits (replacing several
+prefixes in one shot, reordering, full-list rewrite) under a single
+lock, `update-prefix-list` is the right verb — it atomically swaps
+the full entry list.
 
 **Auth gate**: `spec.author` with `field = "<kind plural>"` and
 `resource = "<name>"`. An operator who can `create-X` or
@@ -1547,37 +1527,6 @@ Add an entry to a prefix list.
 
 ```json
 {"data": {"prefix": "10.0.0.0/8"}}
-```
-
-#### POST /newtron/v1/networks/{netID}/update-prefix-list-entry
-
-Atomically swap one prefix for another in a prefix list. Server-side
-single-entry mutation under the network-spec lock — eliminates the
-read-modify-write window the bulk `update-prefix-list` path exposes
-to concurrent operators, and preserves match-set continuity for
-referring rules (issue #220).
-
-**Query parameters:** `dry_run`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `prefix_list` | string | yes | Prefix list name |
-| `prefix` | string | yes | Existing prefix to replace |
-| `new_prefix` | string | yes | New CIDR value (required — single-field entries have no other mutable surface) |
-
-**Behaviors:**
-
-- 404 if the prefix list does not exist.
-- 404 if `prefix` is not present in the list.
-- 409 if `new_prefix` is already present elsewhere in the list (and not equal to `prefix`).
-- Idempotent no-op when `prefix == new_prefix`.
-
-**Response (200):**
-
-```json
-{"data": {"prefix": "10.0.0.0/24"}}
 ```
 
 #### POST /newtron/v1/networks/{netID}/remove-prefix-list-entry
@@ -2713,14 +2662,14 @@ Remove a BGP EVPN overlay peer.
 
 ### QoS at the node level (substrate-only annotation)
 
-Newtron does NOT expose node-level `POST /nodes/{device}/apply-qos` or
-`POST /nodes/{device}/remove-qos` endpoints. QoS apply/remove is an
+Newtron does NOT expose node-level `POST /nodes/{device}/bind-qos` or
+`POST /nodes/{device}/unbind-qos` endpoints. QoS bind/unbind is an
 interface-scoped operation (per `DESIGN_PRINCIPLES_NEWTRON.md` §6: "The
 interface is the point of service delivery, unit of lifecycle"). The
 wired endpoints are:
 
-- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos`
-- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos`
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-qos`
+- `POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-qos`
 
 See §QoS Bindings (Interface-Level) below for the canonical interfaces.
 
@@ -3075,7 +3024,7 @@ Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethe
 | Interface config | `configure-interface`, `unconfigure-interface`, `remove-trunk-vlan` | `vrf`, `ip`, `vlan_id`, `tagged` |
 | ACL | `bind-acl`, `unbind-acl` | `acl`, `direction` |
 | BGP | `add-bgp-peer`, `remove-bgp-peer` | `neighbor_ip`, `remote_as` |
-| QoS | `apply-qos`, `remove-qos` | `policy` |
+| QoS | `bind-qos`, `unbind-qos` | `policy` |
 | Port property | `set-property`, `clear-property` | `property`, `value` (set only) |
 
 All endpoints use `POST` method.
@@ -3368,9 +3317,9 @@ Remove the BGP peer from this interface.
 
 ### QoS
 
-#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-qos
 
-Apply a QoS policy to this interface.
+Bind a QoS policy to this interface.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -3382,9 +3331,9 @@ Apply a QoS policy to this interface.
 
 **Response (200):** `WriteResult`
 
-#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos
+#### POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-qos
 
-Remove the QoS policy from this interface.
+Unbind the QoS policy from this interface.
 
 **Query parameters:** `dry_run`, `no_save`
 

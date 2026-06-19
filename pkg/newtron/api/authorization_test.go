@@ -681,8 +681,8 @@ func TestAuthorizationL4_InterfaceMutationsGated(t *testing.T) {
 			body: map[string]any{"vrf": "default", "ip": "10.0.0.1/30"},
 		},
 		{
-			name: "apply-qos (qos.modify)",
-			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-qos?mode=topology",
+			name: "bind-qos (qos.modify)",
+			path: "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/bind-qos?mode=topology",
 			body: map[string]any{"policy": "qos-a"},
 		},
 	}
@@ -777,26 +777,26 @@ func TestRemoveBGPPeer_ResourceRecoveredFromIntent(t *testing.T) {
 	}
 }
 
-// TestRemoveQoS_ResourceRecoveredFromIntent pins the #163 contract
-// for the RemoveQoS reverse op: the bound policy name is recovered
+// TestUnbindQoS_ResourceRecoveredFromIntent pins the #163 contract
+// for the UnbindQoS reverse op: the bound policy name is recovered
 // from the intent record before gating, so
 // `where: {resource: "<policy>"}` clauses scope the reverse op
-// symmetrically with ApplyQoS.
+// symmetrically with BindQoS.
 //
 // Setup mirrors the BGPPeer test:
-//   - QOS_A defined in network.json (otherwise ApplyQoS would 404)
+//   - QOS_A defined in network.json (otherwise BindQoS would 404)
 //   - global qos.modify scoped to where:{resource:"QOS_A"} for
 //     "scoped-team"; device.write also granted (the topology-mode
 //     persist hook gates on it downstream, see the BGPPeer test
 //     above for the same observation)
-//   - root applies QOS_A to Ethernet0
-//   - bob attempts remove-qos
+//   - root binds QOS_A to Ethernet0
+//   - bob attempts unbind-qos
 //
-// With #163's fix: RemoveQoS reads QoSPolicyName() → "QOS_A" → gate
+// With #163's fix: UnbindQoS reads QoSPolicyName() → "QOS_A" → gate
 // sees Resource="QOS_A" → grant matches → authorized.
 // Without the fix: Resource="" → pattern "QOS_A" doesn't match ""
 // → 403.
-func TestRemoveQoS_ResourceRecoveredFromIntent(t *testing.T) {
+func TestUnbindQoS_ResourceRecoveredFromIntent(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	netJSON := `{
   "version": "1.0",
@@ -831,17 +831,17 @@ func TestRemoveQoS_ResourceRecoveredFromIntent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
 
-	applyPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/apply-qos?mode=topology"
-	if w := postAs(t, s, "root", applyPath, map[string]any{"policy": "QOS_A"}); w.Code >= 400 {
-		t.Fatalf("root could not apply QoS to set up intent state: status=%d body=%s", w.Code, w.Body.String())
+	bindPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/bind-qos?mode=topology"
+	if w := postAs(t, s, "root", bindPath, map[string]any{"policy": "QOS_A"}); w.Code >= 400 {
+		t.Fatalf("root could not bind QoS to set up intent state: status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	removePath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/remove-qos?mode=topology"
-	w := postAs(t, s, "bob", removePath, map[string]any{})
+	unbindPath := "/newtron/v1/networks/default/nodes/switch1/interfaces/Ethernet0/unbind-qos?mode=topology"
+	w := postAs(t, s, "bob", unbindPath, map[string]any{})
 	if w.Code == http.StatusForbidden {
 		var env httputil.APIResponse
 		_ = json.Unmarshal(w.Body.Bytes(), &env)
-		t.Fatalf("bob denied removing QOS_A despite where:{resource:QOS_A} grant — policy name not recovered from intent (status=%d, body=%s)", w.Code, env.Error)
+		t.Fatalf("bob denied unbinding QOS_A despite where:{resource:QOS_A} grant — policy name not recovered from intent (status=%d, body=%s)", w.Code, env.Error)
 	}
 }
 

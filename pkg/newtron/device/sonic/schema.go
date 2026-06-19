@@ -518,7 +518,7 @@ var Schema = map[string]TableSchema{
 				OpCreatePortChannel, OpConfigureIRB, OpAddStaticRoute,
 				OpSetProperty, OpConfigureInterface, OpAddTrunkVLAN, OpAddBGPPeer,
 				OpUpdateStaticRoute, OpUpdateBGPPeer, OpUpdateBGPEVPNPeer,
-				OpApplyService, OpBindACL, OpApplyQoS,
+				OpApplyService, OpBindACL, OpBindQoS,
 				OpAddACLRule, OpUpdateACLRule, OpAddPortChannelMember, OpInterfaceInit, OpDeployService,
 			}},
 			// DAG metadata — structural dependencies between intent records

@@ -1313,52 +1313,6 @@ func (n *Network) AddPrefixToPrefixList(prefixList string, prefix string) error 
 	return n.persistSpec()
 }
 
-// UpdatePrefixInPrefixList atomically swaps one prefix for another in
-// a prefix list, eliminating the read-modify-write race the bulk
-// UpdatePrefixList path has between concurrent operators. The current
-// prefix must exist in the list; the new prefix must not (or must equal
-// the current prefix, which is treated as an idempotent no-op).
-// Match-set atomicity for in-use lists is preserved — referring rules
-// never observe an intermediate state. Issue #220.
-func (n *Network) UpdatePrefixInPrefixList(prefixList, currentPrefix, newPrefix string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	prefixList = util.NormalizeName(prefixList)
-	prefixes, ok := n.spec.PrefixLists[prefixList]
-	if !ok {
-		return fmt.Errorf("prefix list '%s' not found", prefixList)
-	}
-	// Locate the current prefix.
-	currentIdx := -1
-	for i, p := range prefixes {
-		if p == currentPrefix {
-			currentIdx = i
-			break
-		}
-	}
-	if currentIdx < 0 {
-		return fmt.Errorf("prefix '%s' not found in prefix list '%s'", currentPrefix, prefixList)
-	}
-	// Idempotent no-op when swapping to the same value.
-	if currentPrefix == newPrefix {
-		return nil
-	}
-	// Refuse collision: the target value must not already exist elsewhere.
-	for i, p := range prefixes {
-		if i == currentIdx {
-			continue
-		}
-		if p == newPrefix {
-			return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", newPrefix, prefixList)
-		}
-	}
-	prefixes[currentIdx] = newPrefix
-	n.spec.PrefixLists[prefixList] = prefixes
-	return n.persistSpec()
-}
-
 // RemovePrefixFromPrefixList atomically removes a prefix from a prefix
 // list. Returns an error if the list or prefix doesn't exist.
 func (n *Network) RemovePrefixFromPrefixList(prefixList string, prefix string) error {

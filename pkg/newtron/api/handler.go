@@ -96,7 +96,6 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-prefix-list", s.handleCreatePrefixList)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-prefix-list", s.handleDeletePrefixList)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/add-prefix-list-entry", s.handleAddPrefixListEntry)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-prefix-list-entry", s.handleUpdatePrefixListEntry)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/remove-prefix-list-entry", s.handleRemovePrefixListEntry)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-route-policy", s.handleCreateRoutePolicy)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-route-policy", s.handleDeleteRoutePolicy)
@@ -221,8 +220,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/clear-property", s.handleClearProperty)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/configure-interface", s.handleConfigureInterface)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-trunk-vlan", s.handleRemoveTrunkVLAN)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/apply-qos", s.handleApplyInterfaceQoS)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/remove-qos", s.handleRemoveInterfaceQoS)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/bind-qos", s.handleBindQoS)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{device}/interfaces/{name}/unbind-qos", s.handleUnbindQoS)
 
 	// Apply middleware chain (outermost → innermost):
 	//   recovery → logger → requestID → caller → audit → timeout → persist → mode → mux

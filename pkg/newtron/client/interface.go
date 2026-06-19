@@ -93,15 +93,15 @@ func (c *Client) ClearProperty(device, iface, property string, opts newtron.Exec
 	return c.interfaceWrite(device, iface, "clear-property", body, opts)
 }
 
-// InterfaceApplyQoS applies a QoS policy to an interface (interface-level).
-func (c *Client) InterfaceApplyQoS(device, iface, policy string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.ApplyQoSRequest{Policy: policy}
-	return c.interfaceWrite(device, iface, "apply-qos", body, opts)
+// InterfaceBindQoS binds a QoS policy to an interface (interface-level).
+func (c *Client) InterfaceBindQoS(device, iface, policy string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.BindQoSRequest{Policy: policy}
+	return c.interfaceWrite(device, iface, "bind-qos", body, opts)
 }
 
-// InterfaceRemoveQoS removes QoS from an interface (interface-level).
-func (c *Client) InterfaceRemoveQoS(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.interfaceWrite(device, iface, "remove-qos", nil, opts)
+// InterfaceUnbindQoS unbinds QoS from an interface (interface-level).
+func (c *Client) InterfaceUnbindQoS(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.interfaceWrite(device, iface, "unbind-qos", nil, opts)
 }
 
 // ConfigureInterface sets forwarding mode on an interface.

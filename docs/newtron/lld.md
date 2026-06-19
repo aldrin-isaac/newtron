@@ -68,7 +68,7 @@ pkg/newtron/network/node/             # Node internals — all operations live h
     bgp_ops.go                        # ConfigureBGP, AddBGPEVPNPeer, ConfigureRouteReflector
     evpn_ops.go                       # SetupVXLAN, TeardownVXLAN, BindMACVPN, UnbindMACVPN
     acl_ops.go                        # CreateACL, DeleteACL, AddACLRule, DeleteACLRule
-    qos_ops.go                        # ApplyQoS, RemoveQoS (on Interface)
+    qos_ops.go                        # BindQoS, UnbindQoS (on Interface)
     interface_ops.go                  # ConfigureInterface, UnconfigureInterface, SetProperty, etc.
     interface_bgp_ops.go              # AddBGPPeer, RemoveBGPPeer (on Interface)
     baseline_ops.go                   # SetupDevice, ConfigureLoopback, RemoveLoopback
@@ -293,7 +293,7 @@ type FilterRule struct {
 
 ### 2.8 QoSPolicy
 
-Defines DSCP-to-queue mapping and scheduling. Applied to interfaces via `ApplyQoS`; generates DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, QUEUE, and PORT_QOS_MAP entries.
+Defines DSCP-to-queue mapping and scheduling. Bound to interfaces via `BindQoS`; generates DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, QUEUE, and PORT_QOS_MAP entries.
 
 ```go
 type QoSPolicy struct {
@@ -1063,7 +1063,6 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 | POST | `.../update-prefix-list` | `CreatePrefixListRequest` (full-replacement; `prefixes` is in the request shape so Update replaces it; #152) |
 | POST | `.../delete-prefix-list` | `{name}` |
 | POST | `.../add-prefix-list-entry` | `AddPrefixListEntryRequest` |
-| POST | `.../update-prefix-list-entry` | `UpdatePrefixListEntryRequest` — atomic single-entry swap; required `new_prefix` (#220) |
 | POST | `.../remove-prefix-list-entry` | `{prefix_list, prefix}` |
 | POST | `.../create-route-policy` | `CreateRoutePolicyRequest` |
 | POST | `.../update-route-policy` | `CreateRoutePolicyRequest` (full-replacement; preserves `rules` sub-collection; #152) |
@@ -1195,8 +1194,8 @@ Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `Wri
 | POST | `.../interfaces/{name}/add-bgp-peer` | `AddBGPPeer` |
 | POST | `.../interfaces/{name}/update-bgp-peer` | `UpdateBGPPeer` — atomic per-peer field mutation; key (vrf, neighbor_ip) is immutable (§47, #227) |
 | POST | `.../interfaces/{name}/remove-bgp-peer` | `RemoveBGPPeer` |
-| POST | `.../interfaces/{name}/apply-qos` | `ApplyQoS` |
-| POST | `.../interfaces/{name}/remove-qos` | `RemoveQoS` |
+| POST | `.../interfaces/{name}/bind-qos` | `BindQoS` |
+| POST | `.../interfaces/{name}/unbind-qos` | `UnbindQoS` |
 
 All paths prefixed with `/networks/{netID}/node/{device}`.
 
@@ -1554,7 +1553,7 @@ These two functions are the bridge between intent records and config methods. Th
 | `/interfaces/{name}/add-bgp-peer` | `iface.AddBGPPeer(ctx, config)` |
 | `/interfaces/{name}/set-property` | `iface.SetProperty(ctx, prop, value)` |
 | `/interfaces/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
-| `/interfaces/{name}/apply-qos` | `iface.ApplyQoS(ctx, policy, spec)` |
+| `/interfaces/{name}/bind-qos` | `iface.BindQoS(ctx, policy, spec)` |
 
 `RebuildProjection` (in `node.go`) and `InitFromDeviceIntent` (in
 `node_actuated.go`) call `IntentsToSteps + ReplayStep` directly against

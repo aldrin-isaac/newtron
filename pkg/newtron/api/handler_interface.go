@@ -301,13 +301,13 @@ func (s *Server) handleClearProperty(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleApplyInterfaceQoS(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleBindQoS(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
 	ifName := interfaceName(r)
-	var req ApplyQoSRequest
+	var req BindQoSRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
@@ -318,7 +318,7 @@ func (s *Server) handleApplyInterfaceQoS(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			return err
 		}
-		return iface.ApplyQoS(ctx, req.Policy)
+		return iface.BindQoS(ctx, req.Policy)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -385,7 +385,7 @@ func (s *Server) handleConfigureInterface(w http.ResponseWriter, r *http.Request
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleRemoveInterfaceQoS(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUnbindQoS(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -397,7 +397,7 @@ func (s *Server) handleRemoveInterfaceQoS(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
-		return iface.RemoveQoS(ctx)
+		return iface.UnbindQoS(ctx)
 	})
 	if err != nil {
 		writeError(w, err)

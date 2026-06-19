@@ -270,7 +270,7 @@ it does not reach into the child's intent record.
 
 ```
 RemoveService orchestrates:
-  1. iface.RemoveQoS()     → sub-resource deletes own intent, deregisters from interface
+  1. iface.UnbindQoS()     → sub-resource deletes own intent, deregisters from interface
   2. iface.UnbindACL()     → binding deletes own intent, deregisters from interface + ACL
   3. n.deleteIntent("interface|Ethernet0")  → interface intent deleted (children already gone)
 ```
@@ -712,9 +712,9 @@ QoS policy binding on an interface.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | apply-qos | `Interface.ApplyQoS` | qos_ops.go |
-| Read | remove-qos | `Interface.RemoveQoS` | qos_ops.go |
-| Delete | remove-qos | `Interface.RemoveQoS` | qos_ops.go |
+| Create | bind-qos | `Interface.BindQoS` | qos_ops.go |
+| Read | unbind-qos | `Interface.UnbindQoS` | qos_ops.go |
+| Delete | unbind-qos | `Interface.UnbindQoS` | qos_ops.go |
 
 **Parents**: `[interface|INTF]`
 
@@ -751,7 +751,7 @@ cannot exist without an interface intent — there is no purpose in configuring
 properties on an interface that the intent system doesn't know about.
 
 The interface intent is created by `ConfigureInterface` or `ApplyService`
-(§10.7). Sub-resource operations (`ApplyQoS`, `BindACL`, `SetProperty`,
+(§10.7). Sub-resource operations (`BindQoS`, `BindACL`, `SetProperty`,
 `AddBGPPeer`, etc.) require the interface intent to exist (I4 enforcement)
 and declare it as their parent. `UnconfigureInterface` / `RemoveService`
 must first remove all sub-resources (I5 — `deleteIntent` refuses if children
@@ -788,7 +788,7 @@ VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH entries.
 IRB (Integrated Routing and Bridging) configuration on a VLAN. Creates
 VLAN_INTERFACE IP entries and SAG_GLOBAL anycast MAC. Uses the `interface|`
 namespace because an IRB is a SONiC interface (`Vlan100`) — sub-resource
-operations (BindACL, AddBGPPeer, ApplyQoS) parent to it like any other
+operations (BindACL, AddBGPPeer, BindQoS) parent to it like any other
 interface.
 
 | Action | Operation | Function | File |
@@ -894,7 +894,7 @@ All 17 intent resource keys at a glance:
 | 6 | `evpn-peer\|ADDR` | `[device]` | AddBGPEVPNPeer | RemoveBGPEVPNPeer |
 | 7 | `interface\|INTF` | varies; +`portchannel\|NAME` for PCs | ConfigureInterface, ApplyService | UnconfigureInterface, RemoveService |
 | 8 | `interface\|INTF\|acl\|DIR` | `[interface\|INTF, acl\|NAME]` | BindACL | UnbindACL |
-| 9 | `interface\|INTF\|qos` | `[interface\|INTF]` | ApplyQoS | RemoveQoS |
+| 9 | `interface\|INTF\|qos` | `[interface\|INTF]` | BindQoS | UnbindQoS |
 | 10 | `interface\|INTF\|PROPERTY` | `[interface\|INTF]` | SetProperty | ClearProperty |
 | 11 | `macvpn\|VLANID` | `[vlan\|ID]` | Node.BindMACVPN | Node.UnbindMACVPN |
 | 12 | `interface\|Vlan{ID}` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
@@ -1103,7 +1103,7 @@ vlan|100 (create-vlan)
 ```
 $ newtron intent tree switch1 interface:Ethernet0
 interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
-├── interface|Ethernet0|qos (apply-qos) policy=STRICT_PRIORITY
+├── interface|Ethernet0|qos (bind-qos) policy=STRICT_PRIORITY
 ├── interface|Ethernet0|acl|ingress (bind-acl) acl_name=EDGE_IN
 └── interface|Ethernet0|mtu (set-property) mtu=9100
 ```
@@ -1507,7 +1507,7 @@ operation that walks the DAG.
 The rule: **sub-resource intents require an interface intent as parent.** The
 interface intent (`interface|INTF`) is created by `ConfigureInterface`,
 `ApplyService`, or `AddBGPPeer` — whichever operation first gives the
-interface a role. Sub-resource operations (`ApplyQoS`, `BindACL`,
+interface a role. Sub-resource operations (`BindQoS`, `BindACL`,
 `SetProperty`, `Interface.BindMACVPN`) declare `interface|INTF` as parent.
 If the interface has no intent, the sub-resource's `writeIntent` fails (I4).
 
@@ -1515,7 +1515,7 @@ This creates a two-level tree per interface:
 
 ```
 interface|Ethernet0 (configure-interface)
-├── interface|Ethernet0|qos (apply-qos)
+├── interface|Ethernet0|qos (bind-qos)
 ├── interface|Ethernet0|acl|ingress (bind-acl)
 └── interface|Ethernet0|mtu (set-property)
 ```

@@ -279,17 +279,21 @@ Examples:
 	},
 }
 
-var qosApplyCmd = &cobra.Command{
-	Use:   "apply <interface> <policy-name>",
-	Short: "Apply a QoS policy to an interface",
-	Long: `Apply a QoS policy to an interface on the device.
+var qosBindCmd = &cobra.Command{
+	Use:   "bind <interface> <policy-name>",
+	Short: "Bind a QoS policy to an interface",
+	Long: `Bind a QoS policy to an interface on the device.
 
-This writes QoS entries to CONFIG_DB for the specified interface.
+Mirror of acl bind: per §16 (verb vocabulary) and §24 (shared-object
+lifecycle), QoS policies are device-wide objects that interfaces bind
+to. The first bind for a policy creates the device-wide entries
+(DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE); subsequent
+binds reuse them. Unbind reverses (last-consumer cleanup).
 
 Requires -D (device) flag.
 
 Examples:
-  newtron -D leaf1-ny qos apply Ethernet0 8q-datacenter -x`,
+  newtron -D leaf1-ny qos bind Ethernet0 8q-datacenter -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
@@ -299,19 +303,21 @@ Examples:
 			return err
 		}
 
-		return displayWriteResult(app.client.InterfaceApplyQoS(app.deviceName, intfName, policyName, execOpts()))
+		return displayWriteResult(app.client.InterfaceBindQoS(app.deviceName, intfName, policyName, execOpts()))
 	},
 }
 
-var qosRemoveCmd = &cobra.Command{
-	Use:   "remove <interface>",
-	Short: "Remove QoS configuration from an interface",
-	Long: `Remove QoS configuration from an interface on the device.
+var qosUnbindCmd = &cobra.Command{
+	Use:   "unbind <interface>",
+	Short: "Unbind QoS from an interface",
+	Long: `Unbind the QoS policy from an interface. The bound policy
+name is recovered from the intent record. If this is the last
+interface using the policy, the device-wide entries are also removed.
 
 Requires -D (device) flag.
 
 Examples:
-  newtron -D leaf1-ny qos remove Ethernet0 -x`,
+  newtron -D leaf1-ny qos unbind Ethernet0 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
@@ -320,7 +326,7 @@ Examples:
 			return err
 		}
 
-		return displayWriteResult(app.client.InterfaceRemoveQoS(app.deviceName, intfName, execOpts()))
+		return displayWriteResult(app.client.InterfaceUnbindQoS(app.deviceName, intfName, execOpts()))
 	},
 }
 
@@ -339,6 +345,6 @@ func init() {
 	qosCmd.AddCommand(qosDeleteCmd)
 	qosCmd.AddCommand(qosAddQueueCmd)
 	qosCmd.AddCommand(qosRemoveQueueCmd)
-	qosCmd.AddCommand(qosApplyCmd)
-	qosCmd.AddCommand(qosRemoveCmd)
+	qosCmd.AddCommand(qosBindCmd)
+	qosCmd.AddCommand(qosUnbindCmd)
 }

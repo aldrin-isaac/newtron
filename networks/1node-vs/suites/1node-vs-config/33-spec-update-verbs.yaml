@@ -1,13 +1,12 @@
 name: spec-update-verbs
 description: |
-  E2E coverage for the four per-item update verbs that landed in PRs
-  #215 / #216 / #217 / #222 (issues #209 / #210 / #211 / #220).
+  E2E coverage for the three per-item update verbs that landed in PRs
+  #215 / #216 / #217 (issues #209 / #210 / #211).
 
   Exercises:
     - update-filter-rule       — modify in place + renumber via new_seq
     - update-route-policy-rule — modify in place + renumber via new_seq
     - update-qos-queue         — modify in place + renumber via new_queue_id
-    - update-prefix-list-entry — atomic CIDR swap
 
   Loopback mode — these are pure network-spec mutations (no device traffic),
   so they validate the API surface end-to-end without needing a real ASIC.
@@ -233,53 +232,3 @@ steps:
     url: /delete-qos-policy
     params: {name: TEST_QOS_UPD}
 
-  # ====================================================================
-  # update-prefix-list-entry (#220 / PR #222)
-  # ====================================================================
-  - name: create-pl-for-update-entry
-    action: newtron
-    method: POST
-    url: /create-prefix-list
-    params:
-      name: TEST_PL_UPD
-      prefixes:
-        - "10.0.0.0/8"
-        - "172.16.0.0/12"
-
-  - name: update-prefix-list-entry-swap
-    action: newtron
-    method: POST
-    url: /update-prefix-list-entry
-    params:
-      prefix_list: TEST_PL_UPD
-      prefix: "10.0.0.0/8"
-      new_prefix: "10.0.0.0/24"
-
-  - name: verify-prefix-list-entry-swapped
-    action: newtron
-    url: /prefix-lists/TEST_PL_UPD
-    expect:
-      jq: |
-        (.prefixes | sort) == ["10.0.0.0/24", "172.16.0.0/12"]
-
-  - name: update-prefix-list-entry-idempotent-no-op
-    action: newtron
-    method: POST
-    url: /update-prefix-list-entry
-    params:
-      prefix_list: TEST_PL_UPD
-      prefix: "10.0.0.0/24"
-      new_prefix: "10.0.0.0/24"
-
-  - name: verify-pl-unchanged-after-idempotent
-    action: newtron
-    url: /prefix-lists/TEST_PL_UPD
-    expect:
-      jq: |
-        (.prefixes | sort) == ["10.0.0.0/24", "172.16.0.0/12"]
-
-  - name: cleanup-test-pl-upd
-    action: newtron
-    method: POST
-    url: /delete-prefix-list
-    params: {name: TEST_PL_UPD}

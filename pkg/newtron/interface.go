@@ -280,9 +280,9 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) error {
 	return nil
 }
 
-// ApplyQoS applies a QoS policy to this interface.
+// BindQoS binds a QoS policy to this interface.
 // Resolves the QoS policy spec by name from the node's SpecProvider.
-func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
+func (i *Interface) BindQoS(ctx context.Context, policy string) error {
 	if err := i.gate(ctx, auth.PermQoSModify, policy); err != nil {
 		return err
 	}
@@ -291,7 +291,7 @@ func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
 	if err != nil {
 		return err
 	}
-	cs, err := i.internal.ApplyQoS(ctx, policy, policyDef)
+	cs, err := i.internal.BindQoS(ctx, policy, policyDef)
 	if err != nil {
 		return err
 	}
@@ -299,16 +299,16 @@ func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
 	return nil
 }
 
-// RemoveQoS removes QoS configuration from this interface. Recovers
-// the bound policy name from the intent record before gating so
+// UnbindQoS unbinds the QoS policy from this interface. Recovers the
+// bound policy name from the intent record before gating so
 // `where: {resource: "<policy>"}` clauses scope this reverse op
-// symmetrically with ApplyQoS (DPN §15; #163).
-func (i *Interface) RemoveQoS(ctx context.Context) error {
+// symmetrically with BindQoS (DPN §15; #163).
+func (i *Interface) UnbindQoS(ctx context.Context) error {
 	policy := i.internal.QoSPolicyName()
 	if err := i.gate(ctx, auth.PermQoSModify, policy); err != nil {
 		return err
 	}
-	cs, err := i.internal.RemoveQoS(ctx)
+	cs, err := i.internal.UnbindQoS(ctx)
 	if err != nil {
 		return err
 	}

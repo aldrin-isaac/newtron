@@ -594,8 +594,8 @@ definitions independent of any device.
 │                                                 │
 │                    Interface                    │
 │  owns: interface identity (name + parent node)  │
-│   ApplyService(), RemoveService(), ApplyQoS()   │
-│  ConfigureInterface(), BindACL(), UnbindACL()  │
+│   ApplyService(), RemoveService(), BindQoS()    │
+│    SetIP(), SetVRF(), BindACL(), UnbindACL()    │
 │                                                 │
 └─────────────────────────────────────────────────┘
 ```
@@ -1216,7 +1216,7 @@ The current operation pairs:
 | `BindIPVPN` | `UnbindIPVPN` |
 | `CreatePortChannel` | `DeletePortChannel` |
 | `ApplyService` | `RemoveService` |
-| `ApplyQoS` | `RemoveQoS` |
+| `BindQoS` | `UnbindQoS` |
 | `BindACL` | `UnbindACL` |
 | `AddBGPPeer` | `RemoveBGPPeer` |
 | `AddBGPEVPNPeer` | `RemoveBGPEVPNPeer` |
@@ -1282,7 +1282,7 @@ shared resources — a domain judgment that no mechanical reversal can
 replicate.
 
 Only domain-level reverse operations (`RemoveService`, `UnbindACL`,
-`RemoveQoS`) have the context to determine whether a shared resource
+`UnbindQoS`) have the context to determine whether a shared resource
 can be safely removed. Dependency checking scans the node's intent
 collection (actuated intents) in addition to CONFIG_DB, ensuring that
 shared resource removal accounts for all declared consumers — not just
@@ -1361,6 +1361,10 @@ the verb knows whether a teardown command exists and what it's called.
 | `bind-*` | Relationship between resources. | `unbind-*` |
 | `apply-*` | Composite (service, policy). | `remove-*` |
 | `configure-*` | Multi-field configuration of existing resource. | `unconfigure-*` |
+
+QoS uses `bind-qos` / `unbind-qos` (not `apply-*`) because a QoS policy is a shared
+device-wide object referenced by per-interface bindings — the same shared-object model
+as ACLs and IP-VPNs (§24).
 
 Two rules follow:
 - `setup-*` and `set-*` = no individual reverse. Remediation is
@@ -1638,7 +1642,7 @@ connected, or actuated.
 
 Rollback operates at the intent level, not the ChangeSet level. To roll
 back an operation, the orchestrator calls the domain-level reverse for that
-intent (RemoveService, RemoveQoS, etc.). Shared resources are handled by
+intent (RemoveService, UnbindQoS, etc.). Shared resources are handled by
 the same dependency-aware logic described in §15: the reverse operation
 scans actuated intents for remaining consumers before deleting shared
 infrastructure. Mechanical ChangeSet reversal remains unsafe for the same
@@ -2187,8 +2191,8 @@ by `configure-interface` — the interface is the subject (§6).
 object provides its own identity; callers express intent, not identity.
 
 **Rule 3: Node convenience methods delegate, not duplicate.**
-`Node.ApplyQoS(intfName, ...)` resolves a name to an Interface and
-calls `iface.ApplyQoS(...)`. It never re-implements the operation.
+`Node.BindQoS(intfName, ...)` resolves a name to an Interface and
+calls `iface.BindQoS(...)`. It never re-implements the operation.
 
 **If an object knows its own identity, callers must not re-supply it.**
 

@@ -668,7 +668,7 @@ operation field distinguishes them. Parents vary by configuration context
 Auto-created anchor for sub-resource operations on interfaces that have no
 explicit configuration (no `ConfigureInterface`, no `ApplyService`). Ensures
 the `interface|{INTF}` parent exists when `SetProperty`, `BindACL`,
-`ApplyQoS`, or `AddBGPPeer` is called on an unconfigured interface.
+`BindQoS`, or `AddBGPPeer` is called on an unconfigured interface.
 
 | Field | Value |
 |-------|-------|
@@ -858,16 +858,16 @@ service-level BGP neighbors which use peer groups.
 
 #### `interface|{INTF}|qos`
 
-QoS policy binding on an interface. Created explicitly via `ApplyQoS` or
+QoS policy binding on an interface. Created explicitly via `BindQoS` or
 implicitly by `ApplyService` when the service spec references a QoS policy.
 
 | Field | Value |
 |-------|-------|
 | **Resource key** | `"interface|" + i.name + "\|qos"` |
-| **Operation** | `OpApplyQoS` (`"apply-qos"`) |
-| **Created by** | `ApplyQoS()` in `qos_ops.go`; `ApplyService()` in `service_ops.go` |
-| **Deleted by** | `RemoveQoS()` in `qos_ops.go`; `RemoveService()` in `service_ops.go` |
-| **Reconstruct** | `replayInterfaceStep` → `iface.ApplyQoS(ctx, policyName, policy)` |
+| **Operation** | `OpBindQoS` (`"bind-qos"`) |
+| **Created by** | `BindQoS()` in `qos_ops.go`; `ApplyService()` in `service_ops.go` |
+| **Deleted by** | `UnbindQoS()` in `qos_ops.go`; `RemoveService()` in `service_ops.go` |
+| **Reconstruct** | `replayInterfaceStep` → `iface.BindQoS(ctx, policyName, policy)` |
 | **skipInReconstruct** | No |
 
 **Parents:** `["interface|" + i.name]`.
@@ -1216,7 +1216,7 @@ stale relative to the service intent's current keys.
 | 13 | `interface\|INTF` | `configure-interface` | varies (§7.5) | sub-resources | No |
 | 14 | `interface\|INTF` | `apply-service` | varies (§7.5) | qos | No |
 | 15 | `interface\|INTF\|bgp-peer` | `add-bgp-peer` | `[interface\|INTF]` | (leaf) | No |
-| 16 | `interface\|INTF\|qos` | `apply-qos` | `[interface\|INTF]` | (leaf) | No |
+| 16 | `interface\|INTF\|qos` | `bind-qos` | `[interface\|INTF]` | (leaf) | No |
 | 17 | `interface\|INTF\|acl\|DIR` | `bind-acl` | `[interface\|INTF, acl\|NAME]` | (leaf) | No |
 | 18 | `interface\|INTF\|PROPERTY` | `set-property` | `[interface\|INTF]` | (leaf) | No |
 | 19 | `portchannel\|NAME\|MEMBER` | `add-pc-member` | `[portchannel\|NAME]` | (leaf) | No |

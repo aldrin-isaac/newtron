@@ -602,7 +602,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// QoS entries (per-interface binding + device-wide tables)
 	if qosPolicy != nil {
-		if err := n.writeIntent(cs, sonic.OpApplyQoS, "interface|"+i.name+"|qos",
+		if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
 			map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
 			[]string{"interface|" + i.name}); err != nil {
 			return nil, err
