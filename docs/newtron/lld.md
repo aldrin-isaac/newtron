@@ -1063,7 +1063,6 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 | POST | `.../update-prefix-list` | `CreatePrefixListRequest` (full-replacement; `prefixes` is in the request shape so Update replaces it; #152) |
 | POST | `.../delete-prefix-list` | `{name}` |
 | POST | `.../add-prefix-list-entry` | `AddPrefixListEntryRequest` |
-| POST | `.../update-prefix-list-entry` | `UpdatePrefixListEntryRequest` — atomic single-entry swap; required `new_prefix` (#220) |
 | POST | `.../remove-prefix-list-entry` | `{prefix_list, prefix}` |
 | POST | `.../create-route-policy` | `CreateRoutePolicyRequest` |
 | POST | `.../update-route-policy` | `CreateRoutePolicyRequest` (full-replacement; preserves `rules` sub-collection; #152) |
