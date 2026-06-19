@@ -41,41 +41,142 @@ type FieldMeta struct {
 	RefKind     string   `json:"ref_kind,omitempty"`  // for type=ref — UI renders dropdown of this kind's names
 	ItemType    string   `json:"item_type,omitempty"` // for type=array|map — primitive element type
 	ItemKind    string   `json:"item_kind,omitempty"` // for type=array|map of objects — element kind name
+
+	// Validation hints (UI client-side validation; server still validates
+	// server-side on POST). All optional.
+	Pattern   string `json:"pattern,omitempty"`   // regex the value must match
+	Min       *int   `json:"min,omitempty"`       // inclusive lower bound for type=int
+	Max       *int   `json:"max,omitempty"`       // inclusive upper bound for type=int
+	Format    string `json:"format,omitempty"`    // semantic hint — "cidr", "ipv4", "ipv6", "mac", "asn"
+	Immutable bool   `json:"immutable,omitempty"` // value is fixed at create time — UI suppresses edit affordance in update-mode forms
 }
 
-// SchemaMeta describes one spec type as a whole — the kind plus its fields.
+// SchemaPaths declares the HTTP path templates a UI uses to drive a kind
+// end-to-end. Path components in braces (`{netID}`, `{name}`) are
+// substituted by the UI at request time. Omitted paths mean the verb
+// doesn't exist for this kind:
+//
+//   - PlatformSpec is read-only: List + Show populated, Create/Update/Delete
+//     omitted.
+//   - Sub-rule kinds (FilterRule, QoSQueue, …) aren't top-level
+//     addressable: List + Show omitted, Create/Update/Delete carry the
+//     add-X / update-X / remove-X verbs that take the parent's name in
+//     the request body (see ParentIdentifierField on SchemaMeta).
+//   - PrefixListEntry has no Update verb (per §47 there are no other
+//     mutable fields).
+type SchemaPaths struct {
+	List   string `json:"list,omitempty"`   // GET — enumerate names
+	Show   string `json:"show,omitempty"`   // GET — fetch one named instance
+	Create string `json:"create,omitempty"` // POST — create
+	Update string `json:"update,omitempty"` // POST — replace fields in place
+	Delete string `json:"delete,omitempty"` // POST — remove
+}
+
+// SchemaMeta describes one spec type as a whole — the kind, its fields,
+// and the URL+identity metadata a UI needs to drive create/update/delete
+// without hardcoded mappings.
 type SchemaMeta struct {
 	Kind        string      `json:"kind"`                  // Go type name (e.g. "ServiceSpec")
 	Label       string      `json:"label"`                 // human label for the kind
 	Description string      `json:"description,omitempty"` // tooltip for the kind
 	Fields      []FieldMeta `json:"fields"`
+
+	// Identifier names the field that addresses one row of this kind. For
+	// most top-level kinds it's "name"; sub-rules use "seq" / "queue_id" /
+	// "prefix". UIs use this to suppress the identifier field in edit-mode
+	// forms (the URL carries it) and to detect rename / renumber against
+	// the source row.
+	Identifier string `json:"identifier,omitempty"`
+
+	// ParentRef names the wire field a sub-rule's request body uses to
+	// identify its parent (e.g. FilterRule's add/update/remove bodies
+	// carry `filter: "<parent_name>"`). Empty for top-level kinds.
+	ParentRef string `json:"parent_ref,omitempty"`
+
+	// Paths carries the HTTP path templates for this kind's CRUD verbs.
+	// `omitzero` (Go 1.24+) drops the whole object when every path is
+	// empty — embedded-only kinds (RoutingSpec, RoutePolicySet, EVPNConfig)
+	// have no paths and shouldn't surface a noisy empty object on the wire.
+	Paths SchemaPaths `json:"paths,omitzero"`
 }
 
-// schemaKind carries a spec kind's reflect.Type plus the kind-level label
-// and description. The registry hands these to BuildSchemaMeta to produce
-// the final SchemaMeta document.
+// SchemaRegistration carries everything required to register a spec kind
+// with the schema metadata endpoint. Passed to RegisterSchemaKind at
+// init() time.
+//
+// Sample is a zero value of the kind's Go type; reflection on its tags
+// drives the per-field metadata. Identifier / ParentRef / Paths are
+// static metadata the kind's struct tags cannot express.
+//
+// IdentifierField is optional and used only when the identifier isn't
+// already a field on the Sample struct — sub-rule kinds whose identifier
+// is implicit in the parent's representation (e.g. QoSQueue's queue_id
+// is the array index in QoSPolicy.Queues). When non-nil, this FieldMeta
+// is prepended to the extracted field list so universal UIs see a
+// complete form shape.
+type SchemaRegistration struct {
+	Kind            string
+	Label           string
+	Description     string
+	Sample          any
+	Identifier      string
+	IdentifierField *FieldMeta
+	ParentRef       string
+	Paths           SchemaPaths
+}
+
+// schemaKind carries a registered kind's reflect.Type plus the static
+// metadata that doesn't come from struct tags. The registry hands these
+// to buildSchemaMeta to produce the final SchemaMeta document.
 type schemaKind struct {
-	t           reflect.Type
-	label       string
-	description string
+	t               reflect.Type
+	label           string
+	description     string
+	identifier      string
+	identifierField *FieldMeta
+	parentRef       string
+	paths           SchemaPaths
 }
 
 // schemaRegistry holds every spec kind that participates in the schema
 // metadata endpoint. Populated by RegisterSchemaKind at init() time from
-// the spec package; cached schema docs are built lazily on first read so
-// circular registration order doesn't matter.
+// the spec package; SchemaMeta docs are built on demand so registration
+// order doesn't matter.
 var schemaRegistry = map[string]schemaKind{}
 
 // RegisterSchemaKind makes a spec type available to the schema metadata
-// endpoint. Call at init() time with the zero value of the type:
+// endpoint. Call at init() time:
 //
-//	func init() { RegisterSchemaKind("ServiceSpec", "Service", "...", ServiceSpec{}) }
-func RegisterSchemaKind(kind, label, description string, sample any) {
-	t := reflect.TypeOf(sample)
+//	func init() {
+//	    RegisterSchemaKind(SchemaRegistration{
+//	        Kind:        "IPVPNSpec",
+//	        Label:       "IP-VPN",
+//	        Description: "A Layer-3 VPN — VRF + L3VNI + route targets.",
+//	        Sample:      IPVPNSpec{},
+//	        Identifier:  "name",
+//	        Paths: SchemaPaths{
+//	            List:   "/newtron/v1/networks/{netID}/ipvpns",
+//	            Show:   "/newtron/v1/networks/{netID}/ipvpns/{name}",
+//	            Create: "/newtron/v1/networks/{netID}/create-ipvpn",
+//	            Update: "/newtron/v1/networks/{netID}/update-ipvpn",
+//	            Delete: "/newtron/v1/networks/{netID}/delete-ipvpn",
+//	        },
+//	    })
+//	}
+func RegisterSchemaKind(reg SchemaRegistration) {
+	t := reflect.TypeOf(reg.Sample)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
-	schemaRegistry[kind] = schemaKind{t: t, label: label, description: description}
+	schemaRegistry[reg.Kind] = schemaKind{
+		t:               t,
+		label:           reg.Label,
+		description:     reg.Description,
+		identifier:      reg.Identifier,
+		identifierField: reg.IdentifierField,
+		parentRef:       reg.ParentRef,
+		paths:           reg.Paths,
+	}
 }
 
 // ListSchemaKinds returns every registered kind's name, sorted for stable
@@ -106,11 +207,21 @@ func LookupSchema(kind string) *SchemaMeta {
 // buildSchemaMeta walks a reflect.Type and produces its SchemaMeta. Exposed
 // for tests; production code goes through LookupSchema.
 func buildSchemaMeta(sk schemaKind) SchemaMeta {
+	fields := extractFields(sk.t)
+	// Prepend a synthetic identifier field for sub-rule kinds whose
+	// identifier is implicit in the parent's representation (e.g.
+	// QoSQueue's queue_id is the array index, not a struct field).
+	if sk.identifierField != nil {
+		fields = append([]FieldMeta{*sk.identifierField}, fields...)
+	}
 	meta := SchemaMeta{
 		Kind:        sk.t.Name(),
 		Label:       sk.label,
 		Description: sk.description,
-		Fields:      extractFields(sk.t),
+		Identifier:  sk.identifier,
+		ParentRef:   sk.parentRef,
+		Paths:       sk.paths,
+		Fields:      fields,
 	}
 	return meta
 }
@@ -148,6 +259,19 @@ func extractFields(t reflect.Type) []FieldMeta {
 			Label:       sf.Tag.Get("label"),
 			Description: sf.Tag.Get("tooltip"),
 			Required:    !hasOmitEmpty && sf.Type.Kind() != reflect.Ptr,
+			Pattern:     sf.Tag.Get("pattern"),
+			Format:      sf.Tag.Get("format"),
+			Immutable:   sf.Tag.Get("immutable") == "true",
+		}
+		if minTag := sf.Tag.Get("min"); minTag != "" {
+			if v, ok := parseIntTag(minTag); ok {
+				fm.Min = &v
+			}
+		}
+		if maxTag := sf.Tag.Get("max"); maxTag != "" {
+			if v, ok := parseIntTag(maxTag); ok {
+				fm.Max = &v
+			}
 		}
 		annotateType(&fm, sf)
 		// Default label when no `label:` tag — title-case the wire name so
@@ -253,6 +377,34 @@ func parseJSONTag(tag, fieldName string) (string, bool) {
 		}
 	}
 	return name, omitempty
+}
+
+// parseIntTag parses a struct-tag integer value. Returns (value, true) on
+// success; (0, false) on parse failure so the caller leaves the field
+// unset (a malformed tag value is a bug at compile time — the silent
+// skip is acceptable because the test suite catches it).
+func parseIntTag(s string) (int, bool) {
+	neg := false
+	i := 0
+	if i < len(s) && s[i] == '-' {
+		neg = true
+		i++
+	}
+	if i == len(s) {
+		return 0, false
+	}
+	v := 0
+	for ; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		v = v*10 + int(c-'0')
+	}
+	if neg {
+		v = -v
+	}
+	return v, true
 }
 
 // splitCSV trims whitespace around each comma-separated value.

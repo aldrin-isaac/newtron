@@ -206,8 +206,22 @@ func TestRegisterAndLookup(t *testing.T) {
 	schemaRegistry = map[string]schemaKind{}
 	defer func() { schemaRegistry = saved }()
 
-	RegisterSchemaKind("FixSimple", "Simple Fixture", "A test fixture", fixSimple{})
-	RegisterSchemaKind("FixEnum", "Enum Fixture", "", fixEnum{})
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:        "FixSimple",
+		Label:       "Simple Fixture",
+		Description: "A test fixture",
+		Sample:      fixSimple{},
+		Identifier:  "name",
+		Paths: SchemaPaths{
+			List:   "/x/list",
+			Create: "/x/create",
+		},
+	})
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixEnum",
+		Label:  "Enum Fixture",
+		Sample: fixEnum{},
+	})
 
 	kinds := ListSchemaKinds()
 	want := []string{"FixEnum", "FixSimple"}
@@ -222,11 +236,131 @@ func TestRegisterAndLookup(t *testing.T) {
 	if meta.Kind != "fixSimple" || meta.Label != "Simple Fixture" || meta.Description != "A test fixture" {
 		t.Errorf("unexpected meta: %+v", meta)
 	}
+	if meta.Identifier != "name" {
+		t.Errorf("identifier: got %q, want name", meta.Identifier)
+	}
+	if meta.Paths.List != "/x/list" || meta.Paths.Create != "/x/create" {
+		t.Errorf("paths not surfaced: %+v", meta.Paths)
+	}
+	if meta.Paths.Update != "" || meta.Paths.Delete != "" {
+		t.Errorf("unset paths should remain empty: %+v", meta.Paths)
+	}
 	if len(meta.Fields) != 3 {
 		t.Errorf("want 3 fields, got %d", len(meta.Fields))
 	}
 
 	if LookupSchema("nonexistent") != nil {
 		t.Error("LookupSchema(nonexistent) should return nil")
+	}
+}
+
+// TestRegister_SyntheticIdentifierField verifies that an IdentifierField
+// on the registration is prepended to the field list. Used by sub-rule
+// kinds (QoSQueue) whose identifier is implicit in the parent's
+// representation.
+func TestRegister_SyntheticIdentifierField(t *testing.T) {
+	saved := schemaRegistry
+	schemaRegistry = map[string]schemaKind{}
+	defer func() { schemaRegistry = saved }()
+
+	min := 0
+	max := 7
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:        "FixSubrule",
+		Label:       "Sub-rule Fixture",
+		Sample:      fixSimple{},
+		Identifier:  "slot",
+		ParentRef:   "parent",
+		IdentifierField: &FieldMeta{
+			Name:      "slot",
+			Label:     "Slot",
+			Type:      "int",
+			Required:  true,
+			Min:       &min,
+			Max:       &max,
+			Immutable: true,
+		},
+	})
+
+	meta := LookupSchema("FixSubrule")
+	if meta == nil {
+		t.Fatal("LookupSchema(FixSubrule) returned nil")
+	}
+	if meta.ParentRef != "parent" {
+		t.Errorf("parent_ref: got %q, want parent", meta.ParentRef)
+	}
+	// Synthetic field is first.
+	if len(meta.Fields) < 1 || meta.Fields[0].Name != "slot" {
+		t.Fatalf("synthetic identifier field not prepended: %+v", meta.Fields)
+	}
+	if !meta.Fields[0].Immutable {
+		t.Error("synthetic identifier should be immutable")
+	}
+	if meta.Fields[0].Min == nil || *meta.Fields[0].Min != 0 {
+		t.Errorf("min: %v, want 0", meta.Fields[0].Min)
+	}
+	if meta.Fields[0].Max == nil || *meta.Fields[0].Max != 7 {
+		t.Errorf("max: %v, want 7", meta.Fields[0].Max)
+	}
+	// Original struct fields follow.
+	if len(meta.Fields) != 4 {
+		t.Errorf("want 4 fields (1 synthetic + 3 from fixSimple), got %d", len(meta.Fields))
+	}
+}
+
+// TestExtractFields_Validation covers the validation tag parsing —
+// pattern, min, max, format, immutable.
+type fixValidation struct {
+	Name     string `json:"name" label:"Name" pattern:"^[A-Z]+$" immutable:"true"`
+	VlanID   int    `json:"vlan_id" label:"VLAN ID" min:"1" max:"4094"`
+	LoopIP   string `json:"loop_ip" label:"Loopback" format:"cidr"`
+	Negative int    `json:"negative" min:"-100" max:"-1"`
+}
+
+func TestExtractFields_Validation(t *testing.T) {
+	got := extractFields(reflect.TypeOf(fixValidation{}))
+	if len(got) != 4 {
+		t.Fatalf("want 4 fields, got %d", len(got))
+	}
+	byName := make(map[string]FieldMeta, len(got))
+	for _, f := range got {
+		byName[f.Name] = f
+	}
+	if name := byName["name"]; name.Pattern != "^[A-Z]+$" || !name.Immutable {
+		t.Errorf("name: pattern=%q immutable=%v", name.Pattern, name.Immutable)
+	}
+	if vlan := byName["vlan_id"]; vlan.Min == nil || *vlan.Min != 1 || vlan.Max == nil || *vlan.Max != 4094 {
+		t.Errorf("vlan_id: min=%v max=%v", vlan.Min, vlan.Max)
+	}
+	if ip := byName["loop_ip"]; ip.Format != "cidr" {
+		t.Errorf("loop_ip format=%q, want cidr", ip.Format)
+	}
+	if neg := byName["negative"]; neg.Min == nil || *neg.Min != -100 || neg.Max == nil || *neg.Max != -1 {
+		t.Errorf("negative: min=%v max=%v", neg.Min, neg.Max)
+	}
+}
+
+func TestParseIntTag(t *testing.T) {
+	cases := []struct {
+		in   string
+		ok   bool
+		want int
+	}{
+		{"0", true, 0},
+		{"7", true, 7},
+		{"4094", true, 4094},
+		{"-100", true, -100},
+		{"-1", true, -1},
+		{"", false, 0},
+		{"-", false, 0},
+		{"abc", false, 0},
+		{"12x", false, 0},
+		{"--3", false, 0},
+	}
+	for _, c := range cases {
+		got, ok := parseIntTag(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("parseIntTag(%q) = (%d, %v), want (%d, %v)", c.in, got, ok, c.want, c.ok)
+		}
 	}
 }

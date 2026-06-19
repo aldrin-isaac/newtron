@@ -509,18 +509,27 @@ type name (e.g. `ServiceSpec`, not `Service`).
     "kind": "ServiceSpec",
     "label": "Service",
     "description": "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces.",
+    "identifier": "name",
+    "paths": {
+      "list":   "/newtron/v1/networks/{netID}/services",
+      "show":   "/newtron/v1/networks/{netID}/services/{name}",
+      "create": "/newtron/v1/networks/{netID}/create-service",
+      "update": "/newtron/v1/networks/{netID}/update-service",
+      "delete": "/newtron/v1/networks/{netID}/delete-service"
+    },
     "fields": [
       {
-        "name": "description",
-        "label": "Description",
-        "description": "Operator-facing description of this service",
+        "name": "name",
+        "label": "Name",
+        "description": "Unique identifier within this kind. Letters, digits, underscore, and hyphen only. Immutable after creation.",
         "type": "string",
-        "required": true
+        "required": true,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "immutable": true
       },
       {
         "name": "service_type",
         "label": "Service Type",
-        "description": "How the service is delivered: EVPN overlay (evpn-*) or local-only (irb/bridged/routed)",
         "type": "enum",
         "required": true,
         "enum": ["evpn-irb", "evpn-bridged", "evpn-routed", "irb", "bridged", "routed"]
@@ -528,7 +537,6 @@ type name (e.g. `ServiceSpec`, not `Service`).
       {
         "name": "ipvpn",
         "label": "IP-VPN",
-        "description": "Reference to an ipvpn definition (required for evpn-irb / evpn-routed)",
         "type": "ref",
         "required": false,
         "ref_kind": "IPVPNSpec"
@@ -538,7 +546,43 @@ type name (e.g. `ServiceSpec`, not `Service`).
 }
 ```
 
-**Field-meta shape**:
+**SchemaMeta shape**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Canonical kind name (Go type name) |
+| `label` | string | Human label for the kind |
+| `description` | string | Tooltip for the kind |
+| `fields` | FieldMeta[] | Per-field metadata (see next table) |
+| `identifier` | string | Field name that addresses one row — `name` for top-level kinds, `seq` / `queue_id` / `prefix` for sub-rules |
+| `parent_ref` | string | Sub-rules only: wire field name carrying the parent's name in the request body (e.g. `filter` for FilterRule) |
+| `paths` | SchemaPaths | HTTP path templates for the kind's CRUD verbs (see SchemaPaths) |
+
+**SchemaPaths shape**:
+
+| Field | Description |
+|-------|-------------|
+| `list` | GET — enumerate names for this kind |
+| `show` | GET — fetch one named instance |
+| `create` | POST — create |
+| `update` | POST — replace fields in place |
+| `delete` | POST — remove |
+
+Every path is a template with `{netID}` and (for `show`) `{name}` placeholders the
+UI substitutes at request time. Empty paths mean the verb doesn't exist for this
+kind:
+
+- **Read-only kinds** (PlatformSpec): `list` + `show` populated; `create` /
+  `update` / `delete` absent.
+- **Sub-rule kinds** (FilterRule, QoSQueue, RoutePolicyRule, PrefixListEntry):
+  no `list` / `show` (sub-rules aren't top-level addressable); `create` / `update`
+  / `delete` carry the `add-X` / `update-X` / `remove-X` verbs.
+- **PrefixListEntry**: no `update` (per §47 the prefix IS the entry — no other
+  mutable fields).
+- **Embedded-only kinds** (RoutingSpec, RoutePolicySet, EVPNConfig): the `paths`
+  object is omitted entirely.
+
+**FieldMeta shape**:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -551,6 +595,17 @@ type name (e.g. `ServiceSpec`, not `Service`).
 | `ref_kind` | string | For `type: ref` — the kind this field references (UI renders a dropdown) |
 | `item_type` | string | For `type: array` or `map` of primitives — the element type |
 | `item_kind` | string | For `type: array` or `map` of objects — the element kind name |
+| `pattern` | string | Regex the value must match (UI client-side validation) |
+| `min` | int | Inclusive lower bound for `type: int` |
+| `max` | int | Inclusive upper bound for `type: int` |
+| `format` | string | Semantic hint — `cidr`, `ipv4`, `ipv6`, `mac`, `asn` (UI picks a format-specific input widget) |
+| `immutable` | bool | Value is fixed at create time — UI suppresses the edit affordance in update-mode forms |
+
+**Synthetic identifier fields**: top-level kinds (`ServiceSpec`, `IPVPNSpec`, …)
+get a synthetic `name` field prepended to `fields` because the name lives in the
+create-X request body, not on the spec struct. `QoSQueue` gets a synthetic
+`queue_id` field for the same reason (the slot index is implicit in the
+`QoSPolicy.Queues` array position).
 
 **Errors:**
 - 404: `kind` is not a registered spec type

@@ -123,6 +123,154 @@ func TestSchemaShow_ServiceSpec(t *testing.T) {
 	}
 }
 
+// TestSchemaShow_TopLevelPaths pins the URL+identity metadata contract
+// for top-level kinds — UIs depend on these to drive CRUD without
+// hardcoded mappings (§27).
+func TestSchemaShow_TopLevelPaths(t *testing.T) {
+	s := NewServer(Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/IPVPNSpec", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var env struct {
+		Data spec.SchemaMeta `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.Identifier != "name" {
+		t.Errorf("identifier: got %q, want name", env.Data.Identifier)
+	}
+	if env.Data.ParentRef != "" {
+		t.Errorf("parent_ref: got %q, want empty (top-level kind)", env.Data.ParentRef)
+	}
+	want := spec.SchemaPaths{
+		List:   "/newtron/v1/networks/{netID}/ipvpns",
+		Show:   "/newtron/v1/networks/{netID}/ipvpns/{name}",
+		Create: "/newtron/v1/networks/{netID}/create-ipvpn",
+		Update: "/newtron/v1/networks/{netID}/update-ipvpn",
+		Delete: "/newtron/v1/networks/{netID}/delete-ipvpn",
+	}
+	if env.Data.Paths != want {
+		t.Errorf("paths: got %+v, want %+v", env.Data.Paths, want)
+	}
+	// Top-level kinds get a synthetic `name` field prepended; it must
+	// carry the immutable flag and pattern.
+	if len(env.Data.Fields) == 0 || env.Data.Fields[0].Name != "name" {
+		t.Fatalf("synthetic name field missing: %+v", env.Data.Fields)
+	}
+	if !env.Data.Fields[0].Immutable {
+		t.Error("synthetic name field should be immutable")
+	}
+	if env.Data.Fields[0].Pattern == "" {
+		t.Error("synthetic name field should carry a pattern")
+	}
+}
+
+// TestSchemaShow_SubrulePaths pins the sub-rule contract: ParentRef
+// declares the body field, paths use add/update/remove verbs, no
+// List/Show (sub-rules aren't top-level addressable).
+func TestSchemaShow_SubrulePaths(t *testing.T) {
+	s := NewServer(Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/FilterRule", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var env struct {
+		Data spec.SchemaMeta `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.Identifier != "seq" {
+		t.Errorf("identifier: got %q, want seq", env.Data.Identifier)
+	}
+	if env.Data.ParentRef != "filter" {
+		t.Errorf("parent_ref: got %q, want filter", env.Data.ParentRef)
+	}
+	if env.Data.Paths.List != "" || env.Data.Paths.Show != "" {
+		t.Errorf("sub-rule should have no list/show paths: %+v", env.Data.Paths)
+	}
+	if env.Data.Paths.Create != "/newtron/v1/networks/{netID}/add-filter-rule" {
+		t.Errorf("create path: %q", env.Data.Paths.Create)
+	}
+	if env.Data.Paths.Delete != "/newtron/v1/networks/{netID}/remove-filter-rule" {
+		t.Errorf("delete path: %q", env.Data.Paths.Delete)
+	}
+}
+
+// TestSchemaShow_QoSQueueSyntheticIdentifier verifies that QoSQueue's
+// queue_id (which is the array index in QoSPolicy.Queues — implicit, not
+// a struct field) is synthesized into the form field list with the
+// correct min/max/immutable annotations.
+func TestSchemaShow_QoSQueueSyntheticIdentifier(t *testing.T) {
+	s := NewServer(Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/QoSQueue", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var env struct {
+		Data spec.SchemaMeta `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.Identifier != "queue_id" {
+		t.Errorf("identifier: got %q, want queue_id", env.Data.Identifier)
+	}
+	if env.Data.ParentRef != "policy" {
+		t.Errorf("parent_ref: got %q, want policy", env.Data.ParentRef)
+	}
+	// queue_id is the first field (synthetic, prepended).
+	if len(env.Data.Fields) == 0 || env.Data.Fields[0].Name != "queue_id" {
+		t.Fatalf("synthetic queue_id field missing: %+v", env.Data.Fields)
+	}
+	qid := env.Data.Fields[0]
+	if !qid.Immutable {
+		t.Error("queue_id should be immutable")
+	}
+	if qid.Min == nil || *qid.Min != 0 {
+		t.Errorf("queue_id.min: got %v, want 0", qid.Min)
+	}
+	if qid.Max == nil || *qid.Max != 7 {
+		t.Errorf("queue_id.max: got %v, want 7", qid.Max)
+	}
+}
+
+// TestSchemaShow_PlatformReadOnly verifies that PlatformSpec exposes
+// only list+show paths (no create/update/delete).
+func TestSchemaShow_PlatformReadOnly(t *testing.T) {
+	s := NewServer(Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/PlatformSpec", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var env struct {
+		Data spec.SchemaMeta `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.Paths.List == "" || env.Data.Paths.Show == "" {
+		t.Errorf("platform list/show should be set: %+v", env.Data.Paths)
+	}
+	if env.Data.Paths.Create != "" || env.Data.Paths.Update != "" || env.Data.Paths.Delete != "" {
+		t.Errorf("platform should be read-only — got create/update/delete: %+v", env.Data.Paths)
+	}
+}
+
 func TestSchemaShow_NotFound(t *testing.T) {
 	s := NewServer(Config{})
 
