@@ -1264,22 +1264,45 @@ name; omitted fields revert to their JSON-zero value. The
 `PUT /networks/{netID}/topology/nodes/{name}` is the same shape;
 this PR brings the spec kinds in line with it (issue #152).
 
-**Sub-collection preservation.** Three kinds carry a sub-collection
-that the Create request shape doesn't transport — `update-filter`
-preserves the existing filter's `rules`, `update-route-policy`
-preserves the policy's `rules`, `update-qos-policy` preserves the
-policy's `queues`. Operators who want to mutate a single sub-rule
-in place — change its fields or rotate its sequence number — use
-the per-item update verbs `update-filter-rule`, `update-route-policy-rule`,
-`update-qos-queue` (issues #209, #210, #211). The
-`add-X-rule` / `remove-X-rule` verbs remain for list growth and shrinkage.
+**Sub-collection preservation — contract.** For three kinds the
+update-X verb **always preserves the existing entry's sub-collection,
+regardless of what (if anything) the request body carries for that
+field**:
 
-The other 6 kinds (`update-service`, `update-ipvpn`,
-`update-macvpn`, `update-prefix-list`, `update-profile`,
-`update-zone`) replace every field carried by the request body
-directly. `update-prefix-list` is the exception that proves the
-rule: its sub-collection (`prefixes`) IS in the request shape, so
-Update replaces it.
+| Verb | Preserved sub-collection field |
+|---|---|
+| `update-filter` | `rules` |
+| `update-route-policy` | `rules` |
+| `update-qos-policy` | `queues` |
+
+A request body that includes a `rules` (or `queues`) field is accepted
+but the field is **ignored**: the existing entry's sub-collection
+remains intact. A request body that omits the field has the same
+effect. This is a stable contract, not an implementation detail.
+
+The rationale is structural. The dedicated sub-rule verbs —
+`add-filter-rule` / `update-filter-rule` / `remove-filter-rule`,
+`add-route-policy-rule` / `update-route-policy-rule` /
+`remove-route-policy-rule`, `add-qos-queue` / `update-qos-queue` /
+`remove-qos-queue` (#209, #210, #211) — **own the sub-collection
+lifecycle**. If `update-filter` replaced the rule list from its body,
+those verbs would race with it: an operator editing the filter's
+description via `update-filter` would silently wipe rules curated via
+the sub-rule verbs in a different session. Preservation is the only
+sane semantics for a parent-edit verb in a kind where sub-collections
+have their own verbs.
+
+`update-prefix-list` is the deliberate exception. A prefix list's only
+content IS its `prefixes` sub-collection — there is no parent metadata
+to edit independently. The request body's `prefixes` field therefore
+replaces the entry's list directly; the per-entry `add-prefix-list-
+entry` / `remove-prefix-list-entry` verbs offer the finer-grained
+alternative.
+
+The other 5 top-level update verbs (`update-service`, `update-ipvpn`,
+`update-macvpn`, `update-profile`, `update-zone`) have no
+sub-collection to preserve — every field carried by the request body
+becomes the new content directly.
 
 **Prefix-list-entry mutation.** A prefix-list entry has no fields
 beyond the CIDR itself (`PrefixLists` is `map[string][]string`), so
