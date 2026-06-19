@@ -13,17 +13,24 @@ import (
 // Array position = queue index = traffic class.
 // Unmapped DSCP values default to queue 0.
 type QoSPolicy struct {
-	Description string      `json:"description,omitempty"`
-	Queues      []*QoSQueue `json:"queues"`
+	Description string      `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this QoS policy"`
+	Queues      []*QoSQueue `json:"queues" label:"Queues" tooltip:"Ordered list of queues by traffic class (index 0–7)" item_kind:"QoSQueue"`
 }
 
 // QoSQueue defines a single queue within a QoS policy.
+//
+// The queue's slot ID (0–7) is implicit in the array position within
+// QoSPolicy.Queues — it is NOT a field on this struct. The wire shape
+// on add/update/remove still carries `queue_id` in the request body
+// (see AddQoSQueueRequest in pkg/newtron); the schema metadata endpoint
+// synthesizes a `queue_id` form field via SchemaMeta.Identifier rather
+// than storing it twice.
 type QoSQueue struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`             // "dwrr" or "strict"
-	Weight int    `json:"weight,omitempty"` // DWRR weight (percentage)
-	DSCP   []int  `json:"dscp,omitempty"`   // DSCP values mapped to this queue
-	ECN    bool   `json:"ecn,omitempty"`    // Enable ECN/WRED
+	Name   string `json:"name" label:"Name" tooltip:"Operator-facing queue name (e.g. \"voice\", \"best-effort\")"`
+	Type   string `json:"type" label:"Scheduler Type" tooltip:"Strict-priority queues drain before DWRR queues" enum:"strict,dwrr"`
+	Weight int    `json:"weight,omitempty" label:"DWRR Weight" tooltip:"Weight percentage for DWRR-scheduled queues (ignored for strict)" min:"1" max:"100"`
+	DSCP   []int  `json:"dscp,omitempty" label:"DSCP Values" tooltip:"DSCP code points (0–63) mapped to this queue"`
+	ECN    bool   `json:"ecn,omitempty" label:"Enable ECN/WRED" tooltip:"Mark packets instead of dropping when queue fills"`
 }
 
 // OverridableSpecs holds spec maps that participate in hierarchical resolution
@@ -71,11 +78,11 @@ type ZoneSpec struct {
 // For vrf_type "shared": VRF name = IPVPNSpec.VRF
 // For vrf_type "interface": VRF name = derived from service + interface
 type IPVPNSpec struct {
-	Description  string   `json:"description,omitempty"`
-	VRF          string   `json:"vrf"`
-	L3VNI        int      `json:"l3vni"`
-	L3VNIVlan    int      `json:"l3vni_vlan,omitempty"` // Dedicated transit VLAN for L3VNI decap (no ports, no IP)
-	RouteTargets []string `json:"route_targets"`
+	Description  string   `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this IP-VPN"`
+	VRF          string   `json:"vrf" label:"VRF Name" tooltip:"SONiC VRF name used on-device for this IP-VPN's routing table" pattern:"^[A-Za-z][A-Za-z0-9_]*$"`
+	L3VNI        int      `json:"l3vni" label:"L3VNI" tooltip:"VXLAN Network Identifier for the L3 EVPN overlay" min:"1" max:"16777215"`
+	L3VNIVlan    int      `json:"l3vni_vlan,omitempty" label:"L3VNI Transit VLAN" tooltip:"Dedicated transit VLAN ID for L3VNI decap (no ports, no IP)" min:"1" max:"4094"`
+	RouteTargets []string `json:"route_targets" label:"Route Targets" tooltip:"BGP extended-community route targets controlling import/export"`
 }
 
 // MACVPNSpec defines MAC-VPN parameters for L2 bridging (EVPN Type-2 routes).
@@ -86,13 +93,13 @@ type IPVPNSpec struct {
 // AnycastIP is the shared gateway IP configured on all leafs (EVPN
 // symmetric IRB anycast gateway). Omit for pure L2 (no routing).
 type MACVPNSpec struct {
-	Description    string   `json:"description,omitempty"`
-	VlanID         int      `json:"vlan_id"`
-	VNI            int      `json:"vni"`
-	AnycastIP      string   `json:"anycast_ip,omitempty"`
-	AnycastMAC     string   `json:"anycast_mac,omitempty"`
-	RouteTargets   []string `json:"route_targets,omitempty"`
-	ARPSuppression bool     `json:"arp_suppression,omitempty"`
+	Description    string   `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this MAC-VPN"`
+	VlanID         int      `json:"vlan_id" label:"VLAN ID" tooltip:"Local bridge-domain VLAN ID, identical on every leaf in this MAC-VPN" min:"1" max:"4094"`
+	VNI            int      `json:"vni" label:"L2VNI" tooltip:"VXLAN Network Identifier for the L2 EVPN overlay" min:"1" max:"16777215"`
+	AnycastIP      string   `json:"anycast_ip,omitempty" label:"Anycast Gateway IP" tooltip:"Shared anycast gateway IP for symmetric IRB; omit for pure L2" format:"cidr"`
+	AnycastMAC     string   `json:"anycast_mac,omitempty" label:"Anycast Gateway MAC" tooltip:"Shared anycast gateway MAC for symmetric IRB" format:"mac"`
+	RouteTargets   []string `json:"route_targets,omitempty" label:"Route Targets" tooltip:"BGP extended-community route targets controlling import/export"`
+	ARPSuppression bool     `json:"arp_suppression,omitempty" label:"Enable ARP Suppression" tooltip:"Suppress ARP flooding by answering from the EVPN MAC/IP table"`
 }
 
 // ============================================================================
@@ -120,23 +127,23 @@ type MACVPNSpec struct {
 //   - "shared":    Uses VRF named in IPVPNSpec.VRF
 //   - (omitted):   No VRF, uses global routing table
 type ServiceSpec struct {
-	Description string `json:"description"`
-	ServiceType string `json:"service_type"` // evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed
+	Description string `json:"description" label:"Description" tooltip:"Operator-facing description of this service"`
+	ServiceType string `json:"service_type" label:"Service Type" tooltip:"How the service is delivered: EVPN overlay (evpn-*) or local-only (irb/bridged/routed)" enum:"evpn-irb,evpn-bridged,evpn-routed,irb,bridged,routed"`
 
 	// VPN references (names from ipvpn/macvpn sections)
-	IPVPN   string `json:"ipvpn,omitempty"`    // Reference to ipvpn definition
-	MACVPN  string `json:"macvpn,omitempty"`   // Reference to macvpn definition
-	VRFType string `json:"vrf_type,omitempty"` // "interface" or "shared"
+	IPVPN   string `json:"ipvpn,omitempty" label:"IP-VPN" tooltip:"Reference to an ipvpn definition (required for evpn-irb / evpn-routed)" ref:"IPVPNSpec"`
+	MACVPN  string `json:"macvpn,omitempty" label:"MAC-VPN" tooltip:"Reference to a macvpn definition (required for evpn-irb / evpn-bridged)" ref:"MACVPNSpec"`
+	VRFType string `json:"vrf_type,omitempty" label:"VRF Type" tooltip:"How the per-service VRF is instantiated on-device" enum:"interface,shared"`
 
 	// Routing protocol specification
-	Routing *RoutingSpec `json:"routing,omitempty"`
+	Routing *RoutingSpec `json:"routing,omitempty" label:"Routing" tooltip:"BGP / static-routing protocol parameters"`
 
 	// Filters (references to filters)
-	IngressFilter string `json:"ingress_filter,omitempty"`
-	EgressFilter  string `json:"egress_filter,omitempty"`
+	IngressFilter string `json:"ingress_filter,omitempty" label:"Ingress Filter" tooltip:"Reference to a filter applied to ingress traffic on this service" ref:"FilterSpec"`
+	EgressFilter  string `json:"egress_filter,omitempty" label:"Egress Filter" tooltip:"Reference to a filter applied to egress traffic on this service" ref:"FilterSpec"`
 
 	// QoS
-	QoSPolicy string `json:"qos_policy,omitempty"`
+	QoSPolicy string `json:"qos_policy,omitempty" label:"QoS Policy" tooltip:"Reference to a QoS policy bound to interfaces using this service" ref:"QoSPolicy"`
 }
 
 // RoutingSpec defines routing protocol specification for a service.
@@ -146,19 +153,19 @@ type ServiceSpec struct {
 //   - Peer AS can be fixed (number), or "request" (provided at apply time)
 //   - Peer IP is derived from interface IP for point-to-point links
 type RoutingSpec struct {
-	Protocol string `json:"protocol"` // "bgp", "static", or empty (none)
+	Protocol string `json:"protocol" label:"Protocol" tooltip:"Routing protocol to use on this service" enum:"bgp,static"`
 
 	// BGP-specific
-	PeerAS       string `json:"peer_as,omitempty"`       // AS number, or "request"
-	ImportPolicy string `json:"import_policy,omitempty"` // Route policy name → translated to ROUTE_MAP
-	ExportPolicy string `json:"export_policy,omitempty"` // Route policy name → translated to ROUTE_MAP
+	PeerAS       string `json:"peer_as,omitempty" label:"Peer AS" tooltip:"Remote BGP AS number, or the literal \"request\" to require it at apply time" pattern:"^(\\d+|request)$"`
+	ImportPolicy string `json:"import_policy,omitempty" label:"Import Policy" tooltip:"Reference to a route-policy applied to inbound BGP updates" ref:"RoutePolicy"`
+	ExportPolicy string `json:"export_policy,omitempty" label:"Export Policy" tooltip:"Reference to a route-policy applied to outbound BGP updates" ref:"RoutePolicy"`
 
 	// Additional BGP filtering (compose as AND conditions with policies)
-	ImportCommunity  string `json:"import_community,omitempty"`   // COMMUNITY_SET match in import route-map
-	ExportCommunity  string `json:"export_community,omitempty"`   // COMMUNITY_SET set-action in export route-map
-	ImportPrefixList string `json:"import_prefix_list,omitempty"` // PREFIX_SET match in import route-map
-	ExportPrefixList string `json:"export_prefix_list,omitempty"` // PREFIX_SET match in export route-map
-	Redistribute     *bool  `json:"redistribute,omitempty"`       // Override default redistribution
+	ImportCommunity  string `json:"import_community,omitempty" label:"Import Community Match" tooltip:"Additional community match (composes as AND) on the import route-map"`
+	ExportCommunity  string `json:"export_community,omitempty" label:"Export Community" tooltip:"Community attached as a set-action on the export route-map"`
+	ImportPrefixList string `json:"import_prefix_list,omitempty" label:"Import Prefix List" tooltip:"Additional prefix-list match (composes as AND) on the import route-map"`
+	ExportPrefixList string `json:"export_prefix_list,omitempty" label:"Export Prefix List" tooltip:"Additional prefix-list match (composes as AND) on the export route-map"`
+	Redistribute     *bool  `json:"redistribute,omitempty" label:"Redistribute Connected/Static" tooltip:"Override the service-type default redistribution behavior"`
 }
 
 // ============================================================================
@@ -168,24 +175,24 @@ type RoutingSpec struct {
 // FilterSpec defines a reusable set of ACL rules.
 // Referenced by services via ingress_filter/egress_filter fields.
 type FilterSpec struct {
-	Description string        `json:"description"`
-	Type        string        `json:"type"` // ipv4, ipv6 (translated to L3, L3V6 for CONFIG_DB)
-	Rules       []*FilterRule `json:"rules"`
+	Description string        `json:"description" label:"Description" tooltip:"Operator-facing description of this filter"`
+	Type        string        `json:"type" label:"Address Family" tooltip:"Address family the filter rules match" enum:"ipv4,ipv6"`
+	Rules       []*FilterRule `json:"rules" label:"Rules" tooltip:"Ordered list of rules evaluated by sequence number" item_kind:"FilterRule"`
 }
 
 // FilterRule defines a single rule within a FilterSpec.
 type FilterRule struct {
-	Sequence      int    `json:"seq"`
-	SrcPrefixList string `json:"src_prefix_list,omitempty"` // Reference to prefix_lists
-	DstPrefixList string `json:"dst_prefix_list,omitempty"`
-	SrcIP         string `json:"src_ip,omitempty"` // Direct CIDR
-	DstIP         string `json:"dst_ip,omitempty"`
-	Protocol      string `json:"protocol,omitempty"` // tcp, udp, icmp, or number
-	SrcPort       string `json:"src_port,omitempty"` // Port or range "1024-65535"
-	DstPort       string `json:"dst_port,omitempty"`
-	DSCP          string `json:"dscp,omitempty"`
-	Action        string `json:"action"` // permit, deny
-	CoS           string `json:"cos,omitempty"`
+	Sequence      int    `json:"seq" label:"Sequence" tooltip:"Evaluation order — lower numbers evaluated first" min:"1" max:"65535"`
+	SrcPrefixList string `json:"src_prefix_list,omitempty" label:"Source Prefix List" tooltip:"Reference to a prefix-list for the source-IP match (mutually exclusive with src_ip)"`
+	DstPrefixList string `json:"dst_prefix_list,omitempty" label:"Destination Prefix List" tooltip:"Reference to a prefix-list for the destination-IP match (mutually exclusive with dst_ip)"`
+	SrcIP         string `json:"src_ip,omitempty" label:"Source IP/CIDR" tooltip:"Inline source IP or CIDR (mutually exclusive with src_prefix_list)" format:"cidr"`
+	DstIP         string `json:"dst_ip,omitempty" label:"Destination IP/CIDR" tooltip:"Inline destination IP or CIDR (mutually exclusive with dst_prefix_list)" format:"cidr"`
+	Protocol      string `json:"protocol,omitempty" label:"Protocol" tooltip:"IP protocol — name (tcp/udp/icmp) or IANA number"`
+	SrcPort       string `json:"src_port,omitempty" label:"Source Port" tooltip:"Source TCP/UDP port or range (e.g. \"1024-65535\")"`
+	DstPort       string `json:"dst_port,omitempty" label:"Destination Port" tooltip:"Destination TCP/UDP port or range"`
+	DSCP          string `json:"dscp,omitempty" label:"DSCP Match" tooltip:"DSCP code-point match (name or number)"`
+	Action        string `json:"action" label:"Action" tooltip:"Permit or deny matched traffic" enum:"permit,deny"`
+	CoS           string `json:"cos,omitempty" label:"CoS" tooltip:"Class-of-service value to set on matched traffic"`
 }
 
 // ============================================================================
@@ -196,28 +203,28 @@ type FilterRule struct {
 // Referenced by service routing via import_policy/export_policy.
 //
 type RoutePolicy struct {
-	Description string             `json:"description,omitempty"`
-	Rules       []*RoutePolicyRule `json:"rules"`
+	Description string             `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this route policy"`
+	Rules       []*RoutePolicyRule `json:"rules" label:"Rules" tooltip:"Ordered list of rules evaluated by sequence number" item_kind:"RoutePolicyRule"`
 }
 
 // RoutePolicyRule defines a single rule within a RoutePolicy.
 type RoutePolicyRule struct {
-	Sequence int    `json:"seq"`
-	Action   string `json:"action"` // permit, deny
+	Sequence int    `json:"seq" label:"Sequence" tooltip:"Evaluation order — lower numbers evaluated first" min:"1" max:"65535"`
+	Action   string `json:"action" label:"Action" tooltip:"Permit matched routes (continue with set-actions) or deny" enum:"permit,deny"`
 
 	// Match conditions (all conditions must match)
-	PrefixList string `json:"prefix_list,omitempty"` // Reference to prefix_lists
-	Community  string `json:"community,omitempty"`   // Match community
+	PrefixList string `json:"prefix_list,omitempty" label:"Match Prefix List" tooltip:"Reference to a prefix-list to match the route's NLRI"`
+	Community  string `json:"community,omitempty" label:"Match Community" tooltip:"Community string the route must carry"`
 
 	// Set actions (for permit rules)
-	Set *RoutePolicySet `json:"set,omitempty"`
+	Set *RoutePolicySet `json:"set,omitempty" label:"Set Actions" tooltip:"Attributes applied to permitted routes"`
 }
 
 // RoutePolicySet defines attributes to set on matching routes.
 type RoutePolicySet struct {
-	LocalPref int    `json:"local_pref,omitempty"` // Set LOCAL_PREF
-	Community string `json:"community,omitempty"`  // Set/add community
-	MED       int    `json:"med,omitempty"`        // Set MED
+	LocalPref int    `json:"local_pref,omitempty" label:"Local Preference" tooltip:"Set BGP LOCAL_PREF on matched routes"`
+	Community string `json:"community,omitempty" label:"Community" tooltip:"Append a community attribute to matched routes"`
+	MED       int    `json:"med,omitempty" label:"MED" tooltip:"Set BGP Multi-Exit Discriminator on matched routes"`
 }
 
 // ============================================================================
@@ -232,27 +239,47 @@ type PlatformSpecFile struct {
 }
 
 // PlatformSpec defines a SONiC platform or host device type.
+//
+// Platform support is deeply tied to the backend (HWSKU mapping, port
+// stride, SAI compatibility). Platforms are exposed by the schema
+// metadata endpoint as read-only — operators can view them but not
+// author them via a universal UI; adding a platform requires backend
+// coordination.
 type PlatformSpec struct {
-	HWSKU        string   `json:"hwsku"`
-	Description  string   `json:"description,omitempty"`
-	DeviceType   string   `json:"device_type,omitempty"` // "switch" (default) or "host"
-	PortCount    int      `json:"port_count"`
-	DefaultSpeed string   `json:"default_speed"`
-	Breakouts    []string `json:"breakouts,omitempty"` // Supported breakout modes
+	HWSKU        string   `json:"hwsku" label:"HWSKU" tooltip:"SONiC hardware SKU identifier"`
+	Description  string   `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description"`
+	DeviceType   string   `json:"device_type,omitempty" label:"Device Type" tooltip:"Network switch or virtual host" enum:"switch,host"`
+	PortCount    int      `json:"port_count" label:"Port Count" tooltip:"Number of data ports on this platform"`
+	DefaultSpeed string   `json:"default_speed" label:"Default Port Speed" tooltip:"Default speed for each data port (e.g. \"100G\")"`
+	Breakouts    []string `json:"breakouts,omitempty" label:"Supported Breakouts" tooltip:"Breakout modes this platform can accept"`
 
 	// newtlab VM fields
-	VMImage              string         `json:"vm_image,omitempty"`
-	VMMemory             int            `json:"vm_memory,omitempty"`
-	VMCPUs               int            `json:"vm_cpus,omitempty"`
-	VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
-	VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
-	VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
-	VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
-	VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
-	Dataplane            string         `json:"dataplane,omitempty"`        // "vpp", "barefoot", "" (none/vs)
-	VMImageRelease       string         `json:"vm_image_release,omitempty"` // e.g. "202405" — selects release-specific boot patches
-	VMSkipBootstrap      bool           `json:"vm_skip_bootstrap,omitempty"` // image is pre-bootstrapped: skip console-driven network bring-up (mgmt IP + ssh user must already be configured in the image)
-	UnsupportedFeatures  []string       `json:"unsupported_features,omitempty"` // features this platform cannot handle (e.g. "acl")
+	VMImage             string         `json:"vm_image,omitempty" label:"VM Image" tooltip:"Path or URL to the platform's VM disk image"`
+	VMMemory            int            `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Default VM memory size"`
+	VMCPUs              int            `json:"vm_cpus,omitempty" label:"VM vCPUs" tooltip:"Default VM vCPU count"`
+	VMNICDriver         string         `json:"vm_nic_driver,omitempty" label:"VM NIC Driver" tooltip:"QEMU NIC driver (e.g. \"virtio-net-pci\")"`
+	VMInterfaceMap      string         `json:"vm_interface_map,omitempty" label:"VM Interface Map" tooltip:"How QEMU NICs map to data ports"`
+	VMCPUFeatures       string         `json:"vm_cpu_features,omitempty" label:"VM CPU Features" tooltip:"QEMU CPU feature flags"`
+	VMCredentials       *VMCredentials `json:"vm_credentials,omitempty" label:"VM Credentials" tooltip:"Default SSH credentials baked into the VM image"`
+	VMBootTimeout       int            `json:"vm_boot_timeout,omitempty" label:"VM Boot Timeout (s)" tooltip:"Seconds to wait for VM to reach SSH"`
+	Dataplane           string         `json:"dataplane,omitempty" label:"Dataplane" tooltip:"Forwarding plane the platform uses" enum:"vpp,barefoot"`
+	VMImageRelease      string         `json:"vm_image_release,omitempty" label:"VM Image Release" tooltip:"Release tag selecting release-specific boot patches (e.g. \"202405\")"`
+	VMSkipBootstrap     bool           `json:"vm_skip_bootstrap,omitempty" label:"Skip Bootstrap" tooltip:"Image is pre-bootstrapped — skip console-driven network bring-up"`
+	UnsupportedFeatures []string       `json:"unsupported_features,omitempty" label:"Unsupported Features" tooltip:"Features this platform cannot handle (e.g. \"acl\", \"evpn-vxlan\")"`
+}
+
+// PrefixListEntry describes the form shape of one entry inside a prefix
+// list. The on-disk representation of PrefixLists is `map[string][]string`
+// — entries are bare CIDR strings — but the schema metadata endpoint
+// exposes a single-field struct so universal UIs can render the entry's
+// authoring form consistently with every other sub-rule kind.
+//
+// The wire shape on add/remove is `{prefix_list, prefix}`; the parent
+// reference (`prefix_list`) is carried via SchemaMeta.ParentRef, not
+// here. Per §47 the prefix IS the entry's identity — there is no update
+// verb because there are no other mutable fields.
+type PrefixListEntry struct {
+	Prefix string `json:"prefix" label:"Prefix" tooltip:"CIDR prefix to add to the list (e.g. \"10.0.0.0/8\")" format:"cidr"`
 }
 
 // IsHost returns true if the platform is a host device (not a network switch).
@@ -351,9 +378,9 @@ type VMCredentials struct {
 
 // EVPNConfig defines EVPN overlay peering for a device profile.
 type EVPNConfig struct {
-	Peers          []string `json:"peers,omitempty"`
-	RouteReflector bool     `json:"route_reflector,omitempty"`
-	ClusterID      string   `json:"cluster_id,omitempty"`
+	Peers          []string `json:"peers,omitempty" label:"EVPN Peers" tooltip:"Loopback IPs of remote EVPN BGP peers (overlay sessions)"`
+	RouteReflector bool     `json:"route_reflector,omitempty" label:"Route Reflector" tooltip:"This device acts as an EVPN route reflector for its peers"`
+	ClusterID      string   `json:"cluster_id,omitempty" label:"Cluster ID" tooltip:"BGP route-reflector cluster ID (defaults to loopback IP)"`
 }
 
 // DeviceProfile contains per-device specification.
@@ -361,37 +388,37 @@ type EVPNConfig struct {
 // is inherited from region/global or derived at runtime.
 type DeviceProfile struct {
 	// REQUIRED - must be specified
-	MgmtIP     string `json:"mgmt_ip"`
-	LoopbackIP string `json:"loopback_ip"`
-	Zone     string `json:"zone"` // Zone name (must exist in network.json zones)
+	MgmtIP     string `json:"mgmt_ip" label:"Management IP" tooltip:"Out-of-band management IP reachable from newtron" format:"cidr"`
+	LoopbackIP string `json:"loopback_ip" label:"Loopback IP" tooltip:"Loopback IP — the device's BGP router-id and VTEP source" format:"cidr"`
+	Zone       string `json:"zone" label:"Zone" tooltip:"Zone name (must exist in network.json zones)" ref:"ZoneSpec"`
 
 	// OPTIONAL - EVPN overlay peering
-	EVPN *EVPNConfig `json:"evpn,omitempty"`
+	EVPN *EVPNConfig `json:"evpn,omitempty" label:"EVPN Overlay" tooltip:"EVPN BGP overlay peering — set on leafs and route reflectors"`
 
 	// OPTIONAL - device-specific
-	MAC      string `json:"mac,omitempty"`
-	Platform string `json:"platform,omitempty"`
+	MAC      string `json:"mac,omitempty" label:"Base MAC" tooltip:"Override the device base MAC (otherwise derived)" format:"mac"`
+	Platform string `json:"platform,omitempty" label:"Platform" tooltip:"Reference to a platforms.json entry; determines HWSKU, ports, and VM image" ref:"PlatformSpec"`
 
 	OverridableSpecs // Embedded — node-level overrides
 
 	// OPTIONAL - SSH credentials for Redis tunnel. SSH port is runtime
 	// state owned by newtlab (§27) — not stored here; resolved through
 	// newtron's PortResolver at Connect time.
-	SSHUser string `json:"ssh_user,omitempty"`
-	SSHPass string `json:"ssh_pass,omitempty"`
+	SSHUser string `json:"ssh_user,omitempty" label:"SSH User" tooltip:"Username for the SSH tunnel to Redis"`
+	SSHPass string `json:"ssh_pass,omitempty" label:"SSH Password" tooltip:"Password or ${secret:KEY} reference for the SSH tunnel"`
 
 	// OPTIONAL - newtlab per-device overrides
-	VMMemory    int    `json:"vm_memory,omitempty"`
-	VMCPUs      int    `json:"vm_cpus,omitempty"`
-	VMImage     string `json:"vm_image,omitempty"`
-	VMHost      string `json:"vm_host,omitempty"`
+	VMMemory int    `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Per-device override for VM memory size"`
+	VMCPUs   int    `json:"vm_cpus,omitempty" label:"VM vCPUs" tooltip:"Per-device override for VM vCPU count"`
+	VMImage  string `json:"vm_image,omitempty" label:"VM Image Path" tooltip:"Per-device override for VM disk image"`
+	VMHost   string `json:"vm_host,omitempty" label:"VM Host" tooltip:"Hostname or IP of the physical host running this VM"`
 
 	// OPTIONAL - eBGP underlay ASN (unique per device)
-	UnderlayASN int `json:"underlay_asn,omitempty"`
+	UnderlayASN int `json:"underlay_asn,omitempty" label:"Underlay ASN" tooltip:"eBGP underlay AS number (must be unique per device)" min:"1" max:"4294967295" format:"asn"`
 
 	// OPTIONAL - virtual host IP assignment (newtlab auto-derives if omitted)
-	HostIP      string `json:"host_ip,omitempty"`      // data-plane IP (e.g., "10.1.100.10/24")
-	HostGateway string `json:"host_gateway,omitempty"` // default gateway
+	HostIP      string `json:"host_ip,omitempty" label:"Host Data-plane IP" tooltip:"Virtual host data-plane IP; newtlab auto-derives if omitted" format:"cidr"`
+	HostGateway string `json:"host_gateway,omitempty" label:"Host Default Gateway" tooltip:"Default gateway for the virtual host"`
 }
 
 // ResolvedProfile contains fully resolved device values

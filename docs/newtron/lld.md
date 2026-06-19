@@ -117,7 +117,47 @@ pkg/newtron/device/sonic/             # SONiC device layer — Redis clients, sc
 pkg/newtron/spec/                     # Spec types and file I/O
     types.go                          # All spec types (ServiceSpec, DeviceProfile, TopologySpecFile, etc.)
     loader.go                         # Load/save network.json, profiles, platforms, topology
+    schema_meta.go                    # FieldMeta + SchemaMeta + reflection-based tag extractor
+    schema_registry.go                # init() registers every spec authoring kind for /schema endpoints
 ```
+
+Field metadata for UIs (form labels, tooltips, enum lists, refs to other kinds,
+client-side validation) lives as struct tags on the spec types themselves:
+
+| Tag | Purpose |
+|-----|---------|
+| `label:` | Human form-field label |
+| `tooltip:` | Hover/help text |
+| `enum:` | Comma-separated allowed values for fixed-vocabulary fields |
+| `ref:` | Names another spec kind (UI renders a dropdown of existing names) |
+| `item_kind:` | Element kind for arrays/maps of objects (overrides reflect inference) |
+| `pattern:` | Regex the value must match |
+| `min:` / `max:` | Inclusive bounds for int fields |
+| `format:` | Semantic hint — `cidr`, `ipv4`, `ipv6`, `mac`, `asn` |
+| `immutable:"true"` | Value is fixed at create time; UI suppresses edit affordance |
+
+The `/newtron/v1/schema` and `/newtron/v1/schema/{kind}` endpoints expose this
+metadata plus per-kind URL templates (`SchemaPaths`) and identity metadata
+(`Identifier`, `ParentRef`) registered in `schema_registry.go`. UIs consume the
+combined document to drive every kind's CRUD without hardcoded mappings (§27).
+
+`Identifier` names the field that addresses one row — usually `name` for
+top-level kinds; `seq` / `queue_id` / `prefix` for sub-rules. For top-level
+kinds and `QoSQueue`, the identifier doesn't appear on the spec struct (it
+lives in the create-X request body or, for queues, the array position); the
+registry supplies an `IdentifierField *FieldMeta` that the schema builder
+prepends to the field list.
+
+`ParentRef` (sub-rules only) names the wire field a sub-rule's request body
+uses to identify its parent — e.g. `add-filter-rule` takes `{filter: "<name>",
+...}`, so `FilterRule.ParentRef = "filter"`.
+
+`SchemaPaths` carries List / Show / Create / Update / Delete URL templates
+(with `{netID}` and `{name}` placeholders). Read-only kinds (PlatformSpec)
+omit Create/Update/Delete; sub-rule kinds omit List/Show; PrefixListEntry
+omits Update (per §47 the prefix IS the entry, no other mutable fields);
+embedded-only kinds (RoutingSpec, RoutePolicySet, EVPNConfig) omit the entire
+`paths` object via `json:"paths,omitzero"`.
 
 ```
 cmd/newtron/                          # CLI — one file per noun, dispatched via commands map
