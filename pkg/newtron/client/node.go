@@ -271,20 +271,18 @@ func (c *Client) AddBGPEVPNPeer(device string, config newtron.BGPNeighborConfig,
 	return c.nodeWrite(device, "add-bgp-evpn-peer", config, opts)
 }
 
-// UpdateBGPEVPNPeer atomically mutates an existing EVPN BGP peer.
-// Optional newNeighborIP re-keys the peer. Closes the EVPN session blip
-// remove + add exposes today (#227).
-func (c *Client) UpdateBGPEVPNPeer(device, neighborIP string, config newtron.BGPNeighborConfig, newNeighborIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// UpdateBGPEVPNPeer atomically mutates an existing EVPN BGP peer's
+// fields. The composite key (default + neighbor_ip) is the row's
+// identity (§47); a re-IP is remove + add via separate verbs. #227.
+func (c *Client) UpdateBGPEVPNPeer(device, neighborIP string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
-		NeighborIP    string `json:"neighbor_ip"`
-		RemoteAS      int    `json:"remote_as"`
-		Description   string `json:"description,omitempty"`
-		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+		NeighborIP  string `json:"neighbor_ip"`
+		RemoteAS    int    `json:"remote_as"`
+		Description string `json:"description,omitempty"`
 	}{
-		NeighborIP:    neighborIP,
-		RemoteAS:      config.RemoteAS,
-		Description:   config.Description,
-		NewNeighborIP: newNeighborIP,
+		NeighborIP:  neighborIP,
+		RemoteAS:    config.RemoteAS,
+		Description: config.Description,
 	}
 	return c.nodeWrite(device, "update-bgp-evpn-peer", body, opts)
 }
@@ -373,12 +371,12 @@ func (c *Client) AddStaticRoute(device, vrf, prefix, nexthop string, metric int,
 	return c.nodeWrite(device, "add-static-route", body, opts)
 }
 
-// UpdateStaticRoute atomically mutates a static route under the
-// per-device intent lock. Optional newPrefix re-keys (same VRF,
-// different prefix). Closes the forwarding black hole remove + add
-// exposes today (#227).
-func (c *Client) UpdateStaticRoute(device, vrf, prefix, nexthop string, metric int, newPrefix string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.StaticRouteUpdateRequest{VRF: vrf, Prefix: prefix, NextHop: nexthop, Metric: metric, NewPrefix: newPrefix}
+// UpdateStaticRoute atomically mutates fields on a static route under
+// the per-device intent lock. Per §47 the key (vrf, prefix) is
+// immutable. Closes the forwarding black hole remove + add exposes
+// today (#227).
+func (c *Client) UpdateStaticRoute(device, vrf, prefix, nexthop string, metric int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.StaticRouteUpdateRequest{VRF: vrf, Prefix: prefix, NextHop: nexthop, Metric: metric}
 	return c.nodeWrite(device, "update-static-route", body, opts)
 }
 
@@ -431,32 +429,31 @@ func (c *Client) AddACLRule(device, acl string, config newtron.ACLRuleAddRequest
 	return c.nodeWrite(device, "add-acl-rule", body, opts)
 }
 
-// UpdateACLRule atomically mutates an ACL rule under the per-device
-// intent lock. Optional NewRuleName re-keys the rule (rename). Closes
-// the packet-leak window remove + add exposes today (#227).
+// UpdateACLRule atomically mutates fields on an ACL rule under the
+// per-device intent lock. Per §47 the key (acl_table, rule_name) is
+// immutable. Closes the packet-leak window remove + add exposes
+// today (#227).
 func (c *Client) UpdateACLRule(device, acl string, config newtron.ACLRuleUpdateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
-		ACL         string `json:"acl"`
-		RuleName    string `json:"rule_name"`
-		Priority    int    `json:"priority"`
-		Action      string `json:"action"`
-		SrcIP       string `json:"src_ip"`
-		DstIP       string `json:"dst_ip"`
-		Protocol    string `json:"protocol"`
-		SrcPort     string `json:"src_port"`
-		DstPort     string `json:"dst_port"`
-		NewRuleName string `json:"new_rule_name,omitempty"`
+		ACL      string `json:"acl"`
+		RuleName string `json:"rule_name"`
+		Priority int    `json:"priority"`
+		Action   string `json:"action"`
+		SrcIP    string `json:"src_ip"`
+		DstIP    string `json:"dst_ip"`
+		Protocol string `json:"protocol"`
+		SrcPort  string `json:"src_port"`
+		DstPort  string `json:"dst_port"`
 	}{
-		ACL:         acl,
-		RuleName:    config.RuleName,
-		Priority:    config.Priority,
-		Action:      config.Action,
-		SrcIP:       config.SrcIP,
-		DstIP:       config.DstIP,
-		Protocol:    config.Protocol,
-		SrcPort:     config.SrcPort,
-		DstPort:     config.DstPort,
-		NewRuleName: config.NewRuleName,
+		ACL:      acl,
+		RuleName: config.RuleName,
+		Priority: config.Priority,
+		Action:   config.Action,
+		SrcIP:    config.SrcIP,
+		DstIP:    config.DstIP,
+		Protocol: config.Protocol,
+		SrcPort:  config.SrcPort,
+		DstPort:  config.DstPort,
 	}
 	return c.nodeWrite(device, "update-acl-rule", body, opts)
 }

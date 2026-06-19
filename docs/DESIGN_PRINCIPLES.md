@@ -2585,6 +2585,52 @@ endpoints currently surface only a summary without the canonical
 form alongside, the principle is violated; the violation closes by
 adding the canonical type, not by removing the summary.
 
+---
+
+## 42. CONFIG_DB Composite Key Is the Identity
+
+A CONFIG_DB row's Redis hash key — `ACL_RULE|EDGE_IN|RULE_10`,
+`STATIC_ROUTE|Vrf_CUST1|10.0.0.0/24`, `BGP_NEIGHBOR|default|10.1.0.1` —
+is what makes that row distinguishable from every other row in the
+table. The key composition is the row's identity. Nothing else is.
+
+An API verb that calls itself `update-X` while changing any part of
+the key isn't updating — it's deleting one row and creating another.
+SAI sees a delete on the old key and a create on the new one. The
+dataplane sees whatever the protocol layer does when its anchor
+changes: a BGP session bounce when the BGP_NEIGHBOR key's IP changes;
+a FIB gap when the STATIC_ROUTE prefix changes; an ACL match-set
+transient when the ACL_RULE name changes. The verb's name hides this.
+The operator forms a wrong mental model of what's happening. The
+audit log says "update" when the device experienced "remove + add."
+
+The principle is small. Three rules:
+
+1. **`update-X` preserves the key.** The request body carries the
+   full composite key as identification. It modifies only fields. Key
+   components are immutable through `update-X`.
+
+2. **Key changes are remove + add.** Renaming, renumbering,
+   relocating, re-IP'ing — all of these change identity. Package them
+   under `remove-X` + `add-X`. The protocol-layer cost (session
+   bounce, forwarding gap, match-set churn) is honest about what's
+   happening.
+
+3. **No invented identity.** If the schema permits two rows to
+   coexist (because they don't collide on the key), don't invent
+   additional uniqueness constraints in the API. CONFIG_DB allows
+   two ACL_RULE rows with the same PRIORITY (different rule_names).
+   Priority is a field. The verb shape must accept that.
+
+The schema file is the contract. `pkg/newtron/device/sonic/schema.go`
+declares `KeyPattern` for every table — that pattern is the identity
+model. New verbs read it before claiming what's mutable.
+
+**The CONFIG_DB key is the identity. An update verb that changes it
+isn't updating — it's deleting one row and creating another.**
+
+---
+
 # Tensions and Resolutions
 
 A coherent system of principles is not a system without tensions.
@@ -2743,3 +2789,5 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 38 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
 | 39 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
 | 40 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
+| 41 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
+| 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C |

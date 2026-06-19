@@ -195,11 +195,10 @@ func (s *Server) handleUpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	ifName := interfaceName(r)
 	var req struct {
-		NeighborIP    string `json:"neighbor_ip"`
-		RemoteAS      int    `json:"remote_as"`
-		Description   string `json:"description,omitempty"`
-		Multihop      int    `json:"multihop,omitempty"`
-		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+		NeighborIP  string `json:"neighbor_ip"`
+		RemoteAS    int    `json:"remote_as"`
+		Description string `json:"description,omitempty"`
+		Multihop    int    `json:"multihop,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -216,7 +215,7 @@ func (s *Server) handleUpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 			RemoteAS:    req.RemoteAS,
 			Description: req.Description,
 			Multihop:    req.Multihop,
-		}, req.NewNeighborIP)
+		})
 	})
 	if err != nil {
 		writeError(w, err)

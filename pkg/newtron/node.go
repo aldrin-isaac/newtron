@@ -513,16 +513,16 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) err
 	return err
 }
 
-// UpdateBGPEVPNPeer atomically mutates an existing EVPN overlay peer.
-// Optional newNeighborIP re-keys the peer (changes the destination IP)
-// without going through remove + add. §15 mirror of AddBGPEVPNPeer that
-// closes the EVPN session blip the remove + add sequence exposes today
-// (#227).
-func (n *Node) UpdateBGPEVPNPeer(ctx context.Context, neighborIP string, config BGPNeighborConfig, newNeighborIP string) error {
+// UpdateBGPEVPNPeer atomically mutates fields on an existing EVPN
+// overlay peer. Per §47 the key (default, neighbor_ip) is immutable;
+// to change the neighbor IP, remove and re-add. §15 mirror of
+// AddBGPEVPNPeer that closes the EVPN session blip the remove + add
+// sequence exposes today (#227).
+func (n *Node) UpdateBGPEVPNPeer(ctx context.Context, neighborIP string, config BGPNeighborConfig) error {
 	if err := n.gate(ctx, auth.PermEVPNPeer, neighborIP); err != nil {
 		return err
 	}
-	cs, err := n.internal.UpdateBGPEVPNPeer(ctx, neighborIP, config.RemoteAS, config.Description, false, newNeighborIP)
+	cs, err := n.internal.UpdateBGPEVPNPeer(ctx, neighborIP, config.RemoteAS, config.Description, false)
 	n.appendPending(cs)
 	return err
 }
@@ -551,16 +551,16 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrf, prefix, nexthop string, 
 	return err
 }
 
-// UpdateStaticRoute atomically mutates an existing static route. Optional
-// newPrefix re-keys (the route covers a different prefix under the same
-// VRF) without going through remove + add. §15 mirror of AddStaticRoute
-// that closes the forwarding black hole the remove + add sequence
-// exposes today (#227).
-func (n *Node) UpdateStaticRoute(ctx context.Context, vrf, prefix, nexthop string, metric int, newPrefix string) error {
+// UpdateStaticRoute atomically mutates fields on an existing static
+// route. Per §47 the key (vrf, prefix) is immutable; to change the
+// prefix, remove and re-add. §15 mirror of AddStaticRoute that closes
+// the forwarding black hole the remove + add sequence exposes today
+// (#227).
+func (n *Node) UpdateStaticRoute(ctx context.Context, vrf, prefix, nexthop string, metric int) error {
 	if err := n.gate(ctx, auth.PermVRFRoute, vrf); err != nil {
 		return err
 	}
-	cs, err := n.internal.UpdateStaticRoute(ctx, vrf, prefix, nexthop, metric, newPrefix)
+	cs, err := n.internal.UpdateStaticRoute(ctx, vrf, prefix, nexthop, metric)
 	n.appendPending(cs)
 	return err
 }
@@ -647,11 +647,11 @@ func (n *Node) AddACLRule(ctx context.Context, acl, ruleName string, config ACLR
 	return err
 }
 
-// UpdateACLRule atomically mutates an existing ACL rule. Optional newRuleName
-// re-keys the rule (rename) without going through delete + add. §15 mirror of
-// AddACLRule that closes the packet-leak window the remove+add sequence
-// exposes today (#227).
-func (n *Node) UpdateACLRule(ctx context.Context, acl, ruleName string, config ACLRuleConfig, newRuleName string) error {
+// UpdateACLRule atomically mutates fields on an existing ACL rule.
+// Per §47 the key (acl_table, rule_name) is immutable; to rename a
+// rule, remove and re-add. §15 mirror of AddACLRule that closes the
+// packet-leak window the remove + add sequence exposes today (#227).
+func (n *Node) UpdateACLRule(ctx context.Context, acl, ruleName string, config ACLRuleConfig) error {
 	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
 		return err
 	}
@@ -663,7 +663,7 @@ func (n *Node) UpdateACLRule(ctx context.Context, acl, ruleName string, config A
 		Protocol: config.Protocol,
 		SrcPort:  config.SrcPort,
 		DstPort:  config.DstPort,
-	}, newRuleName)
+	})
 	n.appendPending(cs)
 	return err
 }

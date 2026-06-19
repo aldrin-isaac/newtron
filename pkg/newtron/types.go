@@ -1194,18 +1194,18 @@ type ACLRuleAddRequest struct {
 }
 
 // ACLRuleUpdateRequest is the request body for atomically updating an ACL
-// rule. Optional NewRuleName re-keys the rule (rename) under the per-device
-// intent lock. Priority changes are field changes (no re-key). Issue #227.
+// rule's fields under the per-device intent lock. The composite key
+// (table + rule_name) is the row's identity (§47) and is not mutable
+// through this verb — rename via remove-acl-rule + add-acl-rule. #227.
 type ACLRuleUpdateRequest struct {
-	RuleName    string `json:"rule_name"`
-	Priority    int    `json:"priority"`
-	Action      string `json:"action"`
-	SrcIP       string `json:"src_ip,omitempty"`
-	DstIP       string `json:"dst_ip,omitempty"`
-	Protocol    string `json:"protocol,omitempty"`
-	SrcPort     string `json:"src_port,omitempty"`
-	DstPort     string `json:"dst_port,omitempty"`
-	NewRuleName string `json:"new_rule_name,omitempty"`
+	RuleName string `json:"rule_name"`
+	Priority int    `json:"priority"`
+	Action   string `json:"action"`
+	SrcIP    string `json:"src_ip,omitempty"`
+	DstIP    string `json:"dst_ip,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	SrcPort  string `json:"src_port,omitempty"`
+	DstPort  string `json:"dst_port,omitempty"`
 }
 
 // PortChannelCreateRequest is the request body for creating a port channel.

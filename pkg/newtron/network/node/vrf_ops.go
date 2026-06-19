@@ -260,22 +260,13 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop stri
 // and writes the new one. The intent record is replaced via writeIntent's
 // idempotent path (DEL+HSET — #228 fix) so dropped params don't ghost.
 //
-// When newPrefix is supplied and differs from prefix, the operation is a
-// re-key: the intent record's resource changes from route|<vrf>|<old> to
-// route|<vrf>|<new>. The new key must not already exist. Issue #227.
-func (n *Node) UpdateStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int, newPrefix string) (*ChangeSet, error) {
+// Per §47 (CONFIG_DB Composite Key Is the Identity) the key
+// (vrf, prefix) is immutable. Issue #227.
+func (n *Node) UpdateStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error) {
 	resource := "route|" + vrfName + "|" + prefix
 	existing := n.GetIntent(resource)
 	if existing == nil {
 		return nil, fmt.Errorf("static route %s not found in VRF %s", prefix, vrfName)
-	}
-	targetPrefix := prefix
-	if newPrefix != "" && newPrefix != prefix {
-		targetResource := "route|" + vrfName + "|" + newPrefix
-		if n.GetIntent(targetResource) != nil {
-			return nil, fmt.Errorf("static route %s already exists in VRF %s", newPrefix, vrfName)
-		}
-		targetPrefix = newPrefix
 	}
 
 	cs, err := n.op(sonic.OpUpdateStaticRoute, prefix, ChangeAdd,
@@ -288,12 +279,14 @@ func (n *Node) UpdateStaticRoute(ctx context.Context, vrfName, prefix, nextHop s
 		return nil, err
 	}
 
+	// CONFIG_DB: DEL+ADD same (vrf, prefix) key. The prefix is the row's
+	// identity (§47); a prefix change would be remove + add via separate verbs.
 	cs.Deletes(deleteStaticRouteConfig(vrfName, prefix))
-	cs.Adds(createStaticRouteConfig(vrfName, targetPrefix, nextHop, metric))
+	cs.Adds(createStaticRouteConfig(vrfName, prefix, nextHop, metric))
 
 	intentParams := map[string]string{
 		sonic.FieldVRF:     vrfName,
-		sonic.FieldPrefix:  targetPrefix,
+		sonic.FieldPrefix:  prefix,
 		sonic.FieldNextHop: nextHop,
 	}
 	if metric > 0 {
@@ -305,21 +298,12 @@ func (n *Node) UpdateStaticRoute(ctx context.Context, vrfName, prefix, nextHop s
 	} else {
 		routeParents = []string{"vrf|" + vrfName}
 	}
-	if targetPrefix != prefix {
-		if err := n.deleteIntent(cs, resource); err != nil {
-			return nil, err
-		}
-		if err := n.writeIntent(cs, sonic.OpAddStaticRoute, "route|"+vrfName+"|"+targetPrefix, intentParams, routeParents); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := n.writeIntent(cs, sonic.OpAddStaticRoute, resource, intentParams, routeParents); err != nil {
-			return nil, err
-		}
+	if err := n.writeIntent(cs, sonic.OpAddStaticRoute, resource, intentParams, routeParents); err != nil {
+		return nil, err
 	}
 
-	cs.OperationParams = map[string]string{"vrf": vrfName, "prefix": targetPrefix}
-	util.WithDevice(n.name).Infof("Updated static route %s via %s (VRF %s)", targetPrefix, nextHop, vrfName)
+	cs.OperationParams = map[string]string{"vrf": vrfName, "prefix": prefix}
+	util.WithDevice(n.name).Infof("Updated static route %s via %s (VRF %s)", prefix, nextHop, vrfName)
 	return cs, nil
 }
 

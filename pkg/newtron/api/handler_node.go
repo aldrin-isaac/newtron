@@ -598,16 +598,15 @@ func (s *Server) handleUpdateACLRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ACL         string `json:"acl"`
-		RuleName    string `json:"rule_name"`
-		Priority    int    `json:"priority"`
-		Action      string `json:"action"`
-		SrcIP       string `json:"src_ip"`
-		DstIP       string `json:"dst_ip"`
-		Protocol    string `json:"protocol"`
-		SrcPort     string `json:"src_port"`
-		DstPort     string `json:"dst_port"`
-		NewRuleName string `json:"new_rule_name,omitempty"`
+		ACL      string `json:"acl"`
+		RuleName string `json:"rule_name"`
+		Priority int    `json:"priority"`
+		Action   string `json:"action"`
+		SrcIP    string `json:"src_ip"`
+		DstIP    string `json:"dst_ip"`
+		Protocol string `json:"protocol"`
+		SrcPort  string `json:"src_port"`
+		DstPort  string `json:"dst_port"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -623,7 +622,7 @@ func (s *Server) handleUpdateACLRule(w http.ResponseWriter, r *http.Request) {
 			Protocol: req.Protocol,
 			SrcPort:  req.SrcPort,
 			DstPort:  req.DstPort,
-		}, req.NewRuleName)
+		})
 	})
 	if err != nil {
 		writeError(w, err)
@@ -852,10 +851,9 @@ func (s *Server) handleUpdateBGPEVPNPeer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		NeighborIP    string `json:"neighbor_ip"`
-		RemoteAS      int    `json:"remote_as"`
-		Description   string `json:"description,omitempty"`
-		NewNeighborIP string `json:"new_neighbor_ip,omitempty"`
+		NeighborIP  string `json:"neighbor_ip"`
+		RemoteAS    int    `json:"remote_as"`
+		Description string `json:"description,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -867,7 +865,7 @@ func (s *Server) handleUpdateBGPEVPNPeer(w http.ResponseWriter, r *http.Request)
 			NeighborIP:  req.NeighborIP,
 			RemoteAS:    req.RemoteAS,
 			Description: req.Description,
-		}, req.NewNeighborIP)
+		})
 	})
 	if err != nil {
 		writeError(w, err)
@@ -926,11 +924,10 @@ func (s *Server) handleUpdateStaticRoute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		VRF       string `json:"vrf"`
-		Prefix    string `json:"prefix"`
-		NextHop   string `json:"nexthop"`
-		Metric    int    `json:"metric"`
-		NewPrefix string `json:"new_prefix,omitempty"`
+		VRF     string `json:"vrf"`
+		Prefix  string `json:"prefix"`
+		NextHop string `json:"nexthop"`
+		Metric  int    `json:"metric"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -938,7 +935,7 @@ func (s *Server) handleUpdateStaticRoute(w http.ResponseWriter, r *http.Request)
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.UpdateStaticRoute(ctx, req.VRF, req.Prefix, req.NextHop, req.Metric, req.NewPrefix)
+		return n.UpdateStaticRoute(ctx, req.VRF, req.Prefix, req.NextHop, req.Metric)
 	})
 	if err != nil {
 		writeError(w, err)

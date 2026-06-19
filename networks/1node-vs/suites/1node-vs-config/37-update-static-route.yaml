@@ -1,17 +1,18 @@
 name: update-static-route
 description: |
   E2E coverage for issue #227 update-static-route — atomic per-route
-  mutation for device CONFIG_DB static routes. Closes the forwarding
+  field mutation for device CONFIG_DB static routes. Closes the forwarding
   black hole the remove + add sequence exposes today (traffic destined
   to the prefix has no next-hop during the gap).
+
+  Per §47 (CONFIG_DB Composite Key Is the Identity) the key
+  (vrf, prefix) is immutable. To relocate a route to a different prefix,
+  operators remove and re-add; the verb mutates fields in place only.
 
   Verifies:
     - Next-hop swap (same prefix, different next-hop) writes a single
       DEL+ADD pair for the STATIC_ROUTE entry; intent record's nexthop
       param reflects the new value.
-    - Re-key (new_prefix) relocates both STATIC_ROUTE and
-      NEWTRON_INTENT atomically — old key deleted, new key added.
-    - Re-key to occupied prefix fails (409).
     - Missing route fails (404).
 
   Loopback mode — pure HTTP.
@@ -82,63 +83,14 @@ steps:
       jq: '.nexthop == "10.1.0.5"'
 
   # ====================================================================
-  # Re-key — change prefix
-  # ====================================================================
-  - name: update-route-10-rekey-to-16
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/update-static-route?mode=loopback
-    params:
-      vrf: Vrf_CUST227R
-      prefix: "10.0.0.0/24"
-      nexthop: "10.1.0.2"
-      new_prefix: "10.0.0.0/16"
-
-  - name: verify-route-10-24-key-gone
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_CUST227R%7C10.0.0.0%2F24/exists?mode=loopback
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-route-10-16-key-exists
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/STATIC_ROUTE/Vrf_CUST227R%7C10.0.0.0%2F16/exists?mode=loopback
-    expect:
-      jq: '.exists == true'
-
-  - name: verify-route-10-24-intent-gone
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F24/exists?mode=loopback
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-route-10-16-intent-exists
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F16/exists?mode=loopback
-    expect:
-      jq: '.exists == true'
-
-  - name: verify-route-10-16-intent-nexthop
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/route%7CVrf_CUST227R%7C10.0.0.0%2F16?mode=loopback
-    expect:
-      jq: '.next_hop == "10.1.0.2" and .prefix == "10.0.0.0/16"'
-
-  # ====================================================================
   # Cleanup
   # ====================================================================
-  - name: cleanup-remove-route-16
+  - name: cleanup-remove-route-10
     action: newtron
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/remove-static-route?mode=loopback
-    params: {vrf: Vrf_CUST227R, prefix: "10.0.0.0/16"}
+    params: {vrf: Vrf_CUST227R, prefix: "10.0.0.0/24"}
 
   - name: cleanup-remove-route-192
     action: newtron

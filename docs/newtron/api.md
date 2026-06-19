@@ -2438,14 +2438,15 @@ Add a static route.
 
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/update-static-route
 
-Atomically update a static route under the per-device intent lock.
-Closes the forwarding black hole that remove-static-route +
-add-static-route exposes today (traffic destined to the prefix has no
-next-hop during the DEL → ADD window). Issue #227.
+Atomically update a static route's fields (nexthop, metric) under the
+per-device intent lock. Closes the forwarding black hole that
+remove-static-route + add-static-route exposes today (traffic destined
+to the prefix has no next-hop during the DEL → ADD window). Issue #227.
 
-Optional `new_prefix` re-keys the route (same VRF, different prefix)
-without going through delete + add. The new prefix must not already
-have a route in this VRF; collision returns 409.
+The composite key `(vrf, prefix)` identifies the row; per §47, this
+verb mutates fields only. To change the prefix, use remove-static-route
++ add-static-route — that's the protocol-honest path for a different
+route at a different prefix.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2457,12 +2458,10 @@ have a route in this VRF; collision returns 409.
 | `prefix` | string | yes | Existing route prefix |
 | `nexthop` | string | yes | New next-hop IP |
 | `metric` | integer | no | Route metric/distance |
-| `new_prefix` | string | no | Re-key the route to this prefix (same VRF) |
 
 **Behaviors:**
 
 - 404 if no route exists at `(vrf, prefix)`.
-- 409 if `new_prefix` already names a different route in the same VRF.
 
 **Response (200):** `WriteResult`
 
@@ -2539,16 +2538,17 @@ Add a rule to an ACL table.
 
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/update-acl-rule
 
-Atomically update an ACL rule under the per-device intent lock. Closes
-the packet-leak window remove + add exposes today: the prior `ACL_RULE`
-entry and the new one are written in a single ChangeSet, so any traffic
-hitting the port during the mutation matches either the old rule or the
-new rule — never neither. Issue #227.
+Atomically update an ACL rule's fields under the per-device intent
+lock. Closes the packet-leak window remove + add exposes today: the
+prior `ACL_RULE` entry and the new one are written in a single
+ChangeSet, so any traffic hitting the port during the mutation matches
+either the old rule or the new rule — never neither. Issue #227.
 
-Optional `new_rule_name` re-keys the rule (rename) without going through
-delete + add. The new key must not already exist; collision returns 409.
-Priority changes are field changes (no re-key needed) — pass the new
-priority and the old `rule_name`.
+The composite key `(table, rule_name)` identifies the row; per §47,
+this verb mutates fields only. Note that **PRIORITY is a field, not a
+handle**: CONFIG_DB allows two ACL_RULE rows in the same table with
+the same PRIORITY (different `rule_name`s). To change the rule's name,
+use remove-acl-rule + add-acl-rule.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2565,12 +2565,10 @@ priority and the old `rule_name`.
 | `protocol` | string | no | IP protocol |
 | `src_port` | string | no | Source port |
 | `dst_port` | string | no | Destination port |
-| `new_rule_name` | string | no | Rename: new rule name (re-key under the same ACL table) |
 
 **Behaviors:**
 
 - 404 if `rule_name` doesn't exist in the ACL table.
-- 409 if `new_rule_name` already names a different rule in the same table.
 
 **Response (200):** `WriteResult`
 
@@ -2682,10 +2680,10 @@ add-bgp-evpn-peer exposes today: EVPN session drop triggers MAC withdraw
 across the fabric and forces a full route re-exchange after
 re-establishment. Issue #227.
 
-Optional `new_neighbor_ip` re-keys both the BGP_NEIGHBOR row and the
-intent resource (`evpn-peer|<ip>`) atomically. 404 if no peer exists at
-`neighbor_ip`; 409 if `new_neighbor_ip` already names a different BGP
-peer on this device.
+The composite key `(default, neighbor_ip)` identifies the row; per §47,
+this verb mutates fields only. To change the BGP destination IP, use
+remove-bgp-evpn-peer + add-bgp-evpn-peer — that's peering with a
+different real-world endpoint. 404 if no peer exists at `neighbor_ip`.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2696,7 +2694,6 @@ peer on this device.
 | `neighbor_ip` | string | yes | Existing peer's neighbor IP |
 | `remote_as` | integer | yes | New remote AS |
 | `description` | string | no | New description |
-| `new_neighbor_ip` | string | no | Re-key the peer to this new IP |
 
 **Response (200):** `WriteResult`
 
@@ -3341,12 +3338,10 @@ per-device intent lock. Closes the session-blip window that
 remove-bgp-peer + add-bgp-peer exposes (BGP session tears down and
 re-establishes during the gap). Issue #227.
 
-Optional `new_neighbor_ip` re-keys the BGP_NEIGHBOR row to a different
-neighbor IP without going through delete + add. The intent record's
-resource is unchanged (`interface|<name>|bgp-peer` is a singleton); only
-its `neighbor_ip` param updates. 404 if no BGP peer exists on the
-interface. 409 if `new_neighbor_ip` already names a different BGP peer
-on this device.
+The composite key `(vrf, neighbor_ip)` identifies the row; per §47,
+this verb mutates fields only. The intent record is read to recover
+the current neighbor IP — operators do not need to pass it. To change
+the BGP destination IP, use remove-bgp-peer + add-bgp-peer.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -3358,7 +3353,6 @@ on this device.
 | `remote_as` | integer | yes | New remote AS number |
 | `description` | string | no | New description |
 | `multihop` | integer | no | New eBGP multihop TTL |
-| `new_neighbor_ip` | string | no | Re-key the BGP_NEIGHBOR row to this IP |
 
 **Response (200):** `WriteResult`
 

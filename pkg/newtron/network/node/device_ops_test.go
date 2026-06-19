@@ -547,12 +547,12 @@ func TestUpdateACLRule_InPlace(t *testing.T) {
 
 	cs, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
 		Priority: 5000, Action: "deny", SrcIP: "192.168.0.0/16",
-	}, "")
+	})
 	if err != nil {
 		t.Fatalf("UpdateACLRule: %v", err)
 	}
 
-	// CONFIG_DB: prior ACL_RULE entry deleted, new one added.
+	// CONFIG_DB: prior ACL_RULE entry deleted, new one added at same key.
 	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
 	c := assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeAdd)
 	assertField(t, c, "PRIORITY", "5000")
@@ -568,56 +568,15 @@ func TestUpdateACLRule_InPlace(t *testing.T) {
 	}
 }
 
-func TestUpdateACLRule_RenameRekey(t *testing.T) {
-	d := aclSetup(t)
-	ctx := context.Background()
-
-	cs, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
-		Priority: 10, Action: "permit", SrcIP: "10.0.0.0/8",
-	}, "RULE_50")
-	if err != nil {
-		t.Fatalf("UpdateACLRule rename: %v", err)
-	}
-
-	// CONFIG_DB: old key gone, new key present.
-	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
-	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_50", ChangeAdd)
-	// Intent: old resource deleted, new resource added.
-	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_10", ChangeDelete)
-	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_50", ChangeAdd)
-
-	if d.GetIntent("acl|EDGE_IN|RULE_10") != nil {
-		t.Error("old intent should be deleted after rename")
-	}
-	if d.GetIntent("acl|EDGE_IN|RULE_50") == nil {
-		t.Error("new intent should exist after rename")
-	}
-}
-
 func TestUpdateACLRule_NotFound(t *testing.T) {
 	d := aclSetup(t)
 	ctx := context.Background()
 
 	_, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_99", ACLRuleConfig{
 		Priority: 99, Action: "permit",
-	}, "")
+	})
 	if err == nil {
 		t.Fatal("expected error for missing rule")
-	}
-}
-
-func TestUpdateACLRule_RenameCollision(t *testing.T) {
-	d := aclSetup(t)
-	ctx := context.Background()
-	if _, err := d.AddACLRule(ctx, "EDGE_IN", "RULE_20", ACLRuleConfig{Priority: 20, Action: "permit"}); err != nil {
-		t.Fatalf("seed second rule: %v", err)
-	}
-
-	_, err := d.UpdateACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
-		Priority: 10, Action: "permit",
-	}, "RULE_20") // collision with seeded second rule
-	if err == nil {
-		t.Fatal("expected collision error for rename to existing rule")
 	}
 }
 
@@ -988,7 +947,7 @@ func TestUpdateBGPEVPNPeer_InPlaceASChange(t *testing.T) {
 	n := evpnPeerSetup(t)
 	ctx := context.Background()
 
-	cs, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65099, "new-desc", true, "")
+	cs, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65099, "new-desc", true)
 	if err != nil {
 		t.Fatalf("UpdateBGPEVPNPeer: %v", err)
 	}
@@ -1006,48 +965,13 @@ func TestUpdateBGPEVPNPeer_InPlaceASChange(t *testing.T) {
 	}
 }
 
-func TestUpdateBGPEVPNPeer_RekeyNeighborIP(t *testing.T) {
-	n := evpnPeerSetup(t)
-	ctx := context.Background()
-
-	cs, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65002, "old-peer", true, "10.0.0.5")
-	if err != nil {
-		t.Fatalf("UpdateBGPEVPNPeer rekey: %v", err)
-	}
-
-	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeDelete)
-	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.5", ChangeAdd)
-	assertChange(t, cs, "NEWTRON_INTENT", "evpn-peer|10.0.0.2", ChangeDelete)
-	assertChange(t, cs, "NEWTRON_INTENT", "evpn-peer|10.0.0.5", ChangeAdd)
-
-	if n.GetIntent("evpn-peer|10.0.0.2") != nil {
-		t.Error("old intent should be deleted")
-	}
-	if n.GetIntent("evpn-peer|10.0.0.5") == nil {
-		t.Error("new intent should exist")
-	}
-}
-
 func TestUpdateBGPEVPNPeer_NotFound(t *testing.T) {
 	n := evpnPeerSetup(t)
 	ctx := context.Background()
 
-	_, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.99", 65099, "x", true, "")
+	_, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.99", 65099, "x", true)
 	if err == nil {
 		t.Fatal("expected error for missing peer")
-	}
-}
-
-func TestUpdateBGPEVPNPeer_RekeyCollision(t *testing.T) {
-	n := evpnPeerSetup(t)
-	ctx := context.Background()
-	if _, err := n.AddBGPEVPNPeer(ctx, "10.0.0.7", 65007, "", true); err != nil {
-		t.Fatalf("seed second peer: %v", err)
-	}
-
-	_, err := n.UpdateBGPEVPNPeer(ctx, "10.0.0.2", 65002, "x", true, "10.0.0.7")
-	if err == nil {
-		t.Fatal("expected collision error")
 	}
 }
 
@@ -1132,7 +1056,7 @@ func TestUpdateStaticRoute_NextHopSwap(t *testing.T) {
 	n := staticRouteSetup(t)
 	ctx := context.Background()
 
-	cs, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.2", 0, "")
+	cs, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.2", 0)
 	if err != nil {
 		t.Fatalf("UpdateStaticRoute next-hop swap: %v", err)
 	}
@@ -1150,48 +1074,13 @@ func TestUpdateStaticRoute_NextHopSwap(t *testing.T) {
 	}
 }
 
-func TestUpdateStaticRoute_RekeyPrefix(t *testing.T) {
-	n := staticRouteSetup(t)
-	ctx := context.Background()
-
-	cs, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.1", 0, "10.0.0.0/16")
-	if err != nil {
-		t.Fatalf("UpdateStaticRoute rekey: %v", err)
-	}
-
-	assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeDelete)
-	assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/16", ChangeAdd)
-	assertChange(t, cs, "NEWTRON_INTENT", "route|Vrf_CUST1|10.0.0.0/24", ChangeDelete)
-	assertChange(t, cs, "NEWTRON_INTENT", "route|Vrf_CUST1|10.0.0.0/16", ChangeAdd)
-
-	if n.GetIntent("route|Vrf_CUST1|10.0.0.0/24") != nil {
-		t.Error("old route intent should be deleted on rekey")
-	}
-	if n.GetIntent("route|Vrf_CUST1|10.0.0.0/16") == nil {
-		t.Error("new route intent should exist after rekey")
-	}
-}
-
 func TestUpdateStaticRoute_NotFound(t *testing.T) {
 	n := staticRouteSetup(t)
 	ctx := context.Background()
 
-	_, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "192.168.0.0/24", "10.1.0.1", 0, "")
+	_, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "192.168.0.0/24", "10.1.0.1", 0)
 	if err == nil {
 		t.Fatal("expected error for missing route")
-	}
-}
-
-func TestUpdateStaticRoute_RekeyCollision(t *testing.T) {
-	n := staticRouteSetup(t)
-	ctx := context.Background()
-	if _, err := n.AddStaticRoute(ctx, "Vrf_CUST1", "192.168.0.0/16", "10.1.0.5", 0); err != nil {
-		t.Fatalf("seed second route: %v", err)
-	}
-
-	_, err := n.UpdateStaticRoute(ctx, "Vrf_CUST1", "10.0.0.0/24", "10.1.0.1", 0, "192.168.0.0/16")
-	if err == nil {
-		t.Fatal("expected collision error for rekey to existing route")
 	}
 }
 

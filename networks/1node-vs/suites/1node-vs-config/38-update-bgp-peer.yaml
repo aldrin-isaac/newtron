@@ -1,16 +1,17 @@
 name: update-bgp-peer
 description: |
-  E2E coverage for issue #227 update-bgp-peer — atomic per-peer mutation
-  for device CONFIG_DB BGP neighbors. Closes the session-blip window the
-  remove + add sequence exposes today.
+  E2E coverage for issue #227 update-bgp-peer — atomic per-peer field
+  mutation for device CONFIG_DB BGP neighbors. Closes the session-blip
+  window the remove + add sequence exposes today.
+
+  Per §47 (CONFIG_DB Composite Key Is the Identity) the key
+  (vrf, neighbor_ip) is immutable. To change the neighbor IP, operators
+  remove and re-add the peer; the verb mutates fields in place only.
 
   Verifies:
     - In-place AS / description change writes a single DEL+ADD pair for
       the BGP_NEIGHBOR row; intent record's remote_as and description
       params reflect new values; neighbor_ip unchanged.
-    - Re-key (new_neighbor_ip) relocates the BGP_NEIGHBOR key while
-      keeping the intent record at the singleton key
-      interface|<name>|bgp-peer.
 
   Loopback mode — runs on switch1, pure HTTP.
 
@@ -80,40 +81,6 @@ steps:
     url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0%7Cbgp-peer?mode=loopback
     expect:
       jq: '.neighbor_ip == "10.227.0.1"'
-
-  # ====================================================================
-  # Re-key — change the neighbor IP
-  # ====================================================================
-  - name: update-bgp-peer-rekey
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet0/update-bgp-peer?mode=loopback
-    params:
-      remote_as: 65099
-      description: "new-peer-description"
-      new_neighbor_ip: "10.227.0.5"
-
-  - name: verify-old-neighbor-gone
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/Vrf_CUST227B%7C10.227.0.1/exists?mode=loopback
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-new-neighbor-exists
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/Vrf_CUST227B%7C10.227.0.5?mode=loopback
-    expect:
-      jq: '.asn == "65099"'
-
-  - name: verify-intent-neighbor-rekeyed
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0%7Cbgp-peer?mode=loopback
-    expect:
-      jq: '.neighbor_ip == "10.227.0.5"'
 
   # ====================================================================
   # Cleanup
