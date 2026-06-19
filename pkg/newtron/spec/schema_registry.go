@@ -162,6 +162,21 @@ func init() {
 			Delete: "/newtron/v1/networks/{netID}/delete-zone",
 		},
 	})
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:        "PrefixListSpec",
+		Label:       "Prefix List",
+		Description: "A reusable list of CIDR prefixes referenced by filter rules and route policies.",
+		Sample:      PrefixListSpec{},
+		Identifier:      "name",
+		IdentifierField: nameIdentifierField(),
+		Paths: SchemaPaths{
+			List:   "/newtron/v1/networks/{netID}/prefix-lists",
+			Show:   "/newtron/v1/networks/{netID}/prefix-lists/{name}",
+			Create: "/newtron/v1/networks/{netID}/create-prefix-list",
+			Update: "/newtron/v1/networks/{netID}/update-prefix-list",
+			Delete: "/newtron/v1/networks/{netID}/delete-prefix-list",
+		},
+	})
 
 	// ====================================================================
 	// Read-only top-level kind — Platform support is deeply tied to the

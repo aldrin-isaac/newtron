@@ -282,6 +282,19 @@ type PrefixListEntry struct {
 	Prefix string `json:"prefix" label:"Prefix" tooltip:"CIDR prefix to add to the list (e.g. \"10.0.0.0/8\")" format:"cidr"`
 }
 
+// PrefixListSpec describes the form shape of a top-level prefix-list
+// kind. On disk the prefix-list is `map[string][]string` (name → CIDRs);
+// there is no storage struct because the wire shape on create-prefix-
+// list / update-prefix-list is the inline `{name, prefixes}` body. The
+// schema metadata endpoint exposes this form shape so universal UIs
+// render the top-level prefix-list authoring form consistently with
+// every other top-level kind. Parallels PrefixListEntry's role for the
+// sub-rule kind. The struct is form-only — it is never marshaled to or
+// from network.json directly (the loader handles the inline map).
+type PrefixListSpec struct {
+	Prefixes []string `json:"prefixes" label:"Prefixes" tooltip:"Ordered list of CIDR prefixes the list contains" item_type:"string"`
+}
+
 // IsHost returns true if the platform is a host device (not a network switch).
 func (p *PlatformSpec) IsHost() bool {
 	return p.DeviceType == "host"

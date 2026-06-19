@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
@@ -313,5 +314,218 @@ func TestSchemaShow_QoSQueue(t *testing.T) {
 		if len(t1.Enum) != 2 || t1.Enum[0] != "strict" || t1.Enum[1] != "dwrr" {
 			t.Errorf("type.enum = %v, want [strict dwrr]", t1.Enum)
 		}
+	}
+}
+
+// TestSchemaList_HasPrefixListSpec verifies PrefixListSpec (added as
+// part of newtcon's universal-engine follow-up) appears in /schema with
+// the registered label, closing the asymmetry where every other
+// top-level kind had a schema entry.
+func TestSchemaList_HasPrefixListSpec(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	var env struct {
+		Data SchemaList `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	by := indexByKind(env.Data.Kinds)
+	pl, ok := by["PrefixListSpec"]
+	if !ok {
+		t.Fatal("PrefixListSpec missing from /schema response")
+	}
+	if pl.Label != "Prefix List" {
+		t.Errorf("label: got %q, want %q", pl.Label, "Prefix List")
+	}
+}
+
+// TestSchemaShow_PrefixListSpec verifies the PrefixListSpec kind exposes
+// the same top-level shape every other top-level kind does: synthetic
+// `name` identifier field with pattern+immutable, prefixes field with
+// type=array of strings, full CRUD paths.
+func TestSchemaShow_PrefixListSpec(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/PrefixListSpec", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var env struct {
+		Data spec.SchemaMeta `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.Identifier != "name" {
+		t.Errorf("identifier: got %q, want name", env.Data.Identifier)
+	}
+	want := spec.SchemaPaths{
+		List:   "/newtron/v1/networks/{netID}/prefix-lists",
+		Show:   "/newtron/v1/networks/{netID}/prefix-lists/{name}",
+		Create: "/newtron/v1/networks/{netID}/create-prefix-list",
+		Update: "/newtron/v1/networks/{netID}/update-prefix-list",
+		Delete: "/newtron/v1/networks/{netID}/delete-prefix-list",
+	}
+	if env.Data.Paths != want {
+		t.Errorf("paths: got %+v, want %+v", env.Data.Paths, want)
+	}
+	if len(env.Data.Fields) == 0 || env.Data.Fields[0].Name != "name" {
+		t.Fatalf("synthetic name field missing: %+v", env.Data.Fields)
+	}
+	prefixes := findField(env.Data.Fields, "prefixes")
+	if prefixes == nil {
+		t.Fatal("prefixes field missing")
+	}
+	if prefixes.Type != "array" || prefixes.ItemType != "string" {
+		t.Errorf("prefixes: type=%s item_type=%s, want array/string", prefixes.Type, prefixes.ItemType)
+	}
+}
+
+func findField(fields []spec.FieldMeta, name string) *spec.FieldMeta {
+	for i := range fields {
+		if fields[i].Name == name {
+			return &fields[i]
+		}
+	}
+	return nil
+}
+
+// TestSchemaAll verifies GET /schema/all returns every registered kind's
+// full SchemaMeta in one response — the universal-engine cold-start
+// collapse from N+1 requests to one.
+func TestSchemaAll(t *testing.T) {
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema/all", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data SchemaAllResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Count must match /schema's list.
+	listReq := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema", nil)
+	listW := httptest.NewRecorder()
+	s.Handler().ServeHTTP(listW, listReq)
+	var listEnv struct {
+		Data SchemaList `json:"data"`
+	}
+	if err := json.Unmarshal(listW.Body.Bytes(), &listEnv); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(env.Data.Schemas) != len(listEnv.Data.Kinds) {
+		t.Errorf("schema/all returned %d kinds; /schema returned %d", len(env.Data.Schemas), len(listEnv.Data.Kinds))
+	}
+	// Spot-check: ServiceSpec entry includes its synthetic name field and
+	// the full enum vocabulary — proves the full SchemaMeta is included,
+	// not the summary shape.
+	var serviceMeta *spec.SchemaMeta
+	for i := range env.Data.Schemas {
+		if env.Data.Schemas[i].Kind == "ServiceSpec" {
+			serviceMeta = &env.Data.Schemas[i]
+			break
+		}
+	}
+	if serviceMeta == nil {
+		t.Fatal("ServiceSpec missing from /schema/all")
+	}
+	if len(serviceMeta.Fields) < 2 || serviceMeta.Fields[0].Name != "name" {
+		t.Errorf("ServiceSpec fields look summary-shaped, not full: %+v", serviceMeta.Fields[:min(len(serviceMeta.Fields), 3)])
+	}
+	st := findField(serviceMeta.Fields, "service_type")
+	if st == nil || len(st.Enum) != 6 {
+		t.Errorf("ServiceSpec.service_type enum: got %+v, want 6 values", st)
+	}
+}
+
+// TestSchemaCacheHeaders_LastModifiedPresent verifies every schema
+// endpoint sets a Last-Modified header. Without these headers UIs cannot
+// implement conditional fetches and re-pull the full schema on every
+// visibility-change.
+func TestSchemaCacheHeaders_LastModifiedPresent(t *testing.T) {
+	s := NewServer(Config{})
+	cases := []string{
+		"/newtron/v1/schema",
+		"/newtron/v1/schema/all",
+		"/newtron/v1/schema/ServiceSpec",
+	}
+	for _, path := range cases {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", path, w.Code)
+			continue
+		}
+		if got := w.Header().Get("Last-Modified"); got == "" {
+			t.Errorf("%s: Last-Modified header missing", path)
+		}
+		if got := w.Header().Get("Cache-Control"); got == "" {
+			t.Errorf("%s: Cache-Control header missing", path)
+		}
+	}
+}
+
+// TestSchemaCacheHeaders_IfModifiedSinceNotModified verifies that
+// when the client's If-Modified-Since equals the server's
+// Last-Modified, the server returns 304 with no body. This is the
+// hot-path newtcon's visibility-change re-fetch hits.
+func TestSchemaCacheHeaders_IfModifiedSinceNotModified(t *testing.T) {
+	s := NewServer(Config{})
+	// First, fetch the canonical Last-Modified value.
+	primingReq := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema", nil)
+	primingW := httptest.NewRecorder()
+	s.Handler().ServeHTTP(primingW, primingReq)
+	lm := primingW.Header().Get("Last-Modified")
+	if lm == "" {
+		t.Fatal("priming Last-Modified empty")
+	}
+	// Re-fetch with that exact value as If-Modified-Since.
+	for _, path := range []string{
+		"/newtron/v1/schema",
+		"/newtron/v1/schema/all",
+		"/newtron/v1/schema/ServiceSpec",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("If-Modified-Since", lm)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusNotModified {
+			t.Errorf("%s: status = %d, want 304", path, w.Code)
+		}
+		// 304 response MUST NOT carry a message body.
+		if w.Body.Len() != 0 {
+			t.Errorf("%s: 304 response should have empty body; got %d bytes", path, w.Body.Len())
+		}
+	}
+}
+
+// TestSchemaCacheHeaders_IfModifiedSinceStale verifies that when the
+// client's If-Modified-Since is older than the server's Last-Modified,
+// the server returns 200 with the full body. Without this branch the
+// conditional fetch would erroneously withhold updated schemas after
+// a deploy.
+func TestSchemaCacheHeaders_IfModifiedSinceStale(t *testing.T) {
+	s := NewServer(Config{})
+	// One hour in the past — guaranteed older than any boot-time
+	// timestamp the server might be carrying.
+	old := time.Now().UTC().Add(-time.Hour).Format(http.TimeFormat)
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/schema", nil)
+	req.Header.Set("If-Modified-Since", old)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (stale cache should re-fetch)", w.Code)
+	}
+	if w.Body.Len() == 0 {
+		t.Error("200 response should carry a body")
 	}
 }
