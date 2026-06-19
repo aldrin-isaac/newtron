@@ -313,6 +313,83 @@ func TestUpdateFilterRule_HappyPath(t *testing.T) {
 	}
 }
 
+// TestUpdateFilterRule_RenumberOnly verifies that supplying new_seq
+// rotates the rule's sequence and re-sorts the rule list, leaving the
+// other fields unchanged.
+func TestUpdateFilterRule_RenumberOnly(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s)
+
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter":  "blocklist",
+		"seq":     10,
+		"new_seq": 5,
+		"action":  "deny", // same as seeded; verifies non-PK fields unchanged
+		"src_ip":  "10.0.0.0/8",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-filter-rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]int `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, w.Body.String())
+	}
+	if resp.Data["seq"] != 5 {
+		t.Errorf("response seq: got %d, want 5", resp.Data["seq"])
+	}
+	rules := readFilterRules(t, s, "BLOCKLIST")
+	if rules[0]["seq"].(float64) != 5 {
+		t.Errorf("on-disk seq: got %v, want 5 (renumber)", rules[0]["seq"])
+	}
+}
+
+// TestUpdateFilterRule_RenumberAndEdit verifies that a renumber and a
+// field change happen in one atomic call.
+func TestUpdateFilterRule_RenumberAndEdit(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s)
+
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter":  "blocklist",
+		"seq":     10,
+		"new_seq": 5,
+		"action":  "permit",
+		"src_ip":  "172.16.0.0/12",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-filter-rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	rules := readFilterRules(t, s, "BLOCKLIST")
+	if rules[0]["seq"].(float64) != 5 || rules[0]["action"].(string) != "permit" || rules[0]["src_ip"].(string) != "172.16.0.0/12" {
+		t.Errorf("rule after renumber+edit: %+v", rules[0])
+	}
+}
+
+// TestUpdateFilterRule_NewSeqCollides verifies rejection when the target
+// renumber slot is occupied by another rule.
+func TestUpdateFilterRule_NewSeqCollides(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedFilterWithRule(t, s) // rule at seq=10
+	if w := post(t, s, "/newtron/v1/networks/default/add-filter-rule", map[string]any{
+		"filter": "blocklist",
+		"seq":    20,
+		"action": "permit",
+	}); w.Code >= 400 {
+		t.Fatalf("add second rule: status=%d body=%s", w.Code, w.Body.String())
+	}
+	w := post(t, s, "/newtron/v1/networks/default/update-filter-rule", map[string]any{
+		"filter":  "blocklist",
+		"seq":     10,
+		"new_seq": 20,
+		"action":  "permit",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error on collision; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 // TestUpdateFilterRule_RuleNotFound verifies rejection when the
 // identified rule doesn't exist.
 func TestUpdateFilterRule_RuleNotFound(t *testing.T) {
@@ -373,6 +450,50 @@ func TestUpdateRoutePolicyRule_HappyPath(t *testing.T) {
 	}
 }
 
+func TestUpdateRoutePolicyRule_Renumber(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedRoutePolicyWithRule(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-route-policy-rule", map[string]any{
+		"policy":  "rp",
+		"seq":     10,
+		"new_seq": 5,
+		"action":  "permit",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-route-policy-rule renumber: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]int `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data["seq"] != 5 {
+		t.Errorf("response seq: got %d, want 5", resp.Data["seq"])
+	}
+}
+
+func TestUpdateRoutePolicyRule_Collision(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedRoutePolicyWithRule(t, s)
+	if w := post(t, s, "/newtron/v1/networks/default/add-route-policy-rule", map[string]any{
+		"policy": "rp",
+		"seq":    20,
+		"action": "permit",
+	}); w.Code >= 400 {
+		t.Fatalf("add second rule: %d %s", w.Code, w.Body.String())
+	}
+	w := post(t, s, "/newtron/v1/networks/default/update-route-policy-rule", map[string]any{
+		"policy":  "rp",
+		"seq":     10,
+		"new_seq": 20,
+		"action":  "permit",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error; got status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateRoutePolicyRule_NotFound(t *testing.T) {
 	s := scaffoldNetwork(t, "default")
 	seedRoutePolicyWithRule(t, s)
@@ -417,6 +538,54 @@ func TestUpdateQoSQueue_HappyPath(t *testing.T) {
 	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("update-qos-queue: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateQoSQueue_Relocate(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedQoSPolicyWithQueue(t, s)
+	w := post(t, s, "/newtron/v1/networks/default/update-qos-queue", map[string]any{
+		"policy":       "qp",
+		"queue_id":     2,
+		"new_queue_id": 4,
+		"name":         "voice",
+		"type":         "strict",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update-qos-queue relocate: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data map[string]int `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data["queue_id"] != 4 {
+		t.Errorf("response queue_id: got %d, want 4", resp.Data["queue_id"])
+	}
+}
+
+func TestUpdateQoSQueue_RelocateCollides(t *testing.T) {
+	s := scaffoldNetwork(t, "default")
+	seedQoSPolicyWithQueue(t, s)
+	if w := post(t, s, "/newtron/v1/networks/default/add-qos-queue", map[string]any{
+		"policy":   "qp",
+		"queue_id": 4,
+		"name":     "video",
+		"type":     "dwrr",
+		"weight":   30,
+	}); w.Code >= 400 {
+		t.Fatalf("add second queue: %d %s", w.Code, w.Body.String())
+	}
+	w := post(t, s, "/newtron/v1/networks/default/update-qos-queue", map[string]any{
+		"policy":       "qp",
+		"queue_id":     2,
+		"new_queue_id": 4,
+		"name":         "voice",
+		"type":         "strict",
+	})
+	if w.Code < 400 {
+		t.Fatalf("expected error; got status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

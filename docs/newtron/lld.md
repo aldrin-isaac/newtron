@@ -1034,7 +1034,7 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 >
 > Two patterns appear in the Update verbs:
 > - Full-replacement Updates on top-level specs (the **#152 family**) reuse their `Create*Request` type — the request body fully replaces the prior spec under the same name. The handler decodes the Create type even though the action is Update.
-> - Per-item Updates on sub-collections (rules, queues) use a dedicated `Update*Request` type that mutates field values in place. Per §47 the item's key (seq, queue_id) is immutable; renumbering / relocating is remove + add.
+> - Per-item Updates on sub-collections (rules, queues, entries) use a dedicated `Update*Request` type that adds an optional `new_seq` / `new_queue_id` / required `new_prefix` field for renumbering or value-swap.
 
 | Method | Path | Request Type |
 |--------|------|-------------|
@@ -1051,13 +1051,13 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 | POST | `.../update-qos-policy` | `CreateQoSPolicyRequest` (full-replacement; preserves `queues` sub-collection — see §5 of `api.md`; #152) |
 | POST | `.../delete-qos-policy` | `{name}` |
 | POST | `.../add-qos-queue` | `AddQoSQueueRequest` |
-| POST | `.../update-qos-queue` | `UpdateQoSQueueRequest` — atomic per-queue field mutation; key (queue_id) is immutable (§47, #211) |
+| POST | `.../update-qos-queue` | `UpdateQoSQueueRequest` — atomic per-queue mutation; optional `new_queue_id` renumbers (#211) |
 | POST | `.../remove-qos-queue` | `{policy, queue_id}` |
 | POST | `.../create-filter` | `CreateFilterRequest` |
 | POST | `.../update-filter` | `CreateFilterRequest` (full-replacement; preserves `rules` sub-collection; #152) |
 | POST | `.../delete-filter` | `{name}` |
 | POST | `.../add-filter-rule` | `AddFilterRuleRequest` |
-| POST | `.../update-filter-rule` | `UpdateFilterRuleRequest` — atomic per-rule field mutation; key (seq) is immutable (§47, #209) |
+| POST | `.../update-filter-rule` | `UpdateFilterRuleRequest` — atomic per-rule mutation; optional `new_seq` renumbers (#209) |
 | POST | `.../remove-filter-rule` | `{filter, seq}` |
 | POST | `.../create-prefix-list` | `CreatePrefixListRequest` |
 | POST | `.../update-prefix-list` | `CreatePrefixListRequest` (full-replacement; `prefixes` is in the request shape so Update replaces it; #152) |
@@ -1068,7 +1068,7 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 | POST | `.../update-route-policy` | `CreateRoutePolicyRequest` (full-replacement; preserves `rules` sub-collection; #152) |
 | POST | `.../delete-route-policy` | `{name}` |
 | POST | `.../add-route-policy-rule` | `AddRoutePolicyRuleRequest` |
-| POST | `.../update-route-policy-rule` | `UpdateRoutePolicyRuleRequest` — atomic per-rule field mutation; key (seq) is immutable (§47, #210) |
+| POST | `.../update-route-policy-rule` | `UpdateRoutePolicyRuleRequest` — atomic per-rule mutation; optional `new_seq` renumbers (#210) |
 | POST | `.../remove-route-policy-rule` | `{policy, seq}` |
 | POST | `.../create-profile` | `CreateDeviceProfileRequest` |
 | POST | `.../update-profile` | `CreateDeviceProfileRequest` (full-replacement; #152) |

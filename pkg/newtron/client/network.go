@@ -478,9 +478,9 @@ func (c *Client) AddQoSQueue(req newtron.AddQoSQueueRequest, opts newtron.ExecOp
 	return c.doPost(c.networkPath()+"/add-qos-queue"+execQuery(opts), req, nil)
 }
 
-// UpdateQoSQueue updates fields on an existing queue in a QoS policy.
-// Per §47 the slot (queue_id) is the queue's identity; relocating to
-// a different slot is remove + add. Issue #211.
+// UpdateQoSQueue updates an existing queue in a QoS policy. The body's
+// QueueID identifies the existing queue; NewQueueID (when non-nil)
+// rotates the queue to that slot. Mirrors UpdateFilterRule. Issue #211.
 func (c *Client) UpdateQoSQueue(req newtron.UpdateQoSQueueRequest, opts newtron.ExecOpts) error {
 	return c.doPost(c.networkPath()+"/update-qos-queue"+execQuery(opts), req, nil)
 }
@@ -512,9 +512,9 @@ func (c *Client) AddFilterRule(req newtron.AddFilterRuleRequest, opts newtron.Ex
 	return c.doPost(c.networkPath()+"/add-filter-rule"+execQuery(opts), req, nil)
 }
 
-// UpdateFilterRule updates fields on an existing rule in a filter.
-// Per §47 the sequence number is the rule's identity; renumbering is
-// remove + add. Issue #209.
+// UpdateFilterRule updates an existing rule in a filter. The body's
+// Sequence field identifies the existing rule; NewSequence (when non-nil)
+// rotates the rule's sequence number. Issue #209.
 func (c *Client) UpdateFilterRule(req newtron.UpdateFilterRuleRequest, opts newtron.ExecOpts) error {
 	return c.doPost(c.networkPath()+"/update-filter-rule"+execQuery(opts), req, nil)
 }

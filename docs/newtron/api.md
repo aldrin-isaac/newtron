@@ -1299,7 +1299,7 @@ Add a queue to a QoS policy.
 
 #### POST /newtron/v1/networks/{netID}/update-qos-queue
 
-Update fields on an existing queue in a QoS policy. `queue_id` identifies the queue. Per §47 the slot (queue_id) is the queue's identity; to relocate a queue to a different slot, use remove-qos-queue + add-qos-queue. Issue #211.
+Update an existing queue in a QoS policy. `queue_id` identifies the queue; `new_queue_id` is optional — when present, the queue rotates to that slot (0–7). Mirrors `update-filter-rule`'s semantics. Issue #211.
 
 **Query parameters:** `dry_run`
 
@@ -1309,6 +1309,7 @@ Update fields on an existing queue in a QoS policy. `queue_id` identifies the qu
 |-------|------|----------|-------------|
 | `policy` | string | yes | Policy name |
 | `queue_id` | integer | yes | Existing queue ID (0–7) |
+| `new_queue_id` | integer | no | New queue ID — present only when rotating slot |
 | `name` | string | yes | Queue name |
 | `type` | string | yes | `"strict"` or `"dwrr"` |
 | `weight` | integer | no | DWRR weight |
@@ -1318,11 +1319,11 @@ Update fields on an existing queue in a QoS policy. `queue_id` identifies the qu
 **Response (200):**
 
 ```json
-{"data": {"queue_id": 2}}
+{"data": {"queue_id": 4}}
 ```
 
 **Errors:**
-- 400: queue at `queue_id` not found; or `queue_id` outside 0–7
+- 400: queue at `queue_id` not found; or `new_queue_id` already occupied; or either ID outside 0–7
 - 403: caller lacks `PermSpecAuthor` on `qos_policies/{policy}`
 
 #### POST /newtron/v1/networks/{netID}/remove-qos-queue
@@ -1416,7 +1417,7 @@ Add a rule to a filter.
 
 #### POST /newtron/v1/networks/{netID}/update-filter-rule
 
-Update fields on an existing rule in a filter. `seq` identifies the rule. Per §47 the sequence number is the rule's identity; to renumber, use remove-filter-rule + add-filter-rule. The remaining fields replace the rule's current values.
+Update an existing rule in a filter. `seq` identifies the rule; `new_seq` is optional — when present, the rule's sequence rotates to that value (renumber). Remaining fields replace the rule's current values.
 
 **Query parameters:** `dry_run`
 
@@ -1426,6 +1427,7 @@ Update fields on an existing rule in a filter. `seq` identifies the rule. Per §
 |-------|------|----------|-------------|
 | `filter` | string | yes | Filter name |
 | `seq` | integer | yes | Sequence number of the existing rule |
+| `new_seq` | integer | no | New sequence number — present only when renumbering |
 | `action` | string | yes | `"permit"` or `"deny"` |
 | `src_ip` | string | no | Source IP/prefix |
 | `dst_ip` | string | no | Destination IP/prefix |
@@ -1440,11 +1442,13 @@ Update fields on an existing rule in a filter. `seq` identifies the rule. Per §
 **Response (200):**
 
 ```json
-{"data": {"seq": 10}}
+{"data": {"seq": 5}}
 ```
 
+The response's `seq` is the resulting sequence — equals `new_seq` when present, equals `seq` otherwise.
+
 **Errors:**
-- 400: rule at `seq` does not exist in the filter
+- 400: rule at `seq` does not exist in the filter; or `new_seq` collides with another rule's sequence
 - 403: caller lacks `PermSpecAuthor` on `filters/{filter}`
 
 #### POST /newtron/v1/networks/{netID}/remove-filter-rule
@@ -1602,7 +1606,7 @@ Add a rule to a route policy.
 
 #### POST /newtron/v1/networks/{netID}/update-route-policy-rule
 
-Update fields on an existing rule in a route policy. `seq` identifies the rule. Per §47 the sequence number is the rule's identity; to renumber, use remove-route-policy-rule + add-route-policy-rule. Issue #210.
+Update an existing rule in a route policy. `seq` identifies the rule; `new_seq` is optional — when present, the rule's sequence rotates to that value (renumber). Mirrors `update-filter-rule`'s semantics. Issue #210.
 
 **Query parameters:** `dry_run`
 
@@ -1612,6 +1616,7 @@ Update fields on an existing rule in a route policy. `seq` identifies the rule. 
 |-------|------|----------|-------------|
 | `policy` | string | yes | Route policy name |
 | `seq` | integer | yes | Sequence number of the existing rule |
+| `new_seq` | integer | no | New sequence number — present only when renumbering |
 | `action` | string | yes | `"permit"` or `"deny"` |
 | `prefix_list` | string | no | Prefix list reference for match |
 | `community` | string | no | Community match |
@@ -1620,11 +1625,11 @@ Update fields on an existing rule in a route policy. `seq` identifies the rule. 
 **Response (200):**
 
 ```json
-{"data": {"seq": 10}}
+{"data": {"seq": 5}}
 ```
 
 **Errors:**
-- 400: rule at `seq` does not exist
+- 400: rule at `seq` does not exist; or `new_seq` collides with another rule
 - 403: caller lacks `PermSpecAuthor` on `route_policies/{policy}`
 
 #### POST /newtron/v1/networks/{netID}/remove-route-policy-rule

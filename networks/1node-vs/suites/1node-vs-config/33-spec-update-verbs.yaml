@@ -3,14 +3,10 @@ description: |
   E2E coverage for the three per-item update verbs that landed in PRs
   #215 / #216 / #217 (issues #209 / #210 / #211).
 
-  Per §47 (CONFIG_DB Composite Key Is the Identity — extended to spec-
-  side identity) the per-item key is immutable; these verbs mutate
-  fields in place only. Renumbering / relocating an item is remove + add.
-
   Exercises:
-    - update-filter-rule       — modify rule fields in place
-    - update-route-policy-rule — modify rule fields in place
-    - update-qos-queue         — modify queue fields in place
+    - update-filter-rule       — modify in place + renumber via new_seq
+    - update-route-policy-rule — modify in place + renumber via new_seq
+    - update-qos-queue         — modify in place + renumber via new_queue_id
 
   Loopback mode — these are pure network-spec mutations (no device traffic),
   so they validate the API surface end-to-end without needing a real ASIC.
@@ -65,6 +61,24 @@ steps:
     expect:
       jq: '.rules[] | select(.seq == 20) | .action == "permit"'
 
+  - name: update-filter-rule-renumber
+    action: newtron
+    method: POST
+    url: /update-filter-rule
+    params:
+      filter: TEST_FILTER_UPD
+      seq: 20
+      new_seq: 50
+      action: permit
+      src_prefix: "192.168.0.0/16"
+
+  - name: verify-filter-rule-renumbered
+    action: newtron
+    url: /filters/TEST_FILTER_UPD
+    expect:
+      jq: |
+        (.rules | map(.seq) | sort) == [10, 50]
+
   - name: cleanup-test-filter-upd
     action: newtron
     method: POST
@@ -116,6 +130,23 @@ steps:
     url: /route-policies/TEST_RP_UPD
     expect:
       jq: '.rules[] | select(.seq == 20) | .action == "permit"'
+
+  - name: update-rp-rule-renumber
+    action: newtron
+    method: POST
+    url: /update-route-policy-rule
+    params:
+      policy: TEST_RP_UPD
+      seq: 20
+      new_seq: 50
+      action: permit
+
+  - name: verify-rp-rule-renumbered
+    action: newtron
+    url: /route-policies/TEST_RP_UPD
+    expect:
+      jq: |
+        (.rules | map(.seq) | sort) == [10, 50]
 
   - name: cleanup-test-rp-upd
     action: newtron
@@ -174,6 +205,26 @@ steps:
     url: /qos-policies/TEST_QOS_UPD
     expect:
       jq: '.queues[] | select(.queue_id == 1) | .weight == 60'
+
+  - name: update-qos-queue-renumber
+    action: newtron
+    method: POST
+    url: /update-qos-queue
+    params:
+      policy: TEST_QOS_UPD
+      queue_id: 1
+      new_queue_id: 5
+      type: dwrr
+      weight: 60
+      dscp: [0]
+      name: best-effort
+
+  - name: verify-qos-queue-renumbered
+    action: newtron
+    url: /qos-policies/TEST_QOS_UPD
+    expect:
+      jq: |
+        (.queues | map(.queue_id) | sort) == [0, 5]
 
   - name: cleanup-test-qos-upd
     action: newtron

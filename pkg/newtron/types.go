@@ -750,40 +750,43 @@ type AddFilterRuleRequest struct {
 	CoS           string `json:"cos,omitempty"`
 }
 
-// UpdateQoSQueueRequest is the request for updating fields on an
-// existing queue in a QoS policy. QueueID identifies the queue (matches
-// RemoveQoSQueue's parameter). Per §47 the slot (queue_id) is the
-// queue's identity; relocating to a different slot is remove + add.
-// Issue #211.
+// UpdateQoSQueueRequest is the request for updating an existing queue
+// in a QoS policy. Mirrors UpdateFilterRuleRequest. QueueID identifies
+// the existing queue (matches RemoveQoSQueue's parameter); NewQueueID
+// is optional — when non-nil the queue rotates to that slot. Issue #211.
 type UpdateQoSQueueRequest struct {
-	Policy  string `json:"policy"`
-	QueueID int    `json:"queue_id"`
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Weight  int    `json:"weight,omitempty"`
-	DSCP    []int  `json:"dscp,omitempty"`
-	ECN     bool   `json:"ecn,omitempty"`
+	Policy     string `json:"policy"`
+	QueueID    int    `json:"queue_id"`
+	NewQueueID *int   `json:"new_queue_id,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Weight     int    `json:"weight,omitempty"`
+	DSCP       []int  `json:"dscp,omitempty"`
+	ECN        bool   `json:"ecn,omitempty"`
 }
 
-// UpdateRoutePolicyRuleRequest is the request for updating fields on
-// an existing rule in a route policy. Per §47 the sequence number is
-// the rule's identity; renumbering is remove + add. Issue #210.
+// UpdateRoutePolicyRuleRequest is the request for updating an existing
+// rule in a route policy. Mirrors UpdateFilterRuleRequest. Issue #210.
 type UpdateRoutePolicyRuleRequest struct {
-	Policy     string              `json:"policy"`
-	Sequence   int                 `json:"seq"`
-	Action     string              `json:"action"`
-	PrefixList string              `json:"prefix_list,omitempty"`
-	Community  string              `json:"community,omitempty"`
-	Set        *RoutePolicySetSpec `json:"set,omitempty"`
+	Policy      string              `json:"policy"`
+	Sequence    int                 `json:"seq"`
+	NewSequence *int                `json:"new_seq,omitempty"`
+	Action      string              `json:"action"`
+	PrefixList  string              `json:"prefix_list,omitempty"`
+	Community   string              `json:"community,omitempty"`
+	Set         *RoutePolicySetSpec `json:"set,omitempty"`
 }
 
-// UpdateFilterRuleRequest is the request for updating fields on an
-// existing rule in a filter. Sequence identifies the rule (matches
-// RemoveFilterRule semantics). Per §47 the sequence number is the
-// rule's identity; renumbering is remove + add. Issue #209.
+// UpdateFilterRuleRequest is the request for updating an existing rule in
+// a filter. Sequence identifies the existing rule (matches RemoveFilterRule
+// semantics). NewSequence is optional — when present and non-zero, the
+// rule's sequence rotates to that value (renumber); when absent, the
+// rule keeps its current sequence. Remaining fields replace the rule's
+// current values. Issue #209.
 type UpdateFilterRuleRequest struct {
 	Filter        string `json:"filter"`
 	Sequence      int    `json:"seq"`
+	NewSequence   *int   `json:"new_seq,omitempty"`
 	Action        string `json:"action"`
 	SrcIP         string `json:"src_ip,omitempty"`
 	DstIP         string `json:"dst_ip,omitempty"`
