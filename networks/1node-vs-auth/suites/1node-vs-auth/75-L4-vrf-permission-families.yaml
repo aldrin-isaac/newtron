@@ -16,12 +16,15 @@ requires: [L4-permission-families-alice]
 as: mallory
 
 steps:
-  # vrf.bind — mallory denied
+  # vrf.bind — mallory denied. Single IPVPN name (IS the VRF name
+  # since #253 — IPVPNs no longer carry a separately editable VRF
+  # field; the IPVPN's own name IS the on-device SONiC VRF name and
+  # must satisfy ^Vrf[A-Za-z0-9_]*$).
   - name: mallory-bind-ipvpn-denied
     action: newtron
     method: POST
     url: /nodes/switch1/bind-ipvpn?mode=topology
-    params: {vrf: vrf-mallory, ipvpn: ipvpn-mallory}
+    params: {ipvpn: Vrf_mallory}
     expect_failure: true
 
   # vrf.route — mallory denied
@@ -30,7 +33,7 @@ steps:
     method: POST
     url: /nodes/switch1/add-static-route?mode=topology
     params:
-      vrf: vrf-mallory
+      vrf: Vrf_mallory
       prefix: 10.99.0.0/24
       nexthop: 10.99.0.1
     expect_failure: true
@@ -47,10 +50,11 @@ steps:
 name: L4-vrf-families-alice-setup
 description: |
   Setup fixture: alice (spec-team, has spec.author) creates the IPVPN
-  bob's bind-ipvpn allow path needs. The vrf-bob VRF that bob's bind
+  bob's bind-ipvpn allow path needs. The Vrf_bob VRF that bob's bind
   binds to was created in the upstream L4-node-mutations-gated-bob
-  scenario; this scenario adds the matching IPVPN spec. Cleanup of
-  ipvpn-75 happens in L4-vrf-families-alice-cleanup after bob's run.
+  scenario; this scenario adds the matching IPVPN spec under the same
+  name (IPVPN name IS the VRF name post-#253). Cleanup happens in
+  L4-vrf-families-alice-cleanup after bob's run.
 
 requires: [L4-vrf-families-mallory]
 as: alice
@@ -61,8 +65,7 @@ steps:
     method: POST
     url: /create-ipvpn
     params:
-      name: ipvpn-75
-      vrf: vrf-bob
+      name: Vrf_bob
       l3vni: 10075
       route_targets: ["65001:75"]
 
@@ -75,27 +78,28 @@ description: |
   ops also exercise the resource-recovery path on RemoveBGPPeer
   (recovers DirectBGPPeerIP from the intent record — #163 / PR #168).
 
-  vrf-bob exists from L4-node-mutations-gated-bob. ipvpn-75 exists
-  from L4-vrf-families-alice-setup.
+  Vrf_bob exists from L4-node-mutations-gated-bob; the matching IPVPN
+  (same name, post-#253) is the fixture L4-vrf-families-alice-setup
+  added.
 
 requires: [L4-vrf-families-alice-setup]
 as: bob
 
 steps:
-  # vrf.bind — forward
+  # vrf.bind — forward (single name; IPVPN name IS the VRF name)
   - name: bob-bind-ipvpn-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/bind-ipvpn?mode=topology
-    params: {vrf: vrf-bob, ipvpn: ipvpn-75}
+    params: {ipvpn: Vrf_bob}
 
-  # vrf.route — forward (writes against vrf-bob)
+  # vrf.route — forward (writes against Vrf_bob)
   - name: bob-add-static-route-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/add-static-route?mode=topology
     params:
-      vrf: vrf-bob
+      vrf: Vrf_bob
       prefix: 10.75.0.0/24
       nexthop: 10.75.0.1
 
@@ -131,7 +135,7 @@ steps:
     method: POST
     url: /nodes/switch1/remove-static-route?mode=topology
     params:
-      vrf: vrf-bob
+      vrf: Vrf_bob
       prefix: 10.75.0.0/24
       nexthop: 10.75.0.1
 
@@ -139,13 +143,13 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/unbind-ipvpn?mode=topology
-    params: {vrf: vrf-bob}
+    params: {ipvpn: Vrf_bob}
 
 ---
 name: L4-vrf-families-alice-cleanup
 description: |
-  Alice tears down the ipvpn-75 spec fixture she created for bob's
-  bind path. Alice (spec-team) has spec.author for the delete-ipvpn
+  Alice tears down the IPVPN spec fixture she created for bob's bind
+  path. Alice (spec-team) has spec.author for the delete-ipvpn
   endpoint. Closes the L4-vrf-families chain at a clean projection
   state so downstream scenarios in 80-L5 / 85-L5 don't inherit it.
 
@@ -157,4 +161,4 @@ steps:
     action: newtron
     method: POST
     url: /delete-ipvpn
-    params: {name: ipvpn-75}
+    params: {name: Vrf_bob}

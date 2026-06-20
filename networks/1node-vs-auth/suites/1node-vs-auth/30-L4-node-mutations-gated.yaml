@@ -24,7 +24,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
-    params: {name: vrf-mallory}
+    params: {name: Vrf_mallory}
     expect_failure: true
 
   # acl.create — denied caller
@@ -61,7 +61,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
-    params: {name: vrf-bob}
+    params: {name: Vrf_bob}
 
   # acl.create — allowed caller
   - name: bob-create-acl-allowed
