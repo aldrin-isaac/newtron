@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"errors"
 	"path/filepath"
 	"sync"
 	"time"
@@ -253,15 +254,42 @@ func (s *Server) Handler() http.Handler {
 }
 
 
-// RegisterNetwork loads a Network from specDir and registers it under the given ID.
-func (s *Server) RegisterNetwork(id, specDir string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// CreateNetwork is the high-level operator API matching POST
+// /newtron/v1/networks: name a network by id and the server resolves
+// the on-disk dir, creates the empty spec layout if needed, and
+// registers the result. Idempotent — calling twice with the same id
+// is a no-op success.
+//
+// Description seeds topology.json when the slot is empty. Ignored
+// when the slot already carries specs (no rewrite of authored files).
+func (s *Server) CreateNetwork(id, description string) error {
+	if s.networksBase == "" {
+		return fmt.Errorf("server has no networks-base configured; cannot resolve dir for id %q", id)
+	}
+	dir := filepath.Join(s.networksBase, id)
 
-	if existing, exists := s.networks[id]; exists {
-		return &alreadyRegisteredError{id: id, existingDir: existing.specDir}
+	s.mu.Lock()
+	_, exists := s.networks[id]
+	s.mu.Unlock()
+	if exists {
+		return nil
 	}
 
+	if !dirHasSpecs(dir) {
+		if err := spec.CreateEmpty(dir, description); err != nil && !errors.Is(err, spec.ErrAlreadyExists) {
+			return err
+		}
+	}
+	return s.RegisterNetwork(id, dir)
+}
+
+// RegisterNetwork loads a network from specDir and registers it under
+// id. Lower-level than CreateNetwork — does no scaffolding; the dir
+// must already carry a valid spec layout. Idempotent on the id: if
+// it's already registered, returns nil. Used by auto-discovery at
+// startup (cmd/newt-server/discover.go) and by tests that fixture
+// arbitrary dirs.
+func (s *Server) RegisterNetwork(id, specDir string) error {
 	net, err := newtron.LoadNetwork(specDir, networkName(specDir), s.portResolver, s.secretStore)
 	if err != nil {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
@@ -270,6 +298,11 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		net.EnableAuthorization()
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.networks[id]; exists {
+		return nil
+	}
 	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout)
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
 	if s.watcher != nil {
@@ -278,21 +311,6 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		}
 	}
 	return nil
-}
-
-// ScaffoldAndRegister creates an empty spec layout at specDir (the three
-// zero-valued spec files newtron's Loader requires plus an empty profiles/
-// subdirectory), then registers the resulting network under id. description
-// flows into topology.json.
-//
-// Returns spec.ErrAlreadyInitialized if specDir already contains spec files;
-// the caller maps this to 409 Conflict. The scaffold step is a no-op for
-// other failure modes — RegisterNetwork's normal errors apply.
-func (s *Server) ScaffoldAndRegister(id, specDir, description string) error {
-	if err := spec.Scaffold(specDir, description); err != nil {
-		return err
-	}
-	return s.RegisterNetwork(id, specDir)
 }
 
 // UnregisterNetwork removes a registered network. Stops all NodeActors

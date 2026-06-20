@@ -748,7 +748,7 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `newtrun scenario put <suite> <name>` | `PUT /newtrun/v1/suites/{suite}/scenarios/{name}` | Creates or updates a scenario from `--file` or stdin; validated via ParseScenarioBytes |
 | `newtrun scenario delete <suite> <name>` | `DELETE /newtrun/v1/suites/{suite}/scenarios/{name}` | Deletes a scenario file |
 | `newtrun networks` | `GET /newtron/v1/networks` | Lists networks registered with newtron (delegates) |
-| `newtrun network create <name>` | `POST /newtron/v1/networks` with `scaffold=true` | Scaffolds an empty spec layout and registers it with newtron in one call |
+| `newtrun network create <name>` | `POST /newtron/v1/networks` | Creates (or picks up) the named network with newtron in one call |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |
 

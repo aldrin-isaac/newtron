@@ -1083,7 +1083,7 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 | `suite create/delete <name>` | POST/DELETE /newtrun/v1/suites | Per [§8](#8-http-server-package-pkgnewtrunapi). |
 | `scenario list/get/put/delete` | /newtrun/v1/suites/{suite}/scenarios* | Per [§8](#8-http-server-package-pkgnewtrunapi). |
 | `networks` | GET /newtron/v1/networks | List newtron-registered networks (delegated). |
-| `network create <name>` | POST /newtron/v1/networks with `scaffold=true` | Scaffold an empty spec layout and register it with newtron in one call. |
+| `network create <name>` | POST /newtron/v1/networks | Create (or pick up) the named network with newtron in one call. |
 | `actions` | static | Help text describing the action vocabulary. |
 | `version` | static | Build info. |
 

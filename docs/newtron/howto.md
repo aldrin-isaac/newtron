@@ -165,7 +165,7 @@ export NEWTRON_SERVER=http://10.0.0.1:18080
 export NEWTRON_NETWORK_ID=production
 ```
 
-On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server, naming only the network `id`. The server resolves `<--networks-base>/<id>` itself, so the CLI never carries an on-disk path on the wire. The call is idempotent: a second register for the same id is a 201 no-op.
+On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `CreateNetwork` on the server, naming only the network `id`. The server resolves `<--networks-base>/<id>` itself, so the CLI never carries an on-disk path on the wire. The call is idempotent: the first call returns 201 Created, subsequent calls 200 OK with the existing `NetworkInfo`.
 
 ### 2.7 Reloading Specs
 
@@ -2491,7 +2491,7 @@ import (
 
 func main() {
     c := client.New("http://localhost:18080", "default")
-    if err := c.RegisterNetwork("/etc/newtron"); err != nil {
+    if _, err := c.CreateNetwork(""); err != nil {
         log.Fatal(err)
     }
 

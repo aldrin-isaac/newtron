@@ -41,7 +41,7 @@ func auditServeGet(t *testing.T, specDir, auditPath, path string) *httptest.Resp
 func scaffoldAuditNetwork(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "audit-endpoint test fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "audit-endpoint test fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	return dir
@@ -306,7 +306,7 @@ func TestAuditIntegrity_TamperedChain(t *testing.T) {
 // is allowed; root super-bypasses.
 func TestAuditEvents_EngageWhenConfigured_GateDenies(t *testing.T) {
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "audit.read engage test"); err != nil {
+	if err := spec.CreateEmpty(dir, "audit.read engage test"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	netJSON := `{

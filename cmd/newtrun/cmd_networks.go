@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -74,19 +73,15 @@ against the current working directory). Override the base with
 	return c
 }
 
-func createNetwork(_ context.Context, name, description, networksBase string) error {
-	dir, err := filepath.Abs(filepath.Join(networksBase, name))
-	if err != nil {
-		return fmt.Errorf("resolve dir: %w", err)
-	}
+func createNetwork(_ context.Context, name, description, _ string) error {
 	c := newNewtronClient(name)
-	// Server owns the path (§27, §33). dir is no longer wire-relevant
-	// — newt-server resolves <networks-base>/<id> itself; this CLI
-	// passes only the description seed.
-	_ = dir
-	info, err := c.ScaffoldNetwork(description)
+	// Server owns the path (§27, §33) — newt-server resolves
+	// <networks-base>/<id> itself. The CLI passes only the description
+	// seed. The networksBase parameter is retained for backward
+	// CLI-flag compatibility but is no longer wire-relevant.
+	info, err := c.CreateNetwork(description)
 	if err != nil {
-		return fmt.Errorf("scaffold network %q: %w", name, err)
+		return fmt.Errorf("create network %q: %w", name, err)
 	}
 	// Print the server-resolved dir rather than the value the
 	// CLI passed in. They are the same here, but reading it from the
@@ -101,7 +96,7 @@ func createNetwork(_ context.Context, name, description, networksBase string) er
 // the rest of the CLI uses for newtrun (newt-server runs both engines on
 // one port; --newtrun-server already names "newt-server or newtrun-server
 // directly"). For server-level calls like ListNetworks, networkID is
-// ignored; for network-scoped calls (e.g. ScaffoldNetwork), pass the
+// ignored; for network-scoped calls (e.g. CreateNetwork), pass the
 // target network's ID.
 func newNewtronClient(networkID string) *newtronclient.Client {
 	url := newtrunServerFlag
