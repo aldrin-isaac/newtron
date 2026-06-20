@@ -14,28 +14,37 @@ import (
 // HTTP Request Types — Network
 // ============================================================================
 
-// RegisterNetworkRequest is the body for POST /network.
+// RegisterNetworkRequest is the body for POST /newtron/v1/networks.
 //
-// When Scaffold is true, the server creates an empty spec layout at Dir
-// (three zero-valued spec files plus an empty profiles/ subdirectory) before
-// registering, and Description seeds topology.json. When Scaffold is false
-// (the default), Dir must already contain valid specs — the same
-// register-existing flow the endpoint has always had.
+// The operator names the topology by id; the server owns the on-disk
+// path (§27, §33). Every registration resolves to
+// filepath.Join(networksBase, id) on the server's filesystem, where
+// networksBase is whatever the operator started newtron with
+// (cmd/newt-server --networks-base; default "networks").
 //
-// Scaffold + register-existing as one wire operation avoids a two-call
-// dance (scaffold-then-register) and keeps newtron the sole owner of the
-// spec-directory layout (§27 Single Owner).
+// What happens at <networksBase>/<id>:
+//   - dir doesn't exist:                  server scaffolds + registers
+//   - dir exists, valid layout:           server registers existing
+//   - dir exists, valid + scaffold:true:  409 ErrAlreadyInitialized
+//                                         (operator asked to scaffold
+//                                         but the slot is occupied)
+//   - dir exists, invalid layout:         500 load error
 //
-// Dir is required for the register-existing case (scaffold=false). For
-// the scaffold case it is optional: when omitted with scaffold=true, the
-// server derives the path from its --scaffold-root config as
-// filepath.Join(scaffoldRoot, id), so UI clients don't have to know
-// newtron's on-disk layout (§33; #122). The resolved dir is always
-// returned in the 201 response (NetworkInfo) so the caller can display
-// "created at <path>" without re-fetching.
+// Scaffold=true is the "force-create" intent — useful only when the
+// caller wants 409 instead of silent register-existing. Omit it for
+// the natural "register-or-scaffold" idempotent case.
+//
+// Description seeds the scaffolded topology.json's description field.
+// Ignored when the dir already exists (no rewrite of existing specs).
+//
+// The resolved absolute dir is returned in the 201 NetworkInfo response
+// so callers can display "created at <path>" without re-fetching.
+//
+// id must match ^[A-Za-z0-9_-]+$, 1–64 characters. Path separators,
+// dots, and spaces are rejected at the validation layer; an operator
+// who needs them files a bug, not a workaround.
 type RegisterNetworkRequest struct {
 	ID          string `json:"id"`
-	Dir     string `json:"dir,omitempty"`
 	Scaffold    bool   `json:"scaffold,omitempty"`
 	Description string `json:"description,omitempty"`
 }
@@ -287,22 +296,14 @@ func (e *notRegisteredError) Error() string {
 	return "network '" + e.id + "' not registered"
 }
 
-// AlreadyRegisteredErrorInfo is the data payload of the 409 envelope on
-// POST /networks when the id is already registered. It carries the existing
-// dir so clients can distinguish true-idempotent re-registration (same
-// id, same dir → return nil) from a real conflict (same id, different
-// dir → surface a typed error). §46 (HTTP API Boundary) on the failure
-// path: the substrate the server already knows is propagated through
-// envelope.Data, the same shape VerificationFailedError uses for its
-// VerificationResult.
-type AlreadyRegisteredErrorInfo struct {
-	ID              string `json:"id"`
-	ExistingDir string `json:"existing_dir"`
-}
-
-// alreadyRegisteredError is returned when a network ID is already registered.
+// alreadyRegisteredError signals a race-condition collision on POST
+// /networks — the handler's in-memory check passed, but a concurrent
+// register beat us to the map. Under the new wire model the resolved
+// dir is always <networks-base>/<id>, so there is no useful substrate
+// to propagate to the client beyond the 409 status itself; the type
+// exists only as an internal status-mapping marker.
 type alreadyRegisteredError struct {
-	id              string
+	id          string
 	existingDir string
 }
 

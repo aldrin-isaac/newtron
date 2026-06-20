@@ -75,8 +75,7 @@ scenario overrides this default for every call that scenario makes.
 |------|---------|---------|
 | `--listen` | `127.0.0.1:18080` | Bind address. Non-loopback values trigger a startup warning. |
 | `--idle-timeout` | `5m` | newtron SSH connection idle timeout. |
-| `--networks-base` | `networks` | Root of the network tree. At boot, every `<base>/<name>/topology.json` is auto-registered as a network with `id=<name>`. Also drives newtrun's suite discovery (`<base>/<name>/suites/<suite>/`) and newtlab's lab-spec resolution. One flag, three engines. |
-| `--scaffold-root` | `""` | Forwarded to newtron. When set, `POST /newtron/v1/networks` accepts `scaffold:true` requests without `dir` and lays them out under `<root>/<id>`. Empty disables this mode — UI clients fall back to passing `dir` explicitly. |
+| `--networks-base` | `networks` | Root of the network tree. At boot, every `<base>/<name>/topology.json` is auto-registered as a network with `id=<name>`. Also resolves the on-disk dir for `POST /newtron/v1/networks {id}` (`<base>/<id>`), drives newtrun's suite discovery (`<base>/<name>/suites/<suite>/`), and newtlab's lab-spec resolution. One flag, four roles. |
 
 ### Identity (auth-design.md §L1-L2c)
 

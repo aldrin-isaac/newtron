@@ -165,7 +165,7 @@ export NEWTRON_SERVER=http://10.0.0.1:18080
 export NEWTRON_NETWORK_ID=production
 ```
 
-On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server with its network directory. This is idempotent on matching state — if the network is already registered with the same dir, the server returns 409 and the CLI continues silently. If the same network ID is registered with a *different* dir, the client returns a typed `*AlreadyRegisteredError` carrying both paths so the operator can unregister or pick a different ID; the CLI surfaces that error.
+On every CLI invocation (except `settings`, `version`, and `help`), the CLI calls `RegisterNetwork` on the server, naming only the network `id`. The server resolves `<--networks-base>/<id>` itself, so the CLI never carries an on-disk path on the wire. The call is idempotent: a second register for the same id is a 201 no-op.
 
 ### 2.7 Reloading Specs
 

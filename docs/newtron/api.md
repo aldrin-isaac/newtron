@@ -661,36 +661,47 @@ own translations on top of the canonical English labels this endpoint returns.
 
 ### POST /newtron/v1/networks
 
-Register a network. Two consumer styles:
+Register a network. Operators name the topology by `id`; the server
+resolves the on-disk path from its `--networks-base` config
+(`filepath.Join(networks-base, id)`). No `dir` field on the wire — the
+server owns the layout (§27, §33).
 
-- **Register an *existing* network directory** (CLI / automation): pass `id` and `dir`. The server loads the spec files at `dir` and registers them under `id`.
-- **Scaffold a *new* topology** (UI / operator-language): pass `id` and `scaffold: true`. The server creates an empty spec layout (three zero-valued spec files plus an empty `nodes/` subdirectory) and registers it in one call. `dir` is optional in this mode — when omitted, the server picks `<scaffold-root>/<id>` from its `--scaffold-root` config. The resolved path is always returned in the response so the client never has to know newtron's on-disk layout.
+The same endpoint covers both "register an existing topology" and
+"scaffold a new topology"; the `scaffold` flag distinguishes
+register-or-scaffold (idempotent) from force-create (refuse on
+collision):
+
+- `scaffold` absent or `false` (CLI / automation default): if the
+  resolved slot already carries a valid spec layout, register it. If
+  not, scaffold + register in one call. Re-posting the same `id` is a
+  no-op success — the resolved state already matches what the caller
+  asked for.
+- `scaffold: true` (UI / "New topology" intent): scaffold + register
+  on an empty slot; **refuse with 409** if the slot is already
+  initialized. This is the safe verb for "create a new topology under
+  this name" — the operator wanted a fresh slot, not a silent re-use.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | yes | Unique network identifier (e.g., `"default"`). |
-| `dir` | string | conditional | Absolute path to the network directory. Required when `scaffold` is false. Optional when `scaffold` is true — the server derives `<scaffold-root>/<id>` if omitted. |
-| `scaffold` | bool | no | Create the empty spec layout before registering. Default `false`. |
-| `description` | string | no | Free-text description seeded into `topology.json` (only used when `scaffold=true`). |
+| `id` | string | yes | Network identifier. Must match `^[A-Za-z0-9_-]{1,64}$`. Maps to `<networks-base>/<id>` on disk. |
+| `scaffold` | bool | no | Force-create. Default `false`. |
+| `description` | string | no | Free-text description seeded into `topology.json` when scaffolding. |
 
 **Behavior matrix:**
 
-| `scaffold` | `dir` | Server state | Outcome |
-|------------|------------|--------------|---------|
-| `false` (default) | supplied; exists with valid specs | — | 201, register |
-| `false` | supplied; missing or invalid | — | 500 spec load error |
-| `false` | omitted | — | 400 `dir is required unless scaffold=true` |
-| `true` | supplied; missing or empty | — | scaffold + register, 201 |
-| `true` | supplied; already initialized | — | 409 |
-| `true` | omitted | `--scaffold-root` set | derive `<root>/<id>`, scaffold + register, 201 |
-| `true` | omitted | `--scaffold-root` empty | 400 `dir omitted but this server has no --scaffold-root configured` |
-| `true` | omitted | `<root>/<id>` already initialized | 409 |
+| `scaffold` | Resolved slot state | Outcome |
+|------------|---------------------|---------|
+| `false` (default) | exists with valid specs | 201, register |
+| `false` | empty / missing | 201, scaffold + register |
+| `false` | already registered (this id) | 201, no-op (idempotent) |
+| `true` | empty / missing | 201, scaffold + register |
+| `true` | already initialized | 409 |
 
-**Response (201):**
-
-The body is the canonical `NetworkInfo` — the same shape `GET /networks` returns, carrying the resolved `dir` so the caller learns the path even when the server picked it.
+**Response (201):** the canonical `NetworkInfo` (same shape as `GET
+/networks`), carrying the resolved `dir` so the caller learns the path
+the server picked.
 
 ```json
 {
@@ -704,53 +715,33 @@ The body is the canonical `NetworkInfo` — the same shape `GET /networks` retur
 }
 ```
 
-**Response (409, id already registered):**
-
-The envelope's `data` field carries an `AlreadyRegisteredErrorInfo` with the existing `dir`, so clients can distinguish a true-idempotent retry (the caller is asking to register the same id+dir again — observable state already matches) from a real conflict (the id is taken by a different dir):
-
-```json
-{
-  "error": "network 'default' already registered with dir '/etc/newtron/2node-vs/specs'",
-  "data": {
-    "id": "default",
-    "existing_dir": "/etc/newtron/2node-vs/specs"
-  }
-}
-```
-
-The Go client (`pkg/newtron/client/Client.RegisterNetwork`) decodes this shape: if `existing_dir == requested dir`, the call returns `nil` (true-idempotent); otherwise it returns a typed `*client.AlreadyRegisteredError` carrying both paths.
-
-**Status codes:** 201 created, 400 missing `id` or missing `dir` without `scaffold=true` or derived mode without `--scaffold-root`, 409 ID already registered (with `existing_dir` in data) or scaffold-into-initialized-dir, 500 network directory load error
+**Status codes:** 201 created (including no-op retry of the same id),
+400 missing or malformed `id`, 409 `scaffold:true` against an
+already-initialized slot, 500 server has no `--networks-base`
+configured / spec load error.
 
 **Examples:**
 
-Register an existing network directory (CLI/automation):
+Register-or-scaffold (the default — operator just wants the slot live):
 
 ```
 POST /newtron/v1/networks
-{"id": "lab", "dir": "/etc/newtron/lab"}
+{"id": "demo"}
 ```
 
-Scaffold a new empty network with an operator-supplied path (CLI with filesystem convention, e.g., `bin/newtrun create-topology`):
-
-```
-POST /newtron/v1/networks
-{"id": "demo-1", "dir": "/var/topologies/demo-1/specs", "scaffold": true, "description": "Demo network"}
-```
-
-Scaffold a new empty network using the server's derived path (UI / operator-language workflow — newtcon "New topology" modal):
+Force-create a new topology (UI "New topology" modal):
 
 ```
 POST /newtron/v1/networks
-{"id": "demo-1", "scaffold": true, "description": "Demo network"}
+{"id": "demo", "scaffold": true, "description": "Demo network"}
 
 → 201
 {
   "data": {
-    "id": "demo-1",
-    "dir": "/etc/newtron/demo-1",
+    "id": "demo",
+    "dir": "/etc/newtron/networks/demo",
     "has_topology": true,
-    "topology": "demo-1",
+    "topology": "demo",
     "nodes": []
   }
 }

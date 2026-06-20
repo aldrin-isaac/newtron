@@ -80,11 +80,11 @@ func createNetwork(_ context.Context, name, description, networksBase string) er
 		return fmt.Errorf("resolve dir: %w", err)
 	}
 	c := newNewtronClient(name)
-	// CLI workflow: the caller picks the path explicitly so the
-	// scaffold lands inside the networks/ convention. The
-	// server-derived mode (#122) is for UI clients that don't track
-	// newtron's on-disk layout — newtrun's CLI does.
-	info, err := c.ScaffoldNetwork(dir, description)
+	// Server owns the path (§27, §33). dir is no longer wire-relevant
+	// — newt-server resolves <networks-base>/<id> itself; this CLI
+	// passes only the description seed.
+	_ = dir
+	info, err := c.ScaffoldNetwork(description)
 	if err != nil {
 		return fmt.Errorf("scaffold network %q: %w", name, err)
 	}

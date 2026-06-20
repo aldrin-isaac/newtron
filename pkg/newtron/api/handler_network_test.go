@@ -10,19 +10,19 @@ import (
 	"testing"
 )
 
-// TestRegisterNetwork_Scaffold_HappyPath posts {scaffold:true} to a fresh
-// dir and asserts the directory was scaffolded with the three seed
-// specs and the network was registered.
-func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
-	specDir := t.TempDir()
-	srv := NewServer(Config{})
+// register-network wire shape:
+// POST /newtron/v1/networks accepts {id, scaffold?, description?}.
+// The server resolves the dir from filepath.Join(NetworksBase, id);
+// operators never see paths on the wire (§27, §33).
 
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:          "demo-1",
-		Dir:     specDir,
-		Scaffold:    true,
-		Description: "scaffold test",
-	})
+// TestRegisterNetwork_HappyPath_Scaffolds posts {id: foo} (scaffold
+// absent) against a base whose <base>/<id> slot doesn't exist —
+// server scaffolds + registers + returns NetworkInfo.
+func TestRegisterNetwork_HappyPath_Scaffolds(t *testing.T) {
+	base := t.TempDir()
+	srv := NewServer(Config{NetworksBase: base})
+
+	body, _ := json.Marshal(RegisterNetworkRequest{ID: "demo"})
 	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -30,36 +30,72 @@ func TestRegisterNetwork_Scaffold_HappyPath(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
 	}
+	dir := filepath.Join(base, "demo")
 	for _, name := range []string{"topology.json", "platforms.json", "network.json"} {
-		if _, err := os.Stat(filepath.Join(specDir, name)); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("expected %s after scaffold: %v", name, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(specDir, "nodes")); err != nil {
-		t.Errorf("expected profiles/ after scaffold: %v", err)
-	}
-	if _, ok := srv.networks["demo-1"]; !ok {
+	if _, ok := srv.networks["demo"]; !ok {
 		t.Errorf("network was not registered after scaffold")
+	}
+
+	var env struct {
+		Data NetworkInfo `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v; body=%s", err, w.Body.String())
+	}
+	if env.Data.ID != "demo" || env.Data.Dir != dir {
+		t.Errorf("response NetworkInfo = %+v, want id=demo dir=%s", env.Data, dir)
 	}
 }
 
-// TestRegisterNetwork_Scaffold_ConflictReturns409 ensures a pre-existing
-// dir maps the spec-package sentinel error onto 409.
-func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
-	specDir := t.TempDir()
-	if err := os.MkdirAll(specDir, 0o755); err != nil {
+// TestRegisterNetwork_HappyPath_RegistersExisting posts {id: foo} when
+// the slot already carries a valid spec layout — server registers it
+// idempotently rather than scaffolding (which would 409).
+func TestRegisterNetwork_HappyPath_RegistersExisting(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "topology.json"), []byte("{}"), 0o644); err != nil {
+	// Seed minimum-viable spec files so RegisterNetwork loads cleanly.
+	for _, name := range []string{"network.json", "topology.json", "platforms.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	srv := NewServer(Config{NetworksBase: base})
+
+	body, _ := json.Marshal(RegisterNetworkRequest{ID: "demo"})
+	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	if _, ok := srv.networks["demo"]; !ok {
+		t.Errorf("network was not registered")
+	}
+}
+
+// TestRegisterNetwork_ScaffoldTrue_409OnExisting confirms that with
+// scaffold:true, an already-initialized slot returns 409 — the
+// "force-create" intent refuses to silently reuse.
+func TestRegisterNetwork_ScaffoldTrue_409OnExisting(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "topology.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	srv := NewServer(Config{NetworksBase: base})
 
-	srv := NewServer(Config{})
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:       "demo-2",
-		Dir:  specDir,
-		Scaffold: true,
-	})
+	body, _ := json.Marshal(RegisterNetworkRequest{ID: "demo", Scaffold: true})
 	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -67,228 +103,51 @@ func TestRegisterNetwork_Scaffold_ConflictReturns409(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
-	if _, ok := srv.networks["demo-2"]; ok {
+	if _, ok := srv.networks["demo"]; ok {
 		t.Errorf("network should not be registered on scaffold conflict")
 	}
 }
 
-// TestRegisterNetwork_NoScaffold_MissingSpecDir confirms the default
-// (register-existing) flow still rejects an empty dir — the scaffold
-// extension must not alter the contract for the existing call site.
-func TestRegisterNetwork_NoScaffold_MissingSpecDir(t *testing.T) {
-	specDir := t.TempDir()
+// TestRegisterNetwork_IDValidation_Rejects pins the id regex contract:
+// path separators, dots, and spaces are rejected with 400 before any
+// filesystem work happens. The operator-facing error must name the
+// constraint so the fix is obvious.
+func TestRegisterNetwork_IDValidation_Rejects(t *testing.T) {
+	base := t.TempDir()
+	srv := NewServer(Config{NetworksBase: base})
 
-	srv := NewServer(Config{})
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:      "demo-3",
-		Dir: specDir,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code == http.StatusCreated {
-		t.Fatalf("expected non-201 for missing dir without scaffold; got 201")
-	}
-	if _, ok := srv.networks["demo-3"]; ok {
-		t.Errorf("network should not be registered when dir is empty")
-	}
-}
-
-// TestRegisterNetwork_Scaffold_DerivedSpecDir_HappyPath posts
-// {id, scaffold:true} with no dir against a server configured with
-// a scaffold root, and asserts the directory was scaffolded at
-// <root>/<id>, the network was registered, and the response carries
-// the resolved dir in the canonical NetworkInfo shape (#122).
-func TestRegisterNetwork_Scaffold_DerivedSpecDir_HappyPath(t *testing.T) {
-	root := t.TempDir()
-	srv := NewServer(Config{ScaffoldRoot: root})
-
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:          "demo-derived",
-		Scaffold:    true,
-		Description: "derived path test",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
-	}
-
-	derived := filepath.Join(root, "demo-derived")
-	for _, name := range []string{"topology.json", "platforms.json", "network.json"} {
-		if _, err := os.Stat(filepath.Join(derived, name)); err != nil {
-			t.Errorf("expected %s at derived path %s: %v", name, derived, err)
+	for _, id := range []string{
+		"with/slash",
+		"with.dot",
+		"with space",
+		"",
+		"way-too-long-" + string(make([]byte, 100)),
+	} {
+		body, _ := json.Marshal(map[string]any{"id": id})
+		req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code == http.StatusCreated {
+			t.Errorf("id=%q should have been rejected, but got 201", id)
 		}
 	}
-
-	// Response is the canonical NetworkInfo wrapped in the standard
-	// envelope; verify the resolved dir matches what the server
-	// derived.
-	var env struct {
-		Data NetworkInfo `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v; body=%s", err, w.Body.String())
-	}
-	if env.Data.ID != "demo-derived" {
-		t.Errorf("Data.ID = %q, want demo-derived", env.Data.ID)
-	}
-	if env.Data.Dir != derived {
-		t.Errorf("Data.Dir = %q, want %q", env.Data.Dir, derived)
-	}
 }
 
-// TestRegisterNetwork_Scaffold_DerivedSpecDir_NoRoot rejects derived-path
-// mode when the server has no scaffold root configured — the operator
-// must opt in by setting --scaffold-root rather than the server picking
-// a default that might be wrong for the deployment (#122).
-func TestRegisterNetwork_Scaffold_DerivedSpecDir_NoRoot(t *testing.T) {
-	srv := NewServer(Config{}) // no scaffold root
+// TestRegisterNetwork_NoBase_Rejected pins the boot-time contract:
+// when the server has no networks-base, it cannot resolve the dir
+// and refuses the request rather than silently registering at "".
+func TestRegisterNetwork_NoBase_Rejected(t *testing.T) {
+	srv := NewServer(Config{})
 
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:       "demo-no-root",
-		Scaffold: true,
-	})
+	body, _ := json.Marshal(RegisterNetworkRequest{ID: "demo"})
 	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
 	if w.Code == http.StatusCreated {
-		t.Fatalf("expected non-201 for derived mode without scaffold root; got 201; body=%s", w.Body.String())
+		t.Errorf("registration without networks-base should fail; got 201")
 	}
-	if _, ok := srv.networks["demo-no-root"]; ok {
-		t.Errorf("network should not be registered when scaffold root is unset")
-	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("scaffold-root")) {
-		t.Errorf("error should mention --scaffold-root so operator knows the fix; body=%s", w.Body.String())
-	}
-}
-
-// TestRegisterNetwork_Scaffold_DerivedSpecDir_Conflict verifies the
-// existing-layout case still maps to 409: if <root>/<id> already
-// carries spec files, the server refuses to overwrite — same contract
-// as the explicit-path collision case, so the wire behavior doesn't
-// depend on who picked the path (#122).
-func TestRegisterNetwork_Scaffold_DerivedSpecDir_Conflict(t *testing.T) {
-	root := t.TempDir()
-	derived := filepath.Join(root, "demo-collide")
-	if err := os.MkdirAll(derived, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(derived, "topology.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	srv := NewServer(Config{ScaffoldRoot: root})
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:       "demo-collide",
-		Scaffold: true,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
-	}
-	if _, ok := srv.networks["demo-collide"]; ok {
-		t.Errorf("network should not be registered on derived-path scaffold conflict")
-	}
-}
-
-// TestRegisterNetwork_201ResponseCarriesNetworkInfo verifies the success
-// response on the existing explicit-path scaffold path also returns
-// NetworkInfo — the response shape is uniform across the two modes so
-// clients don't have to branch on input style.
-func TestRegisterNetwork_201ResponseCarriesNetworkInfo(t *testing.T) {
-	specDir := t.TempDir()
-	srv := NewServer(Config{})
-
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:       "demo-info",
-		Dir:  specDir,
-		Scaffold: true,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
-	}
-	var env struct {
-		Data NetworkInfo `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v; body=%s", err, w.Body.String())
-	}
-	if env.Data.ID != "demo-info" {
-		t.Errorf("Data.ID = %q, want demo-info", env.Data.ID)
-	}
-	if env.Data.Dir != specDir {
-		t.Errorf("Data.Dir = %q, want %q", env.Data.Dir, specDir)
-	}
-}
-
-// TestRegisterNetwork_AlreadyRegistered_409EnvelopeCarriesExistingDir
-// pins issue #117: when the network id is already registered, the 409
-// response includes the existing dir under envelope.Data as
-// AlreadyRegisteredErrorInfo, so the client can distinguish true-idempotent
-// re-registration (same dir → silent success) from a real conflict
-// (different dir → typed error). Without this, the client's old
-// silent-409 swallow masks the conflict.
-func TestRegisterNetwork_AlreadyRegistered_409EnvelopeCarriesExistingDir(t *testing.T) {
-	specDir := t.TempDir()
-	if err := os.MkdirAll(specDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	srv := NewServer(Config{})
-	body, _ := json.Marshal(RegisterNetworkRequest{
-		ID:       "demo-4",
-		Dir:  specDir,
-		Scaffold: true,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("setup register failed: status = %d, body=%s", w.Code, w.Body.String())
-	}
-
-	// Now re-register the same id pointing at a different dir.
-	otherDir := filepath.Join(t.TempDir(), "other-specs")
-	body, _ = json.Marshal(RegisterNetworkRequest{
-		ID:      "demo-4",
-		Dir: otherDir,
-	})
-	req = httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", bytes.NewReader(body))
-	w = httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409; body=%s", w.Code, w.Body.String())
-	}
-
-	// Parse the envelope and verify Data carries AlreadyRegisteredErrorInfo
-	// with the original dir, not the requested one.
-	var env struct {
-		Error string                     `json:"error"`
-		Data  AlreadyRegisteredErrorInfo `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v; body=%s", err, w.Body.String())
-	}
-	if env.Data.ID != "demo-4" {
-		t.Errorf("Data.ID = %q, want demo-4", env.Data.ID)
-	}
-	if env.Data.ExistingDir != specDir {
-		t.Errorf("Data.ExistingDir = %q, want %q", env.Data.ExistingDir, specDir)
-	}
-	if env.Error == "" {
-		t.Errorf("envelope.Error should not be empty on 409")
+	if _, ok := srv.networks["demo"]; ok {
+		t.Errorf("network should not be registered without a base")
 	}
 }

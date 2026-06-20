@@ -44,20 +44,15 @@ type Server struct {
 	// Nil disables resolver consultation (tests, real-hardware).
 	portResolver PortResolver
 
-	// scaffoldRoot is the on-disk root under which derived-dir
-	// scaffolds land (#122). Set via the --scaffold-root flag on
-	// newtron-server / newt-server. Empty means "this server doesn't
-	// derive paths" — POST /newtron/v1/networks with scaffold=true and
-	// no dir returns 400 in that mode. The derived layout is
-	// filepath.Join(scaffoldRoot, id); collision handling matches the
-	// explicit-path case (existing spec.ErrAlreadyInitialized → 409).
-	//
-	// Operator-language alignment (§33): a UI client should not have
-	// to know newtron's on-disk layout to scaffold a topology. When
-	// the server is configured with this root, the client's intent
-	// "create topology named X" suffices — newtron picks the path and
-	// returns it in the response.
-	scaffoldRoot string
+	// networksBase is the on-disk root for every registered network's
+	// spec directory. POST /networks resolves to
+	// filepath.Join(networksBase, id) — the operator names the
+	// topology; newtron picks the path (§27, §33). Auto-discovery at
+	// boot scans the same root, so an id created via POST /networks
+	// reappears in /newtron/v1/networks after a restart without a
+	// re-register dance. Set via Config.NetworksBase which
+	// cmd/newt-server reads from --networks-base (default "networks").
+	networksBase string
 
 	// auditCallerHeader is the TCP-fallback HTTP header name for
 	// self-attested caller identity (auth-design.md L1). Read by
@@ -114,13 +109,20 @@ type Config struct {
 	// (DESIGN_PRINCIPLES §33, §34).
 	PortResolver PortResolver
 
-	// ScaffoldRoot enables the derived-dir mode of POST
-	// /newtron/v1/networks (issue #122). When set, requests with
-	// scaffold:true and no dir scaffold into
-	// filepath.Join(ScaffoldRoot, id). Empty keeps the explicit-
-	// path-only behavior — the derived mode then returns 400
-	// rather than guessing a default.
-	ScaffoldRoot string
+	// NetworksBase is the on-disk root under which every registered
+	// network's spec directory lives. POST /newtron/v1/networks
+	// resolves each registration to filepath.Join(NetworksBase, id) —
+	// operators name a topology, the server owns the path (§27, §33).
+	// Boot-time auto-discovery uses the same root: every
+	// <NetworksBase>/<name>/topology.json triggers an auto-register on
+	// start, so the operator-named "<id>" maps to a stable on-disk
+	// slot across server restarts.
+	//
+	// Required. Empty disables registration entirely — the server
+	// returns 500 on POST /newtron/v1/networks until a base is
+	// configured. cmd/newt-server reads this from --networks-base
+	// (default "networks").
+	NetworksBase string
 
 	// AuditCallerHeader is the HTTP header name read by
 	// callerMiddleware on TCP listeners to extract the
@@ -200,7 +202,7 @@ func NewServer(cfg Config) *Server {
 		idleTimeout:          idleTimeout,
 		logger:               logger,
 		portResolver:         cfg.PortResolver,
-		scaffoldRoot:         cfg.ScaffoldRoot,
+		networksBase:         cfg.NetworksBase,
 		auditCallerHeader:    cfg.AuditCallerHeader,
 		secretStore:          cfg.SecretStore,
 		auditLogPath:         cfg.AuditLogPath,

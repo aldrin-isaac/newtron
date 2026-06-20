@@ -459,11 +459,13 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 // newtlab.NewLab.
 //
 // dir registers the network with newtron-server so newtlab can
-// query specs from there during deploy.
+// query specs from there during deploy. The server resolves the spec
+// directory itself under its --networks-base; dir here is the local
+// path for log messages only.
 func (r *Runner) deployTopology(ctx context.Context, dir string, opts RunOptions) (cleanup func(), err error) {
 	if dir != "" {
-		if regErr := r.Client.RegisterNetwork(dir); regErr != nil {
-			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", dir, regErr)
+		if regErr := r.Client.RegisterNetwork(); regErr != nil {
+			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", r.Client.NetworkID(), regErr)
 		}
 	}
 	if r.NewtlabClient == nil {
