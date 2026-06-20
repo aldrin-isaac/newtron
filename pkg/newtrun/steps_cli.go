@@ -38,6 +38,34 @@ import (
 // from the runner's configuration.
 type newtronCLIExecutor struct{}
 
+// buildCLIArgs assembles the argv for one newtron CLI invocation.
+// Shape: [device] <command tokens> [--json] [--network-id <id>] --server <url>
+//
+// Forwarding --network-id keeps the subprocess CLI on the same
+// network slot the Runner is using. Without it, the subprocess
+// falls back to its own resolution (NEWTRON_NETWORK_ID, then
+// ~/.newtron/settings.json) and the two diverge — per-suite
+// network ids (#116) only land if the runner passes them through.
+func buildCLIArgs(r *Runner, step *Step, device string) []string {
+	cmdStr := step.Command
+	if device != "" {
+		cmdStr = strings.ReplaceAll(cmdStr, "{{device}}", device)
+	}
+	var args []string
+	if device != "" {
+		args = append(args, device)
+	}
+	args = append(args, strings.Fields(cmdStr)...)
+	if step.Expect != nil && step.Expect.JQ != "" {
+		args = append(args, "--json")
+	}
+	if r.NetworkID != "" {
+		args = append(args, "--network-id", r.NetworkID)
+	}
+	args = append(args, "--server", r.ServerURL)
+	return args
+}
+
 func (e *newtronCLIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	// Device routing: if devices: is set OR {{device}} appears in the command,
 	// run per-device. The newtron CLI pattern is "newtron <device> <command>"
@@ -62,17 +90,7 @@ func (e *newtronCLIExecutor) runCLI(ctx context.Context, r *Runner, step *Step, 
 	if device != "" {
 		cmdStr = strings.ReplaceAll(cmdStr, "{{device}}", device)
 	}
-
-	// Build args: [device] <command...> [--json] --server <url>
-	var args []string
-	if device != "" {
-		args = append(args, device)
-	}
-	args = append(args, strings.Fields(cmdStr)...)
-	if step.Expect != nil && step.Expect.JQ != "" {
-		args = append(args, "--json")
-	}
-	args = append(args, "--server", r.ServerURL)
+	args := buildCLIArgs(r, step, device)
 
 	bin := "newtron"
 	if p, err := exec.LookPath("newtron"); err == nil {
