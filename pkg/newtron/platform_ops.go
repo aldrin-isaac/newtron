@@ -8,11 +8,14 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// ListPlatforms returns the canonical PlatformSpecFile (§46). Consumers
-// (CLI, newtrun, newtlab) read whatever subset of fields they need.
-func (net *Network) ListPlatforms() *spec.PlatformSpecFile {
-	platforms := net.internal.Platforms()
-	return &spec.PlatformSpecFile{Platforms: platforms}
+// ListPlatforms returns the platforms by name (§46). Matches the
+// shape sibling list endpoints emit (e.g. ListIPVPNs returns the
+// same name→spec map shape) — wire consumers read details directly
+// without unwrapping a file-format envelope. The previous return
+// shape leaked the on-disk PlatformSpecFile.Version field, which
+// has no domain meaning on the wire and arrived empty besides.
+func (net *Network) ListPlatforms() map[string]*spec.PlatformSpec {
+	return net.internal.Platforms()
 }
 
 // ShowPlatform returns the canonical PlatformSpec (§46) for a single

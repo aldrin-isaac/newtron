@@ -28,7 +28,7 @@ import (
 // interface structurally.
 type SpecClient interface {
 	GetTopology() (*spec.TopologySpecFile, error)
-	ListPlatforms() (*spec.PlatformSpecFile, error)
+	ListPlatforms() (map[string]*spec.PlatformSpec, error)
 	ShowProfile(name string) (*spec.DeviceProfile, error)
 }
 
@@ -46,7 +46,7 @@ type Lab struct {
 	Name         string
 	StateDir     string
 	Topology     *spec.TopologySpecFile
-	Platform     *spec.PlatformSpecFile
+	Platform     map[string]*spec.PlatformSpec
 	Profiles     map[string]*spec.DeviceProfile
 	Config       *VMLabConfig
 	Nodes        map[string]*NodeConfig
@@ -155,7 +155,7 @@ func NewLab(ctx context.Context, client SpecClient, topologyName string) (*Lab, 
 			platformName = l.Topology.Platform
 		}
 		if platformName != "" {
-			platform = l.Platform.Platforms[platformName]
+			platform = l.Platform[platformName]
 		}
 
 		nc, err := ResolveNodeConfig(name, profile, platform)
@@ -922,7 +922,7 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 			return nil // host devices have no platform boot patches
 		}
 		// Use resolved platform from NodeConfig (may come from profile or topology)
-		platform := l.Platform.Platforms[node.Platform]
+		platform := l.Platform[node.Platform]
 		if platform == nil {
 			return nil
 		}

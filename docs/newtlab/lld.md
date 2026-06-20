@@ -190,7 +190,7 @@ type Lab struct {
     Name         string
     StateDir     string
     Topology     *spec.TopologySpecFile
-    Platform     *spec.PlatformSpecFile
+    Platform     map[string]*spec.PlatformSpec
     Profiles     map[string]*spec.DeviceProfile
     Config       *VMLabConfig
     Nodes        map[string]*NodeConfig
@@ -383,7 +383,7 @@ Steps:
    `cmd/newtlab/main.go`.
 2. If `topology.Links` is empty, derive links from `interface.link` fields
    via `DeriveLinksFromInterfaces()`.
-3. Call `client.ListPlatforms()` → `*spec.PlatformSpecFile`.
+3. Call `client.ListPlatforms()` → `map[string]*spec.PlatformSpec`.
 4. Call `client.ShowProfile(deviceName)` → `*spec.DeviceProfile` for each
    device in the topology.
 5. Resolve `VMLabConfig` from `topology.NewtLab` with defaults.

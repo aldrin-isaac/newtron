@@ -25,11 +25,10 @@ var platformListCmd = &cobra.Command{
 
 Shows platform name, HWSKU, description, and count of unsupported features.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		platformFile, err := app.client.ListPlatforms()
+		platforms, err := app.client.ListPlatforms()
 		if err != nil {
 			return err
 		}
-		platforms := platformFile.Platforms
 
 		if len(platforms) == 0 {
 			fmt.Println("No platforms defined")
