@@ -84,7 +84,7 @@ func TestGetAuthorization_ReturnsTable(t *testing.T) {
 // which is also empty).
 func TestGetAuthorization_EmptyNetwork(t *testing.T) {
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "empty-network test fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "empty-network test fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	w := authzServeGet(t, dir, "/newtron/v1/networks/default/authorization")
@@ -121,7 +121,7 @@ func TestGetAuthorization_EmptyNetwork(t *testing.T) {
 // to requireNetwork can't silently regress the inspector to 500.
 func TestGetAuthorization_UnknownNetwork_404(t *testing.T) {
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "unknown-network test fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "unknown-network test fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	w := authzServeGet(t, dir, "/newtron/v1/networks/missing/authorization")
@@ -145,7 +145,7 @@ func TestGetAuthorization_UnknownNetwork_404(t *testing.T) {
 // here that ignores it) would distort what an inspector displays.
 func TestGetAuthorization_WireForm_ShorthandVsTyped(t *testing.T) {
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "wire-form test fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "wire-form test fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	// Rewrite network.json with one shorthand grant and one typed
@@ -243,7 +243,7 @@ func TestGetAuthorization_EngageWhenConfigured_Fallback(t *testing.T) {
 // bypass auth.read like every other permission.
 func TestGetAuthorization_EngageWhenConfigured_GateEngagesAndDenies(t *testing.T) {
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "auth.read gate fires"); err != nil {
+	if err := spec.CreateEmpty(dir, "auth.read gate fires"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	// Rewrite network.json with an auth.read entry.

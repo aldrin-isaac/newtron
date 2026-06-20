@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-func TestScaffold_FreshDirectory(t *testing.T) {
+func TestCreateEmpty_FreshDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "specs")
 
-	if err := Scaffold(dir, "demo description"); err != nil {
-		t.Fatalf("Scaffold: %v", err)
+	if err := CreateEmpty(dir, "demo description"); err != nil {
+		t.Fatalf("CreateEmpty: %v", err)
 	}
 
 	// All three files exist.
@@ -22,13 +22,13 @@ func TestScaffold_FreshDirectory(t *testing.T) {
 		}
 	}
 
-	// profiles/ exists as a directory.
+	// nodes/ exists as a directory.
 	info, err := os.Stat(filepath.Join(dir, "nodes"))
 	if err != nil {
-		t.Fatalf("expected profiles/ to exist: %v", err)
+		t.Fatalf("expected nodes/ to exist: %v", err)
 	}
 	if !info.IsDir() {
-		t.Errorf("profiles/ should be a directory")
+		t.Errorf("nodes/ should be a directory")
 	}
 
 	// Description threads into topology.json.
@@ -48,19 +48,19 @@ func TestScaffold_FreshDirectory(t *testing.T) {
 	}
 }
 
-func TestScaffold_AlreadyInitialized(t *testing.T) {
+func TestCreateEmpty_AlreadyExists(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "specs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// Pre-seed one of the three spec files so Scaffold should refuse.
+	// Pre-seed one of the three spec files so CreateEmpty should refuse.
 	if err := os.WriteFile(filepath.Join(dir, "topology.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	err := Scaffold(dir, "")
-	if !errors.Is(err, ErrAlreadyInitialized) {
-		t.Fatalf("err = %v, want ErrAlreadyInitialized", err)
+	err := CreateEmpty(dir, "")
+	if !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("err = %v, want ErrAlreadyExists", err)
 	}
 
 	// The pre-existing file was not clobbered.
@@ -71,24 +71,24 @@ func TestScaffold_AlreadyInitialized(t *testing.T) {
 	if string(data) != "{}" {
 		t.Errorf("topology.json was overwritten: %s", data)
 	}
-	// And we didn't half-scaffold (platforms.json should not exist).
+	// And we didn't half-create (platforms.json should not exist).
 	if _, err := os.Stat(filepath.Join(dir, "platforms.json")); !os.IsNotExist(err) {
 		t.Errorf("platforms.json should not exist after conflict: err=%v", err)
 	}
 }
 
-func TestScaffold_EmptyPreExistingDir(t *testing.T) {
+func TestCreateEmpty_EmptyPreExistingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "specs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := Scaffold(dir, ""); err != nil {
-		t.Fatalf("Scaffold on empty pre-existing dir: %v", err)
+	if err := CreateEmpty(dir, ""); err != nil {
+		t.Fatalf("CreateEmpty on empty pre-existing dir: %v", err)
 	}
 }
 
-func TestScaffold_EmptySpecDir(t *testing.T) {
-	if err := Scaffold("", ""); err == nil {
+func TestCreateEmpty_EmptySpecDir(t *testing.T) {
+	if err := CreateEmpty("", ""); err == nil {
 		t.Fatalf("expected error for empty dir")
 	}
 }

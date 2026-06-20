@@ -171,7 +171,7 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	// topology by id. RegisterNetwork is idempotent — re-issuing is a
 	// no-op.
 	if dir != "" {
-		if regErr := client.RegisterNetwork(); regErr != nil {
+		if _, regErr := client.CreateNetwork(""); regErr != nil {
 			return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
 		}
 	}

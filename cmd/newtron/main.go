@@ -212,7 +212,7 @@ Examples:
 		} else if app.topology {
 			app.client.Mode = api.ModeTopology
 		}
-		if err := app.client.RegisterNetwork(); err != nil {
+		if _, err := app.client.CreateNetwork(""); err != nil {
 			return fmt.Errorf("registering network with server: %w", err)
 		}
 

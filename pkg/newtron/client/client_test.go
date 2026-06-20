@@ -11,55 +11,16 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
-// register-network client surface — wire shape is just {id}; the
-// server resolves the on-disk path from its --networks-base. Client
-// methods take no dir parameter.
+// CreateNetwork is the single client verb for "ensure the network is
+// registered." Wire shape is {id, description?}; the server resolves
+// the on-disk path from its --networks-base. The CLI surface returns
+// the resolved NetworkInfo so callers learn the path without
+// re-fetching.
 
-// TestRegisterNetwork_201Success pins the happy path — a fresh
-// register against an empty server returns nil.
-func TestRegisterNetwork_201Success(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"data":{"id":"demo","dir":"/srv/networks/demo","nodes":[]}}`))
-	}))
-	defer ts.Close()
-
-	c := New(ts.URL, "demo")
-	if err := c.RegisterNetwork(); err != nil {
-		t.Fatalf("RegisterNetwork: %v", err)
-	}
-}
-
-// TestRegisterNetwork_500ReturnsServerError pins the non-2xx path —
-// the client surfaces a typed *ServerError so callers that switch on
-// it keep working.
-func TestRegisterNetwork_500ReturnsServerError(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"loading network failed"}`))
-	}))
-	defer ts.Close()
-
-	c := New(ts.URL, "demo")
-	err := c.RegisterNetwork()
-	if err == nil {
-		t.Fatal("RegisterNetwork should fail on 500")
-	}
-	var se *ServerError
-	if !errors.As(err, &se) {
-		t.Fatalf("err type = %T, want *ServerError", err)
-	}
-	if se.StatusCode != http.StatusInternalServerError {
-		t.Errorf("StatusCode = %d, want 500", se.StatusCode)
-	}
-}
-
-// TestScaffoldNetwork_ReturnsResolvedDir pins the operator-language
-// contract: the client passes just a description (no path); the
-// response carries the server-resolved on-disk dir so the caller can
-// display "created at <path>" without re-fetching.
-func TestScaffoldNetwork_ReturnsResolvedDir(t *testing.T) {
-	const resolvedPath = "/srv/newtron/networks/demo"
+// TestCreateNetwork_201Success pins the first-call happy path —
+// server returns 201 with NetworkInfo.
+func TestCreateNetwork_201Success(t *testing.T) {
+	const resolvedPath = "/srv/networks/demo"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		env := httputil.APIResponse{
@@ -74,17 +35,58 @@ func TestScaffoldNetwork_ReturnsResolvedDir(t *testing.T) {
 	defer ts.Close()
 
 	c := New(ts.URL, "demo")
-	info, err := c.ScaffoldNetwork("test description")
+	info, err := c.CreateNetwork("")
 	if err != nil {
-		t.Fatalf("ScaffoldNetwork: %v", err)
-	}
-	if info == nil {
-		t.Fatal("info should not be nil on success")
+		t.Fatalf("CreateNetwork: %v", err)
 	}
 	if info.Dir != resolvedPath {
 		t.Errorf("info.Dir = %q, want %q", info.Dir, resolvedPath)
 	}
-	if info.ID != "demo" {
-		t.Errorf("info.ID = %q, want demo", info.ID)
+}
+
+// TestCreateNetwork_200Idempotent confirms that 200 OK (subsequent
+// call against an existing slot) is treated as success — the same
+// success path 201 takes.
+func TestCreateNetwork_200Idempotent(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		env := httputil.APIResponse{
+			Data: api.NetworkInfo{ID: "demo", Dir: "/srv/networks/demo", Nodes: []string{}},
+		}
+		_ = json.NewEncoder(w).Encode(env)
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "demo")
+	info, err := c.CreateNetwork("")
+	if err != nil {
+		t.Fatalf("CreateNetwork on 200: %v", err)
+	}
+	if info == nil || info.ID != "demo" {
+		t.Errorf("info = %+v, want id=demo", info)
+	}
+}
+
+// TestCreateNetwork_500ReturnsServerError pins the non-2xx path —
+// the client surfaces a typed *ServerError so callers that switch on
+// it keep working.
+func TestCreateNetwork_500ReturnsServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"loading network failed"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "demo")
+	_, err := c.CreateNetwork("")
+	if err == nil {
+		t.Fatal("CreateNetwork should fail on 500")
+	}
+	var se *ServerError
+	if !errors.As(err, &se) {
+		t.Fatalf("err type = %T, want *ServerError", err)
+	}
+	if se.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, want 500", se.StatusCode)
 	}
 }

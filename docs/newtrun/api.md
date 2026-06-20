@@ -465,7 +465,7 @@ newtron directly:
 | Operation | Endpoint |
 |-----------|----------|
 | List registered networks | `GET /newtron/v1/networks` |
-| Scaffold + register a new network in one call | `POST /newtron/v1/networks` with `scaffold: true` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
+| Create (or pick up existing) a network by id | `POST /newtron/v1/networks` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
 
 The `newtrun networks` and `newtrun network create` CLI subcommands
 delegate to these newtron endpoints.

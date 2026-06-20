@@ -20,7 +20,7 @@ func (s *Server) buildMux() http.Handler {
 	// ====================================================================
 	// Server management
 	// ====================================================================
-	mux.HandleFunc("POST /newtron/v1/networks", s.handleRegisterNetwork)
+	mux.HandleFunc("POST /newtron/v1/networks", s.handleCreateNetwork)
 	mux.HandleFunc("GET /newtron/v1/networks", s.handleListNetworks)
 
 	// ====================================================================

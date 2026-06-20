@@ -464,7 +464,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 // path for log messages only.
 func (r *Runner) deployTopology(ctx context.Context, dir string, opts RunOptions) (cleanup func(), err error) {
 	if dir != "" {
-		if regErr := r.Client.RegisterNetwork(); regErr != nil {
+		if _, regErr := r.Client.CreateNetwork(""); regErr != nil {
 			fmt.Fprintf(os.Stderr, "newtrun: register %s with newtron: %v (continuing)\n", r.Client.NetworkID(), regErr)
 		}
 	}

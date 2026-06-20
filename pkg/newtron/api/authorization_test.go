@@ -24,7 +24,7 @@ import (
 func scaffoldWithPermissions(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "L3 enforcement test fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "L3 enforcement test fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	// Overwrite the scaffolded empty network.json with one carrying a
@@ -465,7 +465,7 @@ func TestAuthorizationL4_NodeMutationsGated(t *testing.T) {
 func scaffoldWithGrants(t *testing.T, permissionsJSON string) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "L5 fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "L5 fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	netJSON := `{

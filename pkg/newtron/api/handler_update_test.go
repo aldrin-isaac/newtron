@@ -20,7 +20,7 @@ import (
 func scaffoldNetwork(t *testing.T, netID string) *Server {
 	t.Helper()
 	dir := t.TempDir()
-	if err := spec.Scaffold(dir, "update-X round-trip test fixture"); err != nil {
+	if err := spec.CreateEmpty(dir, "update-X round-trip test fixture"); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	s := NewServer(Config{})
