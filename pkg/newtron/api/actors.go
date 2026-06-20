@@ -267,21 +267,27 @@ func (na *NodeActor) ensureTopologyIntent() error {
 	return nil
 }
 
-// ensureLoopbackIntent ensures the cached node exists for loopback mode.
-// On first access, builds from topology.json (same as topology mode). On
-// subsequent accesses, reuses the existing node — never rebuilds. This lets
-// CLI mutations accumulate in memory for offline config testing.
+// ensureLoopbackIntent ensures the cached node is suitable for
+// loopback mode: present, topology-sourced (actuatedIntent=false),
+// transport disconnected.
 //
-// The node has conn=nil and actuatedIntent=false. All operations run against
-// the projection: Lock/Apply/Verify/Save are no-ops, intents accumulate in
-// memory, RebuildProjection replays from in-memory intents.
+// On a topology-sourced cached node, reuses so CLI mutations accumulate
+// across requests (the offline-testing property). On an actuated
+// cached node, destroys and rebuilds — actuated nodes carry
+// connection/lock semantics that loopback's precondition gate rejects.
+// Symmetric with ensureTopologyIntent which makes the same choice
+// for the opposite direction.
+//
+// The rebuilt node has conn=nil and actuatedIntent=false. All
+// operations run against the projection: Lock/Apply/Verify/Save are
+// no-ops, intents accumulate in memory, RebuildProjection replays
+// from in-memory intents.
 func (na *NodeActor) ensureLoopbackIntent() error {
-	if na.node != nil {
-		// Always reuse — mutations accumulate across requests.
+	if na.node != nil && !na.node.HasActuatedIntent() {
 		na.node.DisconnectTransport()
 		return nil
 	}
-	// First access: build from topology.json.
+	na.closeNode()
 	node, err := na.net.BuildTopologyNode(na.device)
 	if err != nil {
 		return err
