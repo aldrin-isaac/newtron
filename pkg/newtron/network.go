@@ -33,8 +33,8 @@ type Network struct {
 // platform values are resolved at load time. nil preserves the
 // plaintext-only behavior — references in specs become hard errors
 // at load.
-func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store) (*Network, error) {
-	net, err := netpkg.NewNetwork(specDir, topologyName, pr, secretStore)
+func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store, platforms map[string]*spec.PlatformSpec) (*Network, error) {
+	net, err := netpkg.NewNetwork(specDir, topologyName, pr, secretStore, platforms)
 	if err != nil {
 		return nil, err
 	}

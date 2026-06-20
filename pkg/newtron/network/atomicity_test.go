@@ -33,7 +33,7 @@ func loadTestNetwork(t *testing.T) *Network {
 		t.Fatalf("write platforms.json: %v", err)
 	}
 
-	n, err := NewNetwork(dir, "", nil, nil)
+	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}

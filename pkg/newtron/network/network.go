@@ -29,11 +29,6 @@ import (
 //
 //   - keyNetworkSpec covers everything in network.json (the OverridableSpecs
 //     maps plus Zones) and the file write that persists them.
-//   - keyPlatforms covers platforms.json (the cached *PlatformSpecFile this
-//     Network holds and the file write that persists it). Added by #173 when
-//     CRUD endpoints retired the "platforms is immutable" invariant; every
-//     read site that previously accessed n.platforms directly is now
-//     RLock-guarded.
 //   - keyTopology covers topology.json (Devices + Links) and the file write
 //     that persists them.
 //   - keyNodes covers the runtime *node.Node cache populated by GetNode.
@@ -41,13 +36,17 @@ import (
 // Profiles are not in this set — spec.Loader has its own RWMutex (added in
 // PR #100) and serializes per-profile correctly on its own.
 //
+// Platforms are also not in this set — the platforms map is the global
+// registry loaded once at newt-server startup from --platforms-base
+// and immutable on this layer (CRUD lives at the Server level if/when
+// it lands).
+//
 // Lock-ordering rule (multi-key acquisitions): alphabetical by key string.
 // Verified for every cross-key call site in this file. Single-key callers
 // are exempt; the rule only kicks in when a caller needs more than one.
 const (
 	keyNetworkSpec lockKey = "network.json"
 	keyNodes       lockKey = "nodes"
-	keyPlatforms   lockKey = "platforms.json"
 	keyTopology    lockKey = "topology.json"
 )
 
@@ -58,8 +57,15 @@ const (
 // are accessible to all Device and Interface objects through parent references.
 type Network struct {
 	// Specs (from JSON files)
-	spec      *spec.NetworkSpecFile
-	platforms *spec.PlatformSpecFile
+	spec *spec.NetworkSpecFile
+	// platforms is the SHARED global platforms registry — loaded once
+	// by newt-server from --platforms-base and handed to every Network
+	// at construction. All Networks see the same pointer. The map is
+	// treated as immutable in the read path (CRUD lives at the Server
+	// level if/when it lands); mutations from one Network would be
+	// visible to every other Network instantly, which is the intended
+	// semantics — platforms are global by definition.
+	platforms map[string]*spec.PlatformSpec
 
 	// Topology spec (nil if topology.json doesn't exist)
 	topology *spec.TopologySpecFile
@@ -126,8 +132,8 @@ type Network struct {
 // --secret-store=PATH on cmd/newt-server) gets that store regardless
 // of what's next to network.json. The convention only kicks in when
 // no flag is set.
-func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store) (*Network, error) {
-	loader := spec.NewLoader(specDir)
+func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store, platforms map[string]*spec.PlatformSpec) (*Network, error) {
+	loader := spec.NewLoader(specDir, platforms)
 
 	// Load all spec files
 	if err := loader.Load(); err != nil {
@@ -153,11 +159,6 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 		}
 	}
 
-	platforms := loader.GetPlatforms()
-	if err := resolvePlatformSecrets(platforms, secretStore); err != nil {
-		return nil, fmt.Errorf("resolving platform secrets: %w", err)
-	}
-
 	return &Network{
 		spec:         loader.GetNetwork(),
 		platforms:    platforms,
@@ -170,21 +171,17 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 	}, nil
 }
 
-// resolvePlatformSecrets walks every PlatformSpec.VMCredentials and
-// resolves any ${secret:KEY} references in the User and Pass fields
-// against the configured store. Mutates the spec in place — the
-// resolved plaintext is what subsequent reads of platforms.json see
-// (whether through Network.Platforms() or the HTTP /platforms
-// endpoint).
+// ResolvePlatformSecrets walks every PlatformSpec.VMCredentials in
+// the global registry and resolves any ${secret:KEY} references
+// against the configured store. Mutates the specs in place. Called
+// once at newt-server startup, after LoadPlatformsFromDir loads the
+// registry and before the registry is shared with Networks.
 //
 // Per auth-design.md L0, plaintext values pass through unchanged
 // regardless of whether a store is configured; references with no
 // store configured are an error.
-func resolvePlatformSecrets(p *spec.PlatformSpecFile, store secret.Store) error {
-	if p == nil {
-		return nil
-	}
-	for name, platform := range p.Platforms {
+func ResolvePlatformSecrets(platforms map[string]*spec.PlatformSpec, store secret.Store) error {
+	for name, platform := range platforms {
 		if platform == nil || platform.VMCredentials == nil {
 			continue
 		}
@@ -299,125 +296,25 @@ func (n *Network) GetFilter(name string) (*spec.FilterSpec, error) {
 	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Filters, "filter", util.NormalizeName(name))
 }
 
-// GetPlatform returns a platform definition by name. Reads
-// n.platforms.Platforms under RLock — the map can be mutated by
-// the CreatePlatform / UpdatePlatform / DeletePlatform methods
-// added in #173.
+// GetPlatform returns a platform definition by name. The platforms
+// map is the GLOBAL registry loaded once at newt-server startup from
+// --platforms-base — it is treated as immutable (no CRUD on this
+// layer), so reads need no lock. Platform authoring happens by
+// editing the on-disk files directly and restarting (or via a future
+// global CRUD endpoint, if added).
 func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error) {
-	mu := n.locks.lock(keyPlatforms)
-	mu.RLock()
-	defer mu.RUnlock()
-	p, ok := n.platforms.Platforms[name]
+	p, ok := n.platforms[name]
 	if !ok {
 		return nil, fmt.Errorf("platform '%s' not found", name)
 	}
 	return p, nil
 }
 
-// Platforms returns a snapshot of all platform definitions. Returns
-// a defensive copy of the map so callers can iterate without holding
-// the platforms lock — necessary now that the map is mutable (#173).
-// The underlying *PlatformSpec pointers are shared, not copied; their
-// contents are treated as immutable after CreatePlatform/UpdatePlatform
-// stores them.
+// Platforms returns the global platforms map. Returns the live pointer
+// (not a copy) — callers must not mutate. Safe to read concurrently;
+// the global registry is set once at startup and never modified.
 func (n *Network) Platforms() map[string]*spec.PlatformSpec {
-	mu := n.locks.lock(keyPlatforms)
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make(map[string]*spec.PlatformSpec, len(n.platforms.Platforms))
-	for k, v := range n.platforms.Platforms {
-		out[k] = v
-	}
-	return out
-}
-
-// ============================================================================
-// Platform CRUD (#173)
-// ============================================================================
-
-// CreatePlatform atomically adds a new platform definition. Returns an
-// error if a platform with the given name already exists. Persists the
-// updated platforms.json under keyPlatforms.Lock().
-func (n *Network) CreatePlatform(name string, def *spec.PlatformSpec) error {
-	mu := n.locks.lock(keyPlatforms)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := n.platforms.Platforms[name]; exists {
-		return fmt.Errorf("platform '%s' already exists", name)
-	}
-	if n.platforms.Platforms == nil {
-		n.platforms.Platforms = make(map[string]*spec.PlatformSpec)
-	}
-	n.platforms.Platforms[name] = def
-	return n.persistPlatforms()
-}
-
-// UpdatePlatform atomically replaces an existing platform definition.
-// Returns *newtronErrors{notFound: true} when the named platform does
-// not exist — the public layer translates this to NotFoundError → 404.
-// Full-replacement semantics mirror UpdateTopologyDevice + the #152
-// update-X family: every field of def becomes the new content.
-func (n *Network) UpdatePlatform(name string, def *spec.PlatformSpec) error {
-	mu := n.locks.lock(keyPlatforms)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := n.platforms.Platforms[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "platform", id: name}
-	}
-	n.platforms.Platforms[name] = def
-	return n.persistPlatforms()
-}
-
-// DeletePlatform removes a platform definition. Refuses with
-// *util.ConflictError when any profile still references this platform
-// (matches the DeleteProfile referential-integrity pattern). There is
-// no force=true cascade — a profile's Platform field is mandatory in
-// practice, so cascading would orphan the profile; the operator must
-// retarget or delete the referring profiles first.
-func (n *Network) DeletePlatform(name string) error {
-	// Profiles are owned by spec.Loader (one file per profile). Scan
-	// every loaded profile for a match on Platform == name.
-	referrers := make([]string, 0)
-	for _, profName := range n.loader.ListProfiles() {
-		prof, err := n.loader.LoadProfile(profName)
-		if err != nil {
-			continue
-		}
-		if prof.Platform == name {
-			referrers = append(referrers, "profile '"+profName+"'")
-		}
-	}
-	if len(referrers) > 0 {
-		return &util.ConflictError{
-			Resource:   "platform",
-			Name:       name,
-			References: referrers,
-		}
-	}
-
-	mu := n.locks.lock(keyPlatforms)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := n.platforms.Platforms[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "platform", id: name}
-	}
-	delete(n.platforms.Platforms, name)
-	return n.persistPlatforms()
-}
-
-// persistPlatforms writes the current platforms snapshot to disk
-// atomically. Mirrors persistSpec in shape — the caller holds
-// keyPlatforms.Lock around the in-memory mutation and this persist
-// call so concurrent CreatePlatform/UpdatePlatform/DeletePlatform
-// can't interleave their persists.
-func (n *Network) persistPlatforms() error {
-	if n.loader == nil {
-		return fmt.Errorf("no loader (in-memory only)")
-	}
-	return n.loader.SavePlatforms(n.platforms)
+	return n.platforms
 }
 
 // GetPrefixList returns a prefix list by name.
@@ -1590,10 +1487,7 @@ func (n *Network) IsHostDevice(name string) bool {
 	if profile.Platform == "" {
 		return false
 	}
-	mu := n.locks.lock(keyPlatforms)
-	mu.RLock()
-	platform, ok := n.platforms.Platforms[profile.Platform]
-	mu.RUnlock()
+	platform, ok := n.platforms[profile.Platform]
 	if !ok {
 		return false
 	}
@@ -2191,10 +2085,7 @@ func (n *Network) isHostDeviceLocked(name string) bool {
 	if err != nil || profile.Platform == "" {
 		return false
 	}
-	mu := n.locks.lock(keyPlatforms)
-	mu.RLock()
-	platform, ok := n.platforms.Platforms[profile.Platform]
-	mu.RUnlock()
+	platform, ok := n.platforms[profile.Platform]
 	if !ok {
 		return false
 	}

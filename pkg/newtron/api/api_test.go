@@ -130,9 +130,7 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateProfile":     true,
 			"UpdateZone":        true,
 			// Platform CRUD (#173)
-			"CreatePlatform": true,
-			"UpdatePlatform": true,
-			"DeletePlatform": true,
+
 			// Topology / Provision
 			"HasTopology":           true,
 			"GetTopology":           true, // #14: GET /networks/{netID}/topology
@@ -324,9 +322,7 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateRoutePolicy":     auth.PermSpecAuthor,
 			"UpdateProfile":         auth.PermSpecAuthor,
 			"UpdateZone":            auth.PermSpecAuthor,
-			"CreatePlatform":        auth.PermSpecAuthor,
-			"UpdatePlatform":        auth.PermSpecAuthor,
-			"DeletePlatform":        auth.PermSpecAuthor,
+
 			"AddTopologyDevice":     auth.PermSpecAuthor,
 			"DeleteTopologyDevice":  auth.PermSpecAuthor,
 			"UpdateTopologyDevice":  auth.PermSpecAuthor,
@@ -647,7 +643,7 @@ func TestHandleConfigDBSnapshot_RouteRegistered(t *testing.T) {
 func TestWriteResult_ChangesPopulated(t *testing.T) {
 	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs")
 
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -768,7 +764,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
 	specDir := filepath.Join(repoRoot(t), "networks", "1node-vs")
 
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -898,7 +894,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 		t.Fatalf("write profile: %v", err)
 	}
 
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -937,7 +933,7 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 		t.Fatalf("write profile: %v", err)
 	}
 
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -993,7 +989,7 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 		t.Fatalf("write profile: %v", err)
 	}
 
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -1037,7 +1033,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 	); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -1072,7 +1068,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 // TopologyDevice entry under the given name.
 func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 	specDir := copyTestSpecDir(t)
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
@@ -1108,7 +1104,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	); err != nil {
 		t.Fatalf("write profile: %v", err)
 	}
-	net, err := newtron.LoadNetwork(specDir, "", nil, nil)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}

@@ -58,9 +58,7 @@ func TestResolvedSpecs_MergeNodeWins(t *testing.T) {
 				Services: map[string]*spec.ServiceSpec{"svc": netSvc},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{
@@ -98,9 +96,7 @@ func TestResolvedSpecs_MergeZoneWinsOverNetwork(t *testing.T) {
 				Filters: map[string]*spec.FilterSpec{"f1": netFilter},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{Zone: "amer"}
@@ -137,9 +133,7 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 				},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{
@@ -183,9 +177,7 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 				},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{
@@ -232,9 +224,7 @@ func TestResolvedSpecs_FindMACVPNByVNI_DynamicFallback(t *testing.T) {
 				},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{Zone: "amer"}
@@ -276,9 +266,7 @@ func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
 				},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{Zone: "amer"}
@@ -324,9 +312,7 @@ func TestResolvedSpecs_LiveFallback_ProfileOverrideStillWins(t *testing.T) {
 				},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{},
-		},
+		platforms: map[string]*spec.PlatformSpec{},
 	}
 
 	profile := &spec.DeviceProfile{
@@ -369,10 +355,8 @@ func TestResolvedSpecs_GetPlatformDelegatesToNetwork(t *testing.T) {
 				"amer": {},
 			},
 		},
-		platforms: &spec.PlatformSpecFile{
-			Platforms: map[string]*spec.PlatformSpec{
-				"as7726": {HWSKU: "Accton-AS7726-32X"},
-			},
+		platforms: map[string]*spec.PlatformSpec{
+			"as7726": {HWSKU: "Accton-AS7726-32X"},
 		},
 	}
 

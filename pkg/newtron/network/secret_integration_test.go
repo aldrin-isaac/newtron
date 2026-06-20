@@ -34,7 +34,7 @@ func TestNewNetwork_SecretRefInProfileResolves(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	n, err := NewNetwork(dir, "", nil, store)
+	n, err := NewNetwork(dir, "", nil, store, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 		"underlay_asn": 65001
 	}`)
 
-	n, err := NewNetwork(dir, "", nil, nil)
+	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v (the reference is only resolved on profile read; init should succeed)", err)
 	}
@@ -92,7 +92,7 @@ func TestNewNetwork_PlaintextProfilePassesThrough(t *testing.T) {
 		"underlay_asn": 65001
 	}`)
 
-	n, err := NewNetwork(dir, "", nil, nil)
+	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
@@ -106,22 +106,10 @@ func TestNewNetwork_PlaintextProfilePassesThrough(t *testing.T) {
 }
 
 // TestNewNetwork_SecretRefInPlatformResolves pins the platform path:
-// a vm_credentials.pass = "${secret:KEY}" reference in platforms.json
-// resolves at network load so cached n.Platforms() carries plaintext.
-func TestNewNetwork_SecretRefInPlatformResolves(t *testing.T) {
-	dir := t.TempDir()
-	writeNetwork(t, dir)
-	writeTopology(t, dir, "switch1")
-	writeProfile(t, dir, "switch1", plainSwitch1Profile())
-	writePlatforms(t, dir, `{
-		"version": "1.0",
-		"platforms": {
-			"p1": {
-				"vm_credentials": {"user": "admin", "pass": "${secret:p1-pass}"}
-			}
-		}
-	}`)
-
+// a vm_credentials.pass = "${secret:KEY}" reference resolves at the
+// global-platforms load step (ResolvePlatformSecrets) so every
+// Network sees plaintext.
+func TestResolvePlatformSecrets_Resolves(t *testing.T) {
 	store, err := secret.NewFileStore(filepath.Join(t.TempDir(), "s.json"))
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
@@ -130,41 +118,37 @@ func TestNewNetwork_SecretRefInPlatformResolves(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	n, err := NewNetwork(dir, "", nil, store)
-	if err != nil {
-		t.Fatalf("NewNetwork: %v", err)
+	platforms := map[string]*spec.PlatformSpec{
+		"p1": {
+			Name:          "p1",
+			VMCredentials: &spec.VMCredentials{User: "admin", Pass: "${secret:p1-pass}"},
+		},
 	}
-	got := n.platforms.Platforms["p1"].VMCredentials.Pass
-	if got != "real-platform-pass" {
+	if err := ResolvePlatformSecrets(platforms, store); err != nil {
+		t.Fatalf("ResolvePlatformSecrets: %v", err)
+	}
+	if got := platforms["p1"].VMCredentials.Pass; got != "real-platform-pass" {
 		t.Errorf("platform pass = %q; want real-platform-pass (resolved from store)", got)
 	}
 }
 
-// TestNewNetwork_SecretRefInPlatformMissingKeyErrors pins that a
-// platform reference with no matching store key fails at load —
-// matches the profile-side behavior so the operator finds both
-// surfaces of misconfiguration at the same time.
-func TestNewNetwork_SecretRefInPlatformMissingKeyErrors(t *testing.T) {
-	dir := t.TempDir()
-	writeNetwork(t, dir)
-	writeTopology(t, dir, "switch1")
-	writeProfile(t, dir, "switch1", plainSwitch1Profile())
-	writePlatforms(t, dir, `{
-		"version": "1.0",
-		"platforms": {
-			"p1": {
-				"vm_credentials": {"user": "admin", "pass": "${secret:nope}"}
-			}
-		}
-	}`)
-
+// TestResolvePlatformSecrets_MissingKeyErrors pins that a platform
+// reference with no matching store key fails fast — operators
+// see the misconfiguration at server startup, not under load.
+func TestResolvePlatformSecrets_MissingKeyErrors(t *testing.T) {
 	store, err := secret.NewFileStore(filepath.Join(t.TempDir(), "s.json"))
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	_, err = NewNetwork(dir, "", nil, store)
+	platforms := map[string]*spec.PlatformSpec{
+		"p1": {
+			Name:          "p1",
+			VMCredentials: &spec.VMCredentials{User: "admin", Pass: "${secret:nope}"},
+		},
+	}
+	err = ResolvePlatformSecrets(platforms, store)
 	if err == nil {
-		t.Fatal("expected NewNetwork to fail with missing platform secret; got nil")
+		t.Fatal("expected ResolvePlatformSecrets to fail with missing secret; got nil")
 	}
 	var nf *secret.ErrNotFound
 	if !errors.As(err, &nf) {
@@ -286,7 +270,7 @@ func TestNewNetwork_SpecDirSecretStoreAutoDiscovery(t *testing.T) {
 		t.Fatalf("write secrets.json: %v", err)
 	}
 
-	n, err := NewNetwork(dir, "", nil, nil) // nil store → auto-discovery kicks in
+	n, err := NewNetwork(dir, "", nil, nil, nil) // nil store → auto-discovery kicks in
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
@@ -328,7 +312,7 @@ func TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	n, err := NewNetwork(dir, "", nil, explicit)
+	n, err := NewNetwork(dir, "", nil, explicit, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
@@ -360,7 +344,7 @@ func TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent(t *testing.T) {
 		"underlay_asn": 65001
 	}`)
 
-	n, err := NewNetwork(dir, "", nil, nil)
+	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}

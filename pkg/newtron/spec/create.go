@@ -32,10 +32,11 @@ func CreateEmpty(specDir, description string) error {
 		return fmt.Errorf("dir is required")
 	}
 
-	// Refuse to overwrite existing specs. Check all three before
-	// doing any work so we don't leave a half-created directory
-	// on conflict.
-	for _, name := range []string{"topology.json", "platforms.json", "network.json"} {
+	// Refuse to overwrite existing specs. Check both before doing any
+	// work so we don't leave a half-created directory on conflict.
+	// platforms.json is no longer per-network — the global registry
+	// at --platforms-base owns platforms.
+	for _, name := range []string{"topology.json", "network.json"} {
 		if _, err := os.Stat(filepath.Join(specDir, name)); err == nil {
 			return fmt.Errorf("%w: %s already exists at %s", ErrAlreadyExists, name, specDir)
 		}
@@ -51,12 +52,6 @@ func CreateEmpty(specDir, description string) error {
 		Description: description,
 		Devices:     map[string]*TopologyDevice{},
 		Links:       []*TopologyLink{},
-	}); err != nil {
-		return err
-	}
-	if err := writeSeed(specDir, "platforms.json", &PlatformSpecFile{
-		Version:   "1.0",
-		Platforms: map[string]*PlatformSpec{},
 	}); err != nil {
 		return err
 	}
