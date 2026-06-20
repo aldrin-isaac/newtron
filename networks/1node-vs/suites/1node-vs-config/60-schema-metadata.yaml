@@ -295,7 +295,138 @@ steps:
       jq: |
         (.fields | map(select(.name == "loopback_ip")) | .[0].format) == "cidr"
 
+  # ====================================================================
+  # GET /schema (cont.) — PrefixListSpec is registered (PR #242 closes
+  # the asymmetry where every other top-level kind had a schema entry)
+  # ====================================================================
+  - name: schema-list-has-PrefixListSpec
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | map(.kind) | contains(["PrefixListSpec"])'
+
+  # ====================================================================
+  # GET /schema/PrefixListSpec — top-level kind: synthetic name field +
+  # full CRUD paths + array-of-string prefixes field
+  # ====================================================================
+  - name: schema-PrefixListSpec-identifier
+    action: newtron
+    url: /schema/PrefixListSpec
+    expect:
+      jq: '.identifier == "name"'
+
+  - name: schema-PrefixListSpec-paths
+    action: newtron
+    url: /schema/PrefixListSpec
+    expect:
+      jq: |
+        .paths.list   == "/newtron/v1/networks/{netID}/prefix-lists" and
+        .paths.show   == "/newtron/v1/networks/{netID}/prefix-lists/{name}" and
+        .paths.create == "/newtron/v1/networks/{netID}/create-prefix-list" and
+        .paths.update == "/newtron/v1/networks/{netID}/update-prefix-list" and
+        .paths.delete == "/newtron/v1/networks/{netID}/delete-prefix-list"
+
+  - name: schema-PrefixListSpec-synthetic-name
+    action: newtron
+    url: /schema/PrefixListSpec
+    expect:
+      # The synthetic name field is prepended (top-level kinds have
+      # the identifier off-struct).
+      jq: '.fields[0].name == "name" and .fields[0].immutable == true'
+
+  - name: schema-PrefixListSpec-prefixes-array-of-string
+    action: newtron
+    url: /schema/PrefixListSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "prefixes")) | .[0]) as $f |
+        $f.type == "array" and $f.item_type == "string"
+
+  # ====================================================================
+  # GET /schema/all — single-request alternative to N+1 per-kind GETs
+  # (PR #242). Returns every kind's full SchemaMeta.
+  # ====================================================================
+  - name: schema-all-returns-200
+    action: newtron
+    url: /schema/all
+    expect:
+      jq: '.schemas | length > 0'
+
+  - name: schema-all-includes-ServiceSpec-full
+    action: newtron
+    url: /schema/all
+    expect:
+      # Spot-check: ServiceSpec is present AND carries the full Field
+      # list (proves the response is full SchemaMeta, not summary).
+      jq: |
+        (.schemas | map(select(.kind == "ServiceSpec")) | .[0]) as $s |
+        $s.label == "Service" and
+        ($s.fields | length) > 1
+
+  - name: schema-all-count-tripwire
+    action: newtron
+    url: /schema/all
+    expect:
+      # Tripwire on the registered kind count. /schema/all and /schema
+      # are derived from the same registry, so a divergence between the
+      # endpoints would mean one silently dropped a kind. A cross-step
+      # comparison would prove that directly, but newtrun's expect
+      # block has no carry-over between steps; the next-best signal is
+      # a hard count against the known registry size — if a kind is
+      # added or removed intentionally, the author updates both this
+      # number and the corresponding /schema-list-has-X step above.
+      jq: '(.schemas | length) == 17'
+
+  # ====================================================================
+  # GET /schema/ServiceSpec — required_when on ipvpn / macvpn (PR #243).
+  # Pins the structured wire shape newtcon's evaluator walks. Drift in
+  # the shape (DSL string, missing operand, wrong field) breaks the
+  # contract; this assertion catches it.
+  # ====================================================================
+  - name: schema-ServiceSpec-ipvpn-required_when
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "ipvpn")) | .[0].required_when) as $rw |
+        $rw.field == "service_type" and
+        ($rw.in | sort) == ["evpn-irb", "evpn-routed"]
+
+  - name: schema-ServiceSpec-macvpn-required_when
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      jq: |
+        (.fields | map(select(.name == "macvpn")) | .[0].required_when) as $rw |
+        $rw.field == "service_type" and
+        ($rw.in | sort) == ["evpn-bridged", "evpn-irb"]
+
+  - name: schema-ServiceSpec-description-no-required_when
+    action: newtron
+    url: /schema/ServiceSpec
+    expect:
+      # Non-conditional fields must NOT carry required_when. A regression
+      # that defaulted required_when onto every field would fail here.
+      jq: |
+        (.fields | map(select(.name == "description")) | .[0].required_when)
+        == null
+
+  # ====================================================================
+  # Coverage notes
+  # ====================================================================
   # 404 on unknown kind is covered by the API unit test
   # (TestSchemaShow_NotFound in handler_schema_test.go); newtrun's
   # newtron action treats non-2xx responses as step failures and has
   # no ExpectBlock.status field, so the negative case is unit-only.
+  #
+  # Cache headers (Last-Modified + Cache-Control + 304 round-trip on
+  # /schema, /schema/{kind}, /schema/all from PR #242) are covered by
+  # API unit tests (TestSchemaCacheHeaders_* in handler_schema_test.go).
+  # newtrun's ExpectBlock has no header-assertion field, so header
+  # coverage stays unit-only.
+  #
+  # Init-time validation of RequiredWhen field references (PR #243)
+  # cannot be exercised at the HTTP layer (a typo'd registration would
+  # panic on server boot before reaching newtrun). Covered by the
+  # spec-package unit tests (TestRequiredWhen_PanicsOn* in
+  # schema_meta_test.go).
