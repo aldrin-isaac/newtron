@@ -493,7 +493,8 @@ All specs from all levels are visible. If the same name exists at multiple level
 `newtron platform generate <path-to-sonic-platform.json>` reads the SONiC
 device-tree `platform.json` (typically at
 `/usr/share/sonic/device/<vendor>-<platform>/platform.json` on a real switch)
-and emits the newtron `PlatformSpec` shape above.
+and emits a standalone newtron `PlatformSpec` ready to drop into the global
+platforms registry under `--platforms-base`.
 
 The translator derives `port_count`, `default_speed` (the highest-rate 1xN
 mode across every port's `breakout_modes` — the "headline" speed each port
@@ -502,24 +503,35 @@ mode key). HWSKU is required via `--hwsku` because SONiC `platform.json`
 doesn't carry it (HWSKU lives in the sibling `<hwsku>/` directory under the
 device tree).
 
-```sh
-# emit to stdout — paste into platforms.json or POST to /create-platform
-newtron platform generate /usr/share/sonic/device/x86_64-dellemc_z9332f_d1508-r0/platform.json \
-    --name dell-z9332f-32x400g --hwsku DellEMC-Z9332f-O32 \
-    --description "Dell Z9332F-ON 32x400G"
+The `--name` value becomes both the filename basename and the spec's `name`
+field. Convention from #257: `<HWSKU>` for single-variant SONiC,
+`<HWSKU>_<variant>` when multiple variants share a HWSKU,
+or a descriptive name for non-SONiC platforms.
 
-# write/merge into an existing platforms.json (atomic temp+rename)
+```sh
+# emit to stdout — redirect into <--platforms-base>/<name>.json
+newtron platform generate /usr/share/sonic/device/x86_64-dellemc_z9332f_d1508-r0/platform.json \
+    --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 \
+    --description "Dell Z9332F-ON 32x400G" \
+    > platforms/DellEMC-Z9332f-O32.json
+
+# write directly into the global platforms directory (atomic temp+rename)
 newtron platform generate platform.json \
-    --name dell-z9332f-32x400g --hwsku DellEMC-Z9332f-O32 \
-    --output platforms.json
+    --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 \
+    --output-dir platforms
+
+# overwrite an existing same-named file
+newtron platform generate platform.json \
+    --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 \
+    --output-dir platforms --force
 ```
 
 What the generator does NOT derive (you fill these in after generation):
 
 - `vm_image`, `vm_memory`, `vm_cpus`, `vm_credentials`, and the other VM/lab
   fields. Real-hardware platforms omit them entirely. Simulator platforms
-  (`sonic-vs`, `ciscovs`) need them, but the values come from per-image
-  conventions, not from `platform.json`.
+  (`Force10-S6000_vs`, `cisco-p200-32x100-vs`) need them, but the values come
+  from per-image conventions, not from `platform.json`.
 - `dataplane` (use `--dataplane` if you want it set during generation).
 - `unsupported_features` — a runtime-discovered property; populate it from
   suite outcomes when a feature reliably fails on the target.
@@ -541,10 +553,10 @@ to override the auto-discovered location.
 ```sh
 # Auto-discovery (one command, both files at conventional paths)
 newtron platform generate /usr/share/sonic/device/x86_64-dell_s6100_c2538-r0/platform.json \
-    --name dell-s6100 --hwsku Force10-S6100
+    --name Force10-S6100 --hwsku Force10-S6100
 
 # Explicit port_config.ini path (paths outside the conventional layout)
-newtron platform generate platform.json --name dell-s6100 --hwsku Force10-S6100 \
+newtron platform generate platform.json --name Force10-S6100 --hwsku Force10-S6100 \
     --port-config-ini /tmp/Force10-S6100/port_config.ini
 ```
 
