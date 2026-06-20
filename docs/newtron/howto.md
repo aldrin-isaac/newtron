@@ -509,21 +509,23 @@ field. Convention from #257: `<HWSKU>` for single-variant SONiC,
 or a descriptive name for non-SONiC platforms.
 
 ```sh
-# emit to stdout — redirect into <--platforms-base>/<name>.json
+# default — writes ./platforms/<name>.json (matches newt-server's --platforms-base default)
 newtron platform generate /usr/share/sonic/device/x86_64-dellemc_z9332f_d1508-r0/platform.json \
     --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 \
-    --description "Dell Z9332F-ON 32x400G" \
-    > platforms/DellEMC-Z9332f-O32.json
+    --description "Dell Z9332F-ON 32x400G"
 
-# write directly into the global platforms directory (atomic temp+rename)
+# write into a sibling directory (e.g. staging changes for review)
 newtron platform generate platform.json \
     --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 \
-    --output-dir platforms
+    --output-dir /tmp/staging-platforms
 
 # overwrite an existing same-named file
 newtron platform generate platform.json \
-    --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 \
-    --output-dir platforms --force
+    --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 --force
+
+# preview — emit to stdout without writing anything
+newtron platform generate platform.json \
+    --name DellEMC-Z9332f-O32 --hwsku DellEMC-Z9332f-O32 --stdout
 ```
 
 What the generator does NOT derive (you fill these in after generation):

@@ -1,13 +1,19 @@
 // cmd_platform_generate.go — `newtron platform generate
 // <sonic-platform.json>` (issue #185; updated for #257's global
 // platforms registry). Wraps spec.FromSONiCPlatformJSON with
-// operator-friendly flag handling and two output modes:
+// operator-friendly flag handling. Default behavior writes
+// `./platforms/<name>.json` (matching cmd/newt-server's
+// --platforms-base default), so a vanilla `newtron platform generate
+// foo.json --name X --hwsku X` lands the file in the live global
+// registry directory with no further flags.
 //
-//   - stdout (default): emit a single PlatformSpec with its name
-//     field set, ready to redirect into <--platforms-base>/<name>.json.
-//   - --output-dir DIR: write DIR/<name>.json (one file per platform —
-//     the global-registry layout post-#257). Refuses on existing
-//     same-named file unless --force.
+// Two output modes:
+//
+//   - --output-dir DIR (default "platforms"): write DIR/<name>.json.
+//     Refuses on existing same-named file unless --force. Atomic
+//     temp+rename.
+//   - --stdout: emit the spec to stdout for preview or piping. Skips
+//     all file I/O.
 //
 // The translation itself lives in pkg/newtron/spec — this file is
 // the CLI I/O layer only (per DPN §28 file-level feature cohesion).
@@ -30,6 +36,7 @@ var (
 	platformGenerateHWSKU         string
 	platformGenerateDescription   string
 	platformGenerateOutputDir     string
+	platformGenerateStdout        bool
 	platformGenerateDataplane     string
 	platformGenerateForce         bool
 	platformGeneratePortConfigINI string
@@ -70,20 +77,22 @@ What the generator does NOT derive (operator fills these in afterward):
 
 Examples:
 
-  # emit to stdout (default) — redirect into <--platforms-base>/<name>.json
+  # default — writes ./platforms/<name>.json (matches newt-server's --platforms-base default)
   newtron platform generate ./platform.json \
-      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 \
-      > platforms/Cisco-8101-32x100.json
+      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100
 
-  # write directly into the global platforms directory
+  # write into a sibling directory (e.g. staging changes for review)
   newtron platform generate ./platform.json \
       --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 \
-      --output-dir platforms
+      --output-dir /tmp/staging-platforms
 
   # overwrite an existing same-named file
   newtron platform generate ./platform.json \
-      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 \
-      --output-dir platforms --force`,
+      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 --force
+
+  # preview-only — emit to stdout without writing anything
+  newtron platform generate ./platform.json \
+      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 --stdout`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if platformGenerateName == "" {
@@ -101,7 +110,7 @@ Examples:
 			return err
 		}
 		ps.Name = platformGenerateName
-		if platformGenerateOutputDir == "" {
+		if platformGenerateStdout {
 			return emitPlatformToStdout(ps)
 		}
 		return writePlatformToDir(platformGenerateOutputDir, ps, platformGenerateForce)
@@ -248,9 +257,13 @@ func init() {
 		"HWSKU name (e.g. \"Cisco-8101-32x100\"). Required — SONiC platform.json doesn't carry HWSKU.")
 	platformGenerateCmd.Flags().StringVar(&platformGenerateDescription, "description", "",
 		"Optional description (set on PlatformSpec.Description).")
-	platformGenerateCmd.Flags().StringVar(&platformGenerateOutputDir, "output-dir", "",
-		"Write to <dir>/<name>.json instead of stdout. Pair with cmd/newt-server's "+
-			"--platforms-base value to land in the live global registry.")
+	platformGenerateCmd.Flags().StringVar(&platformGenerateOutputDir, "output-dir", "platforms",
+		"Directory to write <dir>/<name>.json into. Default matches cmd/newt-server's "+
+			"--platforms-base default so the file lands in the live global registry. "+
+			"Override to a sibling directory when staging changes for review.")
+	platformGenerateCmd.Flags().BoolVar(&platformGenerateStdout, "stdout", false,
+		"Emit to stdout instead of writing a file. Useful for previewing the derived "+
+			"spec before saving, or piping into a custom workflow.")
 	platformGenerateCmd.Flags().StringVar(&platformGenerateDataplane, "dataplane", "",
 		"Optional dataplane hint (\"vpp\", \"barefoot\", \"\" for none).")
 	platformGenerateCmd.Flags().BoolVar(&platformGenerateForce, "force", false,
