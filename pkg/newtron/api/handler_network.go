@@ -25,8 +25,13 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // Server management
 // ============================================================================
 
-func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
-	var req RegisterNetworkRequest
+// handleCreateNetwork is the POST /newtron/v1/networks handler. The
+// verb is "create" because that's the operator's intent in both
+// outcomes the endpoint covers (make a new slot, or pick up an
+// existing one and register it). Always idempotent — the status
+// code distinguishes new (201) from already-existed (200).
+func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
+	var req CreateNetworkRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
@@ -42,55 +47,23 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if s.networksBase == "" {
-		writeError(w, fmt.Errorf("server has no networks-base configured; cannot resolve dir for id %q", req.ID))
-		return
-	}
-	dir := filepath.Join(s.networksBase, req.ID)
 
-	// Two operator outcomes the verb covers:
-	//   (a) "create topology X if missing; register if already there"
-	//       → scaffold absent / false. Idempotent on the existing slot.
-	//   (b) "create a NEW topology X; refuse if there's already one"
-	//       → scaffold:true. ErrAlreadyInitialized → 409.
-	//
-	// Whether the slot is "already there" cuts two ways: on disk
-	// (network.json exists at the resolved dir) and in memory (the
-	// server already registered this id). Both reads have to agree
-	// before we can short-circuit; the in-memory check makes a
-	// re-register of an already-registered id a no-op rather than a
-	// 409 collision.
+	// Already registered? Return its info with 200 (idempotent — the
+	// slot is already in the state the caller asked for).
 	if info := s.getNetworkInfo(req.ID); info != nil {
-		if req.Scaffold {
-			httputil.WriteError(w, http.StatusConflict, spec.ErrAlreadyInitialized)
-			return
-		}
-		httputil.WriteJSON(w, http.StatusCreated, info)
+		httputil.WriteJSON(w, http.StatusOK, info)
 		return
 	}
-	if !req.Scaffold && dirHasSpecs(dir) {
-		if err := s.RegisterNetwork(req.ID, dir); err != nil {
-			writeError(w, err)
-			return
-		}
-	} else {
-		if err := s.ScaffoldAndRegister(req.ID, dir, req.Description); err != nil {
-			if errors.Is(err, spec.ErrAlreadyInitialized) {
-				httputil.WriteError(w, http.StatusConflict, err)
-				return
-			}
-			writeError(w, err)
-			return
-		}
+
+	if err := s.CreateNetwork(req.ID, req.Description); err != nil {
+		writeError(w, err)
+		return
 	}
-	// Return the canonical NetworkInfo (§46) — the caller learns the
-	// resolved dir even when the server picked it, and gets the
-	// same shape the GET /networks list returns.
 	info := s.getNetworkInfo(req.ID)
 	if info == nil {
-		// Registration succeeded but the entity vanished between Lock
-		// release and the getNetworkInfo RLock — concurrent
-		// unregister. Surface as 500; the caller can retry.
+		// Create succeeded but the entity vanished between Unlock
+		// and the getNetworkInfo RLock — concurrent unregister.
+		// Surface as 500; the caller can retry.
 		writeError(w, fmt.Errorf("network %q registered but no longer present (concurrent unregister?)", req.ID))
 		return
 	}

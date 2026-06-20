@@ -661,53 +661,51 @@ own translations on top of the canonical English labels this endpoint returns.
 
 ### POST /newtron/v1/networks
 
-Register a network. Operators name the topology by `id`; the server
+Create a network. Operators name the topology by `id`; the server
 resolves the on-disk path from its `--networks-base` config
 (`filepath.Join(networks-base, id)`). No `dir` field on the wire — the
 server owns the layout (§27, §33).
 
-The same endpoint covers both "register an existing topology" and
-"scaffold a new topology"; the `scaffold` flag distinguishes
-register-or-scaffold (idempotent) from force-create (refuse on
-collision):
+Always idempotent. The same call covers "make a new slot" and "pick
+up an existing one" — the status code distinguishes them:
 
-- `scaffold` absent or `false` (CLI / automation default): if the
-  resolved slot already carries a valid spec layout, register it. If
-  not, scaffold + register in one call. Re-posting the same `id` is a
-  no-op success — the resolved state already matches what the caller
-  asked for.
-- `scaffold: true` (UI / "New topology" intent): scaffold + register
-  on an empty slot; **refuse with 409** if the slot is already
-  initialized. This is the safe verb for "create a new topology under
-  this name" — the operator wanted a fresh slot, not a silent re-use.
+- **201 Created** — the slot was new to the server (just registered).
+  Empty disk slot got materialized with three zero-valued spec files
+  plus an empty `nodes/` subdirectory; pre-existing disk slot got
+  loaded as-is.
+- **200 OK** — the id was already registered in memory; the response
+  carries the existing `NetworkInfo` so the caller learns the
+  resolved path without re-fetching.
+
+There's no "force-create / refuse on collision" mode. The status code
+already tells the operator what happened; a UI that wants to surface
+"name taken" reads 200 instead of 201.
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `id` | string | yes | Network identifier. Must match `^[A-Za-z0-9_-]{1,64}$`. Maps to `<networks-base>/<id>` on disk. |
-| `scaffold` | bool | no | Force-create. Default `false`. |
-| `description` | string | no | Free-text description seeded into `topology.json` when scaffolding. |
+| `description` | string | no | Free-text description seeded into `topology.json` when the slot is empty. Ignored on existing slots (no rewrite of authored specs). |
 
 **Behavior matrix:**
 
-| `scaffold` | Resolved slot state | Outcome |
-|------------|---------------------|---------|
-| `false` (default) | exists with valid specs | 201, register |
-| `false` | empty / missing | 201, scaffold + register |
-| `false` | already registered (this id) | 201, no-op (idempotent) |
-| `true` | empty / missing | 201, scaffold + register |
-| `true` | already initialized | 409 |
+| Slot state                              | Outcome                            |
+|-----------------------------------------|------------------------------------|
+| Already registered (in memory)          | 200, existing `NetworkInfo`        |
+| Disk slot has valid specs               | 201, register existing             |
+| Disk slot empty / missing               | 201, create empty specs + register |
+| Disk slot has invalid specs             | 500, spec load error               |
 
-**Response (201):** the canonical `NetworkInfo` (same shape as `GET
-/networks`), carrying the resolved `dir` so the caller learns the path
-the server picked.
+**Response body** (201 or 200): the canonical `NetworkInfo` (same
+shape as `GET /networks`), carrying the resolved `dir` so the caller
+learns the path the server picked.
 
 ```json
 {
   "data": {
     "id": "default",
-    "dir": "/etc/newtron/default",
+    "dir": "/etc/newtron/networks/default",
     "has_topology": true,
     "topology": "default",
     "nodes": []
@@ -715,25 +713,24 @@ the server picked.
 }
 ```
 
-**Status codes:** 201 created (including no-op retry of the same id),
-400 missing or malformed `id`, 409 `scaffold:true` against an
-already-initialized slot, 500 server has no `--networks-base`
-configured / spec load error.
+**Status codes:** 201 created, 200 already exists, 400 missing or
+malformed `id`, 500 server has no `--networks-base` configured / spec
+load error.
 
 **Examples:**
 
-Register-or-scaffold (the default — operator just wants the slot live):
+Create or register-existing (the default operator intent):
 
 ```
 POST /newtron/v1/networks
 {"id": "demo"}
 ```
 
-Force-create a new topology (UI "New topology" modal):
+With a description seed for a fresh topology:
 
 ```
 POST /newtron/v1/networks
-{"id": "demo", "scaffold": true, "description": "Demo network"}
+{"id": "demo", "description": "Demo network"}
 
 → 201
 {

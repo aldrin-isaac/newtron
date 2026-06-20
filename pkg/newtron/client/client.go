@@ -141,56 +141,22 @@ func (c *Client) NetworkID() string {
 	return c.networkID
 }
 
-// RegisterNetwork registers a network with the server. The operator
-// names the topology by id; the server resolves the on-disk path under
-// its --networks-base. If the slot at <networks-base>/<id> is missing,
-// the server scaffolds it; if it's present, the server registers the
-// existing layout. Either way the call is idempotent on this network
-// id — re-issuing returns the same NetworkInfo.
+// CreateNetwork ensures the network is registered. The operator names
+// the topology by id; the server resolves the on-disk path under its
+// --networks-base. If the slot at <networks-base>/<id> is empty, the
+// server creates the empty spec layout; if it's already populated, the
+// server registers it as-is. Either way the call is idempotent — the
+// server returns 201 on first create and 200 on subsequent calls; this
+// client surface treats both as success.
 //
-// For the "force-create, fail if already initialized" intent, use
-// ScaffoldNetwork — that's the only path that can return 409
-// AlreadyInitialized.
-func (c *Client) RegisterNetwork() error {
-	body := api.RegisterNetworkRequest{ID: c.networkID}
-	bodyBytes, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal body: %w", err)
-	}
-	resp, err := c.httpClient.Post(c.baseURL+"/newtron/v1/networks", "application/json", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return fmt.Errorf("POST /newtron/v1/networks: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 400 {
-		return nil
-	}
-
-	respBody, _ := io.ReadAll(resp.Body)
-	var envelope httputil.APIResponse
-	_ = json.Unmarshal(respBody, &envelope)
-	msg := envelope.Error
-	if msg == "" {
-		msg = resp.Status
-	}
-	return &ServerError{StatusCode: resp.StatusCode, Message: msg}
-}
-
-// ScaffoldNetwork forces creation of a new spec layout under the
-// server's --networks-base for the client's network ID. description
-// seeds the topology.json. The server picks the path
-// (filepath.Join(networksBase, id)) and returns it in NetworkInfo, so
-// the caller can display "created at <path>" without re-fetching.
+// description seeds topology.json when the slot is empty. Ignored on
+// existing slots — no rewrite of authored specs.
 //
-// 409 ErrAlreadyInitialized is meaningful here: the slot named <id>
-// already has a spec layout. The operator can either reuse it via
-// RegisterNetwork or pick a different id; ScaffoldNetwork won't
-// overwrite existing specs.
-func (c *Client) ScaffoldNetwork(description string) (*api.NetworkInfo, error) {
-	body := api.RegisterNetworkRequest{
+// Returns the resolved NetworkInfo so callers can display the picked
+// path without re-fetching.
+func (c *Client) CreateNetwork(description string) (*api.NetworkInfo, error) {
+	body := api.CreateNetworkRequest{
 		ID:          c.networkID,
-		Scaffold:    true,
 		Description: description,
 	}
 	var info api.NetworkInfo

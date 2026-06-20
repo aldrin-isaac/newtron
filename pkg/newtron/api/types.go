@@ -14,38 +14,35 @@ import (
 // HTTP Request Types — Network
 // ============================================================================
 
-// RegisterNetworkRequest is the body for POST /newtron/v1/networks.
+// CreateNetworkRequest is the body for POST /newtron/v1/networks.
 //
 // The operator names the topology by id; the server owns the on-disk
-// path (§27, §33). Every registration resolves to
-// filepath.Join(networksBase, id) on the server's filesystem, where
-// networksBase is whatever the operator started newtron with
-// (cmd/newt-server --networks-base; default "networks").
+// path (§27, §33). Every call resolves to filepath.Join(networksBase, id)
+// on the server's filesystem, where networksBase is whatever the
+// operator started newtron with (cmd/newt-server --networks-base;
+// default "networks").
 //
-// What happens at <networksBase>/<id>:
-//   - dir doesn't exist:                  server scaffolds + registers
-//   - dir exists, valid layout:           server registers existing
-//   - dir exists, valid + scaffold:true:  409 ErrAlreadyInitialized
-//                                         (operator asked to scaffold
-//                                         but the slot is occupied)
+// Behavior is always idempotent. What happens at <networksBase>/<id>:
+//   - id already registered in memory:    200 with existing NetworkInfo
+//   - dir doesn't exist:                  server creates empty specs + registers, 201
+//   - dir exists, valid layout:           server registers existing, 201
 //   - dir exists, invalid layout:         500 load error
 //
-// Scaffold=true is the "force-create" intent — useful only when the
-// caller wants 409 instead of silent register-existing. Omit it for
-// the natural "register-or-scaffold" idempotent case.
+// Operators distinguish "I just made this" from "it was already here"
+// via the response status (201 vs 200) — no client-side flag needed.
 //
-// Description seeds the scaffolded topology.json's description field.
-// Ignored when the dir already exists (no rewrite of existing specs).
+// Description seeds topology.json's description field when the slot is
+// empty and gets created. Ignored on existing slots — no rewrite of
+// authored specs.
 //
-// The resolved absolute dir is returned in the 201 NetworkInfo response
-// so callers can display "created at <path>" without re-fetching.
+// The resolved absolute dir is returned in the NetworkInfo response so
+// callers can display "created at <path>" without re-fetching.
 //
 // id must match ^[A-Za-z0-9_-]+$, 1–64 characters. Path separators,
 // dots, and spaces are rejected at the validation layer; an operator
 // who needs them files a bug, not a workaround.
-type RegisterNetworkRequest struct {
+type CreateNetworkRequest struct {
 	ID          string `json:"id"`
-	Scaffold    bool   `json:"scaffold,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 
@@ -296,24 +293,6 @@ func (e *notRegisteredError) Error() string {
 	return "network '" + e.id + "' not registered"
 }
 
-// alreadyRegisteredError signals a race-condition collision on POST
-// /networks — the handler's in-memory check passed, but a concurrent
-// register beat us to the map. Under the new wire model the resolved
-// dir is always <networks-base>/<id>, so there is no useful substrate
-// to propagate to the client beyond the 409 status itself; the type
-// exists only as an internal status-mapping marker.
-type alreadyRegisteredError struct {
-	id          string
-	existingDir string
-}
-
-func (e *alreadyRegisteredError) Error() string {
-	if e.existingDir == "" {
-		return "network '" + e.id + "' already registered"
-	}
-	return "network '" + e.id + "' already registered with dir '" + e.existingDir + "'"
-}
-
 // httpStatusFromError maps Go error types to HTTP status codes.
 func httpStatusFromError(err error) int {
 	if err == nil {
@@ -323,11 +302,6 @@ func httpStatusFromError(err error) int {
 	var notReg *notRegisteredError
 	if errors.As(err, &notReg) {
 		return http.StatusNotFound
-	}
-
-	var alreadyReg *alreadyRegisteredError
-	if errors.As(err, &alreadyReg) {
-		return http.StatusConflict
 	}
 
 	var notFound *newtron.NotFoundError
