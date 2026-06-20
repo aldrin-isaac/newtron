@@ -207,15 +207,16 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		vlanID = opts.VLAN
 	}
 
-	// Determine VRF name for binding and infrastructure
+	// Determine VRF name for binding and infrastructure. In shared
+	// mode the IPVPN name IS the SONiC VRF name (§13 / §32 — one
+	// concept, one name); in interface mode the name is derived
+	// from the service + interface pair.
 	var vrfName string
 	switch svc.VRFType {
 	case spec.VRFTypeInterface:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	case spec.VRFTypeShared:
-		if ipvpnDef != nil {
-			vrfName = ipvpnDef.VRF
-		}
+		vrfName = svc.IPVPN
 	}
 
 	// Track ACL names from generated entries for interface-merging.
@@ -422,11 +423,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		cs.Merge(vrfCS)
 	}
 
-	// IPVPN binding (intent-idempotent: BindIPVPN checks ipvpn intent)
+	// IPVPN binding (intent-idempotent: BindIPVPN checks ipvpn intent).
+	// In shared mode the IPVPN name IS vrfName by construction (§13).
 	if ipvpnDef != nil && vrfName != "" {
-		ipvpnCS, err := n.BindIPVPN(ctx, vrfName, svc.IPVPN)
+		ipvpnCS, err := n.BindIPVPN(ctx, svc.IPVPN)
 		if err != nil {
-			return nil, fmt.Errorf("bind IPVPN %s to VRF %s: %w", svc.IPVPN, vrfName, err)
+			return nil, fmt.Errorf("bind IPVPN %s: %w", svc.IPVPN, err)
 		}
 		cs.Merge(ipvpnCS)
 	}
@@ -642,9 +644,8 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	if svc.VRFType == spec.VRFTypeInterface {
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	} else if svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-		if def, err := i.Node().GetIPVPN(svc.IPVPN); err == nil {
-			vrfName = def.VRF
-		}
+		// The IPVPN name IS the SONiC VRF name on shared mode (§13).
+		vrfName = svc.IPVPN
 	}
 	vrfKey := "default"
 	if vrfName != "" {

@@ -103,10 +103,15 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 // IP-VPN Binding (L3VNI)
 // ============================================================================
 
-// BindIPVPN binds a VRF to an IP-VPN definition (creates L3VNI mapping and BGP EVPN config).
-// Intent-idempotent: if the ipvpn intent already exists, returns empty ChangeSet.
-func (n *Node) BindIPVPN(ctx context.Context, vrfName, ipvpnName string) (*ChangeSet, error) {
-	resource := "ipvpn|" + vrfName
+// BindIPVPN binds an IP-VPN on this device — materializes the SONiC
+// VRF, the L3VNI mapping, and the BGP EVPN configuration. The IP-VPN
+// name IS the SONiC VRF name (§13 / §32 — one concept, one name;
+// sonic-vrf.yang / RCA-044).
+//
+// Intent-idempotent: if the ipvpn intent already exists, returns
+// empty ChangeSet.
+func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, error) {
+	resource := "ipvpn|" + ipvpnName
 	if n.GetIntent(resource) != nil {
 		return NewChangeSet(n.name, "device.bind-ipvpn"), nil
 	}
@@ -115,15 +120,14 @@ func (n *Node) BindIPVPN(ctx context.Context, vrfName, ipvpnName string) (*Chang
 		return nil, fmt.Errorf("bind-ipvpn: %w", err)
 	}
 	resolved := n.Resolved()
-	cs, err := n.op(sonic.OpBindIPVPN, vrfName, ChangeModify,
-		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
-		func() []sonic.Entry { return bindIpvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) },
+	cs, err := n.op(sonic.OpBindIPVPN, ipvpnName, ChangeModify,
+		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(ipvpnName) },
+		func() []sonic.Entry { return bindIpvpnConfig(ipvpnName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) },
 		"device.unbind-ipvpn")
 	if err != nil {
 		return nil, err
 	}
 	intentParams := map[string]string{
-		sonic.FieldVRF:       vrfName,
 		sonic.FieldIPVPN:     ipvpnName,
 		sonic.FieldL3VNI:     strconv.Itoa(ipvpnDef.L3VNI),
 		sonic.FieldL3VNIVlan: strconv.Itoa(ipvpnDef.L3VNIVlan),
@@ -131,11 +135,11 @@ func (n *Node) BindIPVPN(ctx context.Context, vrfName, ipvpnName string) (*Chang
 	if len(ipvpnDef.RouteTargets) > 0 {
 		intentParams[sonic.FieldRouteTargets] = strings.Join(ipvpnDef.RouteTargets, ",")
 	}
-	if err := n.writeIntent(cs, sonic.OpBindIPVPN, "ipvpn|"+vrfName, intentParams, []string{"vrf|" + vrfName}); err != nil {
+	if err := n.writeIntent(cs, sonic.OpBindIPVPN, "ipvpn|"+ipvpnName, intentParams, []string{"vrf|" + ipvpnName}); err != nil {
 		return nil, err
 	}
-	cs.OperationParams = map[string]string{"vrf": vrfName}
-	util.WithDevice(n.name).Infof("Bound VRF %s to IP-VPN (L3VNI %d, %d route-targets)", vrfName, ipvpnDef.L3VNI, len(ipvpnDef.RouteTargets))
+	cs.OperationParams = map[string]string{"ipvpn": ipvpnName}
+	util.WithDevice(n.name).Infof("Bound IP-VPN %s (L3VNI %d, %d route-targets)", ipvpnName, ipvpnDef.L3VNI, len(ipvpnDef.RouteTargets))
 	return cs, nil
 }
 

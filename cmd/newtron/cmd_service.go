@@ -131,9 +131,6 @@ var serviceShowCmd = &cobra.Command{
 				fmt.Printf("  IP-VPN: %s\n", svc.IPVPN)
 			}
 			if ipvpnDef != nil {
-				if ipvpnDef.VRF != "" {
-					fmt.Printf("  VRF: %s\n", ipvpnDef.VRF)
-				}
 				if ipvpnDef.L3VNI > 0 {
 					fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
 				}
@@ -168,9 +165,6 @@ var serviceShowCmd = &cobra.Command{
 				fmt.Printf("  IP-VPN: %s\n", svc.IPVPN)
 			}
 			if ipvpnDef != nil {
-				if ipvpnDef.VRF != "" {
-					fmt.Printf("  VRF: %s\n", ipvpnDef.VRF)
-				}
 				if ipvpnDef.L3VNI > 0 {
 					fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
 				}

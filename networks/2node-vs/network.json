@@ -69,18 +69,16 @@
     }
   },
   "ipvpns": {
-    "EVPN_IRB_VRF": {
+    "Vrf_IRB": {
       "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
-      "vrf": "Vrf_IRB",
       "l3vni": 50002,
       "l3vni_vlan": 3998,
       "route_targets": [
         "65000:50002"
       ]
     },
-    "EVPN_L3_VRF": {
+    "Vrf_L3EVPN": {
       "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
-      "vrf": "Vrf_L3EVPN",
       "l3vni": 50001,
       "l3vni_vlan": 3999,
       "route_targets": [
@@ -124,7 +122,7 @@
     "SVC_EVPN_IRB": {
       "description": "EVPN IRB service for composite testing",
       "service_type": "evpn-irb",
-      "ipvpn": "EVPN_IRB_VRF",
+      "ipvpn": "Vrf_IRB",
       "macvpn": "SVC_VLAN400",
       "vrf_type": "shared"
     }

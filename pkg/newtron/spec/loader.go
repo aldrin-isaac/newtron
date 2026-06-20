@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -163,6 +164,13 @@ func (l *Loader) validate() error {
 	// Validate QoS policies (network-level)
 	l.validateQoSPolicies(v)
 
+	// Validate IPVPN names match SONiC's VRF pattern at every layer
+	// they may be authored (network, zone, profile).
+	validateIPVPNNames(v, "", l.network.IPVPNs)
+	for zoneName, zone := range l.network.Zones {
+		validateIPVPNNames(v, "zone '"+zoneName+"': ", zone.IPVPNs)
+	}
+
 	// Validate network-level cross-references against network-level maps
 	l.validateSpecRefs(v, "", &l.network.OverridableSpecs, &l.network.OverridableSpecs)
 
@@ -173,6 +181,40 @@ func (l *Loader) validate() error {
 	}
 
 	return v.Build()
+}
+
+// ipvpnNamePattern matches SONiC's VRF name convention from
+// sonic-vrf.yang — names must start with "Vrf" (mixed case) followed
+// by identifier characters. RCA-044 documents the silent intfmgrd
+// drop that happens when an INTERFACE entry's vrf_name does not
+// satisfy this pattern.
+//
+// The IPVPN's map key IS the SONiC VRF name (§13 / §32 — one concept,
+// one name); the pattern applies to that key directly.
+var ipvpnNamePattern = regexp.MustCompile(`^Vrf[A-Za-z0-9_]*$`)
+
+// ValidateIPVPNName returns nil if name satisfies the SONiC VRF name
+// convention, or a descriptive error otherwise. Public so CRUD
+// handlers (CreateIPVPN, UpdateIPVPN, SaveIPVPN) can validate at
+// write time, not only at load time.
+func ValidateIPVPNName(name string) error {
+	if !ipvpnNamePattern.MatchString(name) {
+		return fmt.Errorf(
+			"IPVPN name %q must match %s — SONiC requires VRF names to start with \"Vrf\" prefix (sonic-vrf.yang / RCA-044)",
+			name, ipvpnNamePattern.String(),
+		)
+	}
+	return nil
+}
+
+// validateIPVPNNames runs ValidateIPVPNName on every key in an IPVPN
+// map and accumulates failures into v with the given prefix.
+func validateIPVPNNames(v *util.ValidationBuilder, prefix string, m map[string]*IPVPNSpec) {
+	for name := range m {
+		if err := ValidateIPVPNName(name); err != nil {
+			v.AddErrorf("%s%s", prefix, err.Error())
+		}
+	}
 }
 
 // mergeOverridableSpecs merges parent and child spec maps (child wins).
@@ -769,7 +811,11 @@ func splitEndpoint(endpoint string) []string {
 func normalizeOverridableSpecs(s *OverridableSpecs) {
 	s.Services = normalizeMap(s.Services)
 	s.Filters = normalizeMap(s.Filters)
-	s.IPVPNs = normalizeMap(s.IPVPNs)
+	// IPVPNs are NOT NormalizeName-d — their names ARE the SONiC VRF
+	// names used on-device, and SONiC requires the "Vrf" prefix in
+	// mixed case (sonic-vrf.yang, RCA-044). NormalizeName uppercases,
+	// which would break SONiC's case-sensitive validation. The
+	// strict-form check runs in validateIPVPNNames (load-time fail-fast).
 	s.MACVPNs = normalizeMap(s.MACVPNs)
 	s.QoSPolicies = normalizeMap(s.QoSPolicies)
 	s.RoutePolicies = normalizeMap(s.RoutePolicies)
@@ -784,9 +830,6 @@ func normalizeOverridableSpecs(s *OverridableSpecs) {
 	}
 	for _, rp := range s.RoutePolicies {
 		NormalizeRoutePolicyRefs(rp)
-	}
-	for _, ipvpn := range s.IPVPNs {
-		NormalizeIPVPNRefs(ipvpn)
 	}
 }
 
@@ -809,7 +852,10 @@ func NormalizeServiceRefs(svc *ServiceSpec) {
 	}
 	svc.IngressFilter = normalizeRef(svc.IngressFilter)
 	svc.EgressFilter = normalizeRef(svc.EgressFilter)
-	svc.IPVPN = normalizeRef(svc.IPVPN)
+	// svc.IPVPN is a case-sensitive SONiC VRF name (sonic-vrf.yang);
+	// see the matching note on the IPVPNs map normalization above.
+	// Validation that the referenced IPVPN exists happens in
+	// validateSpecRefs.
 	svc.MACVPN = normalizeRef(svc.MACVPN)
 	svc.QoSPolicy = normalizeRef(svc.QoSPolicy)
 	if svc.Routing != nil {
@@ -842,18 +888,6 @@ func NormalizeRoutePolicyRefs(rp *RoutePolicy) {
 		// rule.Community is a match value (e.g., "65001:100"), not a spec name
 	}
 }
-
-// NormalizeIPVPNRefs normalizes the VRF name in IPVPNSpec.
-// VRF is a CONFIG_DB key name with "Vrf_" prefix — normalize the suffix only.
-func NormalizeIPVPNRefs(ipvpn *IPVPNSpec) {
-	if ipvpn == nil {
-		return
-	}
-	if ipvpn.VRF != "" {
-		ipvpn.VRF = util.NormalizeVRFName(ipvpn.VRF)
-	}
-}
-
 
 // normalizeRef normalizes a single name reference (returns "" for empty strings).
 func normalizeRef(ref string) string {

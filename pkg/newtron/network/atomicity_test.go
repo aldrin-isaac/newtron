@@ -99,7 +99,7 @@ func TestCreateIPVPN_AtomicAgainstConcurrentCreates(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			if err := n.CreateIPVPN("shared", &spec.IPVPNSpec{L3VNI: 5000}); err == nil {
+			if err := n.CreateIPVPN("Vrf_shared", &spec.IPVPNSpec{L3VNI: 5000}); err == nil {
 				successes.Add(1)
 			}
 		}()

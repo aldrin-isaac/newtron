@@ -56,7 +56,7 @@ steps:
 
   # host7 (switch1:Ethernet4) is in VLAN 400 (10.1.40.0/24, VNI 10400).
   # host8 (switch2:Ethernet4) is in VLAN 401 (10.1.41.0/24, VNI 10401).
-  # Both VLANs are bound to Vrf_IRB via the irb-vrf IPVPN (L3VNI 50400).
+  # Both VLANs are bound to Vrf_IRB (the IPVPN name IS the VRF name; L3VNI 50400).
   # Each switch has an anycast SVI for its local VLAN only.
   #
   # Gateway reachability validates that VRF-bound VLAN interfaces are

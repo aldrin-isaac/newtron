@@ -1,25 +1,26 @@
 name: vrf-ipvpn-binding
 description: |
-  VRF IP-VPN bind/unbind lifecycle.
-  Requires IP-VPN spec + VRF to exist.
+  IP-VPN bind/unbind lifecycle. The IP-VPN name IS the SONiC VRF
+  name (§13 / §32; sonic-vrf.yang) — `vrf create` materializes the
+  empty VRF and `vrf bind-ipvpn` overlays the L3VNI + EVPN config.
 requires: [setup-device]
 
 steps:
-  # --- Setup: IP-VPN spec + VRF ---
+  # --- Setup: IP-VPN spec + VRF (same name on both) ---
   - name: create-ipvpn
     action: newtron-cli
-    command: "evpn ipvpn create BIND_TEST --l3vni 10099 --loopback"
+    command: "evpn ipvpn create Vrf_BIND --l3vni 10099 --loopback"
 
   - name: create-vrf
     action: newtron-cli
     devices: [switch1]
     command: "vrf create Vrf_BIND --loopback"
 
-  # --- Bind IP-VPN ---
+  # --- Bind IP-VPN (single name — it's the VRF name AND the IP-VPN name) ---
   - name: bind-ipvpn
     action: newtron-cli
     devices: [switch1]
-    command: "vrf bind-ipvpn Vrf_BIND BIND_TEST --loopback"
+    command: "vrf bind-ipvpn Vrf_BIND --loopback"
 
   - name: verify-ipvpn-intent
     action: newtron-cli
@@ -49,4 +50,4 @@ steps:
 
   - name: delete-ipvpn
     action: newtron-cli
-    command: "evpn ipvpn delete BIND_TEST --loopback"
+    command: "evpn ipvpn delete Vrf_BIND --loopback"
