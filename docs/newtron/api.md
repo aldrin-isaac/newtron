@@ -4100,7 +4100,9 @@ Returned by `GET .../filter` (array) and `GET .../filters/{name}` (single).
 
 #### PlatformDetail
 
-Returned by `GET .../platform` (array) and `GET .../platforms/{name}` (single).
+Returned by `GET .../platforms` (map of platform name → PlatformDetail) and `GET .../platforms/{name}` (single).
+
+The list endpoint is keyed by platform name rather than an array because platforms are referenced by name everywhere downstream (`profile.platform`, `topology.platform`). Other list endpoints (services, zones) return name arrays since their downstream references already arrive named at the call site.
 
 | Field | Type | Description |
 |-------|------|-------------|

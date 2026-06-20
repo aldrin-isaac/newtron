@@ -264,13 +264,15 @@ func (c *Client) ShowFilter(name string) (*newtron.FilterDetail, error) {
 	return &result, nil
 }
 
-// ListPlatforms returns the canonical *spec.PlatformSpecFile (§46).
-func (c *Client) ListPlatforms() (*spec.PlatformSpecFile, error) {
-	var result spec.PlatformSpecFile
+// ListPlatforms returns the platforms by name (§46). Mirrors the
+// server-side ListPlatforms map shape; sibling list endpoints
+// (ListIPVPNs etc.) return the same name→spec form.
+func (c *Client) ListPlatforms() (map[string]*spec.PlatformSpec, error) {
+	var result map[string]*spec.PlatformSpec
 	if err := c.doGet(c.networkPath()+"/platforms", &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	return result, nil
 }
 
 // ShowPlatform returns the canonical *spec.PlatformSpec (§46) for a
