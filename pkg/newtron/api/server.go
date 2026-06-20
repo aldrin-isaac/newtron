@@ -66,6 +66,13 @@ type Server struct {
 	// spec behavior.
 	secretStore secret.Store
 
+	// platforms is the GLOBAL platforms registry — loaded once at
+	// startup by cmd/newt-server (via spec.LoadPlatformsFromDir) and
+	// handed to every Network on LoadNetwork. nil is safe (every
+	// platform lookup returns not-found, which is OK for test fixtures
+	// that don't reference platforms).
+	platforms map[string]*spec.PlatformSpec
+
 	// auditLogPath is the file path the audit logger writes to
 	// (auth-design.md L1). Used by the GET /audit/events and
 	// GET /audit/integrity handlers (#196). Empty disables those
@@ -150,6 +157,13 @@ type Config struct {
 	// from a --secret-store=PATH flag.
 	SecretStore secret.Store
 
+	// Platforms is the global platforms registry. cmd/newt-server
+	// loads it once at startup via spec.LoadPlatformsFromDir from
+	// --platforms-base and passes it here. Every Network registered
+	// against this Server reads the same map. nil is safe (test
+	// fixtures that don't reference platforms).
+	Platforms map[string]*spec.PlatformSpec
+
 	// TLSConfig enables inter-service mTLS on the TCP listener
 	// (auth-design.md L2a). Build with httputil.LoadServerTLSConfig
 	// from the operator's --tls-cert / --tls-key / --client-ca flags.
@@ -206,6 +220,7 @@ func NewServer(cfg Config) *Server {
 		networksBase:         cfg.NetworksBase,
 		auditCallerHeader:    cfg.AuditCallerHeader,
 		secretStore:          cfg.SecretStore,
+		platforms:            cfg.Platforms,
 		auditLogPath:         cfg.AuditLogPath,
 		enforceAuthorization: cfg.EnforceAuthorization,
 	}
@@ -290,7 +305,7 @@ func (s *Server) CreateNetwork(id, description string) error {
 // startup (cmd/newt-server/discover.go) and by tests that fixture
 // arbitrary dirs.
 func (s *Server) RegisterNetwork(id, specDir string) error {
-	net, err := newtron.LoadNetwork(specDir, networkName(specDir), s.portResolver, s.secretStore)
+	net, err := newtron.LoadNetwork(specDir, networkName(specDir), s.portResolver, s.secretStore, s.platforms)
 	if err != nil {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
@@ -349,7 +364,7 @@ func (s *Server) ReloadNetwork(id string) error {
 	entity.stop()
 
 	// Reload specs from disk
-	net, err := newtron.LoadNetwork(entity.specDir, networkName(entity.specDir), s.portResolver, s.secretStore)
+	net, err := newtron.LoadNetwork(entity.specDir, networkName(entity.specDir), s.portResolver, s.secretStore, s.platforms)
 	if err != nil {
 		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
 	}

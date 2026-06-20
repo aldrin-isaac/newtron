@@ -7,7 +7,7 @@
             "leaf2"
         ]
     },
-    "platform": "ciscovs",
+    "platform": "cisco-p200-32x100-vs",
     "ssh_user": "admin",
     "ssh_pass": "${secret:leaf1_ssh_pass}",
     "underlay_asn": 65011

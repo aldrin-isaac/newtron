@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // loopbackPortResolver makes an HTTP call back into the same newtron-server
@@ -66,7 +68,11 @@ func (r *loopbackPortResolver) SSHPort(ctx context.Context, topology, device str
 // this test fails on the 5-second deadline.
 func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {
 	resolver := &loopbackPortResolver{}
-	s := NewServer(Config{PortResolver: resolver})
+	platforms, err := spec.LoadPlatformsFromDir(filepath.Join(repoRoot(t), "platforms"))
+	if err != nil {
+		t.Fatalf("LoadPlatformsFromDir: %v", err)
+	}
+	s := NewServer(Config{PortResolver: resolver, Platforms: platforms})
 	specDir := filepath.Join(repoRoot(t), "networks", "2node-vs")
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)

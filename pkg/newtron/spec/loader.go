@@ -23,8 +23,12 @@ var Dir = "/etc/newtron"
 // by mu. (Pre-#173, platforms was documented as read-only; the platform
 // CRUD endpoints retired that invariant.)
 type Loader struct {
-	specDir   string
-	platforms *PlatformSpecFile
+	specDir string
+	// platforms is a read-only view of the global platforms registry,
+	// injected at construction. Used only by validateProfile to apply
+	// the relaxed-validation path on host-type profiles. Nil is safe
+	// (every platform is treated as non-host).
+	platforms map[string]*PlatformSpec
 
 	mu       sync.RWMutex
 	network  *NetworkSpecFile
@@ -32,14 +36,17 @@ type Loader struct {
 	profiles map[string]*DeviceProfile
 }
 
-// NewLoader creates a new specification loader
-func NewLoader(specDir string) *Loader {
+// NewLoader creates a new specification loader. platforms is the
+// global registry that newt-server loaded from --platforms-base —
+// pass nil if no platforms are known (tests, profile-only fixtures).
+func NewLoader(specDir string, platforms map[string]*PlatformSpec) *Loader {
 	if specDir == "" {
 		specDir = Dir
 	}
 	return &Loader{
-		specDir:  specDir,
-		profiles: make(map[string]*DeviceProfile),
+		specDir:   specDir,
+		platforms: platforms,
+		profiles:  make(map[string]*DeviceProfile),
 	}
 }
 
@@ -53,11 +60,9 @@ func (l *Loader) Load() error {
 		return fmt.Errorf("loading network spec: %w", err)
 	}
 
-	// Load platform spec
-	l.platforms, err = l.loadPlatformSpec()
-	if err != nil {
-		return fmt.Errorf("loading platform spec: %w", err)
-	}
+	// Platform specs are loaded once at server startup by
+	// LoadPlatformsFromDir and shared across networks — not the
+	// per-network Loader's concern anymore.
 
 	// Load topology spec (optional — returns nil if file doesn't exist)
 	l.topology, err = l.loadTopologySpec()
@@ -138,21 +143,6 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 	normalizeOverridableSpecs(&spec.OverridableSpecs)
 	for _, zone := range spec.Zones {
 		normalizeOverridableSpecs(&zone.OverridableSpecs)
-	}
-
-	return &spec, nil
-}
-
-func (l *Loader) loadPlatformSpec() (*PlatformSpecFile, error) {
-	path := filepath.Join(l.specDir, "platforms.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var spec PlatformSpecFile
-	if err := json.Unmarshal(data, &spec); err != nil {
-		return nil, err
 	}
 
 	return &spec, nil
@@ -364,7 +354,7 @@ func (l *Loader) isHostPlatform(platformName string) bool {
 	if l.platforms == nil || platformName == "" {
 		return false
 	}
-	platform, ok := l.platforms.Platforms[platformName]
+	platform, ok := l.platforms[platformName]
 	if !ok {
 		return false
 	}
@@ -414,63 +404,6 @@ func (l *Loader) GetNetwork() *NetworkSpecFile {
 	return l.network
 }
 
-// GetPlatforms returns the platform spec. Reads l.platforms under
-// RLock — the pointer is reassigned by SavePlatforms (#173); the
-// previous "set once at Load()" invariant no longer holds now that
-// CRUD endpoints can mutate the file.
-func (l *Loader) GetPlatforms() *PlatformSpecFile {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.platforms
-}
-
-// SavePlatforms writes the platform spec to disk atomically (temp file +
-// rename), then reassigns l.platforms under the write lock so concurrent
-// GetPlatforms readers see the new pointer atomically. Mirrors
-// SaveNetwork/SaveTopology in shape and atomicity.
-//
-// Operators submitting platform updates via the HTTP API send raw
-// values; secret resolution (${secret:KEY} → plaintext) is a load-time
-// mechanism and is not re-run on Save. Operators authoring secret
-// references should edit platforms.json directly and rely on
-// --spec-watch or /reload, not the create/update API.
-func (l *Loader) SavePlatforms(spec *PlatformSpecFile) error {
-	path := filepath.Join(l.specDir, "platforms.json")
-
-	data, err := json.MarshalIndent(spec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling platform spec: %w", err)
-	}
-	data = append(data, '\n')
-
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "platforms-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("renaming temp file: %w", err)
-	}
-
-	l.mu.Lock()
-	l.platforms = spec
-	l.mu.Unlock()
-
-	return nil
-}
 
 // GetTopology returns the topology spec, or nil if no topology.json was found.
 // Reads l.topology under RLock — the pointer is reassigned by SaveTopology.

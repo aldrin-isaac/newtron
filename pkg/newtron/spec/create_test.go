@@ -16,7 +16,7 @@ func TestCreateEmpty_FreshDirectory(t *testing.T) {
 	}
 
 	// All three files exist.
-	for _, name := range []string{"topology.json", "platforms.json", "network.json"} {
+	for _, name := range []string{"topology.json", "network.json"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("expected %s to exist: %v", name, err)
 		}
@@ -71,9 +71,9 @@ func TestCreateEmpty_AlreadyExists(t *testing.T) {
 	if string(data) != "{}" {
 		t.Errorf("topology.json was overwritten: %s", data)
 	}
-	// And we didn't half-create (platforms.json should not exist).
-	if _, err := os.Stat(filepath.Join(dir, "platforms.json")); !os.IsNotExist(err) {
-		t.Errorf("platforms.json should not exist after conflict: err=%v", err)
+	// And we didn't half-create (network.json should not exist).
+	if _, err := os.Stat(filepath.Join(dir, "network.json")); !os.IsNotExist(err) {
+		t.Errorf("network.json should not exist after conflict: err=%v", err)
 	}
 }
 

@@ -1,10 +1,6 @@
 package newtron
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -59,76 +55,11 @@ func (net *Network) PlatformSupportsFeature(platform, feature string) bool {
 }
 
 
-// ============================================================================
-// Platform CRUD (#173)
-// ============================================================================
+// Platform CRUD is removed: platforms are a global registry loaded
+// once at newt-server startup from --platforms-base. Operators
+// author platforms by editing files under that directory directly
+// and restarting (or via --spec-watch in a future iteration).
 //
-// Closes the residual gap from #152 — platforms now have the same
-// Create/Update/Delete verbs the other 9 spec kinds gained in that PR.
-// Auth gates uniform with #152: PermSpecAuthor with WithField("platforms")
-// and WithResource(name).
-//
-// Request shape: CreatePlatformRequest embeds spec.PlatformSpec
-// directly (DPN §46 — wire shape mirrors canonical types). The request
-// body for create and update is the same shape; the verb dispatches.
-
-// CreatePlatform adds a new platform definition. Returns a *ConflictError
-// when a platform with this name already exists.
-func (net *Network) CreatePlatform(ctx context.Context, req CreatePlatformRequest, opts ExecOpts) error {
-	if req.Name == "" {
-		return &ValidationError{Field: "name", Message: "required"}
-	}
-	if _, err := net.internal.GetPlatform(req.Name); err == nil {
-		return fmt.Errorf("platform '%s' already exists", req.Name)
-	}
-	if opts.Execute {
-		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("platforms").WithResource(req.Name)); err != nil {
-			return err
-		}
-	}
-	if !opts.Execute {
-		return nil
-	}
-	p := req.PlatformSpec
-	return translateInternalError(net.internal.CreatePlatform(req.Name, &p))
-}
-
-// UpdatePlatform replaces an existing platform definition. Returns
-// *NotFoundError → HTTP 404 when no platform with that name exists.
-// Full-replacement semantics: every field on req becomes the new
-// content for that name.
-func (net *Network) UpdatePlatform(ctx context.Context, req CreatePlatformRequest, opts ExecOpts) error {
-	if req.Name == "" {
-		return &ValidationError{Field: "name", Message: "required"}
-	}
-	if opts.Execute {
-		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("platforms").WithResource(req.Name)); err != nil {
-			return err
-		}
-	}
-	if !opts.Execute {
-		return nil
-	}
-	p := req.PlatformSpec
-	return translateInternalError(net.internal.UpdatePlatform(req.Name, &p))
-}
-
-// DeletePlatform removes a platform definition. Returns
-// *ConflictError when any device profile still references this
-// platform (Profile.Platform == name); the operator must retarget or
-// delete those profiles first. Returns *NotFoundError → 404 if the
-// platform doesn't exist.
-func (net *Network) DeletePlatform(ctx context.Context, name string, opts ExecOpts) error {
-	if name == "" {
-		return &ValidationError{Field: "name", Message: "required"}
-	}
-	if opts.Execute {
-		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("platforms").WithResource(name)); err != nil {
-			return err
-		}
-	}
-	if !opts.Execute {
-		return nil
-	}
-	return translateInternalError(net.internal.DeletePlatform(name))
-}
+// This matches PlatformSpec's existing schema-metadata claim that
+// platforms are read-only via the universal UI — adding a platform
+// requires backend coordination, not a wire-API call.

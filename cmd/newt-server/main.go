@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -42,7 +43,9 @@ import (
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
+	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	newtrunapi "github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 	"github.com/aldrin-isaac/newtron/pkg/version"
 )
@@ -52,7 +55,8 @@ const defaultListen = "127.0.0.1:18080"
 func main() {
 	listen := flag.String("listen", defaultListen, "listen address; loopback default; non-loopback requires explicit value")
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
-	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own spec files (network.json, topology.json, platforms.json, nodes/<name>.json) plus suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
+	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own spec files (network.json, topology.json, nodes/<name>.json) plus suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
+	platformsBase := flag.String("platforms-base", "platforms", "directory containing one file per platform (<filename basename>.json). Loaded once at startup; every network reads from the same registry. Platforms describe hardware/image-level identities (HWSKU, port count, VM image, dataplane) — shared across networks by definition. Filename basename must equal the file's name field.")
 	auditLog := flag.String("audit-log", "", "file path for the mutation audit log; empty disables audit emission entirely (default). (auth-design.md L1)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
@@ -154,6 +158,24 @@ func main() {
 		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
 	}
 
+	platforms, err := spec.LoadPlatformsFromDir(*platformsBase)
+	if err != nil {
+		logger.Fatalf("loading platforms from %s: %v", *platformsBase, err)
+	}
+	if err := netpkg.ResolvePlatformSecrets(platforms, store); err != nil {
+		logger.Fatalf("resolving platform secrets: %v", err)
+	}
+	if len(platforms) == 0 {
+		logger.Printf("platforms: no platforms loaded from %s (empty or missing dir)", *platformsBase)
+	} else {
+		names := make([]string, 0, len(platforms))
+		for n := range platforms {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		logger.Printf("platforms: loaded %d from %s: %v", len(platforms), *platformsBase, names)
+	}
+
 	newtronSrv := newtronapi.NewServer(newtronapi.Config{
 		Logger:               logger,
 		IdleTimeout:          *idleTimeout,
@@ -162,6 +184,7 @@ func main() {
 		AuditCallerHeader:    *auditCallerHeader,
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
+		Platforms:            platforms,
 		AuditLogPath:         *auditLog,
 		EnforceAuthorization: *enforceAuthz,
 		SpecWatch:            *specWatch,

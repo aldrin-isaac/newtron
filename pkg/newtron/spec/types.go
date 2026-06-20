@@ -252,7 +252,20 @@ type PlatformSpecFile struct {
 // author them via a universal UI; adding a platform requires backend
 // coordination.
 type PlatformSpec struct {
-	HWSKU        string   `json:"hwsku" label:"HWSKU" tooltip:"SONiC hardware SKU identifier"`
+	// Name is the platform's identity. Authoritative on disk: the file
+	// at <--platforms-base>/<Name>.json must have its Name field equal
+	// to that basename (loader enforces). On the wire (GET /platforms),
+	// Name doubles as the map key — both views agree by construction.
+	//
+	// For SONiC platforms with multiple deployment variants of the same
+	// HWSKU (e.g. Force10-S6000 emulated by the community virtual
+	// switch vs the VPP-flavored variant), the convention is
+	// <HWSKU>_<variant> so each variant gets its own file without
+	// collision. Single-variant SONiC platforms use the bare HWSKU
+	// (cisco-p200-32x100-vs.json). Non-SONiC platforms (host VMs,
+	// vJunos) use a descriptive name; HWSKU is empty for those.
+	Name         string   `json:"name" label:"Name" tooltip:"Platform identifier — filename basename under platforms/ directory; HWSKU for single-variant SONiC, HWSKU_<variant> for multi-variant"`
+	HWSKU        string   `json:"hwsku,omitempty" label:"HWSKU" tooltip:"SONiC hardware SKU identifier"`
 	Description  string   `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description"`
 	DeviceType   string   `json:"device_type,omitempty" label:"Device Type" tooltip:"Network switch or virtual host" enum:"switch,host"`
 	PortCount    int      `json:"port_count" label:"Port Count" tooltip:"Number of data ports on this platform"`

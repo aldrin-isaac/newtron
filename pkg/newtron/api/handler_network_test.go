@@ -34,7 +34,7 @@ func TestCreateNetwork_HappyPath_CreatesEmpty(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
 	}
 	dir := filepath.Join(base, "demo")
-	for _, name := range []string{"topology.json", "platforms.json", "network.json"} {
+	for _, name := range []string{"topology.json", "network.json"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("expected %s after create: %v", name, err)
 		}
@@ -63,7 +63,7 @@ func TestCreateNetwork_HappyPath_RegistersExisting(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	for _, name := range []string{"network.json", "topology.json", "platforms.json"} {
+	for _, name := range []string{"network.json", "topology.json"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}

@@ -2,7 +2,7 @@
     "loopback_ip": "10.0.0.2",
     "mgmt_ip": "127.0.0.1",
     "zone": "amer",
-    "platform": "sonic-vpp",
+    "platform": "Force10-S6000_vpp",
     "evpn": {
         "peers": ["spine1"],
         "route_reflector": true

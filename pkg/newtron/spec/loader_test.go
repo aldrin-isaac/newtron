@@ -119,7 +119,7 @@ func TestLoader_Load(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -136,21 +136,16 @@ func TestLoader_Load(t *testing.T) {
 		t.Errorf("Expected 1 zone, got %d", len(network.Zones))
 	}
 
-	// Check platforms loaded
-	platforms := loader.GetPlatforms()
-	if platforms == nil {
-		t.Fatal("GetPlatforms() returned nil")
-	}
-	if len(platforms.Platforms) != 1 {
-		t.Errorf("Expected 1 platform, got %d", len(platforms.Platforms))
-	}
+	// Platforms loading moved out of the per-network Loader — the
+	// global registry is owned by cmd/newt-server (LoadPlatformsFromDir
+	// + ResolvePlatformSecrets, covered by their own tests).
 }
 
 func TestLoader_LoadProfile(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -175,7 +170,7 @@ func TestLoader_LoadProfile_Caching(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -198,7 +193,7 @@ func TestLoader_LoadProfile_ConcurrentSameKey(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -236,7 +231,7 @@ func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -267,7 +262,7 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -280,7 +275,7 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 
 func TestLoader_DefaultDir(t *testing.T) {
 	// Test that empty string uses default
-	loader := NewLoader("")
+	loader := NewLoader("", nil)
 	if loader.specDir != Dir {
 		t.Errorf("Empty specDir should use default %q, got %q", Dir, loader.specDir)
 	}
@@ -316,7 +311,7 @@ func TestLoader_ValidationErrors(t *testing.T) {
 		t.Fatalf("Failed to write platforms.json: %v", err)
 	}
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	err = loader.Load()
 	if err == nil {
 		t.Error("Load() should fail with invalid filter reference")
@@ -330,33 +325,16 @@ func TestLoader_LoadMissingNetworkSpec(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	err = loader.Load()
 	if err == nil {
 		t.Error("Load() should fail when network.json is missing")
 	}
 }
 
-func TestLoader_LoadMissingPlatformSpec(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create network.json only
-	networkJSON := `{"version": "1.0", "zones": {}, "services": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
-		t.Fatalf("Failed to write network.json: %v", err)
-	}
-
-	loader := NewLoader(tmpDir)
-	err = loader.Load()
-	if err == nil {
-		t.Error("Load() should fail when platforms.json is missing")
-	}
-}
-
+// TestLoader_LoadInvalidJSON pins the failure path for malformed
+// network.json. Platforms.json is no longer this loader's concern
+// (global registry; LoadPlatformsFromDir has its own coverage).
 func TestLoader_LoadInvalidJSON(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
 	if err != nil {
@@ -364,49 +342,12 @@ func TestLoader_LoadInvalidJSON(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tests := []struct {
-		name     string
-		file     string
-		content  string
-		setup    func()
-	}{
-		{
-			name:    "invalid network.json",
-			file:    "network.json",
-			content: "invalid json {",
-		},
-		{
-			name:    "invalid platforms.json",
-			file:    "platforms.json",
-			content: "invalid json {",
-			setup: func() {
-				os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{"version": "1.0", "zones": {}, "services": {}}`), 0644)
-			},
-		},
+	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte("invalid json {"), 0644); err != nil {
+		t.Fatalf("Failed to write network.json: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Clean directory
-			os.RemoveAll(tmpDir)
-			os.MkdirAll(tmpDir, 0755)
-
-			// Setup prerequisite files
-			if tt.setup != nil {
-				tt.setup()
-			}
-
-			// Write invalid JSON
-			if err := os.WriteFile(filepath.Join(tmpDir, tt.file), []byte(tt.content), 0644); err != nil {
-				t.Fatalf("Failed to write %s: %v", tt.file, err)
-			}
-
-			loader := NewLoader(tmpDir)
-			err := loader.Load()
-			if err == nil {
-				t.Errorf("Load() should fail with invalid %s", tt.file)
-			}
-		})
+	loader := NewLoader(tmpDir, nil)
+	if err := loader.Load(); err == nil {
+		t.Error("Load() should fail with invalid network.json")
 	}
 }
 
@@ -414,7 +355,7 @@ func TestLoader_LoadProfile_InvalidJSON(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -546,7 +487,7 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 				t.Fatalf("Failed to write platforms.json: %v", err)
 			}
 
-			loader := NewLoader(tmpDir)
+			loader := NewLoader(tmpDir, nil)
 			err := loader.Load()
 			if tt.expectErr && err == nil {
 				t.Error("Load() should fail with validation error")
@@ -614,7 +555,7 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 				t.Fatalf("Failed to write platforms.json: %v", err)
 			}
 
-			loader := NewLoader(tmpDir)
+			loader := NewLoader(tmpDir, nil)
 			err := loader.Load()
 			if tt.expectErr && err == nil {
 				t.Error("Load() should fail with validation error")
@@ -627,7 +568,7 @@ func TestLoader_ValidateProfileZoneReference(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -653,7 +594,7 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -926,7 +867,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 				t.Fatalf("Failed to write platforms.json: %v", err)
 			}
 
-			loader := NewLoader(tmpDir)
+			loader := NewLoader(tmpDir, nil)
 			err := loader.Load()
 			if tt.expectErr && err == nil {
 				t.Error("Load() should fail with validation error")
@@ -976,7 +917,7 @@ func TestLoader_ZoneLevelServiceRefsNetworkFilter(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() should pass: zone service refs network filter, got: %v", err)
 	}
@@ -1009,7 +950,7 @@ func TestLoader_ZoneLevelServiceRefsMissing(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	err = loader.Load()
 	if err == nil {
 		t.Error("Load() should fail: zone service references nonexistent filter")
@@ -1046,7 +987,7 @@ func TestLoader_ZoneLevelFilterRefsPrefixList(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() should pass: zone filter refs network prefix list, got: %v", err)
 	}
@@ -1086,7 +1027,7 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
 
-	loader := NewLoader(tmpDir)
+	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() should pass: zone service refs zone ipvpn, got: %v", err)
 	}
