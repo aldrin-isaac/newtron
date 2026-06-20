@@ -18,3 +18,11 @@ func NewNodeForTest(name string, configDB *sonic.ConfigDB, connected, locked boo
 		resolved:   &spec.ResolvedProfile{DeviceName: name},
 	}
 }
+
+// MarkActuatedForTest flips n.actuatedIntent so external tests can
+// simulate the post-InitFromDeviceIntent state without an SSH-backed
+// device. Production code reaches this state only through
+// InitFromDeviceIntent.
+func MarkActuatedForTest(n *Node) {
+	n.actuatedIntent = true
+}
