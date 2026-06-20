@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
@@ -12,6 +14,12 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
+
+// idPattern is the canonical network ID validator. Letters, digits,
+// underscore, hyphen; 1–64 characters. No path separators, no dots, no
+// spaces — the id maps directly to a directory name under networksBase
+// and to a URL path segment, so the surface stays unambiguous.
+var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // ============================================================================
 // Server management
@@ -24,38 +32,53 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ID == "" {
-		writeError(w, &newtron.ValidationError{Message: "id is required"})
+		writeError(w, &newtron.ValidationError{Field: "id", Message: "required"})
 		return
 	}
-	// Dir is required for the register-existing case (the operator
-	// is naming an existing on-disk layout). For the scaffold case it
-	// is optional: the server can derive <scaffoldRoot>/<id> when its
-	// scaffold root is configured. The operator-language framing
-	// (§33; #122) says the UI client's intent is "create topology X" —
-	// the path is implementation. The server still owns the on-disk
-	// layout regardless of who picks the path.
-	if req.Dir == "" {
-		if !req.Scaffold {
-			writeError(w, &newtron.ValidationError{Message: "dir is required unless scaffold=true"})
-			return
-		}
-		if s.scaffoldRoot == "" {
-			writeError(w, &newtron.ValidationError{Message: "dir omitted but this server has no --scaffold-root configured; supply dir explicitly or start newtron-server with --scaffold-root"})
-			return
-		}
-		req.Dir = filepath.Join(s.scaffoldRoot, req.ID)
+	if !idPattern.MatchString(req.ID) {
+		writeError(w, &newtron.ValidationError{
+			Field:   "id",
+			Message: "must match ^[A-Za-z0-9_-]{1,64}$ — letters, digits, '-', and '_' only",
+		})
+		return
 	}
-	if req.Scaffold {
-		if err := s.ScaffoldAndRegister(req.ID, req.Dir, req.Description); err != nil {
-			if errors.Is(err, spec.ErrAlreadyInitialized) {
-				httputil.WriteError(w, http.StatusConflict, err)
-				return
-			}
+	if s.networksBase == "" {
+		writeError(w, fmt.Errorf("server has no networks-base configured; cannot resolve dir for id %q", req.ID))
+		return
+	}
+	dir := filepath.Join(s.networksBase, req.ID)
+
+	// Two operator outcomes the verb covers:
+	//   (a) "create topology X if missing; register if already there"
+	//       → scaffold absent / false. Idempotent on the existing slot.
+	//   (b) "create a NEW topology X; refuse if there's already one"
+	//       → scaffold:true. ErrAlreadyInitialized → 409.
+	//
+	// Whether the slot is "already there" cuts two ways: on disk
+	// (network.json exists at the resolved dir) and in memory (the
+	// server already registered this id). Both reads have to agree
+	// before we can short-circuit; the in-memory check makes a
+	// re-register of an already-registered id a no-op rather than a
+	// 409 collision.
+	if info := s.getNetworkInfo(req.ID); info != nil {
+		if req.Scaffold {
+			httputil.WriteError(w, http.StatusConflict, spec.ErrAlreadyInitialized)
+			return
+		}
+		httputil.WriteJSON(w, http.StatusCreated, info)
+		return
+	}
+	if !req.Scaffold && dirHasSpecs(dir) {
+		if err := s.RegisterNetwork(req.ID, dir); err != nil {
 			writeError(w, err)
 			return
 		}
 	} else {
-		if err := s.RegisterNetwork(req.ID, req.Dir); err != nil {
+		if err := s.ScaffoldAndRegister(req.ID, dir, req.Description); err != nil {
+			if errors.Is(err, spec.ErrAlreadyInitialized) {
+				httputil.WriteError(w, http.StatusConflict, err)
+				return
+			}
 			writeError(w, err)
 			return
 		}
@@ -72,6 +95,18 @@ func (s *Server) handleRegisterNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.WriteJSON(w, http.StatusCreated, info)
+}
+
+// dirHasSpecs returns true when `dir` looks like a registered-existing
+// network slot rather than an empty / missing path. The marker we
+// trust is `network.json` — every scaffolded network writes one at
+// creation, and every registered-existing network is loaded through it.
+func dirHasSpecs(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "network.json"))
+	return err == nil
 }
 
 func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {

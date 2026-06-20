@@ -37,23 +37,6 @@ func (e *ServerError) Error() string {
 	return fmt.Sprintf("server error (%d): %s", e.StatusCode, e.Message)
 }
 
-// AlreadyRegisteredError is returned by RegisterNetwork when the network ID
-// is already registered for a different dir. True-idempotent
-// re-registration (same id + same dir) returns nil instead, since the
-// observable state matches what the caller asked for.
-type AlreadyRegisteredError struct {
-	ID               string
-	RequestedDir string
-	ExistingDir  string
-}
-
-func (e *AlreadyRegisteredError) Error() string {
-	return fmt.Sprintf(
-		"network '%s' is already registered with dir '%s'; "+
-			"unregister it first or use a different network ID to register %q alongside",
-		e.ID, e.ExistingDir, e.RequestedDir,
-	)
-}
 
 // New creates a new Client. Functional options configure transport-
 // level concerns (TLS for L2a inter-service mTLS, etc.) without
@@ -158,23 +141,18 @@ func (c *Client) NetworkID() string {
 	return c.networkID
 }
 
-// RegisterNetwork registers a network with the server.
+// RegisterNetwork registers a network with the server. The operator
+// names the topology by id; the server resolves the on-disk path under
+// its --networks-base. If the slot at <networks-base>/<id> is missing,
+// the server scaffolds it; if it's present, the server registers the
+// existing layout. Either way the call is idempotent on this network
+// id — re-issuing returns the same NetworkInfo.
 //
-// Returns nil on true-idempotent re-registration (the network is already
-// registered for the same dir — the observable state already matches).
-// Returns *AlreadyRegisteredError when the network is registered for a
-// different dir, so callers can distinguish "you already did this" from
-// "someone else owns this slot." Other server errors come back as
-// *ServerError.
-//
-// The 409 response envelope carries an api.AlreadyRegisteredErrorInfo in
-// Data with the existing dir; this method decodes it to make the
-// comparison.
-func (c *Client) RegisterNetwork(specDir string) error {
-	body := api.RegisterNetworkRequest{
-		ID:      c.networkID,
-		Dir: specDir,
-	}
+// For the "force-create, fail if already initialized" intent, use
+// ScaffoldNetwork — that's the only path that can return 409
+// AlreadyInitialized.
+func (c *Client) RegisterNetwork() error {
+	body := api.RegisterNetworkRequest{ID: c.networkID}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal body: %w", err)
@@ -192,32 +170,6 @@ func (c *Client) RegisterNetwork(specDir string) error {
 	respBody, _ := io.ReadAll(resp.Body)
 	var envelope httputil.APIResponse
 	_ = json.Unmarshal(respBody, &envelope)
-
-	if resp.StatusCode == http.StatusConflict {
-		var info api.AlreadyRegisteredErrorInfo
-		dataParsed := false
-		if envelope.Data != nil {
-			if dataBytes, err := json.Marshal(envelope.Data); err == nil {
-				if err := json.Unmarshal(dataBytes, &info); err == nil {
-					dataParsed = true
-				}
-			}
-		}
-		// True idempotent only when the server actually told us the
-		// existing dir AND it matches what the caller asked for.
-		// Without the dataParsed guard, an empty/unparseable Data
-		// payload would collapse to ExistingDir == "" and could
-		// match a (degenerate) empty specDir — best to fail loud.
-		if dataParsed && info.ExistingDir == specDir {
-			return nil
-		}
-		return &AlreadyRegisteredError{
-			ID:               c.networkID,
-			RequestedDir: specDir,
-			ExistingDir:  info.ExistingDir,
-		}
-	}
-
 	msg := envelope.Error
 	if msg == "" {
 		msg = resp.Status
@@ -225,29 +177,19 @@ func (c *Client) RegisterNetwork(specDir string) error {
 	return &ServerError{StatusCode: resp.StatusCode, Message: msg}
 }
 
-// ScaffoldNetwork creates an empty spec layout (three zero-valued spec
-// files + an empty profiles/ subdirectory) and registers it under the
-// client's network ID. description seeds topology.json.
+// ScaffoldNetwork forces creation of a new spec layout under the
+// server's --networks-base for the client's network ID. description
+// seeds the topology.json. The server picks the path
+// (filepath.Join(networksBase, id)) and returns it in NetworkInfo, so
+// the caller can display "created at <path>" without re-fetching.
 //
-// specDir may be "" to ask the server to derive the path from its
-// configured scaffold root as <root>/<id> (#122). UI clients that don't
-// want to know newtron's on-disk layout pass "" here; CLI consumers
-// that follow their own filesystem convention (e.g. newtrun's
-// `networks/<name>/specs`) keep passing an explicit path.
-// Either way the returned NetworkInfo carries the resolved dir,
-// so callers can display "created at <path>" without re-fetching.
-//
-// Unlike RegisterNetwork, a 409 here is meaningful — the dir
-// (operator-supplied or derived) already contains specs — and is
-// returned to the caller so the operator can choose to register the
-// existing layout or pick a different path. A 400 from the server
-// signals the derived-path mode is requested but the server has no
-// scaffold root configured (operator must add --scaffold-root or
-// supply dir explicitly).
-func (c *Client) ScaffoldNetwork(specDir, description string) (*api.NetworkInfo, error) {
+// 409 ErrAlreadyInitialized is meaningful here: the slot named <id>
+// already has a spec layout. The operator can either reuse it via
+// RegisterNetwork or pick a different id; ScaffoldNetwork won't
+// overwrite existing specs.
+func (c *Client) ScaffoldNetwork(description string) (*api.NetworkInfo, error) {
 	body := api.RegisterNetworkRequest{
 		ID:          c.networkID,
-		Dir:     specDir,
 		Scaffold:    true,
 		Description: description,
 	}

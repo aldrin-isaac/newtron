@@ -166,13 +166,12 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	}
 	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
 	// Ensure the network is registered on newtron-server so it can
-	// serve specs for this topology. RegisterNetwork is true-idempotent on
-	// matching dir (returns nil); on a real conflict (same network
-	// id, different dir) it returns *AlreadyRegisteredError, which we
-	// surface unwrapped — the operator needs to see exactly which dir
-	// is squatting in the slot.
+	// serve specs for this topology. The server resolves the spec
+	// directory under its --networks-base; this client just names the
+	// topology by id. RegisterNetwork is idempotent — re-issuing is a
+	// no-op.
 	if dir != "" {
-		if regErr := client.RegisterNetwork(dir); regErr != nil {
+		if regErr := client.RegisterNetwork(); regErr != nil {
 			return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
 		}
 	}

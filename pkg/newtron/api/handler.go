@@ -263,11 +263,10 @@ func (s *Server) buildMux() http.Handler {
 //
 // For typed errors that carry actionable substrate, the typed payload is
 // propagated as the Data field of the envelope so consumers see what newtron
-// computed — §46 (HTTP API Boundary) on the failure path. Today three error
+// computed — §46 (HTTP API Boundary) on the failure path. Today two error
 // kinds carry typed Data:
 //
 //   - VerificationFailedError → WriteResult (Verification, DeviceOps, Changes)
-//   - alreadyRegisteredError → AlreadyRegisteredErrorInfo (existing dir)
 //   - AuthorizationError → the AuthorizationError itself (Caller, Permission,
 //     Resource) per auth-design.md L3
 //
@@ -280,13 +279,6 @@ func writeError(w http.ResponseWriter, err error) {
 	var verFailed *newtron.VerificationFailedError
 	if errors.As(err, &verFailed) && verFailed.Result != nil {
 		envelope.Data = verFailed.Result
-	}
-	var alreadyReg *alreadyRegisteredError
-	if errors.As(err, &alreadyReg) {
-		envelope.Data = AlreadyRegisteredErrorInfo{
-			ID:              alreadyReg.id,
-			ExistingDir: alreadyReg.existingDir,
-		}
 	}
 	var authz *newtron.AuthorizationError
 	if errors.As(err, &authz) {

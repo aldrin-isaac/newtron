@@ -396,8 +396,9 @@ Steps:
 (default `http://127.0.0.1:18080`) before any topology operation — the
 newtron and newtlab engines share the same process inside `bin/newt-server`,
 so there's no ordering issue between them. The CLI's `prepareLab()` calls
-`client.RegisterNetwork(dir)` idempotently so the operator does not
-have to register topologies manually.
+`client.RegisterNetwork()` idempotently so the operator does not have
+to register topologies manually. The call names only the network `id`
+on the wire; newt-server resolves `<--networks-base>/<id>` itself.
 
 ### 4.2 Deploy
 
