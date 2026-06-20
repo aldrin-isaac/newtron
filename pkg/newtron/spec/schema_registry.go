@@ -78,8 +78,19 @@ func init() {
 		Label:       "IP-VPN",
 		Description: "A Layer-3 VPN — a VRF + L3VNI + route targets that L3 services attach to.",
 		Sample:      IPVPNSpec{},
-		Identifier:      "name",
-		IdentifierField: nameIdentifierField(),
+		Identifier: "name",
+		// IPVPN names ARE SONiC VRF names on-device — both layers
+		// cite the same IPVPNNamePattern constant so server-side
+		// ValidateIPVPNName and schema-driven UIs stay in agreement.
+		IdentifierField: &FieldMeta{
+			Name:        "name",
+			Label:       "Name",
+			Description: "Unique identifier within this kind — also the on-device SONiC VRF name. The 'Vrf' prefix is required by sonic-vrf.yang; intfmgrd silently drops INTERFACE entries whose vrf_name lacks it (RCA-044). Immutable after creation.",
+			Type:        "string",
+			Required:    true,
+			Pattern:     IPVPNNamePattern,
+			Immutable:   true,
+		},
 		Paths: SchemaPaths{
 			List:   "/newtron/v1/networks/{netID}/ipvpns",
 			Show:   "/newtron/v1/networks/{netID}/ipvpns/{name}",

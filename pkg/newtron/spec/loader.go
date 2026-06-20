@@ -183,25 +183,32 @@ func (l *Loader) validate() error {
 	return v.Build()
 }
 
-// ipvpnNamePattern matches SONiC's VRF name convention from
-// sonic-vrf.yang — names must start with "Vrf" (mixed case) followed
-// by identifier characters. RCA-044 documents the silent intfmgrd
-// drop that happens when an INTERFACE entry's vrf_name does not
-// satisfy this pattern.
+// IPVPNNamePattern is SONiC's VRF name convention from sonic-vrf.yang —
+// names must start with "Vrf" (mixed case) followed by identifier
+// characters. RCA-044 documents the silent intfmgrd drop that happens
+// when an INTERFACE entry's vrf_name does not satisfy this pattern.
 //
 // The IPVPN's map key IS the SONiC VRF name (§13 / §32 — one concept,
 // one name); the pattern applies to that key directly.
-var ipvpnNamePattern = regexp.MustCompile(`^Vrf[A-Za-z0-9_]*$`)
+//
+// Exported as a string so both server-side validation
+// (ValidateIPVPNName) and schema metadata (the IPVPNSpec registration's
+// IdentifierField.Pattern) cite the same source. Schema-driven UIs
+// can then enforce the pattern client-side; the operator sees a
+// browser-level block instead of round-tripping a 500.
+const IPVPNNamePattern = `^Vrf[A-Za-z0-9_]*$`
+
+var ipvpnNameRegexp = regexp.MustCompile(IPVPNNamePattern)
 
 // ValidateIPVPNName returns nil if name satisfies the SONiC VRF name
 // convention, or a descriptive error otherwise. Public so CRUD
 // handlers (CreateIPVPN, UpdateIPVPN, SaveIPVPN) can validate at
 // write time, not only at load time.
 func ValidateIPVPNName(name string) error {
-	if !ipvpnNamePattern.MatchString(name) {
+	if !ipvpnNameRegexp.MatchString(name) {
 		return fmt.Errorf(
 			"IPVPN name %q must match %s — SONiC requires VRF names to start with \"Vrf\" prefix (sonic-vrf.yang / RCA-044)",
-			name, ipvpnNamePattern.String(),
+			name, IPVPNNamePattern,
 		)
 	}
 	return nil
