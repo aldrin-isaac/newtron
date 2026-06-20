@@ -1,15 +1,13 @@
 // cmd_platform_generate.go — `newtron platform generate
-// <sonic-platform.json>` (issue #185). Wraps
-// spec.FromSONiCPlatformJSON with operator-friendly flag handling
-// and three output modes:
+// <sonic-platform.json>` (issue #185; updated for #257's global
+// platforms registry). Wraps spec.FromSONiCPlatformJSON with
+// operator-friendly flag handling and two output modes:
 //
-//   - stdout (default): emit the derived PlatformSpec as a one-key
-//     map ready to paste into a platforms.json `platforms` block.
-//   - --output FILE.json (file doesn't exist): write a fresh
-//     PlatformSpecFile containing only this entry.
-//   - --output FILE.json (file exists): merge the entry into the
-//     existing `platforms` map. Same-name overwrite refuses
-//     unless --force.
+//   - stdout (default): emit a single PlatformSpec with its name
+//     field set, ready to redirect into <--platforms-base>/<name>.json.
+//   - --output-dir DIR: write DIR/<name>.json (one file per platform —
+//     the global-registry layout post-#257). Refuses on existing
+//     same-named file unless --force.
 //
 // The translation itself lives in pkg/newtron/spec — this file is
 // the CLI I/O layer only (per DPN §28 file-level feature cohesion).
@@ -28,12 +26,12 @@ import (
 )
 
 var (
-	platformGenerateName         string
-	platformGenerateHWSKU        string
-	platformGenerateDescription  string
-	platformGenerateOutput       string
-	platformGenerateDataplane    string
-	platformGenerateForce        bool
+	platformGenerateName          string
+	platformGenerateHWSKU         string
+	platformGenerateDescription   string
+	platformGenerateOutputDir     string
+	platformGenerateDataplane     string
+	platformGenerateForce         bool
 	platformGeneratePortConfigINI string
 )
 
@@ -53,30 +51,39 @@ switch). The translator reads the file's "interfaces" map and derives:
 HWSKU is required via --hwsku because SONiC platform.json does not carry it
 (HWSKU lives in the sibling <hwsku>/ directory under the SONiC device tree).
 
+Output shape matches the global-platforms layout (#257): one file per
+platform, filename basename equal to the name field. Convention:
+
+  - Single deployment variant for a HWSKU:  --name <HWSKU>          (e.g. --name Cisco-8101-32x100)
+  - Multiple variants share a HWSKU:        --name <HWSKU>_<variant> (e.g. --name Force10-S6000_vs)
+  - Non-SONiC platforms (no HWSKU):         --name <descriptive>     (e.g. --name vjunos-router)
+
 What the generator does NOT derive (operator fills these in afterward):
 
   - vm_image / vm_memory / vm_cpus and the other VM/lab fields. Omit them for
-    real-hardware platforms; add them by hand for simulator platforms (sonic-vs,
-    ciscovs) per the per-image conventions documented in the platform's HOWTO.
+    real-hardware platforms; add them by hand for simulator platforms
+    (Force10-S6000_vs, cisco-p200-32x100-vs) per the per-image conventions
+    documented in the platform's HOWTO.
   - dataplane unless supplied via --dataplane.
   - unsupported_features. This is a runtime-discovered property — populate it
     from suite outcomes when a feature reliably fails on the target.
 
 Examples:
 
-  # emit to stdout (default) — paste into platforms.json or POST to /create-platform
+  # emit to stdout (default) — redirect into <--platforms-base>/<name>.json
   newtron platform generate ./platform.json \
-      --name cisco-8101-32x100g --hwsku Cisco-8101-32x100
+      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 \
+      > platforms/Cisco-8101-32x100.json
 
-  # write/merge into an existing platforms.json
+  # write directly into the global platforms directory
   newtron platform generate ./platform.json \
-      --name cisco-8101-32x100g --hwsku Cisco-8101-32x100 \
-      --output platforms.json
+      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 \
+      --output-dir platforms
 
-  # overwrite an existing same-named entry
+  # overwrite an existing same-named file
   newtron platform generate ./platform.json \
-      --name cisco-8101-32x100g --hwsku Cisco-8101-32x100 \
-      --output platforms.json --force`,
+      --name Cisco-8101-32x100 --hwsku Cisco-8101-32x100 \
+      --output-dir platforms --force`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if platformGenerateName == "" {
@@ -93,10 +100,11 @@ Examples:
 		if err != nil {
 			return err
 		}
-		if platformGenerateOutput == "" {
-			return emitPlatformToStdout(platformGenerateName, ps)
+		ps.Name = platformGenerateName
+		if platformGenerateOutputDir == "" {
+			return emitPlatformToStdout(ps)
 		}
-		return mergePlatformIntoFile(platformGenerateOutput, platformGenerateName, ps, platformGenerateForce)
+		return writePlatformToDir(platformGenerateOutputDir, ps, platformGenerateForce)
 	},
 }
 
@@ -167,12 +175,10 @@ func resolvePortConfigINIPath(jsonPath, hwsku, explicit string) (string, error) 
 }
 
 // emitPlatformToStdout writes the generated PlatformSpec as a
-// one-key map under "platforms" so the output can be pasted into a
-// platforms.json file as-is. PlatformSpecFile.Platforms uses the
-// same shape, so the wire-form is consistent (DPN §46).
-func emitPlatformToStdout(name string, ps *spec.PlatformSpec) error {
-	wrapper := map[string]*spec.PlatformSpec{name: ps}
-	out, err := json.MarshalIndent(wrapper, "", "  ")
+// standalone JSON document — the same shape <--platforms-base>/<name>.json
+// expects on disk. Operators redirect to a file in that directory.
+func emitPlatformToStdout(ps *spec.PlatformSpec) error {
+	out, err := json.MarshalIndent(ps, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding platform: %w", err)
 	}
@@ -180,51 +186,38 @@ func emitPlatformToStdout(name string, ps *spec.PlatformSpec) error {
 	return nil
 }
 
-// mergePlatformIntoFile writes the generated PlatformSpec into the
-// `platforms` map of platforms.json at path. Three cases:
+// writePlatformToDir writes the generated PlatformSpec to
+// <dir>/<ps.Name>.json. Refuses to overwrite an existing file
+// unless force=true (atomic temp+rename so a crash mid-write leaves
+// either old or new in place, never half-written).
 //
-//   - path doesn't exist → create a fresh PlatformSpecFile with
-//     this one entry.
-//   - path exists and parses as a PlatformSpecFile → merge the new
-//     entry. Same-key conflict refuses unless force=true.
-//   - path exists but doesn't parse → return the parse error to the
-//     operator (don't silently overwrite a hand-authored file).
-//
-// Persistence goes through a temp+rename to match the SavePlatforms
-// pattern (atomicity: a crash mid-write leaves either old or new in
-// place, never half-written).
-func mergePlatformIntoFile(path, name string, ps *spec.PlatformSpec, force bool) error {
-	abs, err := filepath.Abs(path)
+// The dir-as-target shape mirrors the global-platforms layout from
+// #257: one file per platform identity, filename basename equal to
+// the name field. cmd/newt-server's --platforms-base points at this
+// same directory; the loader enforces the filename invariant.
+func writePlatformToDir(dir string, ps *spec.PlatformSpec, force bool) error {
+	if ps.Name == "" {
+		return fmt.Errorf("internal: PlatformSpec.Name is empty before write")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	target := filepath.Join(dir, ps.Name+".json")
+	abs, err := filepath.Abs(target)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return fmt.Errorf("resolve %s: %w", target, err)
 	}
-	var pf spec.PlatformSpecFile
-	if existing, readErr := os.ReadFile(abs); readErr == nil {
-		if err := json.Unmarshal(existing, &pf); err != nil {
-			return fmt.Errorf("parsing existing %s: %w (refusing to overwrite a non-platforms.json file)", abs, err)
-		}
-	} else if !os.IsNotExist(readErr) {
-		return fmt.Errorf("reading %s: %w", abs, readErr)
+	if _, err := os.Stat(abs); err == nil && !force {
+		return fmt.Errorf("%s already exists; pass --force to overwrite", abs)
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("stat %s: %w", abs, err)
 	}
-	if pf.Platforms == nil {
-		pf.Platforms = make(map[string]*spec.PlatformSpec)
-	}
-	if pf.Version == "" {
-		pf.Version = "1.0"
-	}
-	if _, exists := pf.Platforms[name]; exists && !force {
-		return fmt.Errorf("platform %q already exists in %s; pass --force to overwrite", name, abs)
-	}
-	pf.Platforms[name] = ps
-	data, err := json.MarshalIndent(pf, "", "  ")
+	data, err := json.MarshalIndent(ps, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encoding platforms file: %w", err)
+		return fmt.Errorf("encoding platform: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(abs), err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(abs), "platforms-*.json.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(abs), "platform-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("temp file in %s: %w", filepath.Dir(abs), err)
 	}
@@ -242,23 +235,26 @@ func mergePlatformIntoFile(path, name string, ps *spec.PlatformSpec, force bool)
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename %s → %s: %w", tmpPath, abs, err)
 	}
-	fmt.Fprintf(os.Stderr, "platform %q written to %s\n", name, abs)
+	fmt.Fprintf(os.Stderr, "platform %q written to %s\n", ps.Name, abs)
 	return nil
 }
 
 func init() {
 	platformGenerateCmd.Flags().StringVar(&platformGenerateName, "name", "",
-		"Platform key under the `platforms` map (e.g. \"cisco-8101-32x100g\"). Required.")
+		"Platform identity (becomes the filename basename and the spec's name field). "+
+			"Convention: <HWSKU> for single-variant SONiC, <HWSKU>_<variant> for multi-variant, "+
+			"or a descriptive name for non-SONiC platforms. Required.")
 	platformGenerateCmd.Flags().StringVar(&platformGenerateHWSKU, "hwsku", "",
 		"HWSKU name (e.g. \"Cisco-8101-32x100\"). Required — SONiC platform.json doesn't carry HWSKU.")
 	platformGenerateCmd.Flags().StringVar(&platformGenerateDescription, "description", "",
 		"Optional description (set on PlatformSpec.Description).")
-	platformGenerateCmd.Flags().StringVar(&platformGenerateOutput, "output", "",
-		"Write to this path instead of stdout. Merges into existing platforms.json or creates fresh.")
+	platformGenerateCmd.Flags().StringVar(&platformGenerateOutputDir, "output-dir", "",
+		"Write to <dir>/<name>.json instead of stdout. Pair with cmd/newt-server's "+
+			"--platforms-base value to land in the live global registry.")
 	platformGenerateCmd.Flags().StringVar(&platformGenerateDataplane, "dataplane", "",
 		"Optional dataplane hint (\"vpp\", \"barefoot\", \"\" for none).")
 	platformGenerateCmd.Flags().BoolVar(&platformGenerateForce, "force", false,
-		"With --output, overwrite a same-named platform entry. Without --force, conflicts refuse.")
+		"With --output-dir, overwrite an existing same-named file. Without --force, conflicts refuse.")
 	platformGenerateCmd.Flags().StringVar(&platformGeneratePortConfigINI, "port-config-ini", "",
 		"Path to a SONiC port_config.ini (the older per-HWSKU convention). When set, used directly. "+
 			"When unset, the CLI auto-discovers a sibling <hwsku>/port_config.ini iff platform.json's "+
