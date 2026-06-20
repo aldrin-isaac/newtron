@@ -159,12 +159,16 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		return err
 
 	case "bind-ipvpn":
-		vrfName := paramString(p, "vrf")
+		// The IPVPN name IS the SONiC VRF name (§13 / §32 — single
+		// concept, single name). Old intents may also carry a "vrf"
+		// param; ignore it in favor of "ipvpn" — when both are
+		// present they are equal by construction (the previous
+		// writer recorded the same string twice).
 		ipvpnName := paramString(p, "ipvpn")
-		if vrfName == "" || ipvpnName == "" {
-			return fmt.Errorf("bind-ipvpn: requires 'vrf' and 'ipvpn' params")
+		if ipvpnName == "" {
+			return fmt.Errorf("bind-ipvpn: requires 'ipvpn' param")
 		}
-		_, err := n.BindIPVPN(ctx, vrfName, util.NormalizeName(ipvpnName))
+		_, err := n.BindIPVPN(ctx, ipvpnName)
 		return err
 
 	case "add-static-route":

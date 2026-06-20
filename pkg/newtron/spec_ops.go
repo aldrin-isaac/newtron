@@ -123,7 +123,6 @@ func (net *Network) CreateIPVPN(ctx context.Context, req CreateIPVPNRequest, opt
 	ipvpn := &spec.IPVPNSpec{
 		Description:  req.Description,
 		L3VNI:        req.L3VNI,
-		VRF:          req.VRF,
 		RouteTargets: req.RouteTargets,
 	}
 	return net.internal.CreateIPVPN(req.Name, ipvpn)
@@ -827,7 +826,6 @@ func convertIPVPNDetail(name string, s *spec.IPVPNSpec) *IPVPNDetail {
 	return &IPVPNDetail{
 		Name:         name,
 		Description:  s.Description,
-		VRF:          s.VRF,
 		L3VNI:        s.L3VNI,
 		RouteTargets: s.RouteTargets,
 	}
@@ -983,7 +981,6 @@ func (net *Network) UpdateIPVPN(ctx context.Context, req CreateIPVPNRequest, opt
 	ipvpn := &spec.IPVPNSpec{
 		Description:  req.Description,
 		L3VNI:        req.L3VNI,
-		VRF:          req.VRF,
 		RouteTargets: req.RouteTargets,
 	}
 	return translateInternalError(net.internal.UpdateIPVPN(req.Name, ipvpn))

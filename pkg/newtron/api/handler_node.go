@@ -778,17 +778,14 @@ func (s *Server) handleBindIPVPN(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	var req struct {
-		VRF   string `json:"vrf"`
-		IPVPN string `json:"ipvpn"`
-	}
+	var req BindIPVPNRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.BindIPVPN(ctx, req.VRF, req.IPVPN)
+		return n.BindIPVPN(ctx, req.IPVPN)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -803,7 +800,7 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		VRF string `json:"vrf"`
+		IPVPN string `json:"ipvpn"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -811,7 +808,7 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.UnbindIPVPN(ctx, req.VRF)
+		return n.UnbindIPVPN(ctx, req.IPVPN)
 	})
 	if err != nil {
 		writeError(w, err)

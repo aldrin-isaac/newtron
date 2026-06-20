@@ -74,12 +74,18 @@ type ZoneSpec struct {
 // IPVPNSpec defines IP-VPN parameters for L3 routing (EVPN Type-5 routes).
 // Referenced by services via the "ipvpn" field.
 //
-// VRF is the explicit SONiC VRF name used on-device.
-// For vrf_type "shared": VRF name = IPVPNSpec.VRF
+// The IPVPN's own name (its map key in the IPVPNs map) IS the SONiC
+// VRF name used on-device — one concept, one name (§13 / §32). Names
+// must match SONiC's VRF pattern: start with "Vrf" (case-sensitive,
+// per sonic-vrf.yang). RCA-044 documents the silent intfmgrd drop
+// that happens otherwise. Validation runs at spec load time; see
+// validateIPVPNName in loader.go.
+//
+// For vrf_type "shared": VRF name = the IPVPN name itself.
 // For vrf_type "interface": VRF name = derived from service + interface
+// (separate path; this is the only mode where no explicit IPVPN is named).
 type IPVPNSpec struct {
 	Description  string   `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this IP-VPN"`
-	VRF          string   `json:"vrf" label:"VRF Name" tooltip:"SONiC VRF name used on-device for this IP-VPN's routing table" pattern:"^[A-Za-z][A-Za-z0-9_]*$"`
 	L3VNI        int      `json:"l3vni" label:"L3VNI" tooltip:"VXLAN Network Identifier for the L3 EVPN overlay" min:"1" max:"16777215"`
 	L3VNIVlan    int      `json:"l3vni_vlan,omitempty" label:"L3VNI Transit VLAN" tooltip:"Dedicated transit VLAN ID for L3VNI decap (no ports, no IP)" min:"1" max:"4094"`
 	RouteTargets []string `json:"route_targets" label:"Route Targets" tooltip:"BGP extended-community route targets controlling import/export"`

@@ -2527,9 +2527,11 @@ mappings).
 
 ### IP-VPN Binding
 
+The IP-VPN name IS the SONiC VRF name materialized on-device — one concept, one name (§13 / §32). `sonic-vrf.yang` requires names to start with `Vrf` (mixed case, per RCA-044); IP-VPN names are validated against `^Vrf[A-Za-z0-9_]*$` at spec load and at CRUD-spec write time. Operators must `vrf create <Vrf_Name>` before `bind-ipvpn` (the VRF is the precondition; bind-ipvpn overlays L3VNI + EVPN config on top).
+
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/bind-ipvpn
 
-Bind an IP-VPN to a VRF (sets up L3VNI, route targets, EVPN VNI configuration).
+Bind an IP-VPN on this device (sets up L3VNI, route targets, EVPN VNI configuration).
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2537,14 +2539,13 @@ Bind an IP-VPN to a VRF (sets up L3VNI, route targets, EVPN VNI configuration).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `vrf` | string | yes | VRF name |
-| `ipvpn` | string | yes | IP-VPN spec name |
+| `ipvpn` | string | yes | IP-VPN name (also the on-device VRF name) |
 
 **Response (200):** `WriteResult`
 
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/unbind-ipvpn
 
-Unbind the IP-VPN from a VRF (tears down L3VNI infrastructure).
+Unbind the IP-VPN on this device (tears down L3VNI infrastructure).
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2552,7 +2553,7 @@ Unbind the IP-VPN from a VRF (tears down L3VNI infrastructure).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `vrf` | string | yes | VRF name |
+| `ipvpn` | string | yes | IP-VPN name (also the on-device VRF name) |
 
 **Response (200):** `WriteResult`
 
@@ -4024,13 +4025,12 @@ Returned by `GET .../service` (array) and `GET .../services/{name}` (single).
 
 #### IPVPNDetail
 
-Returned by `GET .../ipvpn` (array) and `GET .../ipvpns/{name}` (single).
+Returned by `GET .../ipvpns` (array) and `GET .../ipvpns/{name}` (single). `name` is the SONiC VRF name materialized on-device — there is no separate `vrf` field (§13 / §32; sonic-vrf.yang). Names must match `^Vrf[A-Za-z0-9_]*$`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | IP-VPN name |
+| `name` | string | IP-VPN name (also the on-device VRF name) |
 | `description` | string | Description |
-| `vrf` | string | VRF name |
 | `l3vni` | integer | L3 VNI |
 | `route_targets` | string[] | Route targets |
 

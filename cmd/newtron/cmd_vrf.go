@@ -271,20 +271,19 @@ Examples:
 }
 
 var vrfBindIPVPNCmd = &cobra.Command{
-	Use:   "bind-ipvpn <vrf-name> <ipvpn-name>",
-	Short: "Bind a VRF to an IP-VPN definition",
-	Long: `Bind a VRF to an IP-VPN definition from network.json.
-
-The IP-VPN definition provides L3VNI and route targets for the VRF.
+	Use:   "bind-ipvpn <ipvpn-name>",
+	Short: "Bind an IP-VPN on this device",
+	Long: `Bind an IP-VPN defined in network.json. The IP-VPN name IS
+the SONiC VRF name created on-device — there's no separate VRF
+parameter (§13 / §32; sonic-vrf.yang).
 
 Requires -D (device) flag.
 
 Examples:
-  newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x`,
-	Args: cobra.ExactArgs(2),
+  newtron leaf1 vrf bind-ipvpn Vrf_CUST1 -x`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
-		ipvpnName := args[1]
+		ipvpnName := args[0]
 
 		ipvpnDef, err := app.client.ShowIPVPN(ipvpnName)
 		if err != nil {
@@ -293,9 +292,6 @@ Examples:
 
 		fmt.Printf("IP-VPN: %s\n", ipvpnName)
 		fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
-		if ipvpnDef.VRF != "" {
-			fmt.Printf("  VRF: %s\n", ipvpnDef.VRF)
-		}
 		if len(ipvpnDef.RouteTargets) > 0 {
 			fmt.Printf("  Route Targets: %v\n", ipvpnDef.RouteTargets)
 		}
@@ -304,14 +300,16 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.BindIPVPN(app.deviceName, vrfName, ipvpnName, execOpts()))
+		return displayWriteResult(app.client.BindIPVPN(app.deviceName, ipvpnName, execOpts()))
 	},
 }
 
 var vrfUnbindIPVPNCmd = &cobra.Command{
-	Use:   "unbind-ipvpn <vrf-name>",
-	Short: "Unbind the IP-VPN from a VRF",
-	Long: `Unbind the IP-VPN from a VRF, removing L3VNI and route targets.
+	Use:   "unbind-ipvpn <ipvpn-name>",
+	Short: "Unbind the IP-VPN on this device",
+	Long: `Unbind an IP-VPN previously bound on this device, removing
+the on-device VRF and its L3VNI / route targets. The argument is
+the IP-VPN name (which IS the SONiC VRF name).
 
 Requires -D (device) flag.
 
@@ -319,11 +317,11 @@ Examples:
   newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
+		ipvpnName := args[0]
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.UnbindIPVPN(app.deviceName, vrfName, execOpts()))
+		return displayWriteResult(app.client.UnbindIPVPN(app.deviceName, ipvpnName, execOpts()))
 	},
 }
 

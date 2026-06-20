@@ -27,14 +27,14 @@ steps:
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/bind-ipvpn
-    params: {vrf: Vrf_IRB, ipvpn: evpn-irb-vrf}
+    params: {ipvpn: Vrf_IRB}
 
   - name: bind-ipvpn-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /nodes/{{device}}/bind-ipvpn
-    params: {vrf: Vrf_IRB, ipvpn: evpn-irb-vrf}
+    params: {ipvpn: Vrf_IRB}
 
   # CONFIG_DB verification: VRF with VNI
   - name: verify-vrf-irb-vni

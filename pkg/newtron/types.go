@@ -515,11 +515,13 @@ type ServiceDetail struct {
 	EgressFilter  string `json:"egress_filter,omitempty"`
 }
 
-// IPVPNDetail is the API view of an IP-VPN definition.
+// IPVPNDetail is the API view of an IP-VPN definition. Name is
+// both the operator-facing identifier and the SONiC VRF name on-device
+// (§13 / §32 — one concept, one name; sonic-vrf.yang requires the
+// "Vrf" prefix on that name).
 type IPVPNDetail struct {
 	Name         string   `json:"name"`
 	Description  string   `json:"description,omitempty"`
-	VRF          string   `json:"vrf"`
 	L3VNI        int      `json:"l3vni"`
 	RouteTargets []string `json:"route_targets"`
 }
@@ -690,10 +692,11 @@ type CreateServiceRouting struct {
 }
 
 // CreateIPVPNRequest is the request for creating an IP-VPN definition.
+// Name must satisfy SONiC's VRF naming convention (^Vrf[A-Za-z0-9_]*$) —
+// it IS the on-device VRF name (§13 / §32; sonic-vrf.yang / RCA-044).
 type CreateIPVPNRequest struct {
 	Name         string   `json:"name"`
 	L3VNI        int      `json:"l3vni"`
-	VRF          string   `json:"vrf,omitempty"`
 	RouteTargets []string `json:"route_targets,omitempty"`
 	Description  string   `json:"description,omitempty"`
 }

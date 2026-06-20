@@ -430,9 +430,12 @@ func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
 }
 
-// GetIPVPN returns an IP-VPN definition by name.
+// GetIPVPN returns an IP-VPN definition by name. The lookup is
+// case-sensitive — IPVPN names ARE SONiC VRF names, which sonic-vrf.yang
+// constrains to start with "Vrf" (mixed case). NormalizeName would
+// uppercase the prefix and break the lookup.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
+	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.IPVPNs, "ipvpn", name)
 }
 
 // GetMACVPN returns a MAC-VPN definition by name.
@@ -499,13 +502,15 @@ func (n *Network) persistSpec() error {
 }
 
 // SaveIPVPN creates or updates an IP-VPN definition in network.json.
+// Name must satisfy the SONiC VRF naming convention (§13 / §32) —
+// see spec.ValidateIPVPNName.
 func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
+	if err := spec.ValidateIPVPNName(name); err != nil {
+		return err
+	}
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
 	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-	spec.NormalizeIPVPNRefs(def)
 
 	if n.spec.IPVPNs == nil {
 		n.spec.IPVPNs = make(map[string]*spec.IPVPNSpec)
@@ -515,13 +520,12 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 }
 
 // DeleteIPVPN removes an IP-VPN definition from network.json.
-// Returns error if any service references it.
+// Returns error if any service references it. Lookup is case-sensitive
+// (IPVPN names ARE SONiC VRF names — see GetIPVPN).
 func (n *Network) DeleteIPVPN(name string) error {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
 	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
 
 	// Check for dependent services
 	for svcName, svc := range n.spec.Services {
@@ -830,15 +834,16 @@ func (n *Network) CreateService(name string, def *spec.ServiceSpec) error {
 // CreateIPVPN atomically creates a new IP-VPN definition. Returns an error
 // if an IPVPN with the given name already exists.
 func (n *Network) CreateIPVPN(name string, def *spec.IPVPNSpec) error {
+	if err := spec.ValidateIPVPNName(name); err != nil {
+		return err
+	}
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
 	if _, exists := n.spec.IPVPNs[name]; exists {
 		return fmt.Errorf("ipvpn '%s' already exists", name)
 	}
-	spec.NormalizeIPVPNRefs(def)
 	if n.spec.IPVPNs == nil {
 		n.spec.IPVPNs = make(map[string]*spec.IPVPNSpec)
 	}
@@ -995,15 +1000,16 @@ func (n *Network) UpdateService(name string, def *spec.ServiceSpec) error {
 
 // UpdateIPVPN atomically replaces an existing IP-VPN definition.
 func (n *Network) UpdateIPVPN(name string, def *spec.IPVPNSpec) error {
+	if err := spec.ValidateIPVPNName(name); err != nil {
+		return err
+	}
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
 	if _, exists := n.spec.IPVPNs[name]; !exists {
 		return &newtronErrors{notFound: true, resource: "ipvpn", id: name}
 	}
-	spec.NormalizeIPVPNRefs(def)
 	n.spec.IPVPNs[name] = def
 	return n.persistSpec()
 }

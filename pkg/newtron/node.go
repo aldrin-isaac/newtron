@@ -478,23 +478,25 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) error {
 // Device-level write ops — IPVPN
 // ============================================================================
 
-// BindIPVPN binds a VRF to an IP-VPN definition.
-// Resolves the IPVPN spec by name from the node's SpecProvider.
-func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
-	if err := n.gate(ctx, auth.PermVRFBind, vrf); err != nil {
+// BindIPVPN binds the named IP-VPN on this device. The IP-VPN name
+// IS the SONiC VRF name materialized on-device (§13 / §32 — one
+// concept, one name; sonic-vrf.yang / RCA-044).
+func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) error {
+	if err := n.gate(ctx, auth.PermVRFBind, ipvpnName); err != nil {
 		return err
 	}
-	cs, err := n.internal.BindIPVPN(ctx, vrf, util.NormalizeName(ipvpnName))
+	cs, err := n.internal.BindIPVPN(ctx, ipvpnName)
 	n.appendPending(cs)
 	return err
 }
 
-// UnbindIPVPN unbinds the IP-VPN from a VRF.
-func (n *Node) UnbindIPVPN(ctx context.Context, vrf string) error {
-	if err := n.gate(ctx, auth.PermVRFBind, vrf); err != nil {
+// UnbindIPVPN unbinds the named IP-VPN on this device (collapsing
+// the on-device VRF + its overlay infrastructure).
+func (n *Node) UnbindIPVPN(ctx context.Context, ipvpnName string) error {
+	if err := n.gate(ctx, auth.PermVRFBind, ipvpnName); err != nil {
 		return err
 	}
-	cs, err := n.internal.UnbindIPVPN(ctx, vrf)
+	cs, err := n.internal.UnbindIPVPN(ctx, ipvpnName)
 	n.appendPending(cs)
 	return err
 }

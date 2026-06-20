@@ -172,7 +172,7 @@ var evpnIpvpnListCmd = &cobra.Command{
 				rt = strings.Join(ipvpn.RouteTargets, ",")
 			}
 			desc := dash(ipvpn.Description)
-			t.Row(name, fmt.Sprintf("%d", ipvpn.L3VNI), dash(ipvpn.VRF), rt, desc)
+			t.Row(name, fmt.Sprintf("%d", ipvpn.L3VNI), rt, desc)
 		}
 		t.Flush()
 
@@ -200,9 +200,6 @@ var evpnIpvpnShowCmd = &cobra.Command{
 			fmt.Printf("Description: %s\n", ipvpn.Description)
 		}
 		fmt.Printf("L3VNI: %d\n", ipvpn.L3VNI)
-		if ipvpn.VRF != "" {
-			fmt.Printf("VRF: %s\n", ipvpn.VRF)
-		}
 		if len(ipvpn.RouteTargets) > 0 {
 			fmt.Printf("Route Targets: %s\n", strings.Join(ipvpn.RouteTargets, ", "))
 		}
@@ -214,7 +211,6 @@ var evpnIpvpnShowCmd = &cobra.Command{
 var (
 	ipvpnL3VNI        int
 	ipvpnRouteTargets string
-	ipvpnVRF          string
 	ipvpnDescription  string
 )
 
@@ -226,8 +222,8 @@ var evpnIpvpnCreateCmd = &cobra.Command{
 This is a spec authoring command that does not require a device connection.
 
 Examples:
-  newtron evpn ipvpn create customer-vpn --l3vni 10001 --vrf Vrf_cust -x
-  newtron evpn ipvpn create customer-vpn --l3vni 10001 --vrf Vrf_cust --route-targets 65000:10001 -x`,
+  newtron evpn ipvpn create Vrf_cust --l3vni 10001 -x
+  newtron evpn ipvpn create Vrf_cust --l3vni 10001 --route-targets 65000:10001 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -239,7 +235,6 @@ Examples:
 		req := newtron.CreateIPVPNRequest{
 			Name:        name,
 			L3VNI:       ipvpnL3VNI,
-			VRF:         ipvpnVRF,
 			Description: ipvpnDescription,
 		}
 		if ipvpnRouteTargets != "" {
@@ -248,9 +243,6 @@ Examples:
 
 		fmt.Printf("IP-VPN: %s\n", name)
 		fmt.Printf("  L3VNI: %d\n", req.L3VNI)
-		if req.VRF != "" {
-			fmt.Printf("  VRF: %s\n", req.VRF)
-		}
 		if len(req.RouteTargets) > 0 {
 			fmt.Printf("  Route Targets: %v\n", req.RouteTargets)
 		}
@@ -606,7 +598,6 @@ func init() {
 	// ipvpn create flags
 	evpnIpvpnCreateCmd.Flags().IntVar(&ipvpnL3VNI, "l3vni", 0, "L3VNI for the IP-VPN (required)")
 	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnRouteTargets, "route-targets", "", "Comma-separated route targets")
-	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnVRF, "vrf", "", "VRF name for the IP-VPN")
 	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnDescription, "description", "", "IP-VPN description")
 
 	// macvpn create flags

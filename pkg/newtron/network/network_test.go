@@ -123,14 +123,14 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 				"amer": {
 					OverridableSpecs: spec.OverridableSpecs{
 						IPVPNs: map[string]*spec.IPVPNSpec{
-							"zone-vpn": {VRF: "Vrf_zone", L3VNI: 20001},
+							"Vrf_zone": {L3VNI: 20001},
 						},
 					},
 				},
 			},
 			OverridableSpecs: spec.OverridableSpecs{
 				IPVPNs: map[string]*spec.IPVPNSpec{
-					"net-vpn": {VRF: "Vrf_net", L3VNI: 10001},
+					"Vrf_net": {L3VNI: 10001},
 				},
 				Services: map[string]*spec.ServiceSpec{
 					"net-svc": {Description: "from network"},
@@ -154,11 +154,11 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 	rs := n.buildResolvedSpecs(profile)
 
 	// Network-level IPVPN should be visible
-	if _, err := rs.GetIPVPN("net-vpn"); err != nil {
+	if _, err := rs.GetIPVPN("Vrf_net"); err != nil {
 		t.Errorf("network-level ipvpn should be visible: %v", err)
 	}
 	// Zone-level IPVPN should be visible
-	if _, err := rs.GetIPVPN("zone-vpn"); err != nil {
+	if _, err := rs.GetIPVPN("Vrf_zone"); err != nil {
 		t.Errorf("zone-level ipvpn should be visible: %v", err)
 	}
 	// Network-level service should be visible
