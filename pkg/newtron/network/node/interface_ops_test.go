@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
@@ -451,6 +452,46 @@ func TestApplyService_AlreadyBound(t *testing.T) {
 	}
 	if got := err.Error(); got != "interface Ethernet0 already has service 'EXISTING_SERVICE' - remove it first" {
 		t.Errorf("error = %q", got)
+	}
+}
+
+// TestApplyService_RoutingRejectedOnL2 pins the routing-is-L3-only
+// precondition: a bridged service carrying a routing block is rejected
+// (the server back-stop behind the schema applies_when). A VLAN is
+// supplied so the per-type "bridged requires a VLAN" check passes first
+// — the routing guard fires immediately after the type switch.
+func TestApplyService_RoutingRejectedOnL2(t *testing.T) {
+	d, intf := testInterface()
+	d.SpecProvider.(*testSpecProvider).services["L2_WITH_ROUTING"] = &spec.ServiceSpec{
+		ServiceType: spec.ServiceTypeBridged,
+		Routing:     &spec.RoutingSpec{Protocol: spec.RoutingProtocolBGP},
+	}
+	ctx := context.Background()
+
+	_, err := intf.ApplyService(ctx, "L2_WITH_ROUTING", ApplyServiceOpts{VLAN: 100})
+	if err == nil {
+		t.Fatal("expected error: routing block on an L2 (bridged) service")
+	}
+	if got := err.Error(); !strings.Contains(got, "L2-only") || !strings.Contains(got, "routing") {
+		t.Errorf("error = %q; want it to name L2-only + routing", got)
+	}
+}
+
+// TestApplyService_RoutingAllowedOnL3 is the positive counterpart: a
+// routed service with a routing block passes the L3-only precondition
+// (it fails later for an unrelated reason — no device/BGP set up in the
+// fixture — but NOT with the L2-only routing rejection).
+func TestApplyService_RoutingAllowedOnL3(t *testing.T) {
+	d, intf := testInterface()
+	d.SpecProvider.(*testSpecProvider).services["L3_WITH_ROUTING"] = &spec.ServiceSpec{
+		ServiceType: spec.ServiceTypeRouted,
+		Routing:     &spec.RoutingSpec{Protocol: spec.RoutingProtocolBGP},
+	}
+	ctx := context.Background()
+
+	_, err := intf.ApplyService(ctx, "L3_WITH_ROUTING", ApplyServiceOpts{IPAddress: "10.0.0.1/30"})
+	if err != nil && strings.Contains(err.Error(), "L2-only") {
+		t.Errorf("routed service wrongly rejected by the L2-only guard: %v", err)
 	}
 }
 

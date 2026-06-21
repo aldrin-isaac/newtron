@@ -610,3 +610,123 @@ func TestParseIntTag(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// AppliesWhen — field-applicability key (mirrors RequiredWhen; shares the
+// validateConditionMap validator). Confirms the AppliesWhen branch is wired
+// into both the field-attach pass and the init-time validation.
+// ============================================================================
+
+// TestAppliesWhen_AttachedToTargetField verifies a registered AppliesWhen
+// predicate is attached to the named field's FieldMeta, and that a field
+// with no predicate stays clear.
+func TestAppliesWhen_AttachedToTargetField(t *testing.T) {
+	swapRegistry(t)
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Label:  "Service Fixture",
+		Sample: fixSvc{},
+		AppliesWhen: map[string]*RequiredWhen{
+			"ipvpn": {Field: "service_type", In: []any{"routed", "irb", "evpn-routed", "evpn-irb"}},
+		},
+	})
+	meta := LookupSchema("FixSvc")
+	if meta == nil {
+		t.Fatal("LookupSchema(FixSvc) returned nil")
+	}
+	byName := make(map[string]FieldMeta, len(meta.Fields))
+	for _, f := range meta.Fields {
+		byName[f.Name] = f
+	}
+	ipvpn := byName["ipvpn"]
+	if ipvpn.AppliesWhen == nil {
+		t.Fatal("ipvpn.applies_when is nil")
+	}
+	if ipvpn.AppliesWhen.Field != "service_type" {
+		t.Errorf("ipvpn.applies_when.field = %q, want service_type", ipvpn.AppliesWhen.Field)
+	}
+	if len(ipvpn.AppliesWhen.In) != 4 {
+		t.Errorf("ipvpn.applies_when.in length = %d, want 4", len(ipvpn.AppliesWhen.In))
+	}
+	// Non-targeted fields stay clear.
+	if byName["macvpn"].AppliesWhen != nil {
+		t.Error("macvpn should not carry an applies_when (none was registered)")
+	}
+}
+
+// TestAppliesWhen_CoexistsWithRequiredWhen confirms both predicates can
+// target the same kind on different fields and both reach their FieldMeta —
+// the two axes are independent (applicability vs requiredness).
+func TestAppliesWhen_CoexistsWithRequiredWhen(t *testing.T) {
+	swapRegistry(t)
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			"macvpn": {Field: "service_type", In: []any{"evpn-irb", "evpn-bridged"}},
+		},
+		AppliesWhen: map[string]*RequiredWhen{
+			"ipvpn": {Field: "service_type", In: []any{"routed", "irb", "evpn-routed", "evpn-irb"}},
+		},
+	})
+	meta := LookupSchema("FixSvc")
+	byName := make(map[string]FieldMeta, len(meta.Fields))
+	for _, f := range meta.Fields {
+		byName[f.Name] = f
+	}
+	if byName["ipvpn"].AppliesWhen == nil {
+		t.Error("ipvpn.applies_when should be set")
+	}
+	if byName["macvpn"].RequiredWhen == nil {
+		t.Error("macvpn.required_when should be set")
+	}
+}
+
+// TestAppliesWhen_PanicsOnUnknownTargetField confirms the shared
+// init-time validator runs for AppliesWhen too — a typo'd map key fails
+// at server start, naming the bad field, the kind, and the AppliesWhen
+// label (so the operator knows which map to fix).
+func TestAppliesWhen_PanicsOnUnknownTargetField(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on unknown applies_when target field; got none")
+		}
+		msg, _ := r.(string)
+		if msg == "" {
+			if e, ok := r.(error); ok {
+				msg = e.Error()
+			}
+		}
+		if !strings.Contains(msg, "not_a_field") || !strings.Contains(msg, "FixSvc") || !strings.Contains(msg, "AppliesWhen") {
+			t.Errorf("panic message should name the bad field, the kind, and AppliesWhen; got %q", msg)
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		AppliesWhen: map[string]*RequiredWhen{
+			"not_a_field": {Field: "service_type", Equals: "routed"},
+		},
+	})
+}
+
+// TestAppliesWhen_PanicsOnUnknownConditionField catches a typo INSIDE the
+// applies_when condition — target key is real but it references a sibling
+// that doesn't exist.
+func TestAppliesWhen_PanicsOnUnknownConditionField(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on unknown applies_when condition field; got none")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		AppliesWhen: map[string]*RequiredWhen{
+			"ipvpn": {Field: "servce_type", Equals: "routed"}, // typo
+		},
+	})
+}
