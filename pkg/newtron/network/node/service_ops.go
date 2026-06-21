@@ -130,6 +130,18 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
+	// Routing is L3-only. bridged / evpn-bridged are pure L2 — no routed
+	// interface to source a BGP session from, no routing table to install
+	// routes into — so a routing block is meaningless and would generate
+	// nonsense peer-group/route-map config. The schema hides the field for
+	// these types via applies_when; this is the server back-stop (§13 —
+	// schema and apply agree on the same rule).
+	if svc.Routing != nil &&
+		(svc.ServiceType == spec.ServiceTypeBridged || svc.ServiceType == spec.ServiceTypeEVPNBridged) {
+		return nil, fmt.Errorf("service '%s' (%s) is L2-only and cannot carry a routing block — remove 'routing', or use an L3 service type (routed, irb, evpn-routed, evpn-irb)",
+			serviceName, svc.ServiceType)
+	}
+
 	// EVPN preconditions
 	isOverlay := strings.HasPrefix(svc.ServiceType, "evpn-")
 	if isOverlay {
