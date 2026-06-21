@@ -77,7 +77,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&dir, "dir", "", "network directory (overrides topology name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
-	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — used as the orchestrator URL newtlink pushes BridgeStats to (#118), and as the read path for `newtlab status` link telemetry. Default: http://127.0.0.1:18080. Env: NEWTLAB_SERVER")
+	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — the orchestrator URL newtlink pushes BridgeStats to (#118) and the read path for `newtlab status` link telemetry. Defaults to --newtron-server (same listener in the aggregated newt-server); set explicitly only for multi-host labs where remote workers reach the server at a different, publicly-reachable address. Env: NEWTLAB_SERVER")
 	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "", "newtron network ID (default: derived from the lab name, so concurrent labs get separate registration slots — issue #116)")
 
 	rootCmd.AddCommand(
@@ -183,19 +183,32 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	return lab, nil
 }
 
-// newtlabURL resolves the newtlab-server URL from --newtlab-server flag,
-// NEWTLAB_SERVER env var, and default (matching cmd/newtrun's helper
-// of the same name). The bridge config sent to newtlink references
-// this URL — local newtlink dials it from 127.0.0.1, remote newtlink
-// must be able to reach it across the network (multi-host operators
-// set the flag to a publicly-reachable URL).
+// newtlabURL resolves the URL newtlink pushes BridgeStats to (baked into
+// the bridge config as orchestrator_url) and that `newtlab status` reads
+// link telemetry from. Resolution order:
+//
+//	--newtlab-server flag > NEWTLAB_SERVER env > --newtron-server
+//
+// The final fallback is --newtron-server — the newt-server this CLI already
+// talks to for specs — not an independent hard-coded default. In the
+// aggregated newt-server model the spec API and the lab/orchestrator API are
+// the same listener, so a single provided server URL must reach both: this
+// keeps the baked orchestrator_url and the status read path on the server the
+// operator actually pointed the CLI at, instead of silently defaulting to
+// :18080 when only --newtron-server was given. Because deploy (which bakes the
+// URL) and `newtlab status` (which reads it back) both resolve through this one
+// helper, push target and read path are sourced identically by construction.
+//
+// The explicit --newtlab-server / NEWTLAB_SERVER override remains for
+// multi-host labs, where remote workers must reach the server at a
+// publicly-reachable address that differs from the operator's CLI-to-server URL.
 func newtlabURL() string {
 	url := newtlabServer
 	if url == "" {
 		url = os.Getenv("NEWTLAB_SERVER")
 	}
 	if url == "" {
-		url = "http://127.0.0.1:18080"
+		url = newtronServer
 	}
 	return url
 }
