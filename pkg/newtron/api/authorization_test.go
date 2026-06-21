@@ -105,7 +105,7 @@ func gatedEndpoints() []gatedEndpoint {
 		{
 			name: "create-service (spec.author)",
 			path: "/newtron/v1/networks/default/create-service",
-			body: map[string]any{"name": "svc-a", "type": "routed"},
+			body: map[string]any{"name": "svc-a", "service_type": "routed"},
 		},
 		{
 			name: "create-qos-policy (qos.create)",
@@ -171,7 +171,7 @@ func TestAuthorization_DenyWireShape(t *testing.T) {
 	s := newAuthzServer(t, specDir)
 
 	w := postAs(t, s, "mallory", "/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-wire", "type": "routed"})
+		map[string]any{"name": "svc-wire", "service_type": "routed"})
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
@@ -215,7 +215,7 @@ func TestAuthorization_EmptyCallerDenied(t *testing.T) {
 	s := newAuthzServer(t, specDir)
 
 	w := postAs(t, s, "", "/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-b", "type": "routed"})
+		map[string]any{"name": "svc-b", "service_type": "routed"})
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 — empty Caller must be denied; body = %s", w.Code, w.Body.String())
 	}
@@ -230,7 +230,7 @@ func TestAuthorization_SuperUserBypass(t *testing.T) {
 	s := newAuthzServer(t, specDir)
 
 	w := postAs(t, s, "root", "/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-c", "type": "routed"})
+		map[string]any{"name": "svc-c", "service_type": "routed"})
 	if w.Code == http.StatusForbidden {
 		t.Fatalf("root (super_user) was denied; status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -252,7 +252,7 @@ func TestAuthorization_PreL3Behavior(t *testing.T) {
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
 
 	w := postAs(t, s, "mallory", "/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-d", "type": "routed"})
+		map[string]any{"name": "svc-d", "service_type": "routed"})
 	if w.Code == http.StatusForbidden {
 		t.Fatalf("denial appeared without --enforce-authorization (Code=%d): L3 toggle is leaking",
 			w.Code)
@@ -292,9 +292,9 @@ func TestAuthorization_DecisionAuditEmitted(t *testing.T) {
 
 	// One deny (mallory) and one allow (alice) so we can assert both shapes.
 	_ = postAs(t, s, "mallory", "/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-m", "type": "routed"})
+		map[string]any{"name": "svc-m", "service_type": "routed"})
 	_ = postAs(t, s, "alice", "/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-a", "type": "routed"})
+		map[string]any{"name": "svc-a", "service_type": "routed"})
 
 	var deny, allow *audit.Event
 	for _, e := range collector.events {
@@ -589,7 +589,7 @@ func TestAuthorizationL5_MetaAuthorizationField(t *testing.T) {
 	// !super_users, so "services" is allowed.
 	w := postAs(t, s, "carol",
 		"/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-carol", "type": "routed"})
+		map[string]any{"name": "svc-carol", "service_type": "routed"})
 	if w.Code == http.StatusForbidden {
 		t.Errorf("carol (architects) creating a service was denied: %s", w.Body.String())
 	}
@@ -599,7 +599,7 @@ func TestAuthorizationL5_MetaAuthorizationField(t *testing.T) {
 	// so "services" is NOT matched — denied.
 	w = postAs(t, s, "dave",
 		"/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-dave", "type": "routed"})
+		map[string]any{"name": "svc-dave", "service_type": "routed"})
 	if w.Code != http.StatusForbidden {
 		t.Errorf("dave (iam) creating a service should be 403, got %d: %s", w.Code, w.Body.String())
 	}
@@ -628,7 +628,7 @@ func TestAuthorizationL5_LegacyShorthandStillWorks(t *testing.T) {
 	// so she can mutate any spec.
 	w := postAs(t, s, "carol",
 		"/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-legacy", "type": "routed"})
+		map[string]any{"name": "svc-legacy", "service_type": "routed"})
 	if w.Code == http.StatusForbidden {
 		t.Errorf("carol denied under legacy grant: %s", w.Body.String())
 	}
@@ -636,7 +636,7 @@ func TestAuthorizationL5_LegacyShorthandStillWorks(t *testing.T) {
 	// dave is not in architects, so no grant applies.
 	w = postAs(t, s, "dave",
 		"/newtron/v1/networks/default/create-service",
-		map[string]any{"name": "svc-dave-legacy", "type": "routed"})
+		map[string]any{"name": "svc-dave-legacy", "service_type": "routed"})
 	if w.Code != http.StatusForbidden {
 		t.Errorf("dave should be 403 under legacy grant scoped to architects, got %d", w.Code)
 	}

@@ -29,8 +29,8 @@ func (net *Network) ShowService(name string) (*ServiceDetail, error) {
 
 // CreateService creates a new service definition.
 func (net *Network) CreateService(ctx context.Context, req CreateServiceRequest, opts ExecOpts) error {
-	if req.Type == "" {
-		return &ValidationError{Field: "type", Message: "required"}
+	if req.ServiceType == "" {
+		return &ValidationError{Field: "service_type", Message: "required"}
 	}
 	if _, err := net.internal.GetService(req.Name); err == nil {
 		return fmt.Errorf("service '%s' already exists", req.Name)
@@ -45,7 +45,7 @@ func (net *Network) CreateService(ctx context.Context, req CreateServiceRequest,
 	}
 	svc := &spec.ServiceSpec{
 		Description:   req.Description,
-		ServiceType:   req.Type,
+		ServiceType:   req.ServiceType,
 		IPVPN:         req.IPVPN,
 		MACVPN:        req.MACVPN,
 		VRFType:       req.VRFType,
@@ -930,8 +930,8 @@ func convertRoutePolicyDetail(name string, rp *spec.RoutePolicy) *RoutePolicyDet
 
 // UpdateService replaces an existing service definition.
 func (net *Network) UpdateService(ctx context.Context, req CreateServiceRequest, opts ExecOpts) error {
-	if req.Type == "" {
-		return &ValidationError{Field: "type", Message: "required"}
+	if req.ServiceType == "" {
+		return &ValidationError{Field: "service_type", Message: "required"}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("services").WithResource(req.Name)); err != nil {
@@ -943,7 +943,7 @@ func (net *Network) UpdateService(ctx context.Context, req CreateServiceRequest,
 	}
 	svc := &spec.ServiceSpec{
 		Description:   req.Description,
-		ServiceType:   req.Type,
+		ServiceType:   req.ServiceType,
 		IPVPN:         req.IPVPN,
 		MACVPN:        req.MACVPN,
 		VRFType:       req.VRFType,

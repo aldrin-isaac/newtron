@@ -61,7 +61,7 @@ func TestUpdateService_RoundTrip(t *testing.T) {
 
 	if w := post(t, s, "/newtron/v1/networks/default/create-service", map[string]any{
 		"name":        "transit",
-		"type":        "routed",
+		"service_type":        "routed",
 		"description": "initial description",
 	}); w.Code != http.StatusCreated {
 		t.Fatalf("create: status=%d body=%s", w.Code, w.Body.String())
@@ -69,7 +69,7 @@ func TestUpdateService_RoundTrip(t *testing.T) {
 
 	if w := post(t, s, "/newtron/v1/networks/default/update-service", map[string]any{
 		"name":        "transit",
-		"type":        "routed",
+		"service_type":        "routed",
 		"description": "updated description",
 	}); w.Code != http.StatusOK {
 		t.Fatalf("update: status=%d body=%s", w.Code, w.Body.String())
@@ -105,7 +105,7 @@ func TestUpdateService_NotFound(t *testing.T) {
 
 	w := post(t, s, "/newtron/v1/networks/default/update-service", map[string]any{
 		"name":        "missing-service",
-		"type":        "routed",
+		"service_type":        "routed",
 		"description": "no prior create — should 404",
 	})
 	if w.Code != http.StatusNotFound {

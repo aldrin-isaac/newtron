@@ -668,7 +668,7 @@ type CreateZoneRequest struct {
 // CreateServiceRequest is the request for creating a service definition.
 type CreateServiceRequest struct {
 	Name          string                `json:"name"`
-	Type          string                `json:"type"`
+	ServiceType   string                `json:"service_type"`
 	IPVPN         string                `json:"ipvpn,omitempty"`
 	MACVPN        string                `json:"macvpn,omitempty"`
 	VRFType       string                `json:"vrf_type,omitempty"`

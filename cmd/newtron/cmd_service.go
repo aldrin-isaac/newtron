@@ -442,7 +442,7 @@ Examples:
 
 		if err := app.client.CreateService(newtron.CreateServiceRequest{
 			Name:          serviceName,
-			Type:          svcCreateType,
+			ServiceType:   svcCreateType,
 			IPVPN:         svcCreateIPVPN,
 			MACVPN:        svcCreateMACVPN,
 			VRFType:       svcCreateVRFType,
