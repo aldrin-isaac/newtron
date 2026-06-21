@@ -72,19 +72,33 @@ Two facts pin this down:
    still draining that concurrent backlog.
 
 The difference between the passing isolated run and the failing suite
-run is purely the concurrent SAI load on a cold orchagent. Warm-lab
-runs (the historical 5m47s baseline, where `boot-ssh` reports 0s
-because the lab was already up) never hit it — the pipeline was warm
-and the backlog already drained.
+run is purely the concurrent SAI load on a cold orchagent.
 
 ## Why it surfaced now
 
-The suite was historically validated against a *warm* lab (re-running
-on an already-deployed topology). Cold-deploy timing was never
-separately exercised, so the race stayed latent. It became visible
-when a cold-deploy verification was run explicitly, with three labs
-(19 VMs) sharing the host — enough concurrent boot/provisioning load
-to expose the cold orchagent's lower throughput.
+Not because cold-deploy was untested — it is the mandated mode. The
+suite runs in lifecycle mode (`newtrun start` deploys the topology
+itself, then runs, then `stop` tears down — `runner.go:250`), and
+DESIGN_PRINCIPLES §42 requires it: "Always start tests on a freshly
+deployed topology. Prior state corrupts the convergence baseline."
+The howto documents the suite as "~7m on a fresh lab"
+(`docs/newtrun/howto.md:102`), consistent with a cold run.
+
+The variable that surfaced the race is **host load**, not cold-vs-warm.
+The 2026-06-09 baseline cold run passed at 5m47s on a lightly-loaded
+host (one lab). This session ran the cold deploy with three labs
+(19 VMs) already sharing the host — enough extra CPU contention to
+slow the cold orchagent's SAI throughput past the 60s `bridged` poll,
+and to stretch every convergence-dependent scenario (cold run here:
+7m26s vs the baseline's 5m47s). The race was always latent in the
+60s budget; heavier host contention is what crossed it.
+
+A process note worth recording: several manual re-runs during
+investigation were done *warm* (re-running on an already-deployed
+lab), which violates §42 and returned false 21/21 passes — the warm
+pipeline masks the race entirely. The protocol-compliant cold runs
+are the ones that exposed it. Honor §42 when validating: a warm pass
+proves nothing about the cold path the suite actually runs.
 
 Neither the IPVPN/VRF-name collapse (#253) nor the global-platforms
 work (#257) touched the ASIC poll path; the platform-rename diff is
