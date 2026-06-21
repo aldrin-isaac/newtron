@@ -169,8 +169,8 @@ type RoutingSpec struct {
 	// Additional BGP filtering (compose as AND conditions with policies)
 	ImportCommunity  string `json:"import_community,omitempty" label:"Import Community Match" tooltip:"Additional community match (composes as AND) on the import route-map"`
 	ExportCommunity  string `json:"export_community,omitempty" label:"Export Community" tooltip:"Community attached as a set-action on the export route-map"`
-	ImportPrefixList string `json:"import_prefix_list,omitempty" label:"Import Prefix List" tooltip:"Additional prefix-list match (composes as AND) on the import route-map"`
-	ExportPrefixList string `json:"export_prefix_list,omitempty" label:"Export Prefix List" tooltip:"Additional prefix-list match (composes as AND) on the export route-map"`
+	ImportPrefixList string `json:"import_prefix_list,omitempty" label:"Import Prefix List" tooltip:"Additional prefix-list match (composes as AND) on the import route-map" ref:"PrefixListSpec"`
+	ExportPrefixList string `json:"export_prefix_list,omitempty" label:"Export Prefix List" tooltip:"Additional prefix-list match (composes as AND) on the export route-map" ref:"PrefixListSpec"`
 	Redistribute     *bool  `json:"redistribute,omitempty" label:"Redistribute Connected/Static" tooltip:"Override the service-type default redistribution behavior"`
 }
 
