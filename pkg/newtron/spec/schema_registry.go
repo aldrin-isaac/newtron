@@ -72,6 +72,14 @@ func init() {
 			"ipvpn":  {Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
 			"macvpn": {Field: "service_type", In: []any{"evpn-irb", "evpn-bridged"}},
 		},
+		// Routing is L3-only. bridged / evpn-bridged are pure L2, so the
+		// routing block does not apply — a UI hides it for those types and
+		// omits it from the payload. ApplyService enforces the same rule
+		// server-side (rejects a routing block on an L2 service). Applies
+		// to the four L3-capable types only.
+		AppliesWhen: map[string]*RequiredWhen{
+			"routing": {Field: "service_type", In: []any{"routed", "irb", "evpn-routed", "evpn-irb"}},
+		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "IPVPNSpec",
