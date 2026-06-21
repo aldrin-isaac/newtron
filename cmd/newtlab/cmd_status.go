@@ -24,12 +24,12 @@ func newStatusCmd() *cobra.Command {
 	var monitor bool
 
 	cmd := &cobra.Command{
-		Use:   "status [topology]",
+		Use:   "status [network]",
 		Short: "Show VM status",
 		Long: `Show status of deployed labs.
 
 Without arguments, shows all deployed labs.
-With a topology name, shows detailed status for that lab.
+With a network name, shows detailed status for that lab.
 
   newtlab status                      # all labs
   newtlab status 2node-ngdp                # detailed view

@@ -1,12 +1,12 @@
-// NewtLab — VM orchestration for SONiC network topologies
+// NewtLab — VM orchestration for SONiC networks
 //
-// newtlab deploys QEMU virtual machines from newtron topology specs.
+// newtlab deploys QEMU virtual machines from newtron network specs.
 // It reads topology.json, platforms.json, and nodes/*.json to create
 // connected VMs with socket-based networking. No root, no bridges, no Docker.
 //
 // Usage:
 //
-//	newtlab list                     # show topologies
+//	newtlab list                     # show networks
 //	newtlab deploy 2node-ngdp        # deploy VMs
 //	newtlab status 2node-ngdp        # show VM status
 //	newtlab ssh spine1               # SSH to a VM
@@ -48,21 +48,21 @@ func main() {
 
 var rootCmd = &cobra.Command{
 	Use:               "newtlab",
-	Short:             "VM orchestration for SONiC network topologies",
+	Short:             "VM orchestration for SONiC networks",
 	SilenceUsage:      true,
 	SilenceErrors:     true,
 	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
-	Long: `NewtLab deploys QEMU virtual machines from newtron topology specs.
+	Long: `NewtLab deploys QEMU virtual machines from newtron network specs.
 
-Topologies are resolved by name from networks/.
+Networks are resolved by name from networks/.
 
-  newtlab list                       # show topologies
-  newtlab deploy 2node-ngdp           # deploy VMs from topology
-  newtlab status [topology]          # show VM status
+  newtlab list                       # show networks
+  newtlab deploy 2node-ngdp           # deploy VMs for the network
+  newtlab status [network]          # show VM status
   newtlab ssh <node>                 # SSH to a VM
   newtlab console <node>             # serial console
-  newtlab destroy [topology]         # tear down
-  newtlab provision [topology]       # provision via newtron`,
+  newtlab destroy [network]         # tear down
+  newtlab provision [network]       # provision via newtron`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if verbose {
 			util.SetLogLevel("debug")
@@ -74,7 +74,7 @@ Topologies are resolved by name from networks/.
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dir, "dir", "", "network directory (overrides topology name)")
+	rootCmd.PersistentFlags().StringVar(&dir, "dir", "", "network directory (overrides network name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
 	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — the orchestrator URL newtlink pushes BridgeStats to (#118) and the read path for `newtlab status` link telemetry. Defaults to --newtron-server (same listener in the aggregated newt-server); set explicitly only for multi-host labs where remote workers reach the server at a different, publicly-reachable address. Env: NEWTLAB_SERVER")
@@ -95,10 +95,10 @@ func init() {
 }
 
 // ============================================================================
-// Topology Resolution
+// Network Resolution
 // ============================================================================
 
-// networksBaseDir returns the base directory for topologies.
+// networksBaseDir returns the base directory for networks.
 // Resolution: NEWTRUN_TOPOLOGIES env > settings > default.
 func networksBaseDir() string {
 	if v := os.Getenv("NEWTRUN_TOPOLOGIES"); v != "" {
@@ -110,19 +110,19 @@ func networksBaseDir() string {
 	return "networks"
 }
 
-// resolveTopologyDir resolves a topology name to its network directory.
+// resolveNetworkDir resolves a network name to its network directory.
 // If name contains "/" it's used as-is. Otherwise resolved under networksBaseDir.
-func resolveTopologyDir(name string) string {
+func resolveNetworkDir(name string) string {
 	if strings.Contains(name, "/") {
 		return name
 	}
 	return filepath.Join(networksBaseDir(), name)
 }
 
-// topologyNameFromPath derives the topology name from a network directory
+// networkNameFromPath derives the network name from a network directory
 // path. Mirrors the convention used by newtron-server.s networkName():
-// /path/to/<topology>/specs → <topology>; /path/to/<topology> → <topology>.
-func topologyNameFromPath(absDir string) string {
+// /path/to/<network>/specs → <network>; /path/to/<network> → <network>.
+func networkNameFromPath(absDir string) string {
 	base := filepath.Base(absDir)
 	if base == "" && filepath.Base(filepath.Clean(dir)) == filepath.Base(dir) {
 		return filepath.Base(filepath.Dir(absDir))
@@ -130,7 +130,7 @@ func topologyNameFromPath(absDir string) string {
 	return base
 }
 
-// prepareLab returns a configured *newtlab.Lab for the given topology
+// prepareLab returns a configured *newtlab.Lab for the given network
 // reference. It constructs a newtron HTTP client, registers the spec
 // directory with newtron (idempotent: 409 conflict is treated as
 // success), and calls newtlab.NewLab which consumes specs via the
@@ -166,13 +166,13 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	}
 	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
 	// Ensure the network is registered on newtron-server so it can
-	// serve specs for this topology. The server resolves the spec
-	// directory under its --networks-base; this client just names the
-	// topology by id. RegisterNetwork is idempotent — re-issuing is a
-	// no-op.
+	// serve this network's specs. The server resolves the spec directory
+	// under its --networks-base; this client just names the network by
+	// id (the topology is one facet of that network). RegisterNetwork is
+	// idempotent — re-issuing is a no-op.
 	if dir != "" {
 		if _, regErr := client.CreateNetwork(""); regErr != nil {
-			return nil, fmt.Errorf("registering topology with newtron at %s: %w", newtronServer, regErr)
+			return nil, fmt.Errorf("registering network with newtron at %s: %w", newtronServer, regErr)
 		}
 	}
 	lab, err := newtlab.NewLab(ctx, client, name)
@@ -214,7 +214,7 @@ func newtlabURL() string {
 }
 
 // resolveTarget resolves both lab name and network directory from:
-// -S flag > positional topology name > auto-detect from deployed labs.
+// -S flag > positional network name > auto-detect from deployed labs.
 // This is the shared resolution logic used by resolveLabName and
 // prepareLab. The network directory is no longer used for file reads
 // (§27 — newtron owns spec files); it is the path newtron is asked
@@ -226,10 +226,10 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 		if absErr != nil {
 			return "", "", fmt.Errorf("resolve network dir: %w", absErr)
 		}
-		return topologyNameFromPath(absDir), absDir, nil
+		return networkNameFromPath(absDir), absDir, nil
 	}
 
-	// Positional topology name
+	// Positional network name
 	if len(args) > 0 && args[0] != "" {
 		// Check if it matches a deployed lab by name
 		labs, _ := newtlab.ListLabs()
@@ -241,19 +241,19 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 				}
 				// state.Dir is empty for older labs whose state.json
 				// was written before Dir was persisted; fall back to
-				// the canonical network dir for the topology name so the
+				// the canonical network dir for the network name so the
 				// caller can still register the network with newtron.
 				dir := state.Dir
 				if dir == "" {
-					dir = resolveTopologyDir(l)
+					dir = resolveNetworkDir(l)
 				}
 				return l, dir, nil
 			}
 		}
-		// Try as topology name
-		d := resolveTopologyDir(args[0])
+		// Try as network name
+		d := resolveNetworkDir(args[0])
 		if _, statErr := os.Stat(d); statErr != nil {
-			return "", "", fmt.Errorf("topology %q not found: %s does not exist", args[0], d)
+			return "", "", fmt.Errorf("network %q not found: %s does not exist", args[0], d)
 		}
 		return args[0], d, nil
 	}
@@ -264,7 +264,7 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 		return "", "", listErr
 	}
 	if len(labs) == 0 {
-		return "", "", fmt.Errorf("no deployed labs; specify topology name or use -S <dir>")
+		return "", "", fmt.Errorf("no deployed labs; specify network name or use -S <dir>")
 	}
 	if len(labs) == 1 {
 		state, loadErr := newtlab.LoadState(labs[0])
@@ -273,7 +273,7 @@ func resolveTarget(args []string) (labName string, dir string, err error) {
 		}
 		return labs[0], state.Dir, nil
 	}
-	return "", "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
+	return "", "", fmt.Errorf("multiple labs deployed (%s); specify network name", strings.Join(labs, ", "))
 }
 
 // resolveLabName resolves a lab name from: -S flag > positional name > auto-detect.
@@ -289,12 +289,12 @@ func resolveLabName(args []string) (string, error) {
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List topologies and their deployment status",
+		Short: "List networks and their deployment status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			base := networksBaseDir()
 			entries, err := os.ReadDir(base)
 			if err != nil {
-				return fmt.Errorf("cannot find topologies directory %s: %w", base, err)
+				return fmt.Errorf("cannot find networks directory %s: %w", base, err)
 			}
 
 			// Get deployed labs for status
@@ -307,16 +307,16 @@ func newListCmd() *cobra.Command {
 				}
 			}
 
-			// Display per-topology rows. Device/link counts come from
+			// Display per-network rows. Device/link counts come from
 			// the spec, which is newtron's data object (§27) — newtlab
 			// does not read spec files. Operators who want per-node
-			// detail run `newtlab status <topology>`.
-			t := cli.NewTable("TOPOLOGY", "STATUS", "NODES").WithPrefix("  ")
+			// detail run `newtlab status <network>`.
+			t := cli.NewTable("NETWORK", "STATUS", "NODES").WithPrefix("  ")
 			for _, e := range entries {
 				if !e.IsDir() {
 					continue
 				}
-				// Skip directories without a specs subdirectory (not a topology).
+				// Skip directories without a specs subdirectory (not a network).
 				if _, err := os.Stat(filepath.Join(base, e.Name(), "topology.json")); err != nil {
 					continue
 				}

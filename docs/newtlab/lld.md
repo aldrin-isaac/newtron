@@ -1058,14 +1058,14 @@ subcommand.
 | Command | File | Args | Description |
 |---------|------|------|-------------|
 | `list` | `main.go` | none | Show topologies and deployment status |
-| `deploy` | `cmd_deploy.go` | `[topology]` | Deploy VMs, optional `--provision`, `--force`, `--host`, `--parallel` |
-| `destroy` | `cmd_destroy.go` | `[topology]` | Kill VMs, remove overlays, clean state |
-| `status` | `cmd_status.go` | `[topology]` | Show node/link status with live bridge stats |
+| `deploy` | `cmd_deploy.go` | `[network]` | Deploy VMs, optional `--provision`, `--force`, `--host`, `--parallel` |
+| `destroy` | `cmd_destroy.go` | `[network]` | Kill VMs, remove overlays, clean state |
+| `status` | `cmd_status.go` | `[network]` | Show node/link status with live bridge stats |
 | `ssh` | `cmd_ssh.go` | `<node>` | SSH to a VM (or `ip netns exec` for virtual hosts) |
 | `console` | `cmd_console.go` | `<node>` | Serial console via socat/telnet |
 | `stop` | `cmd_stop.go` | `<node>` | Stop a single VM |
 | `start` | `cmd_stop.go` | `<node>` | Start a stopped VM |
-| `provision` | `cmd_provision.go` | `[topology]` | Run topology reconcile on each device, optional `--device`, `--parallel` |
+| `provision` | `cmd_provision.go` | `[network]` | Run topology reconcile on each device, optional `--device`, `--parallel` |
 | `version` | `main.go` | none | Print version info |
 
 Global flags: `-S <dir>` (spec directory override), `-v` (verbose).

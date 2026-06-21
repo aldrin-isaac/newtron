@@ -16,7 +16,7 @@ import (
 
 // CreateNetworkRequest is the body for POST /newtron/v1/networks.
 //
-// The operator names the topology by id; the server owns the on-disk
+// The operator names the network by id; the server owns the on-disk
 // path (§27, §33). Every call resolves to filepath.Join(networksBase, id)
 // on the server's filesystem, where networksBase is whatever the
 // operator started newtron with (cmd/newt-server --networks-base;

@@ -11,12 +11,12 @@ func newProvisionCmd() *cobra.Command {
 	var parallel int
 
 	cmd := &cobra.Command{
-		Use:   "provision [topology]",
+		Use:   "provision [network]",
 		Short: "Provision devices via newtron",
-		Long: `Run topology reconcile on deployed VMs.
+		Long: `Reconcile a deployed network to its topology.
 
 This invokes 'newtron <name> --topology intent reconcile -x' on each device
-in the topology, replaying topology.json steps and delivering the resulting
+in the network, replaying topology.json steps and delivering the resulting
 CONFIG_DB projection to the device. Equivalent to the --provision flag on
 'newtlab deploy'.
 

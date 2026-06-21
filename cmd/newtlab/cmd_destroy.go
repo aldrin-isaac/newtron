@@ -10,12 +10,12 @@ import (
 
 func newDestroyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "destroy [topology]",
+		Use:   "destroy [network]",
 		Short: "Stop and remove all VMs",
 		Long: `Tear down a deployed lab completely.
 
 Kills all QEMU processes, removes overlay disks, and cleans up state.
-If only one lab is deployed, the topology name can be omitted.
+If only one lab is deployed, the network name can be omitted.
 
   newtlab destroy 2node-ngdp
   newtlab destroy              # auto-selects if only one lab`,

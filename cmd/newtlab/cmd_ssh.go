@@ -102,7 +102,7 @@ func findNodeState(nodeName string) (*newtlab.LabState, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		name := topologyNameFromPath(absDir)
+		name := networkNameFromPath(absDir)
 		state, err := newtlab.LoadState(name)
 		if err != nil {
 			return nil, "", err

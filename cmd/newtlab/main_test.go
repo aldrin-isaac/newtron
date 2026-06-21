@@ -30,17 +30,17 @@ func TestHumanBytes(t *testing.T) {
 func TestResolveTopologyDir(t *testing.T) {
 	t.Run("simple name uses base dir", func(t *testing.T) {
 		t.Setenv("NEWTRUN_TOPOLOGIES", "/tmp/topos")
-		got := resolveTopologyDir("foo")
+		got := resolveNetworkDir("foo")
 		want := "/tmp/topos/foo"
 		if got != want {
-			t.Errorf("resolveTopologyDir(%q) = %q, want %q", "foo", got, want)
+			t.Errorf("resolveNetworkDir(%q) = %q, want %q", "foo", got, want)
 		}
 	})
 
 	t.Run("path with slash returned as-is", func(t *testing.T) {
-		got := resolveTopologyDir("path/to/dir")
+		got := resolveNetworkDir("path/to/dir")
 		if got != "path/to/dir" {
-			t.Errorf("resolveTopologyDir(%q) = %q, want %q", "path/to/dir", got, "path/to/dir")
+			t.Errorf("resolveNetworkDir(%q) = %q, want %q", "path/to/dir", got, "path/to/dir")
 		}
 	})
 }

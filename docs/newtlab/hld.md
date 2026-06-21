@@ -82,7 +82,7 @@ files — no shared libraries, no IPC, no API calls between them.
 
 ## 2. Architecture
 
-A deployed newtlab topology consists of three layers: the spec directory
+A deployed newtlab network consists of three layers: the spec directory
 (input), the newtlab runtime (QEMU processes and bridge workers), and the
 patched profiles (output that enables newtron).
 
@@ -833,14 +833,14 @@ newtlab's CLI provides topology lifecycle management and device access.
 
 | Command | Description |
 |---------|-------------|
-| `newtlab deploy [topology]` | Deploy VMs from spec files |
-| `newtlab destroy [topology]` | Stop all VMs, remove state |
-| `newtlab status [topology]` | Show node and link status with live bridge stats |
+| `newtlab deploy [network]` | Deploy VMs from spec files |
+| `newtlab destroy [network]` | Stop all VMs, remove state |
+| `newtlab status [network]` | Show node and link status with live bridge stats |
 | `newtlab ssh <node>` | SSH to a VM (namespace-aware for virtual hosts) |
 | `newtlab console <node>` | Attach to serial console via socat/telnet |
 | `newtlab stop <node>` | Stop a VM (preserves overlay disk) |
 | `newtlab start <node>` | Start a stopped VM |
-| `newtlab provision [topology]` | Provision devices via newtron |
+| `newtlab provision [network]` | Provision devices via newtron |
 | `newtlab list` | List all deployed labs |
 
 **Key flags:** `-S <dir>` (spec directory), `--provision` (deploy +
@@ -848,12 +848,12 @@ provision), `--host <name>` (multi-host mode), `--force` (redeploy over
 existing), `--parallel <n>` (provisioning concurrency), `-v` (verbose
 output).
 
-**Topology resolution** (when no `-S` flag):
+**Network resolution** (when no `-S` flag):
 1. Positional argument matching a deployed lab by name
-2. Positional argument resolved under the topologies directory
+2. Positional argument resolved under the networks directory
 3. Auto-detect: exactly one deployed lab
 
-The LLD documents the complete flag set and topology resolution logic.
+The LLD documents the complete flag set and network resolution logic.
 
 ### 11.1 HTTP API
 
