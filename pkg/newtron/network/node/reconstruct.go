@@ -159,11 +159,8 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		return err
 
 	case "bind-ipvpn":
-		// The IPVPN name IS the SONiC VRF name (§13 / §32 — single
-		// concept, single name). Old intents may also carry a "vrf"
-		// param; ignore it in favor of "ipvpn" — when both are
-		// present they are equal by construction (the previous
-		// writer recorded the same string twice).
+		// The intent records the IP-VPN spec name in "ipvpn"; BindIPVPN
+		// derives the on-device VRF name from it (util.DeriveVRFNameForIPVPN).
 		ipvpnName := paramString(p, "ipvpn")
 		if ipvpnName == "" {
 			return fmt.Errorf("bind-ipvpn: requires 'ipvpn' param")

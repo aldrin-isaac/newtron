@@ -50,6 +50,7 @@ type FieldMeta struct {
 	Max       *int   `json:"max,omitempty"`       // inclusive upper bound for type=int
 	Format    string `json:"format,omitempty"`    // semantic hint — "cidr", "ipv4", "ipv6", "mac", "asn"
 	Immutable bool   `json:"immutable,omitempty"` // value is fixed at create time — UI suppresses edit affordance in update-mode forms
+	ReadOnly  bool   `json:"read_only,omitempty"` // value is derived/computed server-side — UI displays it but never offers an input and never submits it (e.g. an IP-VPN's vrf_name)
 
 	// RequiredWhen declares a predicate over sibling field values that —
 	// when true — makes this field required even though the static
@@ -202,6 +203,14 @@ type SchemaRegistration struct {
 	// predicate (see FieldMeta.AppliesWhen). Same tree grammar and the
 	// same init-time validation as RequiredWhen.
 	AppliesWhen map[string]*RequiredWhen
+
+	// ComputedFields are read-only, server-derived fields that are not part
+	// of the kind's Sample struct (so they're never authored or persisted)
+	// but are surfaced in the schema and the kind's API view so UIs can
+	// display them. Each should have ReadOnly set. Appended after the
+	// struct-reflected fields. Example: an IP-VPN's vrf_name, derived as
+	// "Vrf_"+name.
+	ComputedFields []FieldMeta
 }
 
 // schemaKind carries a registered kind's reflect.Type plus the static
@@ -217,6 +226,7 @@ type schemaKind struct {
 	paths           SchemaPaths
 	requiredWhen    map[string]*RequiredWhen
 	appliesWhen     map[string]*RequiredWhen
+	computedFields  []FieldMeta
 }
 
 // schemaRegistry holds every spec kind that participates in the schema
@@ -265,6 +275,7 @@ func RegisterSchemaKind(reg SchemaRegistration) {
 		paths:           reg.Paths,
 		requiredWhen:    reg.RequiredWhen,
 		appliesWhen:     reg.AppliesWhen,
+		computedFields:  reg.ComputedFields,
 	}
 }
 
@@ -432,6 +443,8 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 	if sk.identifierField != nil {
 		fields = append([]FieldMeta{*sk.identifierField}, fields...)
 	}
+	// Append read-only, server-derived fields (not on the Sample struct).
+	fields = append(fields, sk.computedFields...)
 	// Attach RequiredWhen / AppliesWhen predicates to their target fields.
 	// Validated at registration time, so every key here matches a real field.
 	for i := range fields {

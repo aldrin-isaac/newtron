@@ -37,7 +37,7 @@ func createTestSpecDir(t *testing.T) string {
 			}
 		},
 		"ipvpns": {
-			"Vrf_customer": {
+			"CUSTOMER": {
 				"l3vni": 10001,
 				"route_targets": ["65000:100"]
 			}
@@ -52,7 +52,7 @@ func createTestSpecDir(t *testing.T) string {
 			"customer-l3": {
 				"description": "Customer L3 service",
 				"service_type": "evpn-routed",
-				"ipvpn": "Vrf_customer",
+				"ipvpn": "CUSTOMER",
 				"vrf_type": "interface"
 			}
 		}
@@ -1007,7 +1007,7 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 			"amer": {
 				"as_number": 65000,
 				"ipvpns": {
-					"Vrf_zone": {
+					"ZONE": {
 						"l3vni": 20001,
 						"route_targets": ["65000:200"]
 					}
@@ -1016,7 +1016,7 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 					"zone-l3": {
 						"description": "Zone L3 service",
 						"service_type": "evpn-routed",
-						"ipvpn": "Vrf_zone",
+						"ipvpn": "ZONE",
 						"vrf_type": "interface"
 					}
 				}

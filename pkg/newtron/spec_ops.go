@@ -6,6 +6,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -825,6 +826,7 @@ func convertServiceDetail(name string, s *spec.ServiceSpec) *ServiceDetail {
 func convertIPVPNDetail(name string, s *spec.IPVPNSpec) *IPVPNDetail {
 	return &IPVPNDetail{
 		Name:         name,
+		VRFName:      util.DeriveVRFNameForIPVPN(name),
 		Description:  s.Description,
 		L3VNI:        s.L3VNI,
 		RouteTargets: s.RouteTargets,

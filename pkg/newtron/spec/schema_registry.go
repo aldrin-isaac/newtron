@@ -86,19 +86,8 @@ func init() {
 		Label:       "IP-VPN",
 		Description: "A Layer-3 VPN — a VRF + L3VNI + route targets that L3 services attach to.",
 		Sample:      IPVPNSpec{},
-		Identifier: "name",
-		// IPVPN names ARE SONiC VRF names on-device — both layers
-		// cite the same IPVPNNamePattern constant so server-side
-		// ValidateIPVPNName and schema-driven UIs stay in agreement.
-		IdentifierField: &FieldMeta{
-			Name:        "name",
-			Label:       "Name",
-			Description: "Unique identifier within this kind — also the on-device SONiC VRF name. The 'Vrf' prefix is required by sonic-vrf.yang; intfmgrd silently drops INTERFACE entries whose vrf_name lacks it (RCA-044). Immutable after creation.",
-			Type:        "string",
-			Required:    true,
-			Pattern:     IPVPNNamePattern,
-			Immutable:   true,
-		},
+		Identifier:      "name",
+		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
 			List:   "/newtron/v1/networks/{netID}/ipvpns",
 			Show:   "/newtron/v1/networks/{netID}/ipvpns/{name}",
@@ -106,6 +95,16 @@ func init() {
 			Update: "/newtron/v1/networks/{netID}/update-ipvpn",
 			Delete: "/newtron/v1/networks/{netID}/delete-ipvpn",
 		},
+		// The on-device SONiC VRF name is derived from the IP-VPN name,
+		// not authored — surfaced read-only so UIs can show it. The "Vrf"
+		// prefix is required by sonic-vrf.yang (RCA-044).
+		ComputedFields: []FieldMeta{{
+			Name:        "vrf_name",
+			Label:       "VRF Name",
+			Description: "On-device SONiC VRF name, derived as \"Vrf_\"+name (read-only). E.g. IP-VPN \"IRB\" → VRF \"Vrf_IRB\".",
+			Type:        "string",
+			ReadOnly:    true,
+		}},
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "MACVPNSpec",

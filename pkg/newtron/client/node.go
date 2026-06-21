@@ -351,15 +351,15 @@ func (c *Client) DeleteVRF(device, name string, opts newtron.ExecOpts) (*newtron
 	return c.nodeWrite(device, "delete-vrf", body, opts)
 }
 
-// BindIPVPN binds an IP-VPN. The IP-VPN name IS the SONiC VRF name
-// on-device — single name, no separate vrf field (§13 / §32; sonic-vrf.yang).
+// BindIPVPN binds an IP-VPN. ipvpn is the IP-VPN spec name; the on-device
+// VRF name is derived from it as "Vrf_"+name (sonic-vrf.yang).
 func (c *Client) BindIPVPN(device, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.BindIPVPNRequest{IPVPN: ipvpn}
 	return c.nodeWrite(device, "bind-ipvpn", body, opts)
 }
 
-// UnbindIPVPN unbinds an IP-VPN. ipvpn is the IP-VPN name (which
-// IS the on-device VRF name).
+// UnbindIPVPN unbinds an IP-VPN. ipvpn is the IP-VPN spec name; the VRF
+// name is derived from it as "Vrf_"+name.
 func (c *Client) UnbindIPVPN(device, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
 		IPVPN string `json:"ipvpn"`

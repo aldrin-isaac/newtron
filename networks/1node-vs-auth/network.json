@@ -66,7 +66,7 @@
     "amer": {}
   },
   "services": {
-    "transit-1": {
+    "TRANSIT_1": {
       "description": "Transit peering service — used by the L5 resource-scope scenario",
       "service_type": "routed",
       "routing": {

@@ -220,15 +220,15 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// Determine VRF name for binding and infrastructure. In shared
-	// mode the IPVPN name IS the SONiC VRF name (§13 / §32 — one
-	// concept, one name); in interface mode the name is derived
-	// from the service + interface pair.
+	// mode the VRF name is derived from the IP-VPN spec name
+	// (util.DeriveVRFNameForIPVPN — "Vrf_"+ipvpn); in interface mode the
+	// name is derived from the service + interface pair.
 	var vrfName string
 	switch svc.VRFType {
 	case spec.VRFTypeInterface:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	case spec.VRFTypeShared:
-		vrfName = svc.IPVPN
+		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
 	}
 
 	// Track ACL names from generated entries for interface-merging.
@@ -436,7 +436,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// IPVPN binding (intent-idempotent: BindIPVPN checks ipvpn intent).
-	// In shared mode the IPVPN name IS vrfName by construction (§13).
+	// BindIPVPN derives the VRF name from svc.IPVPN internally; vrfName
+	// here is the same derived value (util.DeriveVRFNameForIPVPN).
 	if ipvpnDef != nil && vrfName != "" {
 		ipvpnCS, err := n.BindIPVPN(ctx, svc.IPVPN)
 		if err != nil {
@@ -656,8 +657,8 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	if svc.VRFType == spec.VRFTypeInterface {
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	} else if svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-		// The IPVPN name IS the SONiC VRF name on shared mode (§13).
-		vrfName = svc.IPVPN
+		// Shared-mode VRF name is derived from the IP-VPN spec name.
+		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
 	}
 	vrfKey := "default"
 	if vrfName != "" {
@@ -1268,11 +1269,16 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Clean up infrastructure intents whose CONFIG_DB entries were destroyed
 	// above. Must happen AFTER deleting the interface intent (which deregisters
 	// from its parents), so the parent intents satisfy I5 (no children).
-	// Explicit ordered deletion: ipvpn (child of vrf) → vrf → vlan.
+	// Explicit ordered deletion: ipvpn (child of vrf) → vrf → vlan. The ipvpn
+	// intent is keyed by the IP-VPN spec name (b[FieldIPVPN]), not the derived
+	// VRF name; interface-mode VRFs have no IP-VPN, so the spec name is empty
+	// and only the vrf intent is removed.
 	if destroyedVRF != "" {
-		// Delete ipvpn intent first (child of vrf per DAG)
-		if err := n.deleteIntent(cs, "ipvpn|"+destroyedVRF); err != nil {
-			return nil, err
+		if ipvpnName := b[sonic.FieldIPVPN]; ipvpnName != "" {
+			// Delete ipvpn intent first (child of vrf per DAG)
+			if err := n.deleteIntent(cs, "ipvpn|"+ipvpnName); err != nil {
+				return nil, err
+			}
 		}
 		if err := n.deleteIntent(cs, "vrf|"+destroyedVRF); err != nil {
 			return nil, err

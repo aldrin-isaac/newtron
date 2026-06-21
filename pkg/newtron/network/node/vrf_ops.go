@@ -104,9 +104,12 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 // ============================================================================
 
 // BindIPVPN binds an IP-VPN on this device — materializes the SONiC
-// VRF, the L3VNI mapping, and the BGP EVPN configuration. The IP-VPN
-// name IS the SONiC VRF name (§13 / §32 — one concept, one name;
-// sonic-vrf.yang / RCA-044).
+// VRF binding, the L3VNI mapping, and the BGP EVPN configuration. The
+// on-device VRF name is derived from the IP-VPN spec name, never the
+// name itself: VRF = "Vrf_"+ipvpn (util.DeriveVRFNameForIPVPN; sonic-vrf.yang
+// / RCA-044). The intent record is keyed by the spec name (ipvpn|<name>);
+// every CONFIG_DB write and the vrf| parent reference use the derived
+// VRF name.
 //
 // Intent-idempotent: if the ipvpn intent already exists, returns
 // empty ChangeSet.
@@ -119,10 +122,11 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, err
 	if err != nil {
 		return nil, fmt.Errorf("bind-ipvpn: %w", err)
 	}
+	vrfName := util.DeriveVRFNameForIPVPN(ipvpnName)
 	resolved := n.Resolved()
 	cs, err := n.op(sonic.OpBindIPVPN, ipvpnName, ChangeModify,
-		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(ipvpnName) },
-		func() []sonic.Entry { return bindIpvpnConfig(ipvpnName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) },
+		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
+		func() []sonic.Entry { return bindIpvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) },
 		"device.unbind-ipvpn")
 	if err != nil {
 		return nil, err
@@ -135,17 +139,18 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, err
 	if len(ipvpnDef.RouteTargets) > 0 {
 		intentParams[sonic.FieldRouteTargets] = strings.Join(ipvpnDef.RouteTargets, ",")
 	}
-	if err := n.writeIntent(cs, sonic.OpBindIPVPN, "ipvpn|"+ipvpnName, intentParams, []string{"vrf|" + ipvpnName}); err != nil {
+	if err := n.writeIntent(cs, sonic.OpBindIPVPN, resource, intentParams, []string{"vrf|" + vrfName}); err != nil {
 		return nil, err
 	}
 	cs.OperationParams = map[string]string{"ipvpn": ipvpnName}
-	util.WithDevice(n.name).Infof("Bound IP-VPN %s (L3VNI %d, %d route-targets)", ipvpnName, ipvpnDef.L3VNI, len(ipvpnDef.RouteTargets))
+	util.WithDevice(n.name).Infof("Bound IP-VPN %s → VRF %s (L3VNI %d, %d route-targets)", ipvpnName, vrfName, ipvpnDef.L3VNI, len(ipvpnDef.RouteTargets))
 	return cs, nil
 }
 
-// routeTargetsFromIntent extracts route targets from the ipvpn intent record.
-func (n *Node) routeTargetsFromIntent(vrfName string) []string {
-	intent := n.GetIntent("ipvpn|" + vrfName)
+// routeTargetsFromIntent extracts route targets from the ipvpn intent record,
+// keyed by the IP-VPN spec name.
+func (n *Node) routeTargetsFromIntent(ipvpnName string) []string {
+	intent := n.GetIntent("ipvpn|" + ipvpnName)
 	if intent == nil {
 		return nil
 	}
@@ -159,8 +164,13 @@ func (n *Node) routeTargetsFromIntent(vrfName string) []string {
 // Refuses if any NEWTRON_INTENT references this VRF — callers must remove
 // services first. RemoveService calls destroyVrfConfig directly (not UnbindIPVPN),
 // so this guard only protects standalone CLI/test usage.
-func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
-	if err := n.precondition("unbind-ipvpn", vrfName).Result(); err != nil {
+//
+// The argument is the IP-VPN spec name; the on-device VRF name is derived
+// from it (util.DeriveVRFNameForIPVPN). The ipvpn intent record is keyed by the
+// spec name; CONFIG_DB teardown and the FieldVRFName scan use the VRF name.
+func (n *Node) UnbindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, error) {
+	vrfName := util.DeriveVRFNameForIPVPN(ipvpnName)
+	if err := n.precondition("unbind-ipvpn", ipvpnName).Result(); err != nil {
 		return nil, err
 	}
 
@@ -179,7 +189,7 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	// Per design: "NEWTRON_INTENT must contain every value needed for teardown."
 	var l3vni int
 	var l3vniVlan int
-	if intent := n.GetIntent("ipvpn|" + vrfName); intent != nil {
+	if intent := n.GetIntent("ipvpn|" + ipvpnName); intent != nil {
 		l3vni, _ = strconv.Atoi(intent.Params[sonic.FieldL3VNI])
 		l3vniVlan, _ = strconv.Atoi(intent.Params[sonic.FieldL3VNIVlan])
 	}
@@ -193,7 +203,7 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	cs.Updates(clearVrfVniConfig(vrfName))
 
 	// Delete the remaining IP-VPN entries (BGP AFs, route redistribution, EVPN RTs).
-	cs.Deletes(unbindIpvpnConfig(vrfName, n.routeTargetsFromIntent(vrfName)))
+	cs.Deletes(unbindIpvpnConfig(vrfName, n.routeTargetsFromIntent(ipvpnName)))
 
 	// Delete L3VNI transit VLAN infrastructure (reverse of bindIpvpnConfig).
 	// BindIPVPN creates: transit VLAN, IRB binding VLAN→VRF, VXLAN_TUNNEL_MAP.
@@ -204,13 +214,13 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 		cs.Deletes(deleteVlanConfig(l3vniVlan))
 	}
 
-	if err := n.deleteIntent(cs, "ipvpn|"+vrfName); err != nil {
+	if err := n.deleteIntent(cs, "ipvpn|"+ipvpnName); err != nil {
 		return nil, err
 	}
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.name).Infof("Unbound IP-VPN from VRF %s", vrfName)
+	util.WithDevice(n.name).Infof("Unbound IP-VPN %s from VRF %s", ipvpnName, vrfName)
 	return cs, nil
 }
 

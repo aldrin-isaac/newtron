@@ -2527,7 +2527,7 @@ mappings).
 
 ### IP-VPN Binding
 
-The IP-VPN name IS the SONiC VRF name materialized on-device — one concept, one name (§13 / §32). `sonic-vrf.yang` requires names to start with `Vrf` (mixed case, per RCA-044); IP-VPN names are validated against `^Vrf[A-Za-z0-9_]*$` at spec load and at CRUD-spec write time. Operators must `vrf create <Vrf_Name>` before `bind-ipvpn` (the VRF is the precondition; bind-ipvpn overlays L3VNI + EVPN config on top).
+The IP-VPN name is a normal, canonicalized spec name; the on-device SONiC VRF name is **derived** from it, read-only, as `"Vrf_"+name` (e.g. IP-VPN `IRB` → VRF `Vrf_IRB`). `sonic-vrf.yang` requires VRF names to start with `Vrf` (mixed case, per RCA-044) — the derivation supplies that prefix, so operators never author it. The derived name is surfaced read-only on the IP-VPN view as `vrf_name` (the IP-VPN schema exposes it as a computed `vrf_name` field). Operators must `vrf create <Vrf_Name>` (the derived VRF name) before `bind-ipvpn` (the VRF is the precondition; bind-ipvpn overlays L3VNI + EVPN config on top).
 
 #### POST /newtron/v1/networks/{netID}/nodes/{device}/bind-ipvpn
 
@@ -2539,7 +2539,7 @@ Bind an IP-VPN on this device (sets up L3VNI, route targets, EVPN VNI configurat
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `ipvpn` | string | yes | IP-VPN name (also the on-device VRF name) |
+| `ipvpn` | string | yes | IP-VPN spec name (VRF name is derived as `"Vrf_"+name`) |
 
 **Response (200):** `WriteResult`
 
@@ -2553,7 +2553,7 @@ Unbind the IP-VPN on this device (tears down L3VNI infrastructure).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `ipvpn` | string | yes | IP-VPN name (also the on-device VRF name) |
+| `ipvpn` | string | yes | IP-VPN spec name (VRF name is derived as `"Vrf_"+name`) |
 
 **Response (200):** `WriteResult`
 
@@ -4025,11 +4025,12 @@ Returned by `GET .../service` (array) and `GET .../services/{name}` (single).
 
 #### IPVPNDetail
 
-Returned by `GET .../ipvpns` (array) and `GET .../ipvpns/{name}` (single). `name` is the SONiC VRF name materialized on-device — there is no separate `vrf` field (§13 / §32; sonic-vrf.yang). Names must match `^Vrf[A-Za-z0-9_]*$`.
+Returned by `GET .../ipvpns` (array) and `GET .../ipvpns/{name}` (single). `name` is a normal, canonicalized spec name; `vrf_name` is the on-device SONiC VRF name, derived read-only as `"Vrf_"+name` (sonic-vrf.yang requires the `Vrf` prefix — RCA-044). `vrf_name` is never authored — it is computed and returned for display.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | IP-VPN name (also the on-device VRF name) |
+| `name` | string | IP-VPN spec name |
+| `vrf_name` | string | Derived on-device SONiC VRF name (`"Vrf_"+name`), read-only |
 | `description` | string | Description |
 | `l3vni` | integer | L3 VNI |
 | `route_targets` | string[] | Route targets |
