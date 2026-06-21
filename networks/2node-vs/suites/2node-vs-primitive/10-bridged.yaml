@@ -63,7 +63,16 @@ steps:
     expect:
       jq: '.tagging_mode == "untagged"'
 
-  # Poll ASIC_DB for VLAN SAI objects (30s timeout)
+  # Poll ASIC_DB for VLAN + VLAN_MEMBER SAI objects.
+  #
+  # 180s budget (RCA-047): `bridged` is the first ASIC-verification
+  # scenario in the suite, so on a cold-deployed lab it races the
+  # orchagent's initial SAI backlog while ~8 sibling scenarios
+  # (setup-device, routed, bgp-underlay, ...) flood the same two
+  # switches concurrently. SAI programming converges reliably (~15s
+  # in isolation) but can exceed 60s under that concurrent cold-boot
+  # load. The poll exits early on success, so the larger budget is
+  # free on warm runs and only absorbs the cold worst case.
   - name: poll-asic-vlan-ready
     action: newtron
     devices: [switch1]
@@ -71,7 +80,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l"}
     poll:
-      timeout: 60s
+      timeout: 180s
       interval: 5s
     expect:
       jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'
@@ -83,7 +92,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l"}
     poll:
-      timeout: 60s
+      timeout: 180s
       interval: 5s
     expect:
       jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'
