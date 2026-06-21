@@ -7,7 +7,7 @@
     "amer": {}
   },
   "ipvpns": {
-    "Vrf_IRB": {
+    "IRB": {
       "description": "L3 VRF for EVPN IRB routing",
       "l3vni": 50400,
       "l3vni_vlan": 3998,
@@ -78,14 +78,14 @@
     "OVERLAY_IRB_A": {
       "description": "EVPN IRB subnet A (10.1.40.0/24)",
       "service_type": "evpn-irb",
-      "ipvpn": "Vrf_IRB",
+      "ipvpn": "IRB",
       "macvpn": "IRB_VLAN400",
       "vrf_type": "shared"
     },
     "OVERLAY_IRB_B": {
       "description": "EVPN IRB subnet B (10.1.41.0/24)",
       "service_type": "evpn-irb",
-      "ipvpn": "Vrf_IRB",
+      "ipvpn": "IRB",
       "macvpn": "IRB_VLAN401",
       "vrf_type": "shared"
     },

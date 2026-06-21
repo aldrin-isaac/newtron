@@ -224,6 +224,26 @@ func TestNormalizeVRFName(t *testing.T) {
 	}
 }
 
+func TestDeriveVRFNameForIPVPN(t *testing.T) {
+	tests := []struct {
+		ipvpn string
+		want  string
+	}{
+		{"IRB", "Vrf_IRB"},                     // canonical name → Vrf_ prefix
+		{"irb", "Vrf_IRB"},                     // normalizes the suffix
+		{"customer-edge", "Vrf_CUSTOMER_EDGE"}, // hyphen → underscore
+		{"", ""},                               // empty stays empty
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ipvpn, func(t *testing.T) {
+			if got := DeriveVRFNameForIPVPN(tt.ipvpn); got != tt.want {
+				t.Errorf("DeriveVRFNameForIPVPN(%q) = %q, want %q", tt.ipvpn, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseInterfaceName(t *testing.T) {
 	tests := []struct {
 		name       string

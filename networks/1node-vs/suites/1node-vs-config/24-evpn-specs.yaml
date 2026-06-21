@@ -10,17 +10,17 @@ steps:
   # ====================================================================
   - name: create-ipvpn
     action: newtron-cli
-    command: "evpn ipvpn create Vrf_TEST --l3vni 10001 --loopback"
+    command: "evpn ipvpn create TEST --l3vni 10001 --loopback"
 
   - name: verify-ipvpn
     action: newtron-cli
-    command: "evpn ipvpn show Vrf_TEST --loopback"
+    command: "evpn ipvpn show TEST --loopback"
     expect:
       jq: '.l3vni == 10001'
 
   - name: delete-ipvpn
     action: newtron-cli
-    command: "evpn ipvpn delete Vrf_TEST --loopback"
+    command: "evpn ipvpn delete TEST --loopback"
 
   # ====================================================================
   # MAC-VPN spec lifecycle (network-scoped)

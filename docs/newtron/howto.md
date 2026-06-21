@@ -256,7 +256,6 @@ The main spec file defines all reusable network objects. Every object is referen
   "ipvpns": {
     "customer-vpn": {
       "description": "Customer L3VPN",
-      "vrf": "Vrf_customer",
       "l3vni": 10001,
       "route_targets": ["65001:1"]
     }
@@ -1269,11 +1268,14 @@ newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet8 -x
 
 ### 9.4 IP-VPN Binding
 
-Bind a VRF to an IP-VPN definition to configure L3VNI, route targets, and VXLAN tunnel mapping:
+Bind an IP-VPN definition to configure L3VNI, route targets, and VXLAN tunnel
+mapping. The argument is the IP-VPN spec name; the on-device VRF name is derived
+from it as `"Vrf_"+name` (so IP-VPN `CUST1` materializes VRF `Vrf_CUST1`, which
+must already exist via `vrf create`):
 
 ```bash
-newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
-newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 -x
+newtron leaf1 vrf bind-ipvpn CUST1 -x
+newtron leaf1 vrf unbind-ipvpn CUST1 -x
 ```
 
 ### 9.5 BGP Neighbors

@@ -41,14 +41,14 @@ steps:
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/unbind-ipvpn
-    params: {ipvpn: Vrf_IRB}
+    params: {ipvpn: IRB}
 
   - name: unbind-ipvpn-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /nodes/{{device}}/unbind-ipvpn
-    params: {ipvpn: Vrf_IRB}
+    params: {ipvpn: IRB}
 
   - name: verify-vrf-vni-cleared-sw1
     action: newtron

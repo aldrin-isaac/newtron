@@ -24,7 +24,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
-    params: {name: Vrf_mallory}
+    params: {name: Vrf_MALLORY}
     expect_failure: true
 
   # acl.create — denied caller
@@ -56,12 +56,14 @@ steps:
     url: /nodes/switch1/create-vlan?mode=topology
     params: {id: 200}
 
-  # vrf.create — allowed caller (bob: ops, has vrf.create)
+  # vrf.create — allowed caller (bob: ops, has vrf.create).
+  # Vrf_BOB is the VRF that the L4-vrf-families-bob bind-ipvpn step
+  # binds onto (derived from IP-VPN spec name BOB → "Vrf_"+BOB).
   - name: bob-create-vrf-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/create-vrf?mode=topology
-    params: {name: Vrf_bob}
+    params: {name: Vrf_BOB}
 
   # acl.create — allowed caller
   - name: bob-create-acl-allowed

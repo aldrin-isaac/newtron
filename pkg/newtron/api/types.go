@@ -250,9 +250,9 @@ type UnconfigureIRBRequest struct {
 	VlanID int `json:"vlan_id"`
 }
 
-// BindIPVPNRequest is the body for POST .../bind-ipvpn. The IPVPN
-// name IS the SONiC VRF name used on-device — there's no separate
-// vrf field (§13 / §32; sonic-vrf.yang / RCA-044).
+// BindIPVPNRequest is the body for POST .../bind-ipvpn. IPVPN is the
+// IP-VPN spec name; the on-device SONiC VRF name is derived from it as
+// "Vrf_"+name (util.DeriveVRFNameForIPVPN; sonic-vrf.yang / RCA-044).
 type BindIPVPNRequest struct {
 	IPVPN string `json:"ipvpn"`
 }
