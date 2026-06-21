@@ -48,7 +48,7 @@ The exact image path is configured per-platform in `platforms.json` (§3).
 
 ## Quick Start
 
-Deploy a topology, SSH in, and tear down — the minimal path:
+Deploy a network, SSH in, and tear down — the minimal path:
 
 ```bash
 # 1. Build newtlab
@@ -80,7 +80,7 @@ output, and troubleshooting.
 
 ## End-to-End Workflow
 
-This walkthrough deploys the `2node-ngdp-service` topology — two CiscoVS switches
+This walkthrough deploys the `2node-ngdp-service` network — two CiscoVS switches
 with eight virtual hosts — and exercises the full lifecycle: deploy, provision,
 status, data plane test, and teardown.
 
@@ -479,7 +479,7 @@ SONiC subsystems.
 **Command:**
 
 ```bash
-newtlab provision <topology> [flags]
+newtlab provision <network> [flags]
 newtlab provision -S <specs> [flags]
 ```
 
@@ -539,11 +539,11 @@ If no labs are deployed, this prints `no deployed labs`.
 
 ### Detailed Lab Status
 
-With a topology name or `-S` flag, `newtlab status` shows per-node and
+With a network name or `-S` flag, `newtlab status` shows per-node and
 per-link details:
 
 ```bash
-newtlab status <topology>
+newtlab status <network>
 newtlab status -S <specs>
 ```
 
@@ -664,7 +664,7 @@ You can SSH directly using the allocated port:
 
 ```bash
 # Find the port
-newtlab status <topology>
+newtlab status <network>
 
 # Connect
 ssh -p 13006 admin@127.0.0.1
@@ -761,7 +761,7 @@ Destroy tears down the entire lab — kills all VMs, stops all bridge workers,
 cleans up state:
 
 ```bash
-newtlab destroy <topology>
+newtlab destroy <network>
 newtlab destroy              # auto-selects if only one lab deployed
 ```
 
@@ -1083,7 +1083,7 @@ bases by 1000 provides ample room:
 ### Lab Naming
 
 Each lab writes state to `~/.newtlab/labs/<name>/` on the host. Use unique
-topology names to ensure no overlap. Prefix with your username to avoid
+network names to ensure no overlap. Prefix with your username to avoid
 collisions:
 
 ```json
@@ -1093,7 +1093,7 @@ collisions:
 }
 ```
 
-The topology name comes from the `topology.json` filename's parent directory
+The network name comes from the `topology.json` filename's parent directory
 or from the `name` field if present.
 
 ### Port Conflict Detection
@@ -1181,7 +1181,7 @@ ls /etc/config-setup/factory-default-hooks.d/
 
 ```bash
 # Check QEMU log
-cat ~/.newtlab/labs/<topology>/logs/<node>.log
+cat ~/.newtlab/labs/<network>/logs/<node>.log
 ```
 
 Common causes:
@@ -1230,7 +1230,7 @@ Common causes:
 
 ```bash
 # Check bridge worker status
-newtlab status <topology>
+newtlab status <network>
 # Look at the link table — connected/waiting/—
 
 # Check inside the VM
