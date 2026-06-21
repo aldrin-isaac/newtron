@@ -72,13 +72,26 @@ func init() {
 			"ipvpn":  {Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
 			"macvpn": {Field: "service_type", In: []any{"evpn-irb", "evpn-bridged"}},
 		},
-		// Routing is L3-only. bridged / evpn-bridged are pure L2, so the
-		// routing block does not apply — a UI hides it for those types and
-		// omits it from the payload. ApplyService enforces the same rule
-		// server-side (rejects a routing block on an L2 service). Applies
-		// to the four L3-capable types only.
+		// Applicability surface — a field whose predicate is false is NOT
+		// relevant to the selected service_type; a schema-driven UI hides or
+		// disables it and omits it from the payload. ApplyService is the
+		// server-side back-stop for each.
+		//
+		//   ipvpn    — only the overlay-L3 types name an IP-VPN (VRF/L3VNI).
+		//              irb/bridged/routed take no ipvpn; evpn-bridged is L2-only.
+		//   macvpn   — every L2-bearing type: the EVPN L2 overlays and the
+		//              local irb/bridged (which may name a macvpn for the VLAN,
+		//              or take --vlan at apply time). routed/evpn-routed are
+		//              pure L3 — no macvpn.
+		//   vrf_type — selects shared vs per-interface VRF; meaningful only for
+		//              the overlay-L3 types that instantiate a VRF (types.go:
+		//              "vrf_type, overlay types only").
+		//   routing  — L3-only; bridged / evpn-bridged are pure L2.
 		AppliesWhen: map[string]*RequiredWhen{
-			"routing": {Field: "service_type", In: []any{"routed", "irb", "evpn-routed", "evpn-irb"}},
+			"ipvpn":    {Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
+			"macvpn":   {Field: "service_type", In: []any{"evpn-irb", "evpn-bridged", "irb", "bridged"}},
+			"vrf_type": {Field: "service_type", In: []any{"evpn-irb", "evpn-routed"}},
+			"routing":  {Field: "service_type", In: []any{"routed", "irb", "evpn-routed", "evpn-irb"}},
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
@@ -263,6 +276,12 @@ func init() {
 			Create: "/newtron/v1/networks/{netID}/add-qos-queue",
 			Update: "/newtron/v1/networks/{netID}/update-qos-queue",
 			Delete: "/newtron/v1/networks/{netID}/remove-qos-queue",
+		},
+		// weight is a DWRR scheduling parameter; strict-priority queues take
+		// no weight (loader rejects a non-zero weight on a strict queue). A
+		// schema-driven UI hides weight unless type == dwrr.
+		AppliesWhen: map[string]*RequiredWhen{
+			"weight": {Field: "type", In: []any{"dwrr"}},
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
