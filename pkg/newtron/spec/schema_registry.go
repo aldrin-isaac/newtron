@@ -313,6 +313,21 @@ func init() {
 		Label:       "Service Routing",
 		Description: "BGP / static routing parameters embedded on a service.",
 		Sample:      RoutingSpec{},
+		// BGP-only fields are not applicable when protocol=static. A
+		// schema-driven UI hides/disables them and omits them from the
+		// payload; the apply path ignores them server-side regardless
+		// (a static service never reads peer_as / policies / communities /
+		// prefix-lists). protocol and redistribute apply to both protocols
+		// and carry no predicate.
+		AppliesWhen: map[string]*RequiredWhen{
+			"peer_as":            {Field: "protocol", Equals: "bgp"},
+			"import_policy":      {Field: "protocol", Equals: "bgp"},
+			"export_policy":      {Field: "protocol", Equals: "bgp"},
+			"import_community":   {Field: "protocol", Equals: "bgp"},
+			"export_community":   {Field: "protocol", Equals: "bgp"},
+			"import_prefix_list": {Field: "protocol", Equals: "bgp"},
+			"export_prefix_list": {Field: "protocol", Equals: "bgp"},
+		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "RoutePolicySet",

@@ -58,6 +58,25 @@ type FieldMeta struct {
 	// this server-side at request time; the existing 400 on missing
 	// required field is the back-stop. See type RequiredWhen.
 	RequiredWhen *RequiredWhen `json:"required_when,omitempty"`
+
+	// AppliesWhen declares a predicate over sibling field values that —
+	// when false — makes this field NOT APPLICABLE to the current form
+	// shape. UIs hide or disable the field and omit it from the submitted
+	// payload. This is a different axis from RequiredWhen: required_when
+	// answers "must this be filled?", applies_when answers "is this field
+	// relevant at all?". A static service's peer_as isn't "required when
+	// bgp" — it's "not applicable when static", which is stronger (the
+	// field disappears, not just loses its required affordance).
+	//
+	// Applicability gates requiredness: a field whose AppliesWhen is false
+	// is treated as absent, so RequiredWhen is not consulted for it. The
+	// two compose without contradiction.
+	//
+	// Same tree grammar as RequiredWhen (atomic Field+operand / AllOf /
+	// AnyOf), validated at registration time. Newtron does NOT evaluate it
+	// server-side; the apply path naturally ignores fields irrelevant to
+	// the chosen shape (e.g. a static service never reads peer_as).
+	AppliesWhen *RequiredWhen `json:"applies_when,omitempty"`
 }
 
 // RequiredWhen is a conditional-required predicate evaluated against the
@@ -178,6 +197,11 @@ type SchemaRegistration struct {
 	// kind's Sample struct (or as the synthetic IdentifierField). Typos
 	// fail at server start rather than silently in the UI.
 	RequiredWhen map[string]*RequiredWhen
+
+	// AppliesWhen maps a target wire field name to the field-applicability
+	// predicate (see FieldMeta.AppliesWhen). Same tree grammar and the
+	// same init-time validation as RequiredWhen.
+	AppliesWhen map[string]*RequiredWhen
 }
 
 // schemaKind carries a registered kind's reflect.Type plus the static
@@ -192,6 +216,7 @@ type schemaKind struct {
 	parentRef       string
 	paths           SchemaPaths
 	requiredWhen    map[string]*RequiredWhen
+	appliesWhen     map[string]*RequiredWhen
 }
 
 // schemaRegistry holds every spec kind that participates in the schema
@@ -225,7 +250,10 @@ func RegisterSchemaKind(reg SchemaRegistration) {
 		t = t.Elem()
 	}
 	if len(reg.RequiredWhen) > 0 {
-		validateRequiredWhen(reg, t)
+		validateConditionMap(reg.Kind, "RequiredWhen", reg.RequiredWhen, reg.IdentifierField, t)
+	}
+	if len(reg.AppliesWhen) > 0 {
+		validateConditionMap(reg.Kind, "AppliesWhen", reg.AppliesWhen, reg.IdentifierField, t)
 	}
 	schemaRegistry[reg.Kind] = schemaKind{
 		t:               t,
@@ -236,36 +264,37 @@ func RegisterSchemaKind(reg SchemaRegistration) {
 		parentRef:       reg.ParentRef,
 		paths:           reg.Paths,
 		requiredWhen:    reg.RequiredWhen,
+		appliesWhen:     reg.AppliesWhen,
 	}
 }
 
-// validateRequiredWhen walks reg.RequiredWhen at registration time and
-// panics on any reference to a wire field name that doesn't exist on
-// the kind's Sample struct (plus its synthetic IdentifierField if set).
-// Atomic-vs-combinator shape XOR is enforced too. Panics carry the kind
-// name and the bad reference so the operator-facing message points at
-// the broken registration site, not a generic "unknown field" deep in
-// the UI.
+// validateConditionMap walks a conditional-predicate map (RequiredWhen or
+// AppliesWhen — both share the RequiredWhen tree grammar) at registration
+// time and panics on any reference to a wire field name that doesn't exist
+// on the kind's Sample struct (plus its synthetic IdentifierField if set).
+// Atomic-vs-combinator shape XOR is enforced too. The `label` argument
+// ("RequiredWhen" / "AppliesWhen") is woven into the panic so the message
+// points at the broken registration site and the offending key.
 //
-// The validator runs ONCE at init() time when RegisterSchemaKind is
-// called. Per the agreement with newtcon, newtron does not evaluate
-// RequiredWhen at request time — this init pass is the only server-side
-// safety net catching typos before the UI does.
-func validateRequiredWhen(reg SchemaRegistration, t reflect.Type) {
+// Runs ONCE at init() time when RegisterSchemaKind is called. Per the
+// agreement with newtcon, newtron does not evaluate either predicate at
+// request time — this init pass is the only server-side safety net
+// catching typos before the UI does.
+func validateConditionMap(kind, label string, m map[string]*RequiredWhen, identifierField *FieldMeta, t reflect.Type) {
 	known := wireNames(t)
-	if reg.IdentifierField != nil {
-		known[reg.IdentifierField.Name] = struct{}{}
+	if identifierField != nil {
+		known[identifierField.Name] = struct{}{}
 	}
-	for target, cond := range reg.RequiredWhen {
+	for target, cond := range m {
 		if _, ok := known[target]; !ok {
-			panic(schemaRegistrationError(reg.Kind, "RequiredWhen[%q]: target field is not a wire name on %s",
-				target, t.Name()))
+			panic(schemaRegistrationError(kind, "%s[%q]: target field is not a wire name on %s",
+				label, target, t.Name()))
 		}
 		if cond == nil {
-			panic(schemaRegistrationError(reg.Kind, "RequiredWhen[%q]: nil condition", target))
+			panic(schemaRegistrationError(kind, "%s[%q]: nil condition", label, target))
 		}
 		if err := validateRequiredWhenCondition(cond, known); err != "" {
-			panic(schemaRegistrationError(reg.Kind, "RequiredWhen[%q]: %s", target, err))
+			panic(schemaRegistrationError(kind, "%s[%q]: %s", label, target, err))
 		}
 	}
 }
@@ -403,13 +432,14 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 	if sk.identifierField != nil {
 		fields = append([]FieldMeta{*sk.identifierField}, fields...)
 	}
-	// Attach RequiredWhen predicates to their target fields. Validated at
-	// registration time, so every key here matches a real field.
-	if len(sk.requiredWhen) > 0 {
-		for i := range fields {
-			if cond, ok := sk.requiredWhen[fields[i].Name]; ok {
-				fields[i].RequiredWhen = cond
-			}
+	// Attach RequiredWhen / AppliesWhen predicates to their target fields.
+	// Validated at registration time, so every key here matches a real field.
+	for i := range fields {
+		if cond, ok := sk.requiredWhen[fields[i].Name]; ok {
+			fields[i].RequiredWhen = cond
+		}
+		if cond, ok := sk.appliesWhen[fields[i].Name]; ok {
+			fields[i].AppliesWhen = cond
 		}
 	}
 	meta := SchemaMeta{
