@@ -135,6 +135,39 @@ func TestAuditEvents_ReturnsPage(t *testing.T) {
 	}
 }
 
+// TestAuditEvents_ExposesVerificationSource pins that the public wire shape
+// carries verification_source so a reviewer can tell a verified identity from a
+// self-attested one — and, crucially, an anonymous (permissive-mode) request
+// from a missing-data defect.
+func TestAuditEvents_ExposesVerificationSource(t *testing.T) {
+	logPath := writeAuditLog(t, []audit.Event{
+		{User: "alice", Operation: "op1", Success: true, VerificationSource: audit.VerificationPAM},
+		{User: "", Operation: "op2", Success: true, VerificationSource: audit.VerificationAnonymous},
+	})
+	dir := scaffoldAuditNetwork(t)
+	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/events?order=asc")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(env.Data.Events) != 2 {
+		t.Fatalf("events: got %d, want 2", len(env.Data.Events))
+	}
+	if got := env.Data.Events[0]["verification_source"]; got != "pam" {
+		t.Errorf("event 0 verification_source = %v, want pam", got)
+	}
+	if got := env.Data.Events[1]["verification_source"]; got != "anonymous" {
+		t.Errorf("event 1 verification_source = %v, want anonymous (permissive-mode record)", got)
+	}
+}
+
 // TestAuditEvent_Detail covers the per-event detail endpoint
 // (GET …/audit/events/{id}): the list omits the request body (lean), the
 // detail endpoint serves it, and an unknown id is a 404.

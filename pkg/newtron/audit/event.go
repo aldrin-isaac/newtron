@@ -17,9 +17,22 @@ type VerificationSource string
 
 const (
 	// VerificationUnknown is the zero value. Set on synthetic
-	// or test events where no caller was attached. A reviewer
-	// reading this in production data is a bug.
+	// or test events where the audit middleware never ran, so no
+	// caller context was ever attached. A reviewer reading this in
+	// production data is a bug — a real request that simply carried
+	// no identity is VerificationAnonymous, not this.
 	VerificationUnknown VerificationSource = ""
+
+	// VerificationAnonymous means a real request reached the handler
+	// carrying no caller identity, and the server accepted it — it was
+	// operating in permissive mode (no identity source required for
+	// this request). This is an honest, expected record on a server
+	// with no auth layer wired, distinct from VerificationUnknown
+	// (which is a bug). Transports that require identity (mTLS with a
+	// client CA, PAM) reject before the handler, so reaching audit
+	// emission with no caller means the request was genuinely
+	// anonymous-by-policy. The User field is empty.
+	VerificationAnonymous VerificationSource = "anonymous"
 
 	// VerificationUnixPeerCreds means the User came from
 	// SO_PEERCRED on a Unix-domain socket listener — the kernel
