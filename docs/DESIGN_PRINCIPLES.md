@@ -1705,6 +1705,26 @@ VRF interfaces carry their own intent (§6, §17), so the container's
 intent stays simple — just the container's own properties. Members
 are reconstructed from their own intents, not from the container's.
 
+**Orphaned intents — when a referenced definition is gone.**
+Reconstruction replays intent against *current* definitions, so an intent can
+reference a definition (a spec / policy / template) that was removed or renamed
+after it was applied — an orphaned intent. The tension between "the intent
+record is authority" and "reconstruct from current definitions" resolves in
+favor of the definitions: an orphaned intent is state with no backing
+definition — reconcilable drift, not a fatal inconsistency. Two rules follow.
+**Reconstruction tolerates it** — a replay step that fails *solely* because its
+definition no longer resolves is skipped, not fatal, so the managed object
+stays readable; one orphaned record must not break every read of it. The skip
+is scoped to definition-resolution failures only — any other replay error still
+aborts, so reconstruction never silently swallows a real fault. **The orphan
+surfaces as drift, and is deletable** — skipping leaves its state out of the
+reconstructed expectation, so it shows as drift against actual state; removing
+it needs no definition, because the reverse operation is self-sufficient from
+the intent record (§15). A record actuated on the device but missing from the
+definitions should be deletable: reconcile removes its state and the stale
+record. Deleting an orphaned intent is the correct reconcile outcome, not a
+refusal to read.
+
 ---
 
 ## 21. Reconstruct, Don't Record

@@ -52,7 +52,10 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Get service definition via parent reference
 	svc, err := i.Node().GetService(serviceName)
 	if err != nil {
-		return nil, fmt.Errorf("service '%s' not found", serviceName)
+		// Propagate the typed spec.NotFoundError (message is already
+		// "service '<name>' not found") so reconstruction can classify an
+		// orphaned intent — see node.replaySteps.
+		return nil, err
 	}
 
 	// Interface must not be a LAG member
@@ -73,14 +76,16 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		var err error
 		ipvpnDef, err = i.Node().GetIPVPN(svc.IPVPN)
 		if err != nil {
-			return nil, fmt.Errorf("ipvpn '%s' not found", svc.IPVPN)
+			// Typed spec.NotFoundError propagates so reconstruction can skip
+			// an intent whose IP-VPN spec was removed/renamed (orphaned).
+			return nil, err
 		}
 	}
 	if svc.MACVPN != "" {
 		var err error
 		macvpnDef, err = i.Node().GetMACVPN(svc.MACVPN)
 		if err != nil {
-			return nil, fmt.Errorf("macvpn '%s' not found", svc.MACVPN)
+			return nil, err
 		}
 	}
 
@@ -182,25 +187,27 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
-	// Filter preconditions
+	// Filter preconditions. The %w preserves the typed spec.NotFoundError so
+	// reconstruction can skip a service whose referenced filter was removed.
 	if svc.IngressFilter != "" {
 		if _, err := i.Node().GetFilter(svc.IngressFilter); err != nil {
-			return nil, fmt.Errorf("service '%s' references ingress filter '%s' which was not found — define it via 'newtron filter create %s' or in network.json filters section",
-				serviceName, svc.IngressFilter, svc.IngressFilter)
+			return nil, fmt.Errorf("service '%s' references ingress filter '%s' which was not found — define it via 'newtron filter create %s' or in network.json filters section: %w",
+				serviceName, svc.IngressFilter, svc.IngressFilter, err)
 		}
 	}
 	if svc.EgressFilter != "" {
 		if _, err := i.Node().GetFilter(svc.EgressFilter); err != nil {
-			return nil, fmt.Errorf("service '%s' references egress filter '%s' which was not found — define it via 'newtron filter create %s' or in network.json filters section",
-				serviceName, svc.EgressFilter, svc.EgressFilter)
+			return nil, fmt.Errorf("service '%s' references egress filter '%s' which was not found — define it via 'newtron filter create %s' or in network.json filters section: %w",
+				serviceName, svc.EgressFilter, svc.EgressFilter, err)
 		}
 	}
 
-	// QoS validation
+	// QoS validation. %w preserves the typed spec.NotFoundError for orphan
+	// classification during reconstruction.
 	if svc.QoSPolicy != "" {
 		if _, err := i.Node().GetQoSPolicy(svc.QoSPolicy); err != nil {
-			return nil, fmt.Errorf("service '%s' references QoS policy '%s' which was not found — define it in network.json qos_policies section",
-				serviceName, svc.QoSPolicy)
+			return nil, fmt.Errorf("service '%s' references QoS policy '%s' which was not found — define it in network.json qos_policies section: %w",
+				serviceName, svc.QoSPolicy, err)
 		}
 	}
 

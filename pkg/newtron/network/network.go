@@ -251,7 +251,10 @@ func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, err
 	v, ok := m[name]
 	if !ok {
 		var zero V
-		return zero, fmt.Errorf("%s '%s' not found", kind, name)
+		// Typed so reconstruction can classify an intent that references a
+		// removed/renamed spec (an orphaned intent) — see spec.NotFoundError.
+		// The message is identical to the previous fmt.Errorf form.
+		return zero, &spec.NotFoundError{Kind: kind, Name: name}
 	}
 	return v, nil
 }

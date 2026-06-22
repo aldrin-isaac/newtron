@@ -155,6 +155,64 @@ func newTestAbstract() *Node {
 	return n
 }
 
+// TestReplaySteps_SkipsOrphanedIntent proves the reconstruction contract: a
+// committed intent whose spec was removed/renamed (an orphaned intent) is
+// SKIPPED so the device stays readable and its config surfaces as drift — while
+// any non-spec replay failure still aborts (reconstruction does not swallow
+// real errors).
+func TestReplaySteps_SkipsOrphanedIntent(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("orphaned spec reference is skipped, not fatal", func(t *testing.T) {
+		n := newTestAbstract()
+		// A committed bind-ipvpn whose IP-VPN spec ("GONE") is no longer loaded.
+		steps := []spec.TopologyStep{
+			{URL: "/bind-ipvpn", Params: map[string]any{"ipvpn": "GONE"}},
+		}
+		if err := n.replaySteps(ctx, steps); err != nil {
+			t.Fatalf("replaySteps should skip the orphan, got error: %v", err)
+		}
+		// Skipped → no projection config for it → it shows as drift, not a 503.
+		if len(n.ConfigDB().VRF) != 0 {
+			t.Errorf("orphaned bind-ipvpn must not produce VRF config, got %v", n.ConfigDB().VRF)
+		}
+		if n.GetIntent("ipvpn|GONE") != nil {
+			t.Error("orphaned intent must not be re-materialized in the projection")
+		}
+	})
+
+	t.Run("orphan reached through apply-service is skipped", func(t *testing.T) {
+		n := newTestAbstract()
+		// A still-present service that references an IP-VPN which has since
+		// been removed. apply-service resolves the (missing) IP-VPN and the
+		// typed spec.NotFoundError must survive the wrapping chain
+		// (ApplyService → replayInterfaceStep → ReplayStep) to replaySteps.
+		n.SpecProvider.(*testSpecProvider).services["OVERLAY"] = &spec.ServiceSpec{
+			ServiceType: spec.ServiceTypeEVPNIRB,
+			IPVPN:       "GONE",
+			MACVPN:      "GONE_L2",
+		}
+		steps := []spec.TopologyStep{
+			{URL: "/interfaces/Ethernet0/apply-service", Params: map[string]any{"service": "OVERLAY"}},
+		}
+		if err := n.replaySteps(ctx, steps); err != nil {
+			t.Fatalf("apply-service orphan should be skipped, got error: %v", err)
+		}
+	})
+
+	t.Run("non-spec replay error still aborts", func(t *testing.T) {
+		n := newTestAbstract()
+		// Malformed bind-ipvpn (missing the required 'ipvpn' param) is a real
+		// error — not an orphaned spec reference — and must NOT be swallowed.
+		steps := []spec.TopologyStep{
+			{URL: "/bind-ipvpn", Params: map[string]any{}},
+		}
+		if err := n.replaySteps(ctx, steps); err == nil {
+			t.Fatal("replaySteps must return a non-spec replay error, got nil")
+		}
+	})
+}
+
 func TestReplayStepAddBGPEVPNPeer(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
