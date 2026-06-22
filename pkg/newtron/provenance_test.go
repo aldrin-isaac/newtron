@@ -41,7 +41,13 @@ func TestDeriveSpecRef(t *testing.T) {
 			wantKind: "", wantName: "",
 		},
 		{
-			name:     "deferred kind: create-acl returns empty rather than a misleading name",
+			name:     "service-derived create-acl carries the source filter name",
+			url:      "/create-acl",
+			params:   map[string]any{"name": "acl_a1b2c3d4", "filter": "mgmt-in"},
+			wantKind: "filter", wantName: "mgmt-in",
+		},
+		{
+			name:     "standalone/raw create-acl (no source filter) → empty, not a misleading name",
 			url:      "/create-acl",
 			params:   map[string]any{"name": "mgmt-in"},
 			wantKind: "", wantName: "",

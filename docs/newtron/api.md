@@ -2417,7 +2417,7 @@ shows parent-child relationships between intent records.
 
 Each step carries server-derived **`spec_kind`** and **`spec_name`** when it is
 the instantiation of a named network spec — a service applied, an
-IP-VPN/MAC-VPN bound, or a QoS policy bound:
+IP-VPN/MAC-VPN bound, a QoS policy bound, or a service-derived ACL:
 
 | `spec_kind` | `spec_name` | from |
 |---|---|---|
@@ -2425,10 +2425,14 @@ IP-VPN/MAC-VPN bound, or a QoS policy bound:
 | `ipvpn` | the IP-VPN name (e.g. `IRB`) | `bind-ipvpn` |
 | `macvpn` | the MAC-VPN name | `bind-macvpn` |
 | `qos` | the QoS policy name | `bind-qos` |
+| `filter` | the source filter name (e.g. `mgmt-in`) | service-derived `create-acl` |
 
-Both are omitted for primitives (device/VLAN/VRF) and for steps whose source
-spec is not cleanly recoverable (filter→ACL, route-policy, prefix-list use
-content-hashed / service-embedded naming — omitted rather than guessed). They
+Both are omitted for primitives (device/VLAN/VRF) and for a standalone/raw
+`create-acl` (no source filter spec). A service-derived ACL is content-hash-named
+(§24/§25), so newtron records the source filter name on the step rather than
+reversing the hash. Route-policy and prefix-list never appear as standalone
+steps — they are sub-resources of a service application, so the enclosing
+`service` step already carries their provenance. The fields
 are **server-derived at serve time** (re-computed each request, never stale)
 and are **not** persisted to `topology.json`. A client reads them to map intent
 → spec — e.g. "where is service `transit` applied across the topology?" —

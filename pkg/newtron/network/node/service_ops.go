@@ -589,6 +589,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 					sonic.FieldPorts:       i.name,
 					sonic.FieldDescription: desc,
 					sonic.FieldRules:       strings.Join(ruleNames, ","),
+					sonic.FieldFilter:      svc.IngressFilter,
 				}, []string{"device"}); err != nil {
 					return nil, err
 				}
@@ -615,6 +616,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 					sonic.FieldPorts:       i.name,
 					sonic.FieldDescription: desc,
 					sonic.FieldRules:       strings.Join(ruleNames, ","),
+					sonic.FieldFilter:      svc.EgressFilter,
 				}, []string{"device"}); err != nil {
 					return nil, err
 				}

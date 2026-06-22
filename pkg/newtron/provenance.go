@@ -14,6 +14,7 @@ const (
 	SpecKindIPVPN   = "ipvpn"
 	SpecKindMACVPN  = "macvpn"
 	SpecKindQoS     = "qos"
+	SpecKindFilter  = "filter"
 )
 
 // DeriveSpecRef maps an intent/topology step to the named network spec it was
@@ -32,10 +33,14 @@ const (
 // name lives under the operation's step-param key ("service", "ipvpn",
 // "macvpn", "policy").
 //
-// Scope: the unambiguous spec→intent bindings (service, IP-VPN, MAC-VPN, QoS).
-// Filter→ACL, route-policy, and prefix-list use content-hashed / service-
-// embedded naming where the source spec name is not cleanly recoverable from
-// the step; those return ("", "") for now rather than emit a misleading name.
+// Scope: service, IP-VPN, MAC-VPN, QoS — and filter, for service-derived ACLs.
+// A service-derived ACL is content-hash-named (§24/§25), so the name can't be
+// reversed to its filter; instead the generator records the source filter name
+// in sonic.FieldFilter, which is read here. A standalone/raw create-acl has no
+// source filter and returns ("", ""). Route-policy and prefix-list never appear
+// as standalone steps (they are sub-resources of a service application, tracked
+// on the service intent), so there is no step to attribute them to — the
+// enclosing service step already carries spec_kind=service.
 func DeriveSpecRef(url string, params map[string]any) (specKind, specName string) {
 	op := url
 	if i := strings.LastIndex(op, "/"); i >= 0 {
@@ -52,6 +57,11 @@ func DeriveSpecRef(url string, params map[string]any) (specKind, specName string
 		kind, paramKey = SpecKindMACVPN, "macvpn"
 	case sonic.OpBindQoS:
 		kind, paramKey = SpecKindQoS, "policy"
+	case sonic.OpCreateACL:
+		// Only service-derived ACLs carry the source filter name (sonic.FieldFilter);
+		// a standalone/raw create-acl has no filter param and falls through to
+		// ("", "") via the name-absent guard below.
+		kind, paramKey = SpecKindFilter, "filter"
 	default:
 		return "", ""
 	}
