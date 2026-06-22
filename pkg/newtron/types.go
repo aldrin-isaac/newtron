@@ -1152,6 +1152,29 @@ type TopologyStep struct {
 	SpecName string         `json:"spec_name,omitempty"`
 }
 
+// TopologyView is the served shape of GET /topology. It mirrors the on-disk
+// spec.TopologySpecFile JSON exactly, except its steps are the public
+// TopologyStep — carrying server-derived spec_kind/spec_name (DeriveSpecRef) so
+// a client gets spec provenance for a whole network in one call, before any lab
+// is deployed (it's a spec-file read). The derived fields are output-only and
+// re-computed each serve; the on-disk spec.TopologySpecFile is untouched.
+// Links and NewtLab pass through as the spec types — same as the prior raw
+// served shape; only steps are enriched.
+type TopologyView struct {
+	Version     string                         `json:"version"`
+	Platform    string                         `json:"platform,omitempty"`
+	Description string                         `json:"description,omitempty"`
+	Devices     map[string]*TopologyDeviceView `json:"devices"`
+	Links       []*spec.TopologyLink           `json:"links,omitempty"`
+	NewtLab     *spec.NewtLabConfig            `json:"newtlab,omitempty"`
+}
+
+// TopologyDeviceView mirrors spec.TopologyDevice with provenance-bearing steps.
+type TopologyDeviceView struct {
+	Steps []TopologyStep                `json:"steps,omitempty"`
+	Ports map[string]map[string]string `json:"ports,omitempty"`
+}
+
 // ============================================================================
 // Host Types
 // ============================================================================
