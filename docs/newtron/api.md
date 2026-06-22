@@ -987,7 +987,12 @@ fields the middleware captures from the live request/response:
 - `changes` — the CONFIG_DB / intent rows the operation added, removed, or
   updated (the same `sonic.ConfigChange` shape device writes return). Empty
   for spec-authoring and read/no-op operations, which produce no device
-  change. Carried on both the list and the detail endpoint.
+  change. Carried on both the list and the detail endpoint. Each change
+  carries `fields` (the after-state) and, for a CONFIG_DB row, `from` (the
+  before-state — the values it overwrote or deleted), making the row reversible
+  without re-reading the device. `from` is omitted on a pure add and on
+  newtron's own `NEWTRON_INTENT` / `NEWTRON_HISTORY` substrate rows (those are
+  reversed by replaying the inverse operation, not by raw row writes).
 - `request_body` — the JSON the caller submitted, with secret-bearing fields
   (`ssh_pass`, `password`, `secret`, `token`, …) redacted to `***redacted***`.
   A `${secret:KEY}` reference is preserved — it is a pointer, not a secret.
@@ -3651,7 +3656,7 @@ These types are returned by all device write operations (S8, S13).
 | Field | Type | Description |
 |-------|------|-------------|
 | `preview` | string (optional) | Human-readable diff preview. Present only on dry-run; absent (not empty string) otherwise. |
-| `changes` | ConfigChange[] (optional) | Typed ChangeSet entries — every CONFIG_DB add/modify/delete in this operation, in the same `sonic.ConfigChange` shape newtron uses internally. §46 canonical substrate. Absent when `change_count` is 0. |
+| `changes` | ConfigChange[] (optional) | Typed ChangeSet entries — every CONFIG_DB add/modify/delete in this operation, in the same `sonic.ConfigChange` shape newtron uses internally. Each entry carries `fields` (the after-state) and, for a CONFIG_DB row, `from` (the before-state it overwrote or deleted — #236); `from` is omitted on a pure add and on `NEWTRON_INTENT`/`NEWTRON_HISTORY` rows. §46 canonical substrate. Absent when `change_count` is 0. |
 | `device_ops` | DeviceOp[] (optional) | Per-operation outcomes recorded during Apply and Verify — one entry per Redis HSET/DEL and one verify_read entry per change. Operationalizes operator-philosophy invariant #1 (no black boxes) for the apply pipeline. Absent in loopback mode (no device transport). §11 + §46. See DeviceOp below. |
 | `change_count` | integer | Number of CONFIG_DB changes |
 | `applied` | boolean | Whether changes were committed to Redis |
@@ -4254,7 +4259,8 @@ projection of `sonic.ConfigChange`.
 | `table` | string | CONFIG_DB table name. |
 | `key` | string | Row key within the table. |
 | `type` | string | `add`, `modify`, or `delete`. |
-| `fields` | map[string]string (optional) | Field values for an `add`/`modify`; absent for a `delete`. |
+| `fields` | map[string]string (optional) | The **after** state — field values for an `add`/`modify`; absent for a `delete`. |
+| `from` | map[string]string (optional) | The **before** state — field values this change overwrote or deleted, for undo composition (#236). Omitted on a pure `add` (nothing was there) and on `NEWTRON_INTENT`/`NEWTRON_HISTORY` rows (newtron's substrate, reversed by replaying the inverse operation, not raw writes). For a `delete`, `from` holds the deleted fields; for a `modify`, the prior fields. |
 
 ---
 

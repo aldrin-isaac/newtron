@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/user"
 	"sort"
@@ -84,6 +85,14 @@ type Node struct {
 	// the last Save or construction. Set by writeIntent/deleteIntent,
 	// cleared by ClearUnsavedIntents after Save.
 	unsavedIntents bool
+
+	// reconstructing is true while the projection is being rebuilt by
+	// replaying committed intents (replaySteps). It suppresses the per-render
+	// `from`-state capture (issue #236): replay re-applies already-committed
+	// operations, so before/after has no meaning there, and the snapshot would
+	// tax the hot RebuildProjection path. Only a live operator mutation
+	// (reconstructing == false) records `from`.
+	reconstructing bool
 }
 
 // New creates a new Node with the given SpecProvider and profile.
@@ -264,6 +273,12 @@ func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[str
 // this helper — it replays *new, hypothetical* operations, where a missing
 // spec is a genuine error the operator must see.
 func (n *Node) replaySteps(ctx context.Context, steps []spec.TopologyStep) error {
+	// Replay re-applies already-committed operations; the `from`/`to` capture
+	// in render() is for live operator mutations only (#236). Suppress it here
+	// and restore the prior value (defensive against nested rebuilds).
+	wasReconstructing := n.reconstructing
+	n.reconstructing = true
+	defer func() { n.reconstructing = wasReconstructing }()
 	for _, step := range steps {
 		err := ReplayStep(ctx, n, step)
 		if err == nil {
@@ -802,14 +817,67 @@ func (n *Node) render(cs *ChangeSet) error {
 	if err := cs.validate(); err != nil {
 		return err
 	}
-	for _, c := range cs.Changes {
+	// Capture the prior field values each change overwrites or deletes — the
+	// `from` state recorded on the change for audit/undo (#236). Only for live
+	// operator mutations: during reconstruction (replaySteps) before/after has
+	// no meaning and the per-render snapshot would tax the hot rebuild path.
+	// One snapshot up front, maintained incrementally so a delete-then-re-add
+	// of the same key within one ChangeSet (e.g. RefreshService) records each
+	// step's true prior state rather than the original twice.
+	var prior sonic.RawConfigDB
+	if !n.reconstructing {
+		prior = n.configDB.ExportRaw()
+	}
+	for i := range cs.Changes {
+		c := &cs.Changes[i]
+		capture := prior != nil && fromUndoable(c.Table)
+		if capture {
+			if from := prior[c.Table][c.Key]; len(from) > 0 {
+				c.From = maps.Clone(from)
+			}
+		}
 		if c.Type == sonic.ChangeTypeDelete {
 			n.configDB.DeleteEntry(c.Table, c.Key)
+			if capture && prior[c.Table] != nil {
+				delete(prior[c.Table], c.Key)
+			}
 		} else {
 			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
+			if capture {
+				if prior[c.Table] == nil {
+					prior[c.Table] = map[string]map[string]string{}
+				}
+				// Mirror HSET merge semantics so a later same-key change in this
+				// set sees the merged state as its `from`.
+				merged := maps.Clone(prior[c.Table][c.Key])
+				if merged == nil {
+					merged = map[string]string{}
+				}
+				for k, v := range c.Fields {
+					merged[k] = v
+				}
+				prior[c.Table][c.Key] = merged
+			}
 		}
 	}
 	return nil
+}
+
+// fromUndoable reports whether a change to this table should record its prior
+// (`from`) state for audit/undo (#236). CONFIG_DB tables qualify: render()
+// applies them through the projection, so the up-front snapshot holds their
+// true prior. NEWTRON_INTENT / NEWTRON_HISTORY do not: they are newtron's
+// decision/history substrate, applied via renderIntent (outside render's
+// snapshot window, so a `from` captured here would be misleading) and reversed
+// by replaying the inverse operation — never by raw row writes (§15, intent
+// model). Their after-state still rides along as the change's fields.
+func fromUndoable(table string) bool {
+	switch table {
+	case "NEWTRON_INTENT", "NEWTRON_HISTORY":
+		return false
+	default:
+		return true
+	}
 }
 
 // ============================================================================

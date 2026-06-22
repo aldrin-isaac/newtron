@@ -936,12 +936,16 @@ type AuditEvent struct {
 	SessionID   string      `json:"session_id,omitempty"`
 }
 
-// AuditChange is a single CONFIG_DB change within an audit event.
+// AuditChange is a single CONFIG_DB change within an audit event. Fields is the
+// after-state (the values written; empty on a delete); From is the before-state
+// (the values overwritten or deleted; empty on an add) — together they make the
+// change reversible without re-reading the device (issue #236).
 type AuditChange struct {
 	Table  string            `json:"table"`
 	Key    string            `json:"key"`
 	Type   string            `json:"type"`
 	Fields map[string]string `json:"fields,omitempty"`
+	From   map[string]string `json:"from,omitempty"`
 }
 
 // AuditEventPage is the wire shape returned by GET /audit/events

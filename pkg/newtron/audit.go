@@ -80,6 +80,7 @@ func toAuditEvent(e *audit.Event, withBody bool) AuditEvent {
 			Key:    c.Key,
 			Type:   string(c.Type),
 			Fields: c.Fields,
+			From:   c.From,
 		})
 	}
 	if withBody {

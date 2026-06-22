@@ -26,12 +26,22 @@ type Entry struct {
 	Fields map[string]string
 }
 
-// ConfigChange represents a single configuration change
+// ConfigChange represents a single configuration change.
+//
+// Fields is the AFTER state — the field values written by an add/modify (empty
+// for a delete). From is the BEFORE state — the field values the change
+// overwrote or deleted, captured from the projection at render time (issue
+// #236). Together they make a change self-describing for audit and undo
+// composition: the inverse of an add is to delete the key; the inverse of a
+// modify or delete is to set the key back to From. From is empty on an add
+// (nothing was there) and on any change against a previously-absent key, and is
+// omitted from the wire in those cases.
 type ConfigChange struct {
 	Table  string            `json:"table"`
 	Key    string            `json:"key"`
 	Type   ChangeType        `json:"type"`
 	Fields map[string]string `json:"fields,omitempty"`
+	From   map[string]string `json:"from,omitempty"`
 }
 
 // ChangeType represents the type of configuration change
