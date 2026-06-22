@@ -81,9 +81,14 @@ func (n *Node) Tree() *TopologySnapshot {
 	dev := n.internal.Tree()
 	snap := &TopologySnapshot{}
 	for _, s := range dev.Steps {
+		// Derive spec provenance at serve time so clients don't re-implement
+		// the op→spec mapping. Empty for primitives; never persisted.
+		kind, name := DeriveSpecRef(s.URL, s.Params)
 		snap.Steps = append(snap.Steps, TopologyStep{
-			URL:    s.URL,
-			Params: s.Params,
+			URL:      s.URL,
+			Params:   s.Params,
+			SpecKind: kind,
+			SpecName: name,
 		})
 	}
 	return snap
