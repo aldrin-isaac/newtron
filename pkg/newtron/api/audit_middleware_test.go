@@ -160,7 +160,13 @@ func TestAuditMiddleware_CapturesBodyAndChanges(t *testing.T) {
 			ChangeCount: 1,
 			Applied:     true,
 			Changes: []sonic.ConfigChange{
-				{Table: "VLAN", Key: "Vlan100", Type: sonic.ChangeTypeAdd},
+				{
+					Table:  "VLAN",
+					Key:    "Vlan100",
+					Type:   sonic.ChangeTypeModify,
+					Fields: map[string]string{"description": "new"},
+					From:   map[string]string{"description": "old"},
+				},
 			},
 		})
 	}))
@@ -183,6 +189,13 @@ func TestAuditMiddleware_CapturesBodyAndChanges(t *testing.T) {
 	evt := cap.events[0]
 	if len(evt.Changes) != 1 || evt.Changes[0].Key != "Vlan100" {
 		t.Errorf("evt.Changes = %+v; want one VLAN/Vlan100 change", evt.Changes)
+	}
+	// from/to (#236) survive the response→audit capture path.
+	if evt.Changes[0].From["description"] != "old" {
+		t.Errorf("evt.Changes[0].From = %v; want the prior {description:old}", evt.Changes[0].From)
+	}
+	if evt.Changes[0].Fields["description"] != "new" {
+		t.Errorf("evt.Changes[0].Fields = %v; want the new {description:new}", evt.Changes[0].Fields)
 	}
 	// Request body recorded and the secret redacted.
 	var recorded map[string]any
