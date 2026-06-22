@@ -918,6 +918,13 @@ type AuditEvent struct {
 	ID          string      `json:"id"`
 	Timestamp   string      `json:"timestamp"`
 	User        string      `json:"user"`
+	// VerificationSource names how User was established: a verified source
+	// (pam, session_key, service_cert_cn, unix_peer_creds), the unverified
+	// self_attested_header, or anonymous — the request carried no identity and
+	// the server accepted it in permissive mode. A reviewer reads User together
+	// with this: an empty User with "anonymous" is an expected permissive-mode
+	// record, not a missing-data defect.
+	VerificationSource string `json:"verification_source,omitempty"`
 	Device      string      `json:"device"`
 	Operation   string      `json:"operation"`
 	Service     string      `json:"service,omitempty"`

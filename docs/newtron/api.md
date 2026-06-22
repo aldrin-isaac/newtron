@@ -4234,7 +4234,8 @@ Returned by `GET .../audit/events` (in `AuditEventPage.events`, lean) and
 |-------|------|-------------|
 | `id` | string | Hash-chain event ID (L6). Use as `{eventID}` on the detail endpoint. |
 | `timestamp` | RFC3339 string | When the event was recorded. |
-| `user` | string | Caller identity (verified or self-attested — see `verification_source` on the stored record). |
+| `user` | string | Caller identity. Empty when the request was anonymous (see `verification_source`). |
+| `verification_source` | string (optional) | How `user` was established: `pam`, `session_key`, `service_cert_cn`, `unix_peer_creds` (verified); `self_attested_header` (unverified); or `anonymous` (no identity presented — the server accepted the request in permissive mode). An empty `user` paired with `anonymous` is an expected permissive-mode record, **not** missing data. Absent only on synthetic/pre-feature entries. |
 | `device` | string | Target device, when the operation was device-scoped. |
 | `operation` | string | HTTP method + path of the mutation. |
 | `service` | string (optional) | Service name, when the operation was service-scoped. |

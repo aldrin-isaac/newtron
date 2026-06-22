@@ -119,7 +119,13 @@ func (w *auditResponseWriter) Write(b []byte) (int, error) {
 func emitMutationEvent(r *http.Request, status int, start time.Time, reqBody, respBody []byte) {
 	caller := audit.CallerFromContext(r.Context())
 	username := ""
-	source := audit.VerificationUnknown
+	// No caller resolved means the request was processed anonymously: the
+	// server required no identity for it (permissive mode). Record that
+	// explicitly rather than leaving the zero value, which denotes a synthetic
+	// event where the middleware never ran. Required-identity transports (mTLS
+	// client CA, PAM) reject before this handler, so a real mutation reaching
+	// here with no caller is anonymous-by-policy, not an anomaly.
+	source := audit.VerificationAnonymous
 	if caller != nil {
 		username = caller.Username
 		source = caller.Source

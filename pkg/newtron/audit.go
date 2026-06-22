@@ -59,10 +59,11 @@ func QueryAuditLog(path string, filter AuditFilter) ([]AuditEvent, error) {
 // operation produced and the list's highest-value content.
 func toAuditEvent(e *audit.Event, withBody bool) AuditEvent {
 	ae := AuditEvent{
-		ID:          e.ID,
-		Timestamp:   e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-		User:        e.User,
-		Device:      e.Device,
+		ID:                 e.ID,
+		Timestamp:          e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+		User:               e.User,
+		VerificationSource: string(e.VerificationSource),
+		Device:             e.Device,
 		Operation:   e.Operation,
 		Service:     e.Service,
 		Interface:   e.Interface,

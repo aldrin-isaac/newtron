@@ -76,6 +76,15 @@ func TestAuditMiddleware_EmitsOnMutationRequests(t *testing.T) {
 	if !evt.Success {
 		t.Errorf("Success = false, want true")
 	}
+	// No caller resolved → recorded as an explicit anonymous (permissive-mode)
+	// request, not the synthetic zero value.
+	if evt.VerificationSource != audit.VerificationAnonymous {
+		t.Errorf("VerificationSource = %q, want %q (no identity = anonymous)",
+			evt.VerificationSource, audit.VerificationAnonymous)
+	}
+	if evt.User != "" {
+		t.Errorf("User = %q, want empty for an anonymous request", evt.User)
+	}
 }
 
 // TestAuditMiddleware_SkipsReads pins that GET requests do not
