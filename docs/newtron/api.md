@@ -971,14 +971,28 @@ _Lands newtron#150 (initial) + newtron#187 (gate)._
 
 ### Audit log
 
-Two read endpoints over the audit log file the operator configured
-via `--audit-log` on `cmd/newt-server`. Both are gated by
+Three read endpoints over the audit log file the operator configured
+via `--audit-log` on `cmd/newt-server`. All are gated by
 `audit.read` under the same engage-when-configured pattern as
 `auth.read` — no entry in the grant table means ungated; the first
 entry engages the gate. `audit.read` is filed under newtron#196.
 
-When `--audit-log` is unset on `cmd/newt-server`, both endpoints
+When `--audit-log` is unset on `cmd/newt-server`, all three endpoints
 return 404 — there is no audit log to inspect.
+
+**Envelope vs. content.** An audit event records both *that* something
+happened (who/when/verb/outcome) and *what* it did. The content is two
+fields the middleware captures from the live request/response:
+
+- `changes` — the CONFIG_DB / intent rows the operation added, removed, or
+  updated (the same `sonic.ConfigChange` shape device writes return). Empty
+  for spec-authoring and read/no-op operations, which produce no device
+  change. Carried on both the list and the detail endpoint.
+- `request_body` — the JSON the caller submitted, with secret-bearing fields
+  (`ssh_pass`, `password`, `secret`, `token`, …) redacted to `***redacted***`.
+  A `${secret:KEY}` reference is preserved — it is a pointer, not a secret.
+  Carried **only by the per-event detail endpoint** (below); the paged list
+  omits it so list responses stay lean.
 
 #### GET /newtron/v1/networks/{netID}/audit/events
 
@@ -1017,9 +1031,10 @@ with an actionable phrase identifying the field.
 | `total` | integer | Total number of events matching the filter without paging — the client uses this to render "N of M" and decide whether to fetch another page. |
 | `next_offset` | integer or null | When non-null, calling the endpoint again with `?offset=<next_offset>` returns the next page. When null, the current page exhausted the filter — no more pages. |
 
-The `AuditEvent` shape is documented in §13 Types Reference (lives
-unchanged from the existing CLI-side `bin/newtron audit list`
-output — same fields, same JSON tags).
+The `AuditEvent` shape is documented in §13 Types Reference. List
+rows omit `request_body` (it is served only by the detail endpoint
+below); `changes` is present when the operation produced a device
+change.
 
 **Errors:** 404 when `{netID}` is not registered or when
 `--audit-log` is unset on the server; 400 on a malformed filter
@@ -1027,6 +1042,27 @@ parameter; 403 when the `audit.read` gate is engaged and the
 caller has no matching grant.
 
 _Lands newtron#196._
+
+#### GET /newtron/v1/networks/{netID}/audit/events/{eventID}
+
+Per-event detail view. `{eventID}` is the hash-chain `id` carried on each
+event in the list response. Returns the single matching `AuditEvent`
+including `request_body` — the field the list omits — so a UI can render
+"what this one operation submitted and changed" on a clicked row without
+bloating the paged list with every body.
+
+The list answers "what happened"; this answers "what did this operation
+submit and change". Scanning the append-only log for one `id` is cheap on
+typical log sizes, and a detail fetch is one-per-click, not a polling loop.
+
+**Response (200):** a single `AuditEvent` (§13 Types Reference) carrying
+`changes` and the redacted `request_body`.
+
+**Errors:** 404 when `{netID}` is not registered, when `--audit-log` is
+unset, or when no event carries the given `id`; 403 when the `audit.read`
+gate is engaged and the caller has no matching grant.
+
+The CLI counterpart is `bin/newtron audit show <event-id>`.
 
 #### GET /newtron/v1/networks/{netID}/audit/integrity
 
@@ -4179,6 +4215,46 @@ Returned in array by `GET /newtron/v1/networks`.
 | `dir` | string | Spec directory path |
 | `has_topology` | boolean | Whether a topology file was loaded |
 | `nodes` | string[] | Device names from topology |
+
+---
+
+### Audit Types
+
+#### AuditEvent
+
+Returned by `GET .../audit/events` (in `AuditEventPage.events`, lean) and
+`GET .../audit/events/{id}` (full, with `request_body`).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Hash-chain event ID (L6). Use as `{eventID}` on the detail endpoint. |
+| `timestamp` | RFC3339 string | When the event was recorded. |
+| `user` | string | Caller identity (verified or self-attested — see `verification_source` on the stored record). |
+| `device` | string | Target device, when the operation was device-scoped. |
+| `operation` | string | HTTP method + path of the mutation. |
+| `service` | string (optional) | Service name, when the operation was service-scoped. |
+| `interface` | string (optional) | Interface name, when the operation was interface-scoped. |
+| `changes` | AuditChange[] | CONFIG_DB / intent rows the operation added, removed, or updated. Empty for spec-authoring and read/no-op operations. Present on both list and detail. |
+| `request_body` | raw JSON (optional) | The JSON the caller submitted, with secret-bearing fields redacted to `***redacted***` (`${secret:KEY}` references preserved). **Detail endpoint only** — omitted from list rows. |
+| `success` | boolean | Whether the operation succeeded (HTTP 2xx/3xx). |
+| `error` | string (optional) | Failure text when `success` is false. |
+| `execute_mode` | boolean | Whether the operation ran in execute (`-x`) mode. |
+| `dry_run` | boolean | Whether the operation was a dry run. |
+| `duration` | string | Server-side handling duration. |
+| `client_ip` | string (optional) | Remote address of the caller. |
+| `session_id` | string (optional) | Session key ID, when the caller used a session (L2c). |
+
+#### AuditChange
+
+One CONFIG_DB / intent change within an `AuditEvent` — the audit-log
+projection of `sonic.ConfigChange`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `table` | string | CONFIG_DB table name. |
+| `key` | string | Row key within the table. |
+| `type` | string | `add`, `modify`, or `delete`. |
+| `fields` | map[string]string (optional) | Field values for an `add`/`modify`; absent for a `delete`. |
 
 ---
 

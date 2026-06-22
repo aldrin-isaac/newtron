@@ -1,12 +1,18 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
 
 // captureLogger is an audit.Logger that records every Event written
@@ -134,6 +140,60 @@ func TestAuditMiddleware_NoLoggerIsNoOp(t *testing.T) {
 
 	if !handlerCalled {
 		t.Error("handler was not called when audit logger is disabled")
+	}
+}
+
+// TestAuditMiddleware_CapturesBodyAndChanges covers the audit-content gap:
+// the emitted event must carry (a) the request body the caller submitted,
+// (b) the change-set the operation returned — and the handler must still see
+// the full, untruncated body despite the middleware reading it first.
+func TestAuditMiddleware_CapturesBodyAndChanges(t *testing.T) {
+	cap := withCaptureLogger(t)
+
+	var handlerSawBody string
+	handler := auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		handlerSawBody = string(b)
+		// Respond with a faithful device-write envelope so the middleware
+		// can extract changes the same way it does in production.
+		httputil.WriteJSON(w, http.StatusOK, newtron.WriteResult{
+			ChangeCount: 1,
+			Applied:     true,
+			Changes: []sonic.ConfigChange{
+				{Table: "VLAN", Key: "Vlan100", Type: sonic.ChangeTypeAdd},
+			},
+		})
+	}))
+
+	reqJSON := `{"vlan_id":100,"ssh_pass":"hunter2"}`
+	req := httptest.NewRequest(http.MethodPost,
+		"/newtron/v1/networks/default/nodes/switch1/create-vlan",
+		strings.NewReader(reqJSON))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	// The handler must have received the complete body (middleware tee must
+	// not consume it).
+	if handlerSawBody != reqJSON {
+		t.Errorf("handler saw body %q; want full body %q", handlerSawBody, reqJSON)
+	}
+
+	if len(cap.events) != 1 {
+		t.Fatalf("got %d events; want 1", len(cap.events))
+	}
+	evt := cap.events[0]
+	if len(evt.Changes) != 1 || evt.Changes[0].Key != "Vlan100" {
+		t.Errorf("evt.Changes = %+v; want one VLAN/Vlan100 change", evt.Changes)
+	}
+	// Request body recorded and the secret redacted.
+	var recorded map[string]any
+	if err := json.Unmarshal(evt.RequestBody, &recorded); err != nil {
+		t.Fatalf("RequestBody not valid JSON: %v (%s)", err, evt.RequestBody)
+	}
+	if recorded["vlan_id"] != float64(100) {
+		t.Errorf("recorded vlan_id = %v; want 100", recorded["vlan_id"])
+	}
+	if recorded["ssh_pass"] != redactedPlaceholder {
+		t.Errorf("recorded ssh_pass = %v; want redacted", recorded["ssh_pass"])
 	}
 }
 

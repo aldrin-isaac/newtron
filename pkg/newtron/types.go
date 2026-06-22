@@ -5,6 +5,7 @@
 package newtron
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -922,6 +923,10 @@ type AuditEvent struct {
 	Service     string      `json:"service,omitempty"`
 	Interface   string      `json:"interface,omitempty"`
 	Changes     []AuditChange `json:"changes"`
+	// RequestBody is the redacted JSON the caller submitted. Populated only by
+	// the per-event detail endpoint (GET …/audit/events/{id}); the paged list
+	// leaves it empty so the list stays lean. omitempty keeps it off list rows.
+	RequestBody json.RawMessage `json:"request_body,omitempty"`
 	Success     bool        `json:"success"`
 	Error       string      `json:"error,omitempty"`
 	ExecuteMode bool        `json:"execute_mode"`

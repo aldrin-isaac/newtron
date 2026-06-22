@@ -1,12 +1,16 @@
 package audit
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 )
 
 // opsOf extracts the Operation field of each event, in order — used to
@@ -83,6 +87,55 @@ func (e *Event) withService(s string) *Event    { e.Service = s; return e }
 func (e *Event) withInterface(i string) *Event   { e.Interface = i; return e }
 func (e *Event) withSuccess() *Event             { e.Success = true; return e }
 func (e *Event) withError(err error) *Event      { e.Error = err.Error(); return e }
+
+// TestFileLogger_FindByID proves the per-event detail lookup returns the full
+// event — including RequestBody, which the paged list omits — and that a
+// missing ID returns (nil, nil) so the public layer can map it to 404.
+func TestFileLogger_FindByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Integrity on so Log assigns each event a hash-chain ID to look up by.
+	logger, err := NewFileLoggerWithIntegrity(filepath.Join(tmpDir, "audit.log"), RotationConfig{})
+	if err != nil {
+		t.Fatalf("NewFileLoggerWithIntegrity: %v", err)
+	}
+	defer logger.Close()
+
+	detailed := testEvent("alice", "leaf1", "create-vlan").withSuccess()
+	detailed.RequestBody = json.RawMessage(`{"vlan_id":100}`)
+	detailed.Changes = []node.Change{{Table: "VLAN", Key: "Vlan100", Type: sonic.ChangeTypeAdd}}
+	for _, e := range []*Event{
+		testEvent("bob", "leaf2", "create-zone").withSuccess(),
+		detailed,
+		testEvent("carol", "leaf3", "delete-ipvpn").withSuccess(),
+	} {
+		if err := logger.Log(e); err != nil {
+			t.Fatalf("Log: %v", err)
+		}
+	}
+	wantID := detailed.ID // assigned by Log under integrity
+
+	got, err := logger.FindByID(wantID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("FindByID(%q) = nil; want the event", wantID)
+	}
+	if string(got.RequestBody) != `{"vlan_id":100}` {
+		t.Errorf("RequestBody = %s; want the recorded body", got.RequestBody)
+	}
+	if len(got.Changes) != 1 || got.Changes[0].Key != "Vlan100" {
+		t.Errorf("Changes = %+v; want one VLAN/Vlan100 change", got.Changes)
+	}
+
+	missing, err := logger.FindByID("no-such-id")
+	if err != nil {
+		t.Fatalf("FindByID(missing): %v", err)
+	}
+	if missing != nil {
+		t.Errorf("FindByID(missing) = %+v; want nil", missing)
+	}
+}
 
 func TestFileLogger_Basic(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "audit-test-*")

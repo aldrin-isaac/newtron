@@ -1,11 +1,20 @@
 package api
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
+
+// maxAuditCapture bounds how many bytes of the request and response bodies the
+// middleware buffers for the audit record. Mutation payloads and their
+// change-set responses are small relative to this; the cap exists so a
+// pathological request can't balloon server memory. The handler always
+// receives the full, untruncated body — only the stored audit copy is bounded.
+const maxAuditCapture = 1 << 20 // 1 MiB
 
 // auditMiddleware emits an audit.Event for every mutation request
 // (auth-design.md L1). The behavior is governed by the default audit
@@ -27,10 +36,34 @@ func auditMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		start := time.Now()
+		// Capture the request body before the handler consumes it, then hand
+		// the handler an identical reader so it sees the full payload. The
+		// captured copy (redacted) becomes the audit event's RequestBody.
+		reqBody := captureRequestBody(r)
 		rw := &auditResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		emitMutationEvent(r, rw.status, start)
+		emitMutationEvent(r, rw.status, start, reqBody, rw.body.Bytes())
 	})
+}
+
+// captureRequestBody reads r.Body fully, replaces it with an equivalent reader
+// so the handler still sees the complete payload, and returns the bytes for the
+// audit record (capped at maxAuditCapture). Returns nil when there is no body
+// or it can't be read — the request still proceeds; only the audit copy is
+// affected. The handler always gets the untruncated body.
+func captureRequestBody(r *http.Request) []byte {
+	if r.Body == nil {
+		return nil
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if len(body) > maxAuditCapture {
+		return body[:maxAuditCapture]
+	}
+	return body
 }
 
 // isMutation reports whether the HTTP method indicates a state-
@@ -46,18 +79,31 @@ func isMutation(method string) bool {
 	return false
 }
 
-// auditResponseWriter captures the response status code so the audit
-// middleware can record success/failure after the handler returns.
-// Wraps http.ResponseWriter; the WriteHeader override is the only
-// behavior change.
+// auditResponseWriter captures the response status code and body so the audit
+// middleware can record success/failure and extract the change-set the handler
+// returned. Wraps http.ResponseWriter; WriteHeader records the status and Write
+// tees the bytes (capped at maxAuditCapture) while still forwarding them to the
+// client unchanged.
 type auditResponseWriter struct {
 	http.ResponseWriter
 	status int
+	body   bytes.Buffer
 }
 
 func (w *auditResponseWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *auditResponseWriter) Write(b []byte) (int, error) {
+	if remaining := maxAuditCapture - w.body.Len(); remaining > 0 {
+		if len(b) <= remaining {
+			w.body.Write(b)
+		} else {
+			w.body.Write(b[:remaining])
+		}
+	}
+	return w.ResponseWriter.Write(b)
 }
 
 // emitMutationEvent constructs and logs an audit.Event for the
@@ -70,7 +116,7 @@ func (w *auditResponseWriter) WriteHeader(code int) {
 // dimensions are extracted from the URL path values when present —
 // when the handler's route registration carries those names, they're
 // available via r.PathValue without further parsing.
-func emitMutationEvent(r *http.Request, status int, start time.Time) {
+func emitMutationEvent(r *http.Request, status int, start time.Time, reqBody, respBody []byte) {
 	caller := audit.CallerFromContext(r.Context())
 	username := ""
 	source := audit.VerificationUnknown
@@ -79,6 +125,7 @@ func emitMutationEvent(r *http.Request, status int, start time.Time) {
 		source = caller.Source
 	}
 
+	success := status >= 200 && status < 400
 	evt := &audit.Event{
 		Timestamp:          time.Now(),
 		User:               username,
@@ -86,7 +133,9 @@ func emitMutationEvent(r *http.Request, status int, start time.Time) {
 		Device:             r.PathValue("device"),
 		Operation:          r.Method + " " + r.URL.Path,
 		Interface:          r.PathValue("interface"),
-		Success:            status >= 200 && status < 400,
+		Changes:            extractChanges(respBody),
+		RequestBody:        redactRequestBody(reqBody),
+		Success:            success,
 		Duration:           time.Since(start),
 		ClientIP:           r.RemoteAddr,
 	}

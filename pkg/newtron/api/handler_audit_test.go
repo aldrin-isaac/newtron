@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -130,6 +132,70 @@ func TestAuditEvents_ReturnsPage(t *testing.T) {
 		if _, ok := got[key]; !ok {
 			t.Errorf("event missing key %q in response: %v", key, got)
 		}
+	}
+}
+
+// TestAuditEvent_Detail covers the per-event detail endpoint
+// (GET …/audit/events/{id}): the list omits the request body (lean), the
+// detail endpoint serves it, and an unknown id is a 404.
+func TestAuditEvent_Detail(t *testing.T) {
+	logPath := writeAuditLog(t, []audit.Event{{
+		User:        "alice",
+		Device:      "switch1",
+		Operation:   "POST /create-vlan",
+		Success:     true,
+		RequestBody: json.RawMessage(`{"vlan_id":100}`),
+		Changes:     []node.Change{{Table: "VLAN", Key: "Vlan100", Type: sonic.ChangeTypeAdd}},
+	}})
+	dir := scaffoldAuditNetwork(t)
+	base := "/newtron/v1/networks/default/audit/events"
+
+	// List: must NOT carry the request body (lean), but should carry changes.
+	listW := auditServeGet(t, dir, logPath, base)
+	var list struct {
+		Data struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listW.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Data.Events) != 1 {
+		t.Fatalf("list events: got %d, want 1", len(list.Data.Events))
+	}
+	if _, present := list.Data.Events[0]["request_body"]; present {
+		t.Errorf("list event carried request_body; want it omitted (lean list)")
+	}
+	id, _ := list.Data.Events[0]["id"].(string)
+	if id == "" {
+		t.Fatalf("list event has no id to fetch detail by")
+	}
+
+	// Detail: must carry the request body and changes.
+	detailW := auditServeGet(t, dir, logPath, base+"/"+id)
+	if detailW.Code != http.StatusOK {
+		t.Fatalf("detail status: got %d, want 200; body: %s", detailW.Code, detailW.Body.String())
+	}
+	var detail struct {
+		Data struct {
+			RequestBody json.RawMessage  `json:"request_body"`
+			Changes     []map[string]any `json:"changes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detailW.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v; body: %s", err, detailW.Body.String())
+	}
+	if string(detail.Data.RequestBody) != `{"vlan_id":100}` {
+		t.Errorf("detail request_body: got %s, want the recorded body", detail.Data.RequestBody)
+	}
+	if len(detail.Data.Changes) != 1 {
+		t.Errorf("detail changes: got %d, want 1", len(detail.Data.Changes))
+	}
+
+	// Unknown id: 404.
+	missingW := auditServeGet(t, dir, logPath, base+"/deadbeefnonexistent")
+	if missingW.Code != http.StatusNotFound {
+		t.Errorf("unknown id status: got %d, want 404; body: %s", missingW.Code, missingW.Body.String())
 	}
 }
 
