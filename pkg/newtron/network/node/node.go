@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -222,11 +223,9 @@ func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[str
 	// which leaves the projection empty. This matches BuildAbstractNode and
 	// InitFromDeviceIntent where the intent DB starts empty before replay.
 	steps := IntentsToSteps(intents)
-	for _, step := range steps {
-		if err := ReplayStep(ctx, n, step); err != nil {
-			n.actuatedIntent = wasActuated
-			return fmt.Errorf("rebuilding projection, replay %s: %w", step.URL, err)
-		}
+	if err := n.replaySteps(ctx, steps); err != nil {
+		n.actuatedIntent = wasActuated
+		return fmt.Errorf("rebuilding projection: %w", err)
 	}
 
 	// Restore actuated state and unsavedIntents. writeIntent sets
@@ -241,6 +240,44 @@ func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[str
 	//   device intents are persisted, not unsaved.
 	n.actuatedIntent = wasActuated
 	n.unsavedIntents = wasUnsaved
+	return nil
+}
+
+// replaySteps rebuilds the projection by replaying committed intent steps in
+// order. It is the shared reconstruction loop for RebuildProjectionFromIntents
+// and InitFromDeviceIntent.
+//
+// A step that fails *solely* because it references a spec no longer present —
+// an orphaned intent: the IP-VPN/service/MAC-VPN/filter/QoS spec it names was
+// removed or renamed after the operation was applied — is SKIPPED with a
+// warning rather than failing the device. Two principles drive this:
+//   - §20 (on-device intent is sufficient for reconstruction): a device must
+//     stay readable; one orphaned intent must not 503 the whole device.
+//   - §5 (specs are the vocabulary; reconcile eliminates drift): the orphan's
+//     on-device config is left out of the projection, so it surfaces as drift
+//     the operator can reconcile away. Removing it is the self-sufficient
+//     reverse path (§15) — teardown reads the intent record, not the spec.
+//
+// Skipping is scoped to spec.NotFoundError ONLY; any other replay failure
+// (malformed intent, render/validation error) is returned. Reconstruction must
+// not silently swallow real errors. ProjectionDiff deliberately does NOT use
+// this helper — it replays *new, hypothetical* operations, where a missing
+// spec is a genuine error the operator must see.
+func (n *Node) replaySteps(ctx context.Context, steps []spec.TopologyStep) error {
+	for _, step := range steps {
+		err := ReplayStep(ctx, n, step)
+		if err == nil {
+			continue
+		}
+		var notFound *spec.NotFoundError
+		if errors.As(err, &notFound) {
+			util.WithDevice(n.name).Warnf(
+				"reconstruction: skipping orphaned intent %s — %s %q is no longer in the specs; its on-device config will show as drift until reconciled",
+				step.URL, notFound.Kind, notFound.Name)
+			continue
+		}
+		return fmt.Errorf("replaying step %s: %w", step.URL, err)
+	}
 	return nil
 }
 
@@ -961,10 +998,8 @@ func (n *Node) InitFromDeviceIntent(ctx context.Context) error {
 	steps := IntentsToSteps(n.conn.ConfigDB.NewtronIntent)
 
 	// Step 6: Replay each step to rebuild the projection.
-	for _, step := range steps {
-		if err := ReplayStep(ctx, n, step); err != nil {
-			return fmt.Errorf("replaying step %s: %w", step.URL, err)
-		}
+	if err := n.replaySteps(ctx, steps); err != nil {
+		return fmt.Errorf("initializing from device intents: %w", err)
 	}
 
 	// Step 7: Mark node as actuated — Lock will enforce drift guard.

@@ -1607,6 +1607,33 @@ forward operation creates infrastructure that the intent record can't
 reconstruct, drift detection breaks silently — and there is no test
 that catches it until someone asks "why doesn't drift show this entry?"
 
+### Orphaned intents — when a referenced spec is gone
+
+Reconstruction replays each intent against *current* specs (§21), so an intent
+can name a spec that was removed or renamed after it was applied — an
+**orphaned intent**. This is where "the intent DB is authority" (§5) and
+"reconstruct from current specs" (§21) collide, and the specs win: an orphaned
+intent is config with no backing definition — reconcilable drift, not a fatal
+inconsistency.
+
+Two rules follow:
+
+- **Reconstruction tolerates it.** A replay step that fails *solely* because its
+  spec no longer resolves (`spec.NotFoundError`) is skipped, not fatal — a
+  device must stay readable; one orphaned intent must not 503 every read of it.
+  The skip is scoped to spec-resolution failures only; a malformed intent or any
+  other replay error still aborts, so reconstruction never silently swallows a
+  real fault. Spec-resolution sites on the replay path must therefore preserve
+  the typed error through wrapping (`%w`). (`node.replaySteps`.)
+- **The orphan surfaces as drift, and is deletable.** Skipping leaves the
+  orphan's config out of the projection, so it shows as drift against the
+  device's actual CONFIG_DB. Removing it needs no spec — the reverse operation
+  is self-sufficient from the intent record (§15: "never re-resolve specs at
+  removal"). An intent actuated on the device but missing from the specs *should
+  be deletable*: reconcile removes its config and the stale intent record.
+  Deleting orphaned device intents is the correct reconcile outcome, not a
+  refusal to read.
+
 **The device carries its own intent — not as history, but as living
 records that evolve as operations are applied and removed.**
 

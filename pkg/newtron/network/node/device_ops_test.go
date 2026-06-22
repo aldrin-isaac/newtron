@@ -12,7 +12,9 @@ import (
 )
 
 // testSpecProvider implements SpecProvider for unit tests, using simple maps
-// for each spec type. Methods return a "not found" error when a key is absent.
+// for each spec type. Methods return *spec.NotFoundError when a key is absent,
+// mirroring production getSpec so orphan-intent classification (errors.As) is
+// exercised against the same error type the real accessors produce.
 type testSpecProvider struct {
 	services      map[string]*spec.ServiceSpec
 	filterSpecs   map[string]*spec.FilterSpec
@@ -28,35 +30,35 @@ func (sp *testSpecProvider) GetService(name string) (*spec.ServiceSpec, error) {
 	if s, ok := sp.services[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("service %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "service", Name: name}
 }
 
 func (sp *testSpecProvider) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
 	if s, ok := sp.ipvpn[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("ipvpn %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "ipvpn", Name: name}
 }
 
 func (sp *testSpecProvider) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
 	if s, ok := sp.macvpn[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("macvpn %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "macvpn", Name: name}
 }
 
 func (sp *testSpecProvider) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 	if s, ok := sp.qosPolicies[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("qos policy %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "QoS policy", Name: name}
 }
 
 func (sp *testSpecProvider) GetFilter(name string) (*spec.FilterSpec, error) {
 	if s, ok := sp.filterSpecs[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("filter spec %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "filter", Name: name}
 }
 
 func (sp *testSpecProvider) GetPlatform(name string) (*spec.PlatformSpec, error) {
@@ -70,14 +72,14 @@ func (sp *testSpecProvider) GetPrefixList(name string) ([]string, error) {
 	if s, ok := sp.prefixLists[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("prefix list %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "prefix list", Name: name}
 }
 
 func (sp *testSpecProvider) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
 	if s, ok := sp.routePolicies[name]; ok {
 		return s, nil
 	}
-	return nil, fmt.Errorf("route policy %q not found", name)
+	return nil, &spec.NotFoundError{Kind: "route policy", Name: name}
 }
 
 func (sp *testSpecProvider) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
