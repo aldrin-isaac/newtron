@@ -144,6 +144,12 @@ const (
 	FieldTagged          = "tagged"
 	FieldARPSuppression  = "arp_suppression"
 	FieldRules           = "rules"
+	// FieldFilter records the source filter spec name on a service-derived
+	// create-acl intent. The ACL table itself is content-hash-named (§24/§25),
+	// so the hashed name can't be reversed to the filter; this preserves the
+	// provenance the generator already knows. Read by DeriveSpecRef; ignored by
+	// create-acl replay.
+	FieldFilter = "filter"
 )
 
 // Intent is the domain model for a desired-state record bound to a
