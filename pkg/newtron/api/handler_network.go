@@ -330,7 +330,10 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	topo := ne.net.GetTopology()
+	// Serve the enriched view: same shape as the on-disk topology spec file,
+	// but each step carries server-derived spec_kind/spec_name so a client gets
+	// spec provenance for the whole network in one call, lab-independent.
+	topo := ne.net.TopologyView()
 	if topo == nil {
 		writeError(w, &newtron.NotFoundError{Resource: "topology", Name: ""})
 		return

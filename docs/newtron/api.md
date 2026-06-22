@@ -1102,12 +1102,22 @@ _Lands newtron#196._
 
 #### GET /newtron/v1/networks/{netID}/topology
 
-Returns the full topology spec as `TopologySpecFile` — the canonical typed
-substrate newtron uses internally (devices, links, newtlab metadata).
+Returns the full topology as `TopologyView` — the same JSON shape as the
+on-disk `TopologySpecFile` (devices, links, newtlab metadata), with each step
+additionally carrying **server-derived `spec_kind` / `spec_name`** (via the
+same `DeriveSpecRef` as `/intent/tree` — `service`/`ipvpn`/`macvpn`/`qos`, and
+`filter` for service-derived ACLs; `omitempty` for primitives).
 
-**Response (200):** `TopologySpecFile` with `version`, `description`,
-`devices` (map of name → `TopologyDevice`), and `links` (array; omitted when
-empty).
+Unlike `/intent/tree` (per-device, requires a deployed lab), this is **one call
+for the whole network and works before any lab is deployed** — it's a spec-file
+read. It's the source for "where is spec X applied?" reverse-index views. The
+derived fields are computed at serve time (never stale), are **not** persisted
+to `topology.json` (its `spec.TopologyStep` stays `url`/`params`), and are
+output-only — they don't round-trip into `/intent/save`.
+
+**Response (200):** `TopologyView` with `version`, `description`,
+`devices` (map of name → `{ steps[], ports }`, each step `{ url, params,
+spec_kind?, spec_name? }`), and `links` (array; omitted when empty).
 
 **Errors:** 404 when no `topology.json` was loaded for the network.
 

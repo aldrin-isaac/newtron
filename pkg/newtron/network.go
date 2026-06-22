@@ -177,6 +177,41 @@ func (net *Network) GetTopology() *spec.TopologySpecFile {
 	return net.internal.GetTopology()
 }
 
+// TopologyView returns the served shape of GET /topology: the topology spec
+// file with each step enriched by server-derived spec_kind/spec_name
+// (DeriveSpecRef), so a client can map intent → source spec for the whole
+// network in one call without a deployed lab. Returns nil when no topology is
+// loaded. The derivation needs only each step's url+params, so it runs at serve
+// time on a spec-only network; the on-disk spec.TopologySpecFile is untouched.
+func (net *Network) TopologyView() *TopologyView {
+	topo := net.internal.GetTopology()
+	if topo == nil {
+		return nil
+	}
+	view := &TopologyView{
+		Version:     topo.Version,
+		Platform:    topo.Platform,
+		Description: topo.Description,
+		Links:       topo.Links,
+		NewtLab:     topo.NewtLab,
+		Devices:     make(map[string]*TopologyDeviceView, len(topo.Devices)),
+	}
+	for name, dev := range topo.Devices {
+		dv := &TopologyDeviceView{Ports: dev.Ports}
+		for _, s := range dev.Steps {
+			kind, specName := DeriveSpecRef(s.URL, s.Params)
+			dv.Steps = append(dv.Steps, TopologyStep{
+				URL:      s.URL,
+				Params:   s.Params,
+				SpecKind: kind,
+				SpecName: specName,
+			})
+		}
+		view.Devices[name] = dv
+	}
+	return view
+}
+
 // AddTopologyDevice adds a device entry to topology.json. Returns
 // *ConflictError when a device with this name already exists. The matching
 // profile file must already exist. Persists atomically. §7 + §15 + §27 + §46.

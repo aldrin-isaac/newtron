@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
@@ -133,7 +134,8 @@ func TestAPICompleteness(t *testing.T) {
 
 			// Topology / Provision
 			"HasTopology":           true,
-			"GetTopology":           true, // #14: GET /networks/{netID}/topology
+			"GetTopology":           true, // #14: GET /networks/{netID}/topology (raw spec read; backs internal use + tests)
+			"TopologyView":          true, // #14: GET /networks/{netID}/topology — served, provenance-enriched view
 			"AddTopologyDevice":     true, // #15: POST /networks/{netID}/topology/create-node
 			"DeleteTopologyDevice":  true, // #15: DELETE /networks/{netID}/topology/nodes/{name}
 			"UpdateTopologyDevice":  true, // #15: PUT /networks/{netID}/topology/nodes/{name}
@@ -415,6 +417,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ShowZone":                "spec read",
 			"HasTopology":             "spec read",
 			"GetTopology":             "spec read",
+			"TopologyView":            "spec read",
 			"TopologyDeviceNames":     "spec read",
 			"IsHostDevice":            "spec read",
 			"GetHostProfile":          "spec read",
@@ -569,6 +572,66 @@ func TestHandleTopology_ReturnsSpecFile(t *testing.T) {
 	}
 	if devices["switch1"] == nil {
 		t.Errorf("topology.devices.switch1 missing; got keys: %v", mapKeys(devices))
+	}
+}
+
+// TestHandleTopology_CarriesSpecProvenance pins that GET /topology derives
+// spec_kind/spec_name on its steps at serve time — for a whole network, in one
+// call, with NO deployed lab (it's a spec read). 2node-vs-service's committed
+// topology.json carries apply-service steps; the served step must report
+// spec_kind=service / spec_name=transit, while primitive steps (setup-device)
+// carry neither.
+func TestHandleTopology_CarriesSpecProvenance(t *testing.T) {
+	specDir := filepath.Join(repoRoot(t), "networks", "2node-vs-service")
+	s := NewServer(Config{})
+	if err := s.RegisterNetwork("svc", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/svc/topology")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Devices map[string]struct {
+				Steps []struct {
+					URL      string `json:"url"`
+					SpecKind string `json:"spec_kind"`
+					SpecName string `json:"spec_name"`
+				} `json:"steps"`
+			} `json:"devices"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, w.Body.String())
+	}
+
+	var sawApplyService, sawPrimitive bool
+	for dev, d := range env.Data.Devices {
+		for _, step := range d.Steps {
+			switch {
+			case strings.HasSuffix(step.URL, "/apply-service"):
+				sawApplyService = true
+				if step.SpecKind != "service" || step.SpecName == "" {
+					t.Errorf("%s %s: spec_kind=%q spec_name=%q, want service/<name>",
+						dev, step.URL, step.SpecKind, step.SpecName)
+				}
+			case strings.HasSuffix(step.URL, "/setup-device"):
+				sawPrimitive = true
+				if step.SpecKind != "" || step.SpecName != "" {
+					t.Errorf("%s %s: primitive carried spec_kind=%q spec_name=%q, want empty",
+						dev, step.URL, step.SpecKind, step.SpecName)
+				}
+			}
+		}
+	}
+	if !sawApplyService {
+		t.Error("no apply-service step found — fixture changed; can't verify provenance")
+	}
+	if !sawPrimitive {
+		t.Error("no setup-device step found — fixture changed; can't verify primitives stay unattributed")
 	}
 }
 
