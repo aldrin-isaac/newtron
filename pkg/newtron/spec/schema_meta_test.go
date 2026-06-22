@@ -99,6 +99,43 @@ func TestExtractFields_RefKind(t *testing.T) {
 	}
 }
 
+// TestExtractFields_PrefixListRefs pins that the filter-rule and
+// route-policy-rule prefix-list fields are typed as refs to PrefixListSpec
+// (newtron-gap-subrule-prefix-list-refs) — so a schema-driven UI renders a
+// dropdown of existing prefix-lists rather than a free-text box. Same pattern
+// as RoutingSpec.import/export_prefix_list (#264).
+func TestExtractFields_PrefixListRefs(t *testing.T) {
+	byName := func(v any) map[string]FieldMeta {
+		m := map[string]FieldMeta{}
+		for _, f := range extractFields(reflect.TypeOf(v)) {
+			m[f.Name] = f
+		}
+		return m
+	}
+	assertRef := func(t *testing.T, fm FieldMeta, field string) {
+		t.Helper()
+		if fm.Type != "ref" || fm.RefKind != "PrefixListSpec" {
+			t.Errorf("%s: type=%q ref_kind=%q, want ref/PrefixListSpec", field, fm.Type, fm.RefKind)
+		}
+	}
+
+	fr := byName(FilterRule{})
+	assertRef(t, fr["src_prefix_list"], "FilterRule.src_prefix_list")
+	assertRef(t, fr["dst_prefix_list"], "FilterRule.dst_prefix_list")
+	// The inline-match siblings stay plain strings — they are literal values,
+	// not refs.
+	if fr["src_ip"].Type != "string" {
+		t.Errorf("FilterRule.src_ip: type=%q, want string", fr["src_ip"].Type)
+	}
+
+	rpr := byName(RoutePolicyRule{})
+	assertRef(t, rpr["prefix_list"], "RoutePolicyRule.prefix_list")
+	// community stays a literal string (no CommunityList spec kind).
+	if rpr["community"].Type != "string" {
+		t.Errorf("RoutePolicyRule.community: type=%q, want string", rpr["community"].Type)
+	}
+}
+
 func TestExtractFields_NestedObject(t *testing.T) {
 	got := extractFields(reflect.TypeOf(fixNested{}))
 	if len(got) != 1 {

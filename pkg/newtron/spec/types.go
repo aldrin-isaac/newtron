@@ -189,8 +189,8 @@ type FilterSpec struct {
 // FilterRule defines a single rule within a FilterSpec.
 type FilterRule struct {
 	Sequence      int    `json:"seq" label:"Sequence" tooltip:"Evaluation order — lower numbers evaluated first" min:"1" max:"65535"`
-	SrcPrefixList string `json:"src_prefix_list,omitempty" label:"Source Prefix List" tooltip:"Reference to a prefix-list for the source-IP match (mutually exclusive with src_ip)"`
-	DstPrefixList string `json:"dst_prefix_list,omitempty" label:"Destination Prefix List" tooltip:"Reference to a prefix-list for the destination-IP match (mutually exclusive with dst_ip)"`
+	SrcPrefixList string `json:"src_prefix_list,omitempty" label:"Source Prefix List" tooltip:"Reference to a prefix-list for the source-IP match (mutually exclusive with src_ip)" ref:"PrefixListSpec"`
+	DstPrefixList string `json:"dst_prefix_list,omitempty" label:"Destination Prefix List" tooltip:"Reference to a prefix-list for the destination-IP match (mutually exclusive with dst_ip)" ref:"PrefixListSpec"`
 	SrcIP         string `json:"src_ip,omitempty" label:"Source IP/CIDR" tooltip:"Inline source IP or CIDR (mutually exclusive with src_prefix_list)" format:"cidr"`
 	DstIP         string `json:"dst_ip,omitempty" label:"Destination IP/CIDR" tooltip:"Inline destination IP or CIDR (mutually exclusive with dst_prefix_list)" format:"cidr"`
 	Protocol      string `json:"protocol,omitempty" label:"Protocol" tooltip:"IP protocol — name (tcp/udp/icmp) or IANA number"`
@@ -219,7 +219,7 @@ type RoutePolicyRule struct {
 	Action   string `json:"action" label:"Action" tooltip:"Permit matched routes (continue with set-actions) or deny" enum:"permit,deny"`
 
 	// Match conditions (all conditions must match)
-	PrefixList string `json:"prefix_list,omitempty" label:"Match Prefix List" tooltip:"Reference to a prefix-list to match the route's NLRI"`
+	PrefixList string `json:"prefix_list,omitempty" label:"Match Prefix List" tooltip:"Reference to a prefix-list to match the route's NLRI" ref:"PrefixListSpec"`
 	Community  string `json:"community,omitempty" label:"Match Community" tooltip:"Community string the route must carry"`
 
 	// Set actions (for permit rules)
