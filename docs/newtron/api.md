@@ -2412,7 +2412,27 @@ shows parent-child relationships between intent records.
 | `resource` | string | `""` | Filter by resource name |
 | `ancestors` | string | `"false"` | When `"true"`, include ancestor intents |
 
-**Response (200):** Intent tree structure
+**Response (200):** Intent tree structure (`TopologySnapshot` — a list of
+`TopologyStep`).
+
+Each step carries server-derived **`spec_kind`** and **`spec_name`** when it is
+the instantiation of a named network spec — a service applied, an
+IP-VPN/MAC-VPN bound, or a QoS policy bound:
+
+| `spec_kind` | `spec_name` | from |
+|---|---|---|
+| `service` | the service name (e.g. `transit`) | `apply-service` / `deploy-service` |
+| `ipvpn` | the IP-VPN name (e.g. `IRB`) | `bind-ipvpn` |
+| `macvpn` | the MAC-VPN name | `bind-macvpn` |
+| `qos` | the QoS policy name | `bind-qos` |
+
+Both are omitted for primitives (device/VLAN/VRF) and for steps whose source
+spec is not cleanly recoverable (filter→ACL, route-policy, prefix-list use
+content-hashed / service-embedded naming — omitted rather than guessed). They
+are **server-derived at serve time** (re-computed each request, never stale)
+and are **not** persisted to `topology.json`. A client reads them to map intent
+→ spec — e.g. "where is service `transit` applied across the topology?" —
+without re-implementing newtron's per-operation derivation.
 
 ---
 

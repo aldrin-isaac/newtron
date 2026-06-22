@@ -1136,9 +1136,20 @@ type TopologySnapshot struct {
 }
 
 // TopologyStep is a single provisioning operation in topology format.
+//
+// SpecKind and SpecName are server-derived provenance: when the step is the
+// instantiation of a named network spec (a service applied, an IP-VPN/MAC-VPN
+// bound, a QoS policy bound), they name the source spec so a client can map
+// intent → spec without re-implementing newtron's per-operation derivation
+// (see DeriveSpecRef). They are output-only — populated by Tree() at serve
+// time, empty for primitives, and ignored on input. They are NOT persisted to
+// topology.json (that uses spec.TopologyStep); they re-derive on every serve,
+// so they can never go stale.
 type TopologyStep struct {
-	URL    string         `json:"url"`
-	Params map[string]any `json:"params,omitempty"`
+	URL      string         `json:"url"`
+	Params   map[string]any `json:"params,omitempty"`
+	SpecKind string         `json:"spec_kind,omitempty"`
+	SpecName string         `json:"spec_name,omitempty"`
 }
 
 // ============================================================================
