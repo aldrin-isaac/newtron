@@ -133,6 +133,52 @@ func TestAuditEvents_ReturnsPage(t *testing.T) {
 	}
 }
 
+// TestAuditEvents_Order verifies the HTTP layer defaults to newest-first,
+// honors ?order=asc (chronological) and ?order=desc, and rejects a bad
+// value with 400 (fail-closed param validation).
+func TestAuditEvents_Order(t *testing.T) {
+	logPath := writeAuditLog(t, []audit.Event{
+		{User: "alice", Operation: "op1", Success: true},
+		{User: "alice", Operation: "op2", Success: true},
+		{User: "alice", Operation: "op3", Success: true},
+	})
+	dir := scaffoldAuditNetwork(t)
+	base := "/newtron/v1/networks/default/audit/events"
+
+	firstOp := func(path string) string {
+		w := auditServeGet(t, dir, logPath, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: status %d; body: %s", path, w.Code, w.Body.String())
+		}
+		var env struct {
+			Data struct {
+				Events []map[string]any `json:"events"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(env.Data.Events) == 0 {
+			t.Fatalf("GET %s: no events", path)
+		}
+		op, _ := env.Data.Events[0]["operation"].(string)
+		return op
+	}
+
+	if op := firstOp(base); op != "op3" {
+		t.Errorf("default: first event = %q, want op3 (newest first)", op)
+	}
+	if op := firstOp(base + "?order=asc"); op != "op1" {
+		t.Errorf("order=asc: first event = %q, want op1 (oldest first)", op)
+	}
+	if op := firstOp(base + "?order=desc"); op != "op3" {
+		t.Errorf("order=desc: first event = %q, want op3 (newest first)", op)
+	}
+	if w := auditServeGet(t, dir, logPath, base+"?order=sideways"); w.Code != http.StatusBadRequest {
+		t.Errorf("order=sideways: status = %d, want 400", w.Code)
+	}
+}
+
 // TestAuditEvents_FilterByUser pins the user-filter dimension —
 // the Filter shape's primary value: "show me alice's actions".
 // Verifies the query-string parameter reaches audit.Filter and the

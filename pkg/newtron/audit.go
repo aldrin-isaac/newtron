@@ -37,6 +37,7 @@ func QueryAuditLog(path string, filter AuditFilter) ([]AuditEvent, error) {
 		Offset:      filter.Offset,
 		SuccessOnly: filter.SuccessOnly,
 		FailureOnly: filter.FailureOnly,
+		Order:       filter.Order,
 	})
 	if err != nil {
 		return nil, err

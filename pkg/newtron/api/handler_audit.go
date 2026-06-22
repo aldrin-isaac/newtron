@@ -151,6 +151,14 @@ func parseAuditFilter(r *http.Request) (newtron.AuditFilter, error) {
 		}
 	}
 
+	// Result order — newest-first by default; "asc" opts into chronological.
+	switch v := q.Get("order"); v {
+	case "", "asc", "desc":
+		f.Order = v
+	default:
+		return f, &auditFilterParseError{Field: "order", Reason: "expected asc or desc"}
+	}
+
 	const defaultLimit = 100
 	const maxLimit = 1000
 	f.Limit = defaultLimit

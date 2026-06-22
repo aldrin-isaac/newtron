@@ -101,4 +101,18 @@ type Filter struct {
 	FailureOnly bool
 	Limit       int
 	Offset      int
+	// Order selects result ordering, applied before Offset/Limit so paging
+	// starts from the chosen end. Empty or OrderNewestFirst returns the
+	// most recent events first (the default — an audit log is read to see
+	// what just happened, so offset 0 should be recent activity, not the
+	// oldest record ever written). OrderOldestFirst returns chronological
+	// (hash-chain build) order.
+	Order string
 }
+
+// Audit result ordering for Filter.Order — the wire values for the HTTP
+// `order` query parameter and the CLI `--order` flag.
+const (
+	OrderNewestFirst = "desc" // default
+	OrderOldestFirst = "asc"
+)

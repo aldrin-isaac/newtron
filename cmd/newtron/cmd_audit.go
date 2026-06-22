@@ -37,17 +37,24 @@ var (
 	auditLast     string
 	auditLimit    int
 	auditFailures bool
+	auditOrder    string
 )
 
 var auditListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List audit events",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		switch auditOrder {
+		case "", "asc", "desc":
+		default:
+			return fmt.Errorf("invalid --order %q: expected asc or desc", auditOrder)
+		}
 		filter := newtron.AuditFilter{
 			Device:      auditDevice,
 			User:        auditUser,
 			Limit:       auditLimit,
 			FailureOnly: auditFailures,
+			Order:       auditOrder,
 		}
 
 		// Parse --last duration
@@ -165,6 +172,7 @@ func init() {
 	auditListCmd.Flags().StringVar(&auditLast, "last", "", "Show events from last duration (e.g., 24h, 7d)")
 	auditListCmd.Flags().IntVar(&auditLimit, "limit", 100, "Maximum events to show")
 	auditListCmd.Flags().BoolVar(&auditFailures, "failures", false, "Show only failed operations")
+	auditListCmd.Flags().StringVar(&auditOrder, "order", "desc", "Event order: desc (newest first, default) or asc (oldest first)")
 
 	auditCmd.AddCommand(auditListCmd, auditVerifyCmd)
 }
