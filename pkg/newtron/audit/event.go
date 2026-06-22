@@ -2,6 +2,7 @@
 package audit
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
@@ -79,6 +80,16 @@ type Event struct {
 	Resource string `json:"resource,omitempty"`
 	Field    string `json:"field,omitempty"`
 	Changes            []node.Change      `json:"changes"`
+	// RequestBody is the raw JSON payload the caller submitted, captured by
+	// the audit middleware with secret-bearing fields redacted. It answers
+	// "what did this operation submit?" — the content half of an audit trail,
+	// distinct from Changes (what the operation produced on the device). Empty
+	// for requests with no body and for read/no-op operations. Part of the
+	// hash-chained record: it is content the audit trail must preserve, so it
+	// is hashed alongside the rest of the event (audit-design.md L6). Served
+	// only by the per-event detail endpoint, never the paged list — bodies are
+	// unbounded and the list stays lean.
+	RequestBody json.RawMessage `json:"request_body,omitempty"`
 	Success            bool               `json:"success"`
 	Error              string             `json:"error,omitempty"`
 	ExecuteMode        bool               `json:"execute_mode"` // true if -x was used

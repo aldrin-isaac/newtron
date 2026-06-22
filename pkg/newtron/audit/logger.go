@@ -14,6 +14,13 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// maxScanLine bounds the per-line buffer when reading the audit log. Events now
+// carry a request body (capped at 1 MiB by the middleware) plus a change-set,
+// so a single JSON line can far exceed bufio.Scanner's 64 KiB default — without
+// this, such a line would error mid-scan and truncate the read. 8 MiB leaves
+// generous headroom above the middleware's own caps.
+const maxScanLine = 8 << 20
+
 // Logger defines the interface for audit logging backends
 type Logger interface {
 	Log(event *Event) error
@@ -119,6 +126,41 @@ func (l *FileLogger) Log(event *Event) error {
 	return l.encoder.Encode(event)
 }
 
+// FindByID returns the single event whose hash-chain ID matches id, or nil if
+// no such event exists in the log. Unlike Query, it returns the full event
+// including RequestBody — the per-event detail endpoint's reason to exist.
+// Scans the append-only log; on typical sizes this is cheap, and a detail
+// fetch is one-per-click, not a polling loop.
+func (l *FileLogger) FindByID(id string) (*Event, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	file, err := os.Open(l.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxScanLine)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		var event Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			util.Logger.Warnf("audit: skipping malformed log entry at line %d: %v", lineNum, err)
+			continue
+		}
+		if event.ID == id {
+			return &event, nil
+		}
+	}
+	return nil, scanner.Err()
+}
+
 // Query searches for events matching the filter
 func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
 	l.mu.RLock()
@@ -135,6 +177,7 @@ func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
 
 	var events []*Event
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxScanLine)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++

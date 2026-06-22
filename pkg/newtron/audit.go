@@ -45,31 +45,45 @@ func QueryAuditLog(path string, filter AuditFilter) ([]AuditEvent, error) {
 
 	result := make([]AuditEvent, 0, len(events))
 	for _, e := range events {
-		ae := AuditEvent{
-			ID:          e.ID,
-			Timestamp:   e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-			User:        e.User,
-			Device:      e.Device,
-			Operation:   e.Operation,
-			Service:     e.Service,
-			Interface:   e.Interface,
-			Success:     e.Success,
-			Error:       e.Error,
-			ExecuteMode: e.ExecuteMode,
-			DryRun:      e.DryRun,
-			Duration:    e.Duration.String(),
-			ClientIP:    e.ClientIP,
-			SessionID:   e.SessionID,
-		}
-		for _, c := range e.Changes {
-			ae.Changes = append(ae.Changes, AuditChange{
-				Table:  c.Table,
-				Key:    c.Key,
-				Type:   string(c.Type),
-				Fields: c.Fields,
-			})
-		}
-		result = append(result, ae)
+		// List rows omit the request body (withBody=false) — bodies are
+		// unbounded; the per-event detail endpoint serves them on demand.
+		result = append(result, toAuditEvent(e, false))
 	}
 	return result, nil
+}
+
+// toAuditEvent converts an internal audit.Event to the public wire shape.
+// withBody controls whether the (potentially large, already-redacted) request
+// body rides along: false for the paged list, true for the per-event detail
+// endpoint. Changes always ride along — they are the bounded change-set the
+// operation produced and the list's highest-value content.
+func toAuditEvent(e *audit.Event, withBody bool) AuditEvent {
+	ae := AuditEvent{
+		ID:          e.ID,
+		Timestamp:   e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+		User:        e.User,
+		Device:      e.Device,
+		Operation:   e.Operation,
+		Service:     e.Service,
+		Interface:   e.Interface,
+		Success:     e.Success,
+		Error:       e.Error,
+		ExecuteMode: e.ExecuteMode,
+		DryRun:      e.DryRun,
+		Duration:    e.Duration.String(),
+		ClientIP:    e.ClientIP,
+		SessionID:   e.SessionID,
+	}
+	for _, c := range e.Changes {
+		ae.Changes = append(ae.Changes, AuditChange{
+			Table:  c.Table,
+			Key:    c.Key,
+			Type:   string(c.Type),
+			Fields: c.Fields,
+		})
+	}
+	if withBody {
+		ae.RequestBody = e.RequestBody
+	}
+	return ae
 }

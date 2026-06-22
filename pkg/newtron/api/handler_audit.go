@@ -67,6 +67,42 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, page)
 }
 
+// handleAuditEvent serves
+// GET /newtron/v1/networks/{netID}/audit/events/{eventID} — the per-event
+// detail view. Unlike the paged list (handleAuditEvents), it returns the full
+// event including the redacted request body, so newtcon can show "what this
+// operation submitted and changed" on a single clicked row. The change-set is
+// already on the list event; the body is the field only this endpoint serves.
+//
+// Gating mirrors handleAuditEvents exactly — engage-when-configured
+// PermAuditRead, Field stamp "audit_events" — so a where:{field:"audit_events"}
+// clause scopes the list and the detail together. A missing eventID 404s via
+// FindAuditEvent's NotFoundError.
+func (s *Server) handleAuditEvent(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	if s.auditLogPath == "" {
+		writeError(w, &newtron.NotFoundError{
+			Resource: "audit log",
+			Name:     "(unconfigured)",
+		})
+		return
+	}
+	authCtx := auth.NewContext().WithField("audit_events")
+	if err := ne.net.CheckAuditReadGate(r.Context(), authCtx); err != nil {
+		writeError(w, err)
+		return
+	}
+	event, err := newtron.FindAuditEvent(s.auditLogPath, r.PathValue("eventID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, event)
+}
+
 // handleAuditIntegrity serves
 // GET /newtron/v1/networks/{netID}/audit/integrity. Walks the hash
 // chain end to end and returns AuditIntegrityResult. Pure read.

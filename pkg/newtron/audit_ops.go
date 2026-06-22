@@ -77,6 +77,35 @@ func QueryAuditEvents(path string, filter AuditFilter) (AuditEventPage, error) {
 	return page, nil
 }
 
+// FindAuditEvent returns the single audit event identified by its hash-chain
+// id, including the redacted request body — the content the paged list omits.
+// This is the read behind the per-event detail endpoint
+// (GET …/audit/events/{id}): the list answers "what happened", this answers
+// "what did this one operation submit and change".
+//
+// Returns a *NotFoundError when no event carries that id (so the HTTP handler
+// maps it to 404) and an empty/never-found result for an unconfigured log path,
+// matching QueryAuditEvents' no-audit-log convention.
+func FindAuditEvent(path string, id string) (AuditEvent, error) {
+	if path == "" || id == "" {
+		return AuditEvent{}, &NotFoundError{Resource: "audit event", Name: id}
+	}
+	logger, err := audit.NewFileLogger(path, audit.RotationConfig{})
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	defer logger.Close()
+
+	event, err := logger.FindByID(id)
+	if err != nil {
+		return AuditEvent{}, fmt.Errorf("reading audit event: %w", err)
+	}
+	if event == nil {
+		return AuditEvent{}, &NotFoundError{Resource: "audit event", Name: id}
+	}
+	return toAuditEvent(event, true), nil
+}
+
 // VerifyAuditIntegrity walks the audit log's hash chain end to end
 // and returns a structured result describing chain status. Pure
 // read; never mutates the log. Cheap for typical log sizes

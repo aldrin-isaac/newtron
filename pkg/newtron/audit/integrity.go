@@ -57,7 +57,7 @@ func readChainHead(path string) (string, error) {
 	defer f.Close()
 	var lastID string
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxScanLine)
 	for scanner.Scan() {
 		var e Event
 		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
@@ -113,7 +113,7 @@ func Verify(path string) (VerifyResult, error) {
 	var prevHash string
 	var result VerifyResult
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxScanLine)
 	line := 0
 	for scanner.Scan() {
 		line++

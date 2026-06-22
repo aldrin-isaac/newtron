@@ -113,6 +113,37 @@ var auditListCmd = &cobra.Command{
 	},
 }
 
+// auditShowCmd prints the full detail of a single audit event by its
+// hash-chain ID — the redacted request body and the change-set the operation
+// produced, which `audit list` omits to stay scannable. The CLI counterpart of
+// GET …/audit/events/{id}.
+var auditShowCmd = &cobra.Command{
+	Use:   "show <event-id>",
+	Short: "Show full detail of a single audit event",
+	Long: `Print the full recorded detail of one audit event: the request body
+the caller submitted (with secrets redacted) and the CONFIG_DB / intent
+change-set the operation produced. 'audit list' shows the envelope; this
+shows the content.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// The audit subcommand skips PersistentPreRunE, so resolve the
+		// log path from settings explicitly (same as list/verify).
+		settings, err := newtron.LoadSettings()
+		if err != nil {
+			return fmt.Errorf("loading settings: %w", err)
+		}
+		event, err := newtron.FindAuditEvent(settings.GetAuditLogPath(""), args[0])
+		if err != nil {
+			return fmt.Errorf("finding audit event: %w", err)
+		}
+		// Detail is inherently structured (nested body + changes); JSON is
+		// the honest rendering, so print it regardless of --json.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(event)
+	},
+}
+
 // auditVerifyCmd verifies the hash chain on an audit log file
 // (auth-design.md L6). The operator runs it periodically (cron or
 // after a suspected intrusion) to detect entries that were inserted,
@@ -174,5 +205,5 @@ func init() {
 	auditListCmd.Flags().BoolVar(&auditFailures, "failures", false, "Show only failed operations")
 	auditListCmd.Flags().StringVar(&auditOrder, "order", "desc", "Event order: desc (newest first, default) or asc (oldest first)")
 
-	auditCmd.AddCommand(auditListCmd, auditVerifyCmd)
+	auditCmd.AddCommand(auditListCmd, auditShowCmd, auditVerifyCmd)
 }
