@@ -2168,10 +2168,14 @@ Shows HWSKU, port count, default speed, supported/unsupported features, and depe
 
 Every write operation (execute mode) emits an audit event:
 
+Events are listed newest-first by default (most recent activity at the top);
+pass `--order asc` for chronological order.
+
 ```bash
 newtron audit list --last 24h
 newtron audit list --device leaf1 --failures
 newtron audit list --limit 50 --json
+newtron audit list --order asc          # oldest first (chronological)
 
 # Output:
 # Timestamp            User    Operation          Device      Status

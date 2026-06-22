@@ -149,6 +149,18 @@ func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
 		}
 	}
 
+	// Order before paging so Offset/Limit start from the chosen end.
+	// Default is newest-first; OrderOldestFirst keeps chronological order.
+	// The on-disk file is append order (oldest→newest); reversing here is
+	// a presentation concern and does not touch the hash chain (the
+	// prev_hash links live in the event data and are verified in build
+	// order by the integrity walk, independent of read order).
+	if filter.Order != OrderOldestFirst {
+		for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+			events[i], events[j] = events[j], events[i]
+		}
+	}
+
 	// Apply offset and limit
 	if filter.Offset > 0 {
 		if filter.Offset >= len(events) {

@@ -907,6 +907,9 @@ type AuditFilter struct {
 	Offset      int
 	SuccessOnly bool
 	FailureOnly bool
+	// Order selects result ordering ("desc"/"" = newest first, the default;
+	// "asc" = chronological), applied before Offset/Limit. See audit.Filter.
+	Order string
 }
 
 // AuditEvent represents an auditable configuration change event.

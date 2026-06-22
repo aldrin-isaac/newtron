@@ -4,9 +4,68 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
+
+// opsOf extracts the Operation field of each event, in order — used to
+// assert query result ordering.
+func opsOf(events []*Event) []string {
+	ops := make([]string, len(events))
+	for i, e := range events {
+		ops[i] = e.Operation
+	}
+	return ops
+}
+
+// TestFileLogger_QueryOrder proves the default order is newest-first, that
+// "asc" opts back into chronological order, and that paging (Offset/Limit)
+// starts from the chosen end — so page 1 is recent activity by default.
+func TestFileLogger_QueryOrder(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "audit-order-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	logger, err := NewFileLogger(filepath.Join(tmpDir, "audit.log"), RotationConfig{})
+	if err != nil {
+		t.Fatalf("NewFileLogger: %v", err)
+	}
+	defer logger.Close()
+
+	// Append oldest → newest (file/hash-chain build order).
+	for _, op := range []string{"first", "second", "third"} {
+		if err := logger.Log(testEvent("alice", "leaf1", op).withSuccess()); err != nil {
+			t.Fatalf("Log %s: %v", op, err)
+		}
+	}
+
+	cases := []struct {
+		name   string
+		filter Filter
+		want   []string
+	}{
+		{"default is newest-first", Filter{}, []string{"third", "second", "first"}},
+		{"explicit desc matches default", Filter{Order: OrderNewestFirst}, []string{"third", "second", "first"}},
+		{"asc is chronological", Filter{Order: OrderOldestFirst}, []string{"first", "second", "third"}},
+		{"default page 1 is the newest", Filter{Limit: 1}, []string{"third"}},
+		{"asc page 1 is the oldest", Filter{Limit: 1, Order: OrderOldestFirst}, []string{"first"}},
+		{"default page 2 walks toward older", Filter{Limit: 1, Offset: 1}, []string{"second"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := logger.Query(tc.filter)
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			if ops := opsOf(got); !reflect.DeepEqual(ops, tc.want) {
+				t.Errorf("order = %v, want %v", ops, tc.want)
+			}
+		})
+	}
+}
 
 // testEvent creates an Event for testing (replaces deleted NewEvent builder).
 func testEvent(user, device, operation string) *Event {

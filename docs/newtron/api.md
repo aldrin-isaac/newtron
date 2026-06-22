@@ -1000,10 +1000,14 @@ optional and missing means "no constraint."
 | `success` | `true` or `false` | `true` returns only successful events; `false` returns only failures |
 | `limit` | integer (default 100, max 1000) | page size |
 | `offset` | integer (default 0) | offset into the filter's full match set |
+| `order` | `desc` (default) or `asc` | `desc` returns newest events first (offset 0 is the most recent activity, paging walks back into history); `asc` returns chronological (hash-chain build) order |
+
+Ordering is applied before `offset`/`limit`, so paging starts from the
+chosen end. `total` and `next_offset` are order-independent.
 
 Malformed values (non-RFC3339 timestamp, non-numeric `limit`,
-unrecognized `success`) surface as 400 with an actionable phrase
-identifying the field.
+unrecognized `success`, `order` other than `asc`/`desc`) surface as 400
+with an actionable phrase identifying the field.
 
 **Response (200):** `AuditEventPage` with:
 
