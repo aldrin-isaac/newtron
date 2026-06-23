@@ -51,6 +51,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/services` | List services (also: `/ipvpns`, `/macvpns`, `/qos-policies`, `/filters`, `/platforms`, `/route-policies`, `/prefix-lists`) |
 | GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
+| GET | `/networks/{n}/spec-instances` | Flat cross-scope inventory of every spec (network/zone/node), tagged with scope + scope_instance |
 | GET | `/networks/{n}/profiles` | List device profile names |
 | GET | `/networks/{n}/nodes/{name}` | Show device profile |
 | GET | `/networks/{n}/zones` | List zone names |
@@ -863,6 +864,48 @@ GET /newtron/v1/networks/default/service          -> {"data": [ ... array of Ser
 GET /newtron/v1/networks/default/service/transit  -> {"data": { ... single ServiceDetail ... }}
 GET /newtron/v1/networks/default/service/missing  -> {"error": "not found: service 'missing'"}
 ```
+
+### Cross-Scope Spec Inventory
+
+```
+GET /newtron/v1/networks/{netID}/spec-instances
+```
+
+newtron stores specs hierarchically -- the same kind may be defined at the
+**network** scope (network.json), at a **zone** (network.json `zones[<name>]`),
+and at a **node** (nodes/`<name>`.json), with node overriding zone overriding
+network. The per-kind list endpoints above return only the **network** scope.
+This endpoint returns one **flat inventory of every spec at every scope**, each
+entry tagged with the scope and instance it is defined at -- so a schema-driven
+UI can present one flat list filtered by two dropdowns (scope, scope instance)
+instead of replicating each kind's schema once per scope. Storage and resolution
+stay hierarchical; only this read surface is flattened.
+
+**Response (200):** an array of `SpecInstance`, sorted by `(scope, scope_instance, kind, name)`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Spec kind: `ServiceSpec`, `IPVPNSpec`, `MACVPNSpec`, `QoSPolicy`, `RoutePolicy`, `FilterSpec`, `PrefixListSpec` |
+| `name` | string | Canonical spec name (UPPER_SNAKE; equals the `GET .../services` etc. key) |
+| `scope` | string | `network`, `zone`, or `node` |
+| `scope_instance` | string | The zone or node name; empty for `network` scope |
+
+```
+GET /newtron/v1/networks/default/spec-instances
+  -> {"data": [
+       {"kind":"PrefixListSpec","name":"BOGONS","scope":"network","scope_instance":""},
+       {"kind":"ServiceSpec","name":"TRANSIT","scope":"network","scope_instance":""},
+       {"kind":"ServiceSpec","name":"TRANSIT","scope":"node","scope_instance":"leaf1"},
+       {"kind":"PrefixListSpec","name":"LOCAL_PL","scope":"zone","scope_instance":"amer"}
+     ]}
+```
+
+This is a **locating** inventory, not a resolution. It does **not** merge
+overrides: a name defined at both `network` and a `node` appears as two separate
+entries (as `TRANSIT` does above). The override outcome -- what a given node
+*effectively* resolves -- is a separate per-node read, not this list. The
+endpoint is purely additive; the per-kind list/show endpoints (network scope)
+are unchanged.
 
 #### GET /newtron/v1/networks/{netID}/services/{name}/projection
 
@@ -4110,6 +4153,20 @@ Returned by `GET .../hosts/{name}`.
 These types are returned by the spec read endpoints in S4. They are the API's
 view of spec objects -- they contain only the fields relevant to consumers, not
 internal implementation details.
+
+#### SpecInstance
+
+Returned (as an array) by `GET .../spec-instances` -- the flat cross-scope spec
+inventory. Each entry locates one spec definition in the network → zone → node
+hierarchy; it is not the spec's content (read that via the per-kind show
+endpoint).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | string | Spec kind: `ServiceSpec`, `IPVPNSpec`, `MACVPNSpec`, `QoSPolicy`, `RoutePolicy`, `FilterSpec`, `PrefixListSpec` |
+| `name` | string | Canonical spec name |
+| `scope` | string | `network`, `zone`, or `node` |
+| `scope_instance` | string | Zone or node name; empty for `network` scope |
 
 #### ServiceDetail
 

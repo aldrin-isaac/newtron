@@ -108,6 +108,24 @@ func (s *Server) handleReloadNetwork(w http.ResponseWriter, r *http.Request) {
 // Network spec reads
 // ============================================================================
 
+// handleSpecInstances returns the flat cross-scope spec inventory: every spec
+// defined at network/zone/node, each tagged with scope + scope_instance. Additive
+// and read-only — the per-kind list endpoints below (network scope) are
+// unchanged. A schema-driven UI renders one flat list filtered by the two scope
+// dropdowns from this; storage stays hierarchical underneath.
+func (s *Server) handleSpecInstances(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	instances, err := ne.net.SpecInstances()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, instances)
+}
+
 func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
