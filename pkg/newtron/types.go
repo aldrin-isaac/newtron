@@ -503,6 +503,20 @@ type HealthCheckResult struct {
 // Spec Detail Types (API view of spec objects)
 // ============================================================================
 
+// SpecInstance locates one spec definition within newtron's hierarchical spec
+// store: its kind, its (canonical) name, and the scope + instance it is defined
+// at. It is the flat, cross-scope inventory entry a schema-driven UI lists and
+// filters by scope/scope_instance — the boundary projection of the
+// network → zone → node hierarchy (definition is network-scoped, execution
+// node-scoped; DESIGN_PRINCIPLES_NEWTRON §7). Scope is one of "network", "zone",
+// "node"; ScopeInstance is the zone or node name, empty for the network scope.
+type SpecInstance struct {
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
+	Scope         string `json:"scope"`
+	ScopeInstance string `json:"scope_instance"`
+}
+
 // ServiceDetail is the API view of a service definition.
 type ServiceDetail struct {
 	Name          string `json:"name"`

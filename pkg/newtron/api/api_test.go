@@ -66,6 +66,7 @@ func TestAPICompleteness(t *testing.T) {
 	coveredMethods := map[string]map[string]bool{
 		"Network": {
 			// Spec reads
+			"SpecInstances":       true,
 			"ListServices":        true,
 			"ShowService":         true,
 			"ListIPVPNs":          true,
@@ -392,6 +393,7 @@ func TestAPICompleteness(t *testing.T) {
 	// wrapper; gates fire inside the fn it invokes).
 	readOnlyMethods := map[string]map[string]string{
 		"Network": {
+			"SpecInstances":           "spec read",
 			"ListServices":            "spec read",
 			"ShowService":             "spec read",
 			"ListIPVPNs":              "spec read",

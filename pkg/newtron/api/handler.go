@@ -62,6 +62,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/route-policies/{name}", s.handleShowRoutePolicy)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/prefix-lists", s.handleListPrefixLists)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/prefix-lists/{name}", s.handleShowPrefixList)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/spec-instances", s.handleSpecInstances)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/topology", s.handleTopology)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/topology/nodes", s.handleTopologyDeviceNames)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/topology/create-node", s.handleCreateTopologyNode)
