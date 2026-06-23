@@ -11,28 +11,31 @@ func TestDeriveSpecRef(t *testing.T) {
 		wantName string
 	}{
 		{
-			name:     "apply-service (interface-scoped URL)",
+			// spec_name is the spec's CANONICAL identity (NormalizeName: upper +
+			// hyphen→underscore), not the raw step casing — so it equals the
+			// GET /services key regardless of how it was typed at apply time.
+			name:     "apply-service — canonicalized (transit → TRANSIT)",
 			url:      "/interfaces/Ethernet0/apply-service",
 			params:   map[string]any{"service": "transit", "ip_address": "10.1.0.0/31"},
-			wantKind: "service", wantName: "transit",
+			wantKind: "service", wantName: "TRANSIT",
 		},
 		{
-			name:     "bind-ipvpn (node-scoped URL)",
+			name:     "bind-ipvpn — canonicalized (irb → IRB)",
 			url:      "/bind-ipvpn",
-			params:   map[string]any{"ipvpn": "IRB"},
+			params:   map[string]any{"ipvpn": "irb"},
 			wantKind: "ipvpn", wantName: "IRB",
 		},
 		{
-			name:     "bind-macvpn",
+			name:     "bind-macvpn — canonicalized (blue → BLUE)",
 			url:      "/interfaces/Ethernet4/bind-macvpn",
 			params:   map[string]any{"macvpn": "blue", "vlan_id": "400"},
-			wantKind: "macvpn", wantName: "blue",
+			wantKind: "macvpn", wantName: "BLUE",
 		},
 		{
-			name:     "bind-qos (param key is 'policy')",
+			name:     "bind-qos (param key 'policy') — canonicalized (gold → GOLD)",
 			url:      "/interfaces/Ethernet0/bind-qos",
 			params:   map[string]any{"policy": "gold"},
-			wantKind: "qos", wantName: "gold",
+			wantKind: "qos", wantName: "GOLD",
 		},
 		{
 			name:     "primitive create-vrf has no source spec",
@@ -41,10 +44,10 @@ func TestDeriveSpecRef(t *testing.T) {
 			wantKind: "", wantName: "",
 		},
 		{
-			name:     "service-derived create-acl carries the source filter name",
+			name:     "service-derived create-acl — source filter, canonicalized (mgmt-in → MGMT_IN)",
 			url:      "/create-acl",
 			params:   map[string]any{"name": "acl_a1b2c3d4", "filter": "mgmt-in"},
-			wantKind: "filter", wantName: "mgmt-in",
+			wantKind: "filter", wantName: "MGMT_IN",
 		},
 		{
 			name:     "standalone/raw create-acl (no source filter) → empty, not a misleading name",

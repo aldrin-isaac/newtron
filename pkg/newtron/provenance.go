@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // Spec-kind tokens for DeriveSpecRef — the canonical names of the network spec
@@ -72,5 +73,12 @@ func DeriveSpecRef(url string, params map[string]any) (specKind, specName string
 		// claim a kind without a name; that would be a half-record.
 		return "", ""
 	}
-	return kind, name
+	// Return the spec's CANONICAL identity, not the raw step value. Topology
+	// steps store the name in whatever casing the operator typed at apply time
+	// (e.g. "transit", "local-irb"); the spec it references is keyed canonically
+	// (§36 normalizes at load: "TRANSIT", "LOCAL_IRB"). Normalizing here makes
+	// spec_name equal the GET /services / /ipvpns key exactly, so a client
+	// matches provenance against the spec surface with no canonicalization of
+	// its own.
+	return kind, util.NormalizeName(name)
 }
