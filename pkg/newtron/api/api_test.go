@@ -18,6 +18,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // repoRoot walks up from this test file to the newtron repo root so tests
@@ -617,6 +618,13 @@ func TestHandleTopology_CarriesSpecProvenance(t *testing.T) {
 				if step.SpecKind != "service" || step.SpecName == "" {
 					t.Errorf("%s %s: spec_kind=%q spec_name=%q, want service/<name>",
 						dev, step.URL, step.SpecKind, step.SpecName)
+				}
+				// spec_name must be the spec's CANONICAL identity (so it equals
+				// the GET /services key), not the raw step casing — the whole
+				// point of the canonical-name bridge.
+				if step.SpecName != util.NormalizeName(step.SpecName) {
+					t.Errorf("%s %s: spec_name=%q is not canonical (want NormalizeName form)",
+						dev, step.URL, step.SpecName)
 				}
 			case strings.HasSuffix(step.URL, "/setup-device"):
 				sawPrimitive = true
