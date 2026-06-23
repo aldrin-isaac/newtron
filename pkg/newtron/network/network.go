@@ -425,15 +425,46 @@ func (n *Network) DeleteIPVPN(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Check for dependent services
-	for svcName, svc := range n.spec.Services {
-		if svc.IPVPN == name {
-			return fmt.Errorf("cannot delete ipvpn '%s': referenced by service '%s'", name, svcName)
-		}
+	if err := n.checkNoConsumers("IPVPNSpec", name); err != nil {
+		return err
 	}
-
-	delete(n.spec.IPVPNs, name)
+	delete(n.spec.IPVPNs, util.NormalizeName(name))
 	return n.persistSpec()
+}
+
+// checkNoConsumers is the single reverse-dependency guard for every spec delete
+// (§15). It refuses with a *util.ConflictError (→ HTTP 409) when any other spec
+// references the target, listing the referrers. The reference graph is read
+// generically from the `ref:` / `kind:` tags (spec.OverridableSpecs.FindConsumers)
+// — there is no per-kind scan to keep in sync. Spec deletes are refuse-only: a
+// reference must be removed first (unlike profile/topology-device delete there is
+// no safe cascade — newtron cannot auto-delete a consuming service).
+func (n *Network) checkNoConsumers(kind, name string) error {
+	consumers := n.spec.FindConsumers(kind, util.NormalizeName(name))
+	if len(consumers) == 0 {
+		return nil
+	}
+	refs := make([]string, len(consumers))
+	for i, c := range consumers {
+		refs[i] = fmt.Sprintf("%s '%s' (%s)", c.Kind, c.Name, c.Field)
+	}
+	return &util.ConflictError{Resource: kind, Name: util.NormalizeName(name), References: refs}
+}
+
+// checkRefsResolve is the single forward-dependency guard for every spec
+// create/update. It refuses with a *spec.ReferenceError (→ HTTP 400) when the
+// spec references anything that does not exist. The referenced names are read
+// generically from the `ref:` tags (spec.OverridableSpecs.MissingRefs).
+func (n *Network) checkRefsResolve(value any) error {
+	missing := n.spec.MissingRefs(value)
+	if len(missing) == 0 {
+		return nil
+	}
+	errs := make([]string, len(missing))
+	for i, r := range missing {
+		errs[i] = fmt.Sprintf("%s references %s '%s' which does not exist", r.Field, r.Kind, r.Name)
+	}
+	return &spec.ReferenceError{Errors: errs}
 }
 
 // SaveMACVPN creates or updates a MAC-VPN definition in network.json.
@@ -459,16 +490,10 @@ func (n *Network) DeleteMACVPN(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
-
-	// Check for dependent services
-	for svcName, svc := range n.spec.Services {
-		if svc.MACVPN == name {
-			return fmt.Errorf("cannot delete macvpn '%s': referenced by service '%s'", name, svcName)
-		}
+	if err := n.checkNoConsumers("MACVPNSpec", name); err != nil {
+		return err
 	}
-
-	delete(n.spec.MACVPNs, name)
+	delete(n.spec.MACVPNs, util.NormalizeName(name))
 	return n.persistSpec()
 }
 
@@ -495,16 +520,10 @@ func (n *Network) DeleteQoSPolicy(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
-
-	// Check for dependent services
-	for svcName, svc := range n.spec.Services {
-		if svc.QoSPolicy == name {
-			return fmt.Errorf("cannot delete QoS policy '%s': referenced by service '%s'", name, svcName)
-		}
+	if err := n.checkNoConsumers("QoSPolicy", name); err != nil {
+		return err
 	}
-
-	delete(n.spec.QoSPolicies, name)
+	delete(n.spec.QoSPolicies, util.NormalizeName(name))
 	return n.persistSpec()
 }
 
@@ -516,6 +535,9 @@ func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 
 	name = util.NormalizeName(name)
 	spec.NormalizeFilterRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 
 	if n.spec.Filters == nil {
 		n.spec.Filters = make(map[string]*spec.FilterSpec)
@@ -531,16 +553,10 @@ func (n *Network) DeleteFilter(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
-
-	// Check for dependent services
-	for svcName, svc := range n.spec.Services {
-		if svc.IngressFilter == name || svc.EgressFilter == name {
-			return fmt.Errorf("cannot delete filter '%s': referenced by service '%s'", name, svcName)
-		}
+	if err := n.checkNoConsumers("FilterSpec", name); err != nil {
+		return err
 	}
-
-	delete(n.spec.Filters, name)
+	delete(n.spec.Filters, util.NormalizeName(name))
 	return n.persistSpec()
 }
 
@@ -565,26 +581,13 @@ func (n *Network) DeletePrefixList(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
-
-	// Check for dependent filters
-	for filterName, f := range n.spec.Filters {
-		for _, r := range f.Rules {
-			if r.SrcPrefixList == name || r.DstPrefixList == name {
-				return fmt.Errorf("cannot delete prefix list '%s': referenced by filter '%s'", name, filterName)
-			}
-		}
+	// Covers all consumers generically — filters, route policies, AND service
+	// routing (import/export_prefix_list), which the prior hand-coded scan
+	// missed.
+	if err := n.checkNoConsumers("PrefixListSpec", name); err != nil {
+		return err
 	}
-	// Check for dependent route policies
-	for policyName, rp := range n.spec.RoutePolicies {
-		for _, r := range rp.Rules {
-			if r.PrefixList == name {
-				return fmt.Errorf("cannot delete prefix list '%s': referenced by route policy '%s'", name, policyName)
-			}
-		}
-	}
-
-	delete(n.spec.PrefixLists, name)
+	delete(n.spec.PrefixLists, util.NormalizeName(name))
 	return n.persistSpec()
 }
 
@@ -600,6 +603,9 @@ func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
 		n.spec.RoutePolicies = make(map[string]*spec.RoutePolicy)
 	}
 	spec.NormalizeRoutePolicyRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	n.spec.RoutePolicies[name] = def
 	return n.persistSpec()
 }
@@ -610,18 +616,10 @@ func (n *Network) DeleteRoutePolicy(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
-
-	// Check for dependent services
-	for svcName, svc := range n.spec.Services {
-		if svc.Routing != nil {
-			if svc.Routing.ImportPolicy == name || svc.Routing.ExportPolicy == name {
-				return fmt.Errorf("cannot delete route policy '%s': referenced by service '%s'", name, svcName)
-			}
-		}
+	if err := n.checkNoConsumers("RoutePolicy", name); err != nil {
+		return err
 	}
-
-	delete(n.spec.RoutePolicies, name)
+	delete(n.spec.RoutePolicies, util.NormalizeName(name))
 	return n.persistSpec()
 }
 
@@ -659,6 +657,9 @@ func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 
 	name = util.NormalizeName(name)
 	spec.NormalizeServiceRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 
 	if n.spec.Services == nil {
 		n.spec.Services = make(map[string]*spec.ServiceSpec)
@@ -674,9 +675,14 @@ func (n *Network) DeleteService(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	name = util.NormalizeName(name)
-
-	delete(n.spec.Services, name)
+	// Uniform guard — no spec references a service today, but every spec delete
+	// flows through the same check so a future ref:"ServiceSpec" is covered for
+	// free. (Whether a service is still *applied* on a device is a separate,
+	// runtime concern the caller handles.)
+	if err := n.checkNoConsumers("ServiceSpec", name); err != nil {
+		return err
+	}
+	delete(n.spec.Services, util.NormalizeName(name))
 	return n.persistSpec()
 }
 
@@ -722,6 +728,9 @@ func (n *Network) CreateService(name string, def *spec.ServiceSpec) error {
 		return fmt.Errorf("service '%s' already exists", name)
 	}
 	spec.NormalizeServiceRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	if n.spec.Services == nil {
 		n.spec.Services = make(map[string]*spec.ServiceSpec)
 	}
@@ -796,6 +805,9 @@ func (n *Network) CreateFilter(name string, def *spec.FilterSpec) error {
 		return fmt.Errorf("filter '%s' already exists", name)
 	}
 	spec.NormalizeFilterRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	if n.spec.Filters == nil {
 		n.spec.Filters = make(map[string]*spec.FilterSpec)
 	}
@@ -833,6 +845,9 @@ func (n *Network) CreateRoutePolicy(name string, def *spec.RoutePolicy) error {
 		return fmt.Errorf("route policy '%s' already exists", name)
 	}
 	spec.NormalizeRoutePolicyRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	if n.spec.RoutePolicies == nil {
 		n.spec.RoutePolicies = make(map[string]*spec.RoutePolicy)
 	}
@@ -891,6 +906,9 @@ func (n *Network) UpdateService(name string, def *spec.ServiceSpec) error {
 		return &newtronErrors{notFound: true, resource: "service", id: name}
 	}
 	spec.NormalizeServiceRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	n.spec.Services[name] = def
 	return n.persistSpec()
 }
@@ -949,6 +967,9 @@ func (n *Network) UpdateFilter(name string, def *spec.FilterSpec) error {
 		return &newtronErrors{notFound: true, resource: "filter", id: name}
 	}
 	spec.NormalizeFilterRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	n.spec.Filters[name] = def
 	return n.persistSpec()
 }
@@ -978,6 +999,9 @@ func (n *Network) UpdateRoutePolicy(name string, def *spec.RoutePolicy) error {
 		return &newtronErrors{notFound: true, resource: "route-policy", id: name}
 	}
 	spec.NormalizeRoutePolicyRefs(def)
+	if err := n.checkRefsResolve(def); err != nil {
+		return err
+	}
 	n.spec.RoutePolicies[name] = def
 	return n.persistSpec()
 }
@@ -1116,6 +1140,10 @@ func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
 			return fmt.Errorf("rule with priority %d already exists in filter '%s'", rule.Sequence, filter)
 		}
 	}
+	// Forward check on the rule's own references (e.g. src/dst_prefix_list).
+	if err := n.checkRefsResolve(rule); err != nil {
+		return err
+	}
 	f.Rules = append(f.Rules, rule)
 	sort.Slice(f.Rules, func(i, j int) bool {
 		return f.Rules[i].Sequence < f.Rules[j].Sequence
@@ -1149,6 +1177,10 @@ func (n *Network) UpdateFilterRule(filter string, currentSeq int, newRule *spec.
 	}
 	if target == nil {
 		return fmt.Errorf("rule with priority %d not found in filter '%s'", currentSeq, filter)
+	}
+	// Forward check on the replacement rule's own references.
+	if err := n.checkRefsResolve(newRule); err != nil {
+		return err
 	}
 	// If the rule is being renumbered, ensure the target sequence isn't
 	// already occupied by another rule.

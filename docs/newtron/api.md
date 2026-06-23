@@ -1275,6 +1275,24 @@ All spec write endpoints use RPC-style naming: `POST .../create-X` and
 `POST .../delete-X`. They accept the `dry_run` query parameter. When `dry_run=true`,
 the spec is validated but not persisted.
 
+#### Referential integrity (both directions, all kinds)
+
+Cross-spec references are checked uniformly — the relationships are read from the
+`ref:` schema tags, so every kind and every reference is covered without
+per-endpoint logic:
+
+- **Create / update — forward check.** A spec may only reference specs that
+  exist. Creating or updating a spec whose references don't resolve (e.g. a
+  service naming an IP-VPN, filter, QoS policy, route-policy, or prefix-list
+  that isn't defined) is rejected with **400** and lists the unresolved
+  references. Create dependencies before the specs that reference them.
+- **Delete — reverse check.** A spec may not be deleted while another spec
+  references it. The delete is refused with **409** (`ConflictError`) listing
+  the referrers (e.g. *"PrefixListSpec 'BOGONS' has 2 references: ServiceSpec
+  'EDGE' (import_prefix_list), FilterSpec 'MGMT' (src_prefix_list)"*). Remove
+  the references first; there is no force-cascade for specs (newtron will not
+  auto-delete a consuming spec).
+
 ### Services
 
 #### POST /newtron/v1/networks/{netID}/create-service

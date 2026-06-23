@@ -315,6 +315,13 @@ func httpStatusFromError(err error) int {
 		return http.StatusBadRequest
 	}
 
+	// Forward dependency check: a created/updated spec references a spec that
+	// doesn't exist — invalid input, 400.
+	var refErr *spec.ReferenceError
+	if errors.As(err, &refErr) {
+		return http.StatusBadRequest
+	}
+
 	var verificationFailed *newtron.VerificationFailedError
 	if errors.As(err, &verificationFailed) {
 		return http.StatusConflict
