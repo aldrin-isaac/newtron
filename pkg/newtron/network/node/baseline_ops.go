@@ -35,6 +35,28 @@ func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) (*ChangeSe
 	cs := NewChangeSet(n.name, "device."+sonic.OpSetupDevice)
 
 	// Intent record — captures the input params for reconstruction.
+	//
+	// These metadata fields (bgp_asn, hwsku, hostname, type) are
+	// profile/platform-resolved, so the round-trip-completeness rule would
+	// normally say "don't freeze them — re-resolve at replay." setup-device
+	// freezes them on purpose, and this is NOT a violation to "fix":
+	//
+	//   - This is the root "device" intent. Baseline ops have no individual
+	//     reverse (their collective reverse is Reconcile, §15), so the frozen
+	//     values aren't a teardown self-sufficiency cache — they're simply the
+	//     record of what was actuated as the device's foundation.
+	//   - The values are foundational and can't be adopted by an in-place field
+	//     edit. A changed bgp_asn requires a BGP restart (RCA-019) that drops
+	//     every underlay+overlay session — i.e. it cascades to every child
+	//     intent (VRFs, services, EVPN). The only way to apply a changed value
+	//     is a re-provision (re-run setup-device), which rewrites these params
+	//     by construction.
+	//
+	// So the freeze can't usefully drift: while a frozen value disagrees with
+	// the profile, the frozen value is the correct record of what's actuated,
+	// and closing the gap IS the re-provision that refreshes it. Re-resolving
+	// here would buy nothing and would make replay depend on the profile
+	// staying resolvable (the orphan fragility §20 avoids).
 	intentParams := make(map[string]string)
 	for k, v := range opts.Fields {
 		intentParams[k] = v
