@@ -36,14 +36,19 @@ type QoSQueue struct {
 // OverridableSpecs holds spec maps that participate in hierarchical resolution
 // (network → zone → node). Embedded by NetworkSpecFile, ZoneSpec, and DeviceProfile.
 // Resolution is a union with lower-level-wins: node > zone > network.
+// The `kind:"…"` tag binds each map to its spec-kind name — the same vocabulary
+// as the `ref:"…"` tags and SchemaRegistration.Kind. It is the single
+// declaration the referential-integrity framework (references.go) reflects over
+// to enumerate specs and resolve references; adding a spec kind is one map with
+// one kind tag, and forward+reverse dependency checking covers it automatically.
 type OverridableSpecs struct {
-	PrefixLists   map[string][]string      `json:"prefix_lists,omitempty"`
-	Filters       map[string]*FilterSpec   `json:"filters,omitempty"`
-	QoSPolicies   map[string]*QoSPolicy    `json:"qos_policies,omitempty"`
-	RoutePolicies map[string]*RoutePolicy  `json:"route_policies,omitempty"`
-	IPVPNs        map[string]*IPVPNSpec    `json:"ipvpns,omitempty"`
-	MACVPNs       map[string]*MACVPNSpec   `json:"macvpns,omitempty"`
-	Services      map[string]*ServiceSpec  `json:"services,omitempty"`
+	PrefixLists   map[string][]string     `json:"prefix_lists,omitempty" kind:"PrefixListSpec"`
+	Filters       map[string]*FilterSpec  `json:"filters,omitempty" kind:"FilterSpec"`
+	QoSPolicies   map[string]*QoSPolicy   `json:"qos_policies,omitempty" kind:"QoSPolicy"`
+	RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty" kind:"RoutePolicy"`
+	IPVPNs        map[string]*IPVPNSpec   `json:"ipvpns,omitempty" kind:"IPVPNSpec"`
+	MACVPNs       map[string]*MACVPNSpec  `json:"macvpns,omitempty" kind:"MACVPNSpec"`
+	Services      map[string]*ServiceSpec `json:"services,omitempty" kind:"ServiceSpec"`
 }
 
 // NetworkSpecFile represents the global network specification file (network.json).
