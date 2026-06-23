@@ -1110,9 +1110,11 @@ same `DeriveSpecRef` as `/intent/tree` — `service`/`ipvpn`/`macvpn`/`qos`, and
 
 Unlike `/intent/tree` (per-device, requires a deployed lab), this is **one call
 for the whole network and works before any lab is deployed** — it's a spec-file
-read. It's the source for "where is spec X applied?" reverse-index views. The
-derived fields are computed at serve time (never stale), are **not** persisted
-to `topology.json` (its `spec.TopologyStep` stays `url`/`params`), and are
+read. It's the source for "where is spec X applied?" reverse-index views:
+`spec_name` is the **canonical** spec key (see `/intent/tree` above), so a client
+matches it against the `GET /services` / `/ipvpns` key directly. The derived
+fields are computed at serve time (never stale), are **not** persisted to
+`topology.json` (its `spec.TopologyStep` stays `url`/`params`), and are
 output-only — they don't round-trip into `/intent/save`.
 
 **Response (200):** `TopologyView` with `version`, `description`,
@@ -2447,13 +2449,18 @@ Each step carries server-derived **`spec_kind`** and **`spec_name`** when it is
 the instantiation of a named network spec — a service applied, an
 IP-VPN/MAC-VPN bound, a QoS policy bound, or a service-derived ACL:
 
+`spec_name` is the spec's **canonical** identity (`NormalizeName` — upper-case,
+`-`→`_`), so it equals the `GET /services` / `/ipvpns` / … key **exactly**,
+regardless of the casing the operator typed at apply time. A client matches
+`spec_name` against the spec list key with no transformation.
+
 | `spec_kind` | `spec_name` | from |
 |---|---|---|
-| `service` | the service name (e.g. `transit`) | `apply-service` / `deploy-service` |
-| `ipvpn` | the IP-VPN name (e.g. `IRB`) | `bind-ipvpn` |
-| `macvpn` | the MAC-VPN name | `bind-macvpn` |
-| `qos` | the QoS policy name | `bind-qos` |
-| `filter` | the source filter name (e.g. `mgmt-in`) | service-derived `create-acl` |
+| `service` | canonical service name (e.g. `TRANSIT`) | `apply-service` / `deploy-service` |
+| `ipvpn` | canonical IP-VPN name (e.g. `IRB`) | `bind-ipvpn` |
+| `macvpn` | canonical MAC-VPN name | `bind-macvpn` |
+| `qos` | canonical QoS policy name | `bind-qos` |
+| `filter` | canonical source filter name (e.g. `MGMT_IN`) | service-derived `create-acl` |
 
 Both are omitted for primitives (device/VLAN/VRF) and for a standalone/raw
 `create-acl` (no source filter spec). A service-derived ACL is content-hash-named
@@ -2463,7 +2470,7 @@ steps — they are sub-resources of a service application, so the enclosing
 `service` step already carries their provenance. The fields
 are **server-derived at serve time** (re-computed each request, never stale)
 and are **not** persisted to `topology.json`. A client reads them to map intent
-→ spec — e.g. "where is service `transit` applied across the topology?" —
+→ spec — e.g. "where is service `TRANSIT` applied across the topology?" —
 without re-implementing newtron's per-operation derivation.
 
 ---
