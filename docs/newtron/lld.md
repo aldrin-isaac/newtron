@@ -1089,6 +1089,22 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 > - Full-replacement Updates on top-level specs (the **#152 family**) reuse their `Create*Request` type — the request body fully replaces the prior spec under the same name. The handler decodes the Create type even though the action is Update.
 > - Per-item Updates on sub-collections (rules, queues, entries) use a dedicated `Update*Request` type that adds an optional `new_seq` / `new_queue_id` / required `new_prefix` field for renumbering or value-swap.
 
+**Scoped writes.** Every write request body below embeds `ScopeSelector`
+(`scope` + `scope_instance`; absent ⇒ network) and the `delete-`/`remove-` verbs
+carry the same two fields, so any overridable kind or sub-rule can be authored at
+network, zone, or node scope — "flat at the boundary, hierarchical underneath."
+Internal write methods take leading `(scope, instance string)` and route to the
+target container via `withWriteTarget` (network/zone → `network.json` under
+`keyNetworkSpec`; node → `nodes/<name>.json` via `loader.MutateProfile`, which
+reads raw-from-disk so secret-resolved values are never written back). The
+**network-floor invariant** (DESIGN_PRINCIPLES_NEWTRON §7) governs integrity: an
+override requires a network base, so forward ref checks stay network-scoped,
+override deletes are free, and network-base / container deletes are refused while
+referenced or overridden below. Scope is also read-only provenance on
+`GET /spec-instances` (`[]SpecInstance{kind, name, scope, scope_instance}`) and is
+declared in the schema (`scope` enum + scope-conditional `scope_instance` ref via
+`ref_when`).
+
 | Method | Path | Request Type |
 |--------|------|-------------|
 | POST | `.../create-service` | `CreateServiceRequest` |

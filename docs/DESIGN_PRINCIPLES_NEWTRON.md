@@ -698,8 +698,49 @@ device.GetService("TRANSIT")
 Every spec lookup must include the network fallback. A snapshot-only
 lookup is a bug.
 
+### Authoring overrides: the network-floor invariant
+
+Resolution above is the read side. The write side lets an operator
+*author* an override at a zone or node through the same API that authors
+network specs: `create-`/`update-`/`delete-` (and the sub-rule verbs)
+carry an optional `scope` + `scope_instance`. Absent scope means network,
+so the surface is **flat at the boundary** (one form, two discriminators)
+while storage stays **hierarchical underneath**. The schema declares the
+two discriminators — `scope` as an enum, `scope_instance` as a
+scope-conditional reference — so a schema-driven UI renders the override
+form with no special-casing.
+
+Scoped writes hold to one invariant: **a resource may exist at zone or
+node scope only if it also exists at network scope.** An override is a
+*refinement of an existing base*, never a new name introduced at a leaf.
+This is what keeps the live fallback total — every device's chain bottoms
+out at the network definition, so a reference can never dangle from any
+device's perspective, no matter which of hundreds resolves it.
+
+The invariant decides the whole integrity story, and keeps it small:
+
+- **Forward reference checks stay at network scope, unchanged (§13).**
+  Because every referenceable name exists at network, a reference resolves
+  iff it resolves at network — the check never becomes scope-relative.
+- **Deleting an override is always safe** — consumers fall back to the base
+  the invariant guarantees still exists.
+- **Deleting the network base is guarded** — refused while anything
+  references it at *any* scope, or while any override still sits below it
+  (remove the overrides first; deletion is bottom-up, §15).
+- **Deleting a scope container** (a zone, a node profile) that still holds
+  overrides is refused for the same reason — it would silently remove
+  authored resources.
+
+The alternative — letting an override introduce a name with no base — was
+rejected: it makes "is this reference satisfied?" a per-device question
+(resolved where the name happens to be defined below, dangling elsewhere),
+which is both expensive to check and impossible to distinguish from a
+typo. The floor invariant trades a small authoring discipline — define the
+base first — for resolution that is total by construction.
+
 **Define once at the broadest applicable scope; override only where
-necessary; resolve once at node creation.**
+necessary; resolve once at node creation. An override always rests on a
+network-level base.**
 
 ---
 

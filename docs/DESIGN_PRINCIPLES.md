@@ -728,8 +728,28 @@ device.GetService("TRANSIT")
 Every spec lookup must include the network fallback. A snapshot-only
 lookup is a bug.
 
+### Authoring overrides: the base-layer invariant
+
+Resolution above is the read side. When a system also lets you *author* an
+override at a narrower layer, one invariant keeps the layering sound: **a
+value may exist at a narrower layer only if it also exists at the broadest
+layer.** An override refines an existing base; it never introduces a name
+that lives only at a leaf.
+
+This is what keeps fallback total. Every consumer's lookup chain bottoms
+out at the base layer, so a reference can never resolve from some vantage
+points and dangle from others — a failure mode that is both expensive to
+check (it is per-consumer) and impossible to tell apart from a typo. With
+the invariant, integrity stays simple: forward checks run at the base
+layer unchanged; deleting an override is always safe (consumers fall back
+to the base); deleting the base — or a container still holding overrides —
+is refused while anything references or overrides it. The trade is a small
+authoring discipline (define the base first) for resolution that is total
+by construction.
+
 **Define once at the broadest applicable scope; override only where
-necessary; resolve once at node creation.**
+necessary; resolve once at consumption. An override always rests on a
+base-layer definition.**
 
 ---
 
