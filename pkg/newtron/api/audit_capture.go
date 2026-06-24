@@ -2,11 +2,12 @@
 //
 // auditMiddleware (audit_middleware.go) records who/when/verb/outcome for
 // every mutation. These helpers add the *content*: what the caller submitted
-// (redactRequestBody) and what the operation produced on the device
-// (extractChanges). Both operate on raw HTTP bytes the middleware captured, so
-// they cover every mutation handler uniformly — network-level spec authoring
-// (create-service, create-zone) and device writes (apply-service, create-vlan)
-// alike — without any handler needing to participate.
+// (redactRequestBody), what the operation produced on the device
+// (extractChanges), and — on failure — why it failed (extractError). All
+// operate on raw HTTP bytes the middleware captured, so they cover every
+// mutation handler uniformly — network-level spec authoring (create-service,
+// create-zone) and device writes (apply-service, create-vlan) alike — without
+// any handler needing to participate.
 package api
 
 import (
@@ -46,6 +47,28 @@ func extractChanges(respBody []byte) []node.Change {
 		return nil
 	}
 	return envelope.Data.Changes
+}
+
+// extractError pulls the underlying failure reason out of a captured error
+// response body — the `error` member of the standard APIResponse envelope, the
+// same string the caller received live (e.g. "l3vni must be an integer in
+// 1..16777215", or a referential-conflict message). The audit middleware
+// records this on a failed event so the trail is as actionable after the fact
+// as it was at request time, instead of the bare HTTP status text. Returns ""
+// when the body is absent, doesn't parse (e.g. truncated past the capture cap,
+// or a non-JSON error page), or carries no message — the caller then falls back
+// to the status text so the event is never left without a failure hint.
+func extractError(respBody []byte) string {
+	if len(respBody) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return ""
+	}
+	return envelope.Error
 }
 
 // redactSensitiveKeys names the request-body fields whose values are secrets in

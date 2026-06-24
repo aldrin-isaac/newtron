@@ -4463,7 +4463,7 @@ Returned by `GET .../audit/events` (in `AuditEventPage.events`, lean) and
 | `changes` | AuditChange[] | CONFIG_DB / intent rows the operation added, removed, or updated. Empty for spec-authoring and read/no-op operations. Present on both list and detail. |
 | `request_body` | raw JSON (optional) | The JSON the caller submitted, with secret-bearing fields redacted to `***redacted***` (`${secret:KEY}` references preserved). **Detail endpoint only** — omitted from list rows. |
 | `success` | boolean | Whether the operation succeeded (HTTP 2xx/3xx). |
-| `error` | string (optional) | Failure text when `success` is false. |
+| `error` | string (optional) | When `success` is false, the **underlying failure reason** — the same message the live error envelope returned to the caller (e.g. *"l3vni must be an integer in 1..16777215"*, a referential-conflict message). Falls back to the HTTP status text (*"Bad Request"*) only when the response carried no message. |
 | `execute_mode` | boolean | Whether the operation ran in execute (`-x`) mode. |
 | `dry_run` | boolean | Whether the operation was a dry run. |
 | `duration` | string | Server-side handling duration. |

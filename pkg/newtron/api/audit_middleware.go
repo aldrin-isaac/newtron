@@ -146,7 +146,14 @@ func emitMutationEvent(r *http.Request, status int, start time.Time, reqBody, re
 		ClientIP:           r.RemoteAddr,
 	}
 	if !evt.Success {
-		evt.Error = http.StatusText(status)
+		// Record the underlying failure reason (the envelope's `error`, the
+		// same string the caller got live) so the audit trail is actionable;
+		// fall back to the HTTP status text when the body carried no message.
+		if msg := extractError(respBody); msg != "" {
+			evt.Error = msg
+		} else {
+			evt.Error = http.StatusText(status)
+		}
 	}
 
 	// Log via the default logger. When no logger is configured
