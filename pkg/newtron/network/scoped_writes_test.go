@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
@@ -108,6 +110,101 @@ func TestScopedWrite_PerZoneIPVPNOverride(t *testing.T) {
 	}
 	if !network || !zone {
 		t.Errorf("inventory missing a Vrf_BLUE definition: network=%v zone=%v", network, zone)
+	}
+}
+
+// buildNodeScopeNetwork writes a network with a network-scope IP-VPN base and a
+// switch profile "leaf1", returning the Network and its dir so node-scope tests
+// can inspect the on-disk profile. secretStore may be nil.
+func buildNodeScopeNetwork(t *testing.T, secretStore secret.Store, profileJSON string) (*Network, string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "network.json"),
+		[]byte(`{"schema_version":"1.0","zones":{"amer":{}},"ipvpns":{"VRF_BLUE":{"l3vni":1000,"route_targets":["1:1"]}}}`), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
+		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
+		t.Fatalf("write platforms.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
+		t.Fatalf("mkdir nodes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"), []byte(profileJSON), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	n, err := NewNetwork(dir, "", nil, secretStore, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	return n, dir
+}
+
+// TestNodeScopedWrite_FloorAndPersist pins node-scope writes end to end: the
+// override is floor-checked against the network base, persisted to the profile
+// file (not network.json), and a missing base is rejected.
+func TestNodeScopedWrite_FloorAndPersist(t *testing.T) {
+	n, dir := buildNodeScopeNetwork(t, nil,
+		`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer"}`)
+
+	// Floor: an override of a name with no network base is rejected.
+	err := n.CreateIPVPN(spec.ScopeNode, "leaf1", "VRF_RED", &spec.IPVPNSpec{L3VNI: 9})
+	var refErr *spec.ReferenceError
+	if !errors.As(err, &refErr) {
+		t.Fatalf("node override without a network base: got %v, want *spec.ReferenceError (400)", err)
+	}
+
+	// Override the network base VRF_BLUE at node scope with a distinct L3VNI.
+	if err := n.CreateIPVPN(spec.ScopeNode, "leaf1", "VRF_BLUE", &spec.IPVPNSpec{L3VNI: 3000, RouteTargets: []string{"3:3"}}); err != nil {
+		t.Fatalf("node override of VRF_BLUE: %v", err)
+	}
+
+	// It landed in the profile FILE, not network.json.
+	data, err := os.ReadFile(filepath.Join(dir, "nodes", "leaf1.json"))
+	if err != nil {
+		t.Fatalf("read profile: %v", err)
+	}
+	if !strings.Contains(string(data), `"VRF_BLUE"`) || !strings.Contains(string(data), `3000`) {
+		t.Errorf("profile file missing the node override:\n%s", data)
+	}
+	if n.spec.IPVPNs["VRF_BLUE"].L3VNI != 1000 {
+		t.Errorf("network base L3VNI = %d, want 1000 (unchanged)", n.spec.IPVPNs["VRF_BLUE"].L3VNI)
+	}
+}
+
+// TestNodeScopedWrite_SecretSafe pins the landmine guard: a node-scope write
+// must not persist secret-resolved values. The profile's ssh_pass is a
+// ${secret:...} reference; after a write (with the cache primed by a prior read
+// that resolves the reference in place), the on-disk profile must still hold the
+// raw reference, not the resolved literal.
+func TestNodeScopedWrite_SecretSafe(t *testing.T) {
+	store := newFileStoreWith(t, map[string]string{"leaf1_pass": "REAL-PASSWORD"})
+	n, dir := buildNodeScopeNetwork(t, store,
+		`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer","ssh_user":"admin","ssh_pass":"${secret:leaf1_pass}"}`)
+
+	// Prime the cache with a read that resolves ssh_pass in place.
+	p, err := n.GetProfile("leaf1")
+	if err != nil {
+		t.Fatalf("GetProfile: %v", err)
+	}
+	if p.SSHPass != "REAL-PASSWORD" {
+		t.Fatalf("precondition: GetProfile should resolve ssh_pass, got %q", p.SSHPass)
+	}
+
+	// A node-scope write goes through MutateProfile (raw-from-disk).
+	if err := n.CreateIPVPN(spec.ScopeNode, "leaf1", "VRF_BLUE", &spec.IPVPNSpec{L3VNI: 3000}); err != nil {
+		t.Fatalf("node override: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "nodes", "leaf1.json"))
+	if err != nil {
+		t.Fatalf("read profile: %v", err)
+	}
+	if !strings.Contains(string(data), "${secret:leaf1_pass}") {
+		t.Errorf("on-disk profile lost its ${secret:...} reference (resolved secret leaked to disk):\n%s", data)
+	}
+	if strings.Contains(string(data), "REAL-PASSWORD") {
+		t.Errorf("resolved secret REAL-PASSWORD was written to disk:\n%s", data)
 	}
 }
 

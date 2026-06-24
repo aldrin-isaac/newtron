@@ -43,24 +43,51 @@ import (
 // with the profile-file persist path and its locking. The public layer rejects
 // node-scope writes until then.
 
-// writeContainer resolves the OverridableSpecs a scoped write targets. scope is
-// "" (network), "network", or "zone"; instance is the zone name for zone scope.
-// The caller must hold keyNetworkSpec. Network and zone both persist via
-// persistSpec (network.json), so callers persist uniformly after mutating.
-func (n *Network) writeContainer(scope, instance string) (*spec.OverridableSpecs, error) {
+// withWriteTarget resolves the OverridableSpecs a scoped write targets, runs fn
+// against it under the right lock, and persists. It is the single place that
+// knows where each scope lives and how it is locked/persisted:
+//
+//   - network → n.spec.OverridableSpecs, under keyNetworkSpec, persist network.json
+//   - zone    → the zone's OverridableSpecs, under keyNetworkSpec, persist network.json
+//   - node    → the profile's OverridableSpecs, persisted to nodes/<name>.json via
+//     loader.MutateProfile (serialized, secret-safe). The network-spec RLock is
+//     held for the duration so the floor base that fn checks (checkOverrideBase)
+//     can't be deleted mid-write, and so lock order stays keyNetworkSpec → loader.
+//
+// fn mutates the passed container and runs the per-kind checks (existence,
+// checkRefsResolve, checkOverrideBase) — all of which read n.spec under the lock
+// withWriteTarget holds. fn must not re-acquire keyNetworkSpec or call the loader.
+func (n *Network) withWriteTarget(scope, instance string, fn func(specs *spec.OverridableSpecs) error) error {
 	switch scope {
 	case "", spec.ScopeNetwork:
-		return &n.spec.OverridableSpecs, nil
+		mu := n.locks.lock(keyNetworkSpec)
+		mu.Lock()
+		defer mu.Unlock()
+		if err := fn(&n.spec.OverridableSpecs); err != nil {
+			return err
+		}
+		return n.persistSpec()
 	case spec.ScopeZone:
+		mu := n.locks.lock(keyNetworkSpec)
+		mu.Lock()
+		defer mu.Unlock()
 		z, ok := n.spec.Zones[instance]
 		if !ok {
-			return nil, &newtronErrors{notFound: true, resource: "zone", id: instance}
+			return &newtronErrors{notFound: true, resource: "zone", id: instance}
 		}
-		return &z.OverridableSpecs, nil
+		if err := fn(&z.OverridableSpecs); err != nil {
+			return err
+		}
+		return n.persistSpec()
+	case spec.ScopeNode:
+		mu := n.locks.lock(keyNetworkSpec)
+		mu.RLock()
+		defer mu.RUnlock()
+		return n.loader.MutateProfile(instance, func(p *spec.DeviceProfile) error {
+			return fn(&p.OverridableSpecs)
+		})
 	default:
-		// node scope (P2b) and unknown scopes are rejected at the public layer;
-		// this is the defensive internal backstop.
-		return nil, &newtronErrors{notFound: true, resource: "scope", id: scope}
+		return &newtronErrors{notFound: true, resource: "scope", id: scope}
 	}
 }
 
