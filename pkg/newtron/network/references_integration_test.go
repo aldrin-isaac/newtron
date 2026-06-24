@@ -17,40 +17,40 @@ func TestSpecDependencyChecks(t *testing.T) {
 
 	// --- Reverse guard, incl. the prefix-list↔service-routing path the old
 	//     hand-coded scan missed (the concrete gap this work closes) ---
-	if err := n.CreatePrefixList("BOGONS", []string{"10.0.0.0/8"}); err != nil {
+	if err := n.CreatePrefixList("", "", "BOGONS", []string{"10.0.0.0/8"}); err != nil {
 		t.Fatalf("CreatePrefixList: %v", err)
 	}
 	// A routed service that references the prefix list only via routing import.
 	svc := &spec.ServiceSpec{ServiceType: "routed", Routing: &spec.RoutingSpec{ImportPrefixList: "BOGONS"}}
-	if err := n.CreateService("EDGE", svc); err != nil {
+	if err := n.CreateService("", "", "EDGE", svc); err != nil {
 		t.Fatalf("CreateService (valid prefix-list ref): %v", err)
 	}
 
-	err := n.DeletePrefixList("BOGONS")
+	err := n.DeletePrefixList("", "", "BOGONS")
 	var conflict *util.ConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("DeletePrefixList while a service references it via routing: got %v, want *util.ConflictError (409)", err)
 	}
 	// Once the consumer is gone, the delete succeeds.
-	if err := n.DeleteService("EDGE"); err != nil {
+	if err := n.DeleteService("", "", "EDGE"); err != nil {
 		t.Fatalf("DeleteService: %v", err)
 	}
-	if err := n.DeletePrefixList("BOGONS"); err != nil {
+	if err := n.DeletePrefixList("", "", "BOGONS"); err != nil {
 		t.Errorf("DeletePrefixList after removing the consumer: %v", err)
 	}
 
 	// --- Forward guard: a spec that references something nonexistent is rejected ---
-	err = n.CreateService("BAD", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "GHOST"})
+	err = n.CreateService("", "", "BAD", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "GHOST"})
 	var refErr *spec.ReferenceError
 	if !errors.As(err, &refErr) {
 		t.Fatalf("CreateService with a dangling ipvpn ref: got %v, want *spec.ReferenceError (400)", err)
 	}
 
 	// The same spec succeeds once the dependency exists.
-	if err := n.CreateIPVPN("GHOST", &spec.IPVPNSpec{L3VNI: 1001}); err != nil {
+	if err := n.CreateIPVPN("", "", "GHOST", &spec.IPVPNSpec{L3VNI: 1001}); err != nil {
 		t.Fatalf("CreateIPVPN: %v", err)
 	}
-	if err := n.CreateService("BAD", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "GHOST"}); err != nil {
+	if err := n.CreateService("", "", "BAD", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "GHOST"}); err != nil {
 		t.Errorf("CreateService after creating its ipvpn dependency: %v", err)
 	}
 }

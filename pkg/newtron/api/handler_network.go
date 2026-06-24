@@ -537,6 +537,7 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -544,7 +545,7 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteService(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeleteService(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -575,6 +576,7 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -582,7 +584,7 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteIPVPN(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeleteIPVPN(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -613,6 +615,7 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -620,7 +623,7 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteMACVPN(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeleteMACVPN(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -867,6 +870,7 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -874,7 +878,7 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeletePrefixList(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeletePrefixList(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}

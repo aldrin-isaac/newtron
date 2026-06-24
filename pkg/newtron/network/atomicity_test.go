@@ -59,7 +59,7 @@ func TestCreateService_AtomicAgainstConcurrentCreates(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func(i int) {
 			defer wg.Done()
-			err := n.CreateService("shared", &spec.ServiceSpec{ServiceType: "routed"})
+			err := n.CreateService("", "", "shared", &spec.ServiceSpec{ServiceType: "routed"})
 			errs[i] = err
 			if err == nil {
 				successes.Add(1)
@@ -99,7 +99,7 @@ func TestCreateIPVPN_AtomicAgainstConcurrentCreates(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			if err := n.CreateIPVPN("SHARED", &spec.IPVPNSpec{L3VNI: 5000}); err == nil {
+			if err := n.CreateIPVPN("", "", "SHARED", &spec.IPVPNSpec{L3VNI: 5000}); err == nil {
 				successes.Add(1)
 			}
 		}()

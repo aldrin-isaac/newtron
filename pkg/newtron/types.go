@@ -680,8 +680,26 @@ type CreateZoneRequest struct {
 // Spec Authoring Request Types
 // ============================================================================
 
+// ScopeSelector carries the optional scope discriminators on a spec write —
+// the "flat at the boundary, hierarchical underneath" surface (P2). Embedded in
+// the spec write requests. An absent/empty Scope means network scope, which
+// preserves pre-scope behavior exactly (so existing callers are unaffected).
+// ScopeInstance is the zone or node name; it is required when Scope is "zone"
+// or "node" and ignored for "network".
+//
+// Writes follow the network-floor invariant (DESIGN_PRINCIPLES_NEWTRON §7): a
+// zone/node override may be created only if a network-scope definition of the
+// same name already exists. The server enforces this and returns a typed 400
+// when it is violated, so the UI needs no bespoke rule — it offers "override"
+// only on resources the /spec-instances inventory shows at network scope.
+type ScopeSelector struct {
+	Scope         string `json:"scope,omitempty" label:"Scope" tooltip:"Where this definition lives: network (default), or a zone/node override" enum:"network,zone,node"`
+	ScopeInstance string `json:"scope_instance,omitempty" label:"Scope Instance" tooltip:"Zone or node name for a scoped override; empty for network scope"`
+}
+
 // CreateServiceRequest is the request for creating a service definition.
 type CreateServiceRequest struct {
+	ScopeSelector
 	Name          string                `json:"name"`
 	ServiceType   string                `json:"service_type"`
 	IPVPN         string                `json:"ipvpn,omitempty"`
@@ -712,6 +730,7 @@ type CreateServiceRouting struct {
 // derived from it as "Vrf_"+name (util.DeriveVRFNameForIPVPN; sonic-vrf.yang /
 // RCA-044), read-only and never authored here.
 type CreateIPVPNRequest struct {
+	ScopeSelector
 	Name         string   `json:"name"`
 	L3VNI        int      `json:"l3vni"`
 	RouteTargets []string `json:"route_targets,omitempty"`
@@ -720,6 +739,7 @@ type CreateIPVPNRequest struct {
 
 // CreateMACVPNRequest is the request for creating a MAC-VPN definition.
 type CreateMACVPNRequest struct {
+	ScopeSelector
 	Name           string   `json:"name"`
 	VNI            int      `json:"vni"`
 	VlanID         int      `json:"vlan_id,omitempty"`
@@ -821,6 +841,7 @@ type UpdateFilterRuleRequest struct {
 
 // CreatePrefixListRequest is the request for creating a prefix list.
 type CreatePrefixListRequest struct {
+	ScopeSelector
 	Name     string   `json:"name"`
 	Prefixes []string `json:"prefixes,omitempty"`
 }
