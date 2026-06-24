@@ -10,6 +10,38 @@ import (
 )
 
 // ============================================================================
+// Scoped writes — validation (network-floor invariant, P2)
+// ============================================================================
+
+// validateScopeSelector validates the optional scope discriminators on a spec
+// write at the public boundary (§33). It returns a *ValidationError (→ 400) for
+// an unknown scope, a missing instance on a scoped write, or an instance given
+// for network scope. The network-floor invariant itself (an override requires a
+// network base) is enforced internally, under the write lock, where existence is
+// authoritative.
+//
+// Node scope is accepted by the vocabulary but not yet wired through the write
+// path; it is rejected here until P2b lands the profile-file persist path.
+func validateScopeSelector(sel ScopeSelector) error {
+	switch sel.Scope {
+	case "", spec.ScopeNetwork:
+		if sel.ScopeInstance != "" {
+			return &ValidationError{Field: "scope_instance", Message: "must be empty for network scope"}
+		}
+		return nil
+	case spec.ScopeZone:
+		if sel.ScopeInstance == "" {
+			return &ValidationError{Field: "scope_instance", Message: "required for zone scope (the zone name)"}
+		}
+		return nil
+	case spec.ScopeNode:
+		return &ValidationError{Field: "scope", Message: "node-scope spec writes are not yet supported (coming in P2b); use network or zone scope"}
+	default:
+		return &ValidationError{Field: "scope", Message: "must be 'network', 'zone', or 'node'"}
+	}
+}
+
+// ============================================================================
 // Cross-scope spec inventory
 // ============================================================================
 
@@ -60,8 +92,16 @@ func (net *Network) CreateService(ctx context.Context, req CreateServiceRequest,
 	if req.ServiceType == "" {
 		return &ValidationError{Field: "service_type", Message: "required"}
 	}
-	if _, err := net.internal.GetService(req.Name); err == nil {
-		return fmt.Errorf("service '%s' already exists", req.Name)
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetService(req.Name); err == nil {
+			return fmt.Errorf("service '%s' already exists", req.Name)
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("services").WithResource(req.Name)); err != nil {
@@ -94,13 +134,16 @@ func (net *Network) CreateService(ctx context.Context, req CreateServiceRequest,
 			Redistribute:     req.Routing.Redistribute,
 		}
 	}
-	return net.internal.CreateService(req.Name, svc)
+	return net.internal.CreateService(req.Scope, req.ScopeInstance, req.Name, svc)
 }
 
-// DeleteService removes a service definition.
-func (net *Network) DeleteService(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetService(name); err != nil {
-		return nil // idempotent: already absent
+// DeleteService removes a service definition at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the service is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeleteService(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("services").WithResource(name)); err != nil {
@@ -110,7 +153,7 @@ func (net *Network) DeleteService(ctx context.Context, name string, opts ExecOpt
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteService(name)
+	return net.internal.DeleteService(sel.Scope, sel.ScopeInstance, name)
 }
 
 // ============================================================================
@@ -141,6 +184,17 @@ func (net *Network) CreateIPVPN(ctx context.Context, req CreateIPVPNRequest, opt
 	if req.L3VNI <= 0 {
 		return &ValidationError{Field: "l3vni", Message: "required"}
 	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetIPVPN(req.Name); err == nil {
+			return fmt.Errorf("ipvpn '%s' already exists", req.Name)
+		}
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("ipvpns").WithResource(req.Name)); err != nil {
 			return err
@@ -154,12 +208,15 @@ func (net *Network) CreateIPVPN(ctx context.Context, req CreateIPVPNRequest, opt
 		L3VNI:        req.L3VNI,
 		RouteTargets: req.RouteTargets,
 	}
-	return net.internal.CreateIPVPN(req.Name, ipvpn)
+	return net.internal.CreateIPVPN(req.Scope, req.ScopeInstance, req.Name, ipvpn)
 }
 
-// DeleteIPVPN removes an IP-VPN definition.
-func (net *Network) DeleteIPVPN(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetIPVPN(name); err != nil {
+// DeleteIPVPN removes an IP-VPN definition at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the IPVPN is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeleteIPVPN(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
 	if opts.Execute {
@@ -170,7 +227,7 @@ func (net *Network) DeleteIPVPN(ctx context.Context, name string, opts ExecOpts)
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteIPVPN(name)
+	return net.internal.DeleteIPVPN(sel.Scope, sel.ScopeInstance, name)
 }
 
 // ============================================================================
@@ -201,6 +258,17 @@ func (net *Network) CreateMACVPN(ctx context.Context, req CreateMACVPNRequest, o
 	if req.VNI <= 0 {
 		return &ValidationError{Field: "vni", Message: "required"}
 	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetMACVPN(req.Name); err == nil {
+			return fmt.Errorf("macvpn '%s' already exists", req.Name)
+		}
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("macvpns").WithResource(req.Name)); err != nil {
 			return err
@@ -218,12 +286,15 @@ func (net *Network) CreateMACVPN(ctx context.Context, req CreateMACVPNRequest, o
 		RouteTargets:   req.RouteTargets,
 		ARPSuppression: req.ARPSuppression,
 	}
-	return net.internal.CreateMACVPN(req.Name, macvpn)
+	return net.internal.CreateMACVPN(req.Scope, req.ScopeInstance, req.Name, macvpn)
 }
 
-// DeleteMACVPN removes a MAC-VPN definition.
-func (net *Network) DeleteMACVPN(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetMACVPN(name); err != nil {
+// DeleteMACVPN removes a MAC-VPN definition at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the MACVPN is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeleteMACVPN(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
 	if opts.Execute {
@@ -234,7 +305,7 @@ func (net *Network) DeleteMACVPN(ctx context.Context, name string, opts ExecOpts
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteMACVPN(name)
+	return net.internal.DeleteMACVPN(sel.Scope, sel.ScopeInstance, name)
 }
 
 // ============================================================================
@@ -594,8 +665,16 @@ func (net *Network) ShowPrefixList(name string) (*PrefixListDetail, error) {
 
 // CreatePrefixList creates a new prefix list.
 func (net *Network) CreatePrefixList(ctx context.Context, req CreatePrefixListRequest, opts ExecOpts) error {
-	if _, err := net.internal.GetPrefixList(req.Name); err == nil {
-		return fmt.Errorf("prefix list '%s' already exists", req.Name)
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetPrefixList(req.Name); err == nil {
+			return fmt.Errorf("prefix list '%s' already exists", req.Name)
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(req.Name)); err != nil {
@@ -609,13 +688,16 @@ func (net *Network) CreatePrefixList(ctx context.Context, req CreatePrefixListRe
 	if prefixes == nil {
 		prefixes = []string{}
 	}
-	return net.internal.CreatePrefixList(req.Name, prefixes)
+	return net.internal.CreatePrefixList(req.Scope, req.ScopeInstance, req.Name, prefixes)
 }
 
-// DeletePrefixList removes a prefix list.
-func (net *Network) DeletePrefixList(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetPrefixList(name); err != nil {
-		return nil // idempotent: already absent
+// DeletePrefixList removes a prefix list at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the prefix list is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeletePrefixList(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(name)); err != nil {
@@ -625,7 +707,7 @@ func (net *Network) DeletePrefixList(ctx context.Context, name string, opts Exec
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeletePrefixList(name)
+	return net.internal.DeletePrefixList(sel.Scope, sel.ScopeInstance, name)
 }
 
 // AddPrefixListEntry adds a prefix to a prefix list.
@@ -961,6 +1043,9 @@ func (net *Network) UpdateService(ctx context.Context, req CreateServiceRequest,
 	if req.ServiceType == "" {
 		return &ValidationError{Field: "service_type", Message: "required"}
 	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("services").WithResource(req.Name)); err != nil {
 			return err
@@ -992,13 +1077,16 @@ func (net *Network) UpdateService(ctx context.Context, req CreateServiceRequest,
 			Redistribute:     req.Routing.Redistribute,
 		}
 	}
-	return translateInternalError(net.internal.UpdateService(req.Name, svc))
+	return translateInternalError(net.internal.UpdateService(req.Scope, req.ScopeInstance, req.Name, svc))
 }
 
 // UpdateIPVPN replaces an existing IP-VPN definition.
 func (net *Network) UpdateIPVPN(ctx context.Context, req CreateIPVPNRequest, opts ExecOpts) error {
 	if req.L3VNI <= 0 {
 		return &ValidationError{Field: "l3vni", Message: "required"}
+	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("ipvpns").WithResource(req.Name)); err != nil {
@@ -1013,13 +1101,16 @@ func (net *Network) UpdateIPVPN(ctx context.Context, req CreateIPVPNRequest, opt
 		L3VNI:        req.L3VNI,
 		RouteTargets: req.RouteTargets,
 	}
-	return translateInternalError(net.internal.UpdateIPVPN(req.Name, ipvpn))
+	return translateInternalError(net.internal.UpdateIPVPN(req.Scope, req.ScopeInstance, req.Name, ipvpn))
 }
 
 // UpdateMACVPN replaces an existing MAC-VPN definition.
 func (net *Network) UpdateMACVPN(ctx context.Context, req CreateMACVPNRequest, opts ExecOpts) error {
 	if req.VNI <= 0 {
 		return &ValidationError{Field: "vni", Message: "required"}
+	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("macvpns").WithResource(req.Name)); err != nil {
@@ -1038,7 +1129,7 @@ func (net *Network) UpdateMACVPN(ctx context.Context, req CreateMACVPNRequest, o
 		RouteTargets:   req.RouteTargets,
 		ARPSuppression: req.ARPSuppression,
 	}
-	return translateInternalError(net.internal.UpdateMACVPN(req.Name, macvpn))
+	return translateInternalError(net.internal.UpdateMACVPN(req.Scope, req.ScopeInstance, req.Name, macvpn))
 }
 
 // UpdateQoSPolicy replaces an existing QoS policy's metadata. Queues
@@ -1096,6 +1187,9 @@ func (net *Network) UpdateFilter(ctx context.Context, req CreateFilterRequest, o
 // (a flat []string), so the request body's Prefixes replaces the
 // existing list directly.
 func (net *Network) UpdatePrefixList(ctx context.Context, req CreatePrefixListRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(req.Name)); err != nil {
 			return err
@@ -1108,7 +1202,7 @@ func (net *Network) UpdatePrefixList(ctx context.Context, req CreatePrefixListRe
 	if prefixes == nil {
 		prefixes = []string{}
 	}
-	return translateInternalError(net.internal.UpdatePrefixList(req.Name, prefixes))
+	return translateInternalError(net.internal.UpdatePrefixList(req.Scope, req.ScopeInstance, req.Name, prefixes))
 }
 
 // UpdateRoutePolicy replaces an existing route policy's metadata.

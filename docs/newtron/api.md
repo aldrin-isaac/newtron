@@ -1338,6 +1338,42 @@ per-endpoint logic:
   the references first; there is no force-cascade for specs (newtron will not
   auto-delete a consuming spec).
 
+#### Scoped writes (network / zone overrides)
+
+Spec writes are scope-aware — the "flat at the boundary, hierarchical
+underneath" surface (see [§4 Cross-Scope Spec Inventory](#cross-scope-spec-inventory)).
+Every `create-`/`update-`/`delete-` body accepts two optional fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scope` | string | `network` (default), `zone`, or `node` |
+| `scope_instance` | string | the zone or node name; required when `scope` is `zone`/`node`, empty for `network` |
+
+**Absent `scope` means `network` — existing callers are unaffected.** A scoped
+write authors an *override* of a network-scope definition; storage stays
+hierarchical (network → zone → node, node wins), only the write surface is flat.
+
+**Network-floor invariant.** A resource may exist at zone/node scope only if it
+also exists at network scope. This keeps resolution total (every node resolves at
+least the network base — no dangling references from any perspective) and means
+forward referential integrity is unchanged: a reference resolves iff it resolves
+at network. The invariant is enforced server-side:
+
+- **Creating a scoped override with no network base → 400** (the override
+  "references" a required network base that is absent). So the UI offers
+  "override" only on resources the inventory already shows at network scope — no
+  bespoke client rule needed, just a filter on `/spec-instances`.
+- **Deleting a scoped override is always safe** — consumers fall back to the
+  network base.
+- **Deleting the network base is refused (409)** while anything references it at
+  *any* scope, or while any override still sits below it. Delete bottom-up:
+  remove the overrides (and references) first.
+
+**Current support:** `service`, `ipvpn`, `macvpn`, `prefix-list` at `network` and
+`zone` scope. Node scope and the rule-bearing kinds (`filter`, `qos-policy`,
+`route-policy`, and the sub-rule endpoints) follow in subsequent increments;
+until then a `node`-scope write returns **400**.
+
 ### Services
 
 #### POST /newtron/v1/networks/{netID}/create-service
