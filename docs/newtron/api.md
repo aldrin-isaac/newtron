@@ -1369,12 +1369,16 @@ at network. The invariant is enforced server-side:
   *any* scope, or while any override still sits below it. Delete bottom-up:
   remove the overrides (and references) first.
 
-**Current support:** `service`, `ipvpn`, `macvpn`, `prefix-list` at `network`,
-`zone`, and `node` scope (`scope_instance` is the device/profile name for node
-scope). A node-scope write persists to `nodes/<name>.json` and never rewrites a
-secret-resolved value — the profile is round-tripped through disk so `${secret:…}`
-references stay intact. The rule-bearing kinds (`filter`, `qos-policy`,
-`route-policy`, and the sub-rule endpoints) follow in a subsequent increment.
+**Scope coverage:** all spec kinds — `service`, `ipvpn`, `macvpn`, `prefix-list`,
+and the rule-bearing `filter`, `qos-policy`, `route-policy` (including their
+sub-rule endpoints `add`/`update`/`remove-filter-rule`, `…-qos-queue`,
+`…-route-policy-rule`) — at `network`, `zone`, and `node` scope (`scope_instance`
+is the device/profile name for node scope). A sub-rule write targets the
+filter/policy **at that scope**: e.g. `add-filter-rule` with `scope:zone` adds the
+rule to the zone's filter override (which must already exist at that scope), not
+the network base. A node-scope write persists to `nodes/<name>.json` and never
+rewrites a secret-resolved value — the profile is round-tripped through disk so
+`${secret:…}` references stay intact.
 
 **Deleting a scope container.** A zone or node profile that still holds spec
 overrides — or that something else references — cannot be deleted out from under

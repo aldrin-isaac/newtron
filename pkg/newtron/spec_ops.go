@@ -331,8 +331,16 @@ func (net *Network) ShowQoSPolicy(name string) (*QoSPolicyDetail, error) {
 
 // CreateQoSPolicy creates a new QoS policy.
 func (net *Network) CreateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequest, opts ExecOpts) error {
-	if _, err := net.internal.GetQoSPolicy(req.Name); err == nil {
-		return fmt.Errorf("QoS policy '%s' already exists", req.Name)
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetQoSPolicy(req.Name); err == nil {
+			return fmt.Errorf("QoS policy '%s' already exists", req.Name)
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermQoSCreate, auth.NewContext().WithField("qos_policies").WithResource(req.Name)); err != nil {
@@ -346,13 +354,21 @@ func (net *Network) CreateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequ
 		Description: req.Description,
 		Queues:      []*spec.QoSQueue{},
 	}
-	return net.internal.CreateQoSPolicy(req.Name, policy)
+	return net.internal.CreateQoSPolicy(req.Scope, req.ScopeInstance, req.Name, policy)
 }
 
-// DeleteQoSPolicy removes a QoS policy.
-func (net *Network) DeleteQoSPolicy(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetQoSPolicy(name); err != nil {
+// DeleteQoSPolicy removes a QoS policy at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the policy is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeleteQoSPolicy(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
 		return err
+	}
+	if sel.Scope == "" || sel.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetQoSPolicy(name); err != nil {
+			return err
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermQoSDelete, auth.NewContext().WithField("qos_policies").WithResource(name)); err != nil {
@@ -362,7 +378,7 @@ func (net *Network) DeleteQoSPolicy(ctx context.Context, name string, opts ExecO
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteQoSPolicy(name)
+	return net.internal.DeleteQoSPolicy(sel.Scope, sel.ScopeInstance, name)
 }
 
 // AddQoSQueue adds a queue to a QoS policy.
@@ -370,20 +386,24 @@ func (net *Network) AddQoSQueue(ctx context.Context, req AddQoSQueueRequest, opt
 	if req.QueueID < 0 || req.QueueID > 7 {
 		return &ValidationError{Field: "queue_id", Message: "must be 0-7"}
 	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(req.Policy)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		// Dry-run: validate without mutation. Read the parent to verify
-		// the slot would be free; race window here is purely informational.
-		policy, err := net.internal.GetQoSPolicy(req.Policy)
-		if err != nil {
-			return err
-		}
-		if req.QueueID < len(policy.Queues) && policy.Queues[req.QueueID] != nil {
-			return fmt.Errorf("queue %d already exists in policy '%s'", req.QueueID, req.Policy)
+		// Dry-run preview: network-scope only (scoped adds validated authoritatively under write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			policy, err := net.internal.GetQoSPolicy(req.Policy)
+			if err != nil {
+				return err
+			}
+			if req.QueueID < len(policy.Queues) && policy.Queues[req.QueueID] != nil {
+				return fmt.Errorf("queue %d already exists in policy '%s'", req.QueueID, req.Policy)
+			}
 		}
 		return nil
 	}
@@ -394,7 +414,7 @@ func (net *Network) AddQoSQueue(ctx context.Context, req AddQoSQueueRequest, opt
 		DSCP:   req.DSCP,
 		ECN:    req.ECN,
 	}
-	return net.internal.AddQoSQueueToPolicy(req.Policy, req.QueueID, queue)
+	return net.internal.AddQoSQueueToPolicy(req.Scope, req.ScopeInstance, req.Policy, req.QueueID, queue)
 }
 
 // UpdateQoSQueue replaces an existing queue's fields and optionally
@@ -413,21 +433,27 @@ func (net *Network) UpdateQoSQueue(ctx context.Context, req UpdateQoSQueueReques
 			return &ValidationError{Field: "new_queue_id", Message: "must be 0-7"}
 		}
 	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(req.Policy)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		policy, err := net.internal.GetQoSPolicy(req.Policy)
-		if err != nil {
-			return err
-		}
-		if req.QueueID >= len(policy.Queues) || policy.Queues[req.QueueID] == nil {
-			return fmt.Errorf("queue %d not found in policy '%s'", req.QueueID, req.Policy)
-		}
-		if newID != req.QueueID && newID < len(policy.Queues) && policy.Queues[newID] != nil {
-			return fmt.Errorf("queue %d already exists in policy '%s'", newID, req.Policy)
+		// Dry-run preview: network-scope only (scoped updates validated authoritatively under write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			policy, err := net.internal.GetQoSPolicy(req.Policy)
+			if err != nil {
+				return err
+			}
+			if req.QueueID >= len(policy.Queues) || policy.Queues[req.QueueID] == nil {
+				return fmt.Errorf("queue %d not found in policy '%s'", req.QueueID, req.Policy)
+			}
+			if newID != req.QueueID && newID < len(policy.Queues) && policy.Queues[newID] != nil {
+				return fmt.Errorf("queue %d already exists in policy '%s'", newID, req.Policy)
+			}
 		}
 		return nil
 	}
@@ -438,27 +464,33 @@ func (net *Network) UpdateQoSQueue(ctx context.Context, req UpdateQoSQueueReques
 		DSCP:   req.DSCP,
 		ECN:    req.ECN,
 	}
-	return net.internal.UpdateQoSQueueInPolicy(req.Policy, req.QueueID, newID, queue)
+	return net.internal.UpdateQoSQueueInPolicy(req.Scope, req.ScopeInstance, req.Policy, req.QueueID, newID, queue)
 }
 
 // RemoveQoSQueue removes a queue from a QoS policy.
-func (net *Network) RemoveQoSQueue(ctx context.Context, policy string, queueID int, opts ExecOpts) error {
+func (net *Network) RemoveQoSQueue(ctx context.Context, sel ScopeSelector, policy string, queueID int, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(policy)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		p, err := net.internal.GetQoSPolicy(policy)
-		if err != nil {
-			return err
-		}
-		if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
-			return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
+		// Dry-run preview: network-scope only (scoped removes validated authoritatively under write lock).
+		if sel.Scope == "" || sel.Scope == spec.ScopeNetwork {
+			p, err := net.internal.GetQoSPolicy(policy)
+			if err != nil {
+				return err
+			}
+			if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
+				return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
+			}
 		}
 		return nil
 	}
-	return net.internal.RemoveQoSQueueFromPolicy(policy, queueID)
+	return net.internal.RemoveQoSQueueFromPolicy(sel.Scope, sel.ScopeInstance, policy, queueID)
 }
 
 // ============================================================================
@@ -484,8 +516,16 @@ func (net *Network) CreateFilter(ctx context.Context, req CreateFilterRequest, o
 	if req.Type == "" {
 		return &ValidationError{Field: "type", Message: "required (ipv4, ipv6)"}
 	}
-	if _, err := net.internal.GetFilter(req.Name); err == nil {
-		return fmt.Errorf("filter '%s' already exists", req.Name)
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetFilter(req.Name); err == nil {
+			return fmt.Errorf("filter '%s' already exists", req.Name)
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermFilterCreate, auth.NewContext().WithField("filters").WithResource(req.Name)); err != nil {
@@ -500,13 +540,21 @@ func (net *Network) CreateFilter(ctx context.Context, req CreateFilterRequest, o
 		Type:        req.Type,
 		Rules:       []*spec.FilterRule{},
 	}
-	return net.internal.CreateFilter(req.Name, fs)
+	return net.internal.CreateFilter(req.Scope, req.ScopeInstance, req.Name, fs)
 }
 
-// DeleteFilter removes a filter template.
-func (net *Network) DeleteFilter(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetFilter(name); err != nil {
+// DeleteFilter removes a filter template at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the filter is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeleteFilter(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
 		return err
+	}
+	if sel.Scope == "" || sel.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetFilter(name); err != nil {
+			return err
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermFilterDelete, auth.NewContext().WithField("filters").WithResource(name)); err != nil {
@@ -516,24 +564,30 @@ func (net *Network) DeleteFilter(ctx context.Context, name string, opts ExecOpts
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteFilter(name)
+	return net.internal.DeleteFilter(sel.Scope, sel.ScopeInstance, name)
 }
 
 // AddFilterRule adds a rule to a filter template.
 func (net *Network) AddFilterRule(ctx context.Context, req AddFilterRuleRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(req.Filter)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		fs, err := net.internal.GetFilter(req.Filter)
-		if err != nil {
-			return err
-		}
-		for _, r := range fs.Rules {
-			if r.Sequence == req.Sequence {
-				return fmt.Errorf("rule with priority %d already exists in filter '%s'", req.Sequence, req.Filter)
+		// Dry-run preview: network-scope only (scoped adds validated authoritatively under write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			fs, err := net.internal.GetFilter(req.Filter)
+			if err != nil {
+				return err
+			}
+			for _, r := range fs.Rules {
+				if r.Sequence == req.Sequence {
+					return fmt.Errorf("rule with priority %d already exists in filter '%s'", req.Sequence, req.Filter)
+				}
 			}
 		}
 		return nil
@@ -551,7 +605,7 @@ func (net *Network) AddFilterRule(ctx context.Context, req AddFilterRuleRequest,
 		DSCP:          req.DSCP,
 		CoS:           req.CoS,
 	}
-	return net.internal.AddFilterRule(req.Filter, rule)
+	return net.internal.AddFilterRule(req.Scope, req.ScopeInstance, req.Filter, rule)
 }
 
 // UpdateFilterRule replaces an existing filter rule's fields and
@@ -560,6 +614,9 @@ func (net *Network) AddFilterRule(ctx context.Context, req AddFilterRuleRequest,
 // optional — when non-nil the rule's sequence rotates to that value.
 // Issue #209.
 func (net *Network) UpdateFilterRule(ctx context.Context, req UpdateFilterRuleRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(req.Filter)); err != nil {
 			return err
@@ -571,22 +628,25 @@ func (net *Network) UpdateFilterRule(ctx context.Context, req UpdateFilterRuleRe
 		newSeq = *req.NewSequence
 	}
 	if !opts.Execute {
-		fs, err := net.internal.GetFilter(req.Filter)
-		if err != nil {
-			return err
-		}
-		foundCurrent := false
-		for _, r := range fs.Rules {
-			if r.Sequence == req.Sequence {
-				foundCurrent = true
-				continue
+		// Dry-run preview: network-scope only (scoped updates validated authoritatively under write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			fs, err := net.internal.GetFilter(req.Filter)
+			if err != nil {
+				return err
 			}
-			if r.Sequence == newSeq && newSeq != req.Sequence {
-				return fmt.Errorf("rule with priority %d already exists in filter '%s'", newSeq, req.Filter)
+			foundCurrent := false
+			for _, r := range fs.Rules {
+				if r.Sequence == req.Sequence {
+					foundCurrent = true
+					continue
+				}
+				if r.Sequence == newSeq && newSeq != req.Sequence {
+					return fmt.Errorf("rule with priority %d already exists in filter '%s'", newSeq, req.Filter)
+				}
 			}
-		}
-		if !foundCurrent {
-			return fmt.Errorf("rule with priority %d not found in filter '%s'", req.Sequence, req.Filter)
+			if !foundCurrent {
+				return fmt.Errorf("rule with priority %d not found in filter '%s'", req.Sequence, req.Filter)
+			}
 		}
 		return nil
 	}
@@ -603,34 +663,40 @@ func (net *Network) UpdateFilterRule(ctx context.Context, req UpdateFilterRuleRe
 		DSCP:          req.DSCP,
 		CoS:           req.CoS,
 	}
-	return net.internal.UpdateFilterRule(req.Filter, req.Sequence, rule)
+	return net.internal.UpdateFilterRule(req.Scope, req.ScopeInstance, req.Filter, req.Sequence, rule)
 }
 
 // RemoveFilterRule removes a rule from a filter template by sequence number.
-func (net *Network) RemoveFilterRule(ctx context.Context, filter string, seq int, opts ExecOpts) error {
+func (net *Network) RemoveFilterRule(ctx context.Context, sel ScopeSelector, filter string, seq int, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(filter)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		fs, err := net.internal.GetFilter(filter)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, r := range fs.Rules {
-			if r.Sequence == seq {
-				found = true
-				break
+		// Dry-run preview: network-scope only (scoped removes validated authoritatively under write lock).
+		if sel.Scope == "" || sel.Scope == spec.ScopeNetwork {
+			fs, err := net.internal.GetFilter(filter)
+			if err != nil {
+				return err
 			}
-		}
-		if !found {
-			return fmt.Errorf("rule with priority %d not found in filter '%s'", seq, filter)
+			found := false
+			for _, r := range fs.Rules {
+				if r.Sequence == seq {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("rule with priority %d not found in filter '%s'", seq, filter)
+			}
 		}
 		return nil
 	}
-	return net.internal.RemoveFilterRule(filter, seq)
+	return net.internal.RemoveFilterRule(sel.Scope, sel.ScopeInstance, filter, seq)
 }
 
 // ============================================================================
@@ -775,8 +841,16 @@ func (net *Network) ShowRoutePolicy(name string) (*RoutePolicyDetail, error) {
 
 // CreateRoutePolicy creates a new route policy.
 func (net *Network) CreateRoutePolicy(ctx context.Context, req CreateRoutePolicyRequest, opts ExecOpts) error {
-	if _, err := net.internal.GetRoutePolicy(req.Name); err == nil {
-		return fmt.Errorf("route policy '%s' already exists", req.Name)
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
+	// Early "already exists" only for network scope; the scoped target's
+	// existence is checked authoritatively under the write lock in the
+	// internal method (the network read here would be the wrong container).
+	if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetRoutePolicy(req.Name); err == nil {
+			return fmt.Errorf("route policy '%s' already exists", req.Name)
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Name)); err != nil {
@@ -790,13 +864,21 @@ func (net *Network) CreateRoutePolicy(ctx context.Context, req CreateRoutePolicy
 		Description: req.Description,
 		Rules:       []*spec.RoutePolicyRule{},
 	}
-	return net.internal.CreateRoutePolicy(req.Name, rp)
+	return net.internal.CreateRoutePolicy(req.Scope, req.ScopeInstance, req.Name, rp)
 }
 
-// DeleteRoutePolicy removes a route policy.
-func (net *Network) DeleteRoutePolicy(ctx context.Context, name string, opts ExecOpts) error {
-	if _, err := net.internal.GetRoutePolicy(name); err != nil {
-		return nil // idempotent: already absent
+// DeleteRoutePolicy removes a route policy at the given scope (network scope
+// when sel is empty). A network-scope delete is refused while the policy is
+// referenced anywhere or still overridden below it; a scoped override delete is
+// always safe (consumers fall back to the network base).
+func (net *Network) DeleteRoutePolicy(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
+	}
+	if sel.Scope == "" || sel.Scope == spec.ScopeNetwork {
+		if _, err := net.internal.GetRoutePolicy(name); err != nil {
+			return nil // idempotent: already absent
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(name)); err != nil {
@@ -806,24 +888,30 @@ func (net *Network) DeleteRoutePolicy(ctx context.Context, name string, opts Exe
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteRoutePolicy(name)
+	return net.internal.DeleteRoutePolicy(sel.Scope, sel.ScopeInstance, name)
 }
 
 // AddRoutePolicyRule adds a rule to a route policy.
 func (net *Network) AddRoutePolicyRule(ctx context.Context, req AddRoutePolicyRuleRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Policy)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		rp, err := net.internal.GetRoutePolicy(req.Policy)
-		if err != nil {
-			return err
-		}
-		for _, r := range rp.Rules {
-			if r.Sequence == req.Sequence {
-				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", req.Sequence, req.Policy)
+		// Dry-run preview: network-scope only (scoped adds validated authoritatively under write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			rp, err := net.internal.GetRoutePolicy(req.Policy)
+			if err != nil {
+				return err
+			}
+			for _, r := range rp.Rules {
+				if r.Sequence == req.Sequence {
+					return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", req.Sequence, req.Policy)
+				}
 			}
 		}
 		return nil
@@ -841,7 +929,7 @@ func (net *Network) AddRoutePolicyRule(ctx context.Context, req AddRoutePolicyRu
 			MED:       req.Set.MED,
 		}
 	}
-	return net.internal.AddRuleToRoutePolicy(req.Policy, rule)
+	return net.internal.AddRuleToRoutePolicy(req.Scope, req.ScopeInstance, req.Policy, rule)
 }
 
 // UpdateRoutePolicyRule replaces an existing rule's fields and optionally
@@ -850,6 +938,9 @@ func (net *Network) AddRoutePolicyRule(ctx context.Context, req AddRoutePolicyRu
 // the rule's sequence rotates to that value. Mirrors UpdateFilterRule.
 // Issue #210.
 func (net *Network) UpdateRoutePolicyRule(ctx context.Context, req UpdateRoutePolicyRuleRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Policy)); err != nil {
 			return err
@@ -860,22 +951,25 @@ func (net *Network) UpdateRoutePolicyRule(ctx context.Context, req UpdateRoutePo
 		newSeq = *req.NewSequence
 	}
 	if !opts.Execute {
-		rp, err := net.internal.GetRoutePolicy(req.Policy)
-		if err != nil {
-			return err
-		}
-		foundCurrent := false
-		for _, r := range rp.Rules {
-			if r.Sequence == req.Sequence {
-				foundCurrent = true
-				continue
+		// Dry-run preview: network-scope only (scoped updates validated authoritatively under write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			rp, err := net.internal.GetRoutePolicy(req.Policy)
+			if err != nil {
+				return err
 			}
-			if r.Sequence == newSeq && newSeq != req.Sequence {
-				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newSeq, req.Policy)
+			foundCurrent := false
+			for _, r := range rp.Rules {
+				if r.Sequence == req.Sequence {
+					foundCurrent = true
+					continue
+				}
+				if r.Sequence == newSeq && newSeq != req.Sequence {
+					return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newSeq, req.Policy)
+				}
 			}
-		}
-		if !foundCurrent {
-			return fmt.Errorf("rule with sequence %d not found in route policy '%s'", req.Sequence, req.Policy)
+			if !foundCurrent {
+				return fmt.Errorf("rule with sequence %d not found in route policy '%s'", req.Sequence, req.Policy)
+			}
 		}
 		return nil
 	}
@@ -892,25 +986,30 @@ func (net *Network) UpdateRoutePolicyRule(ctx context.Context, req UpdateRoutePo
 			MED:       req.Set.MED,
 		}
 	}
-	return net.internal.UpdateRuleInRoutePolicy(req.Policy, req.Sequence, rule)
+	return net.internal.UpdateRuleInRoutePolicy(req.Scope, req.ScopeInstance, req.Policy, req.Sequence, rule)
 }
 
 // RemoveRoutePolicyRule removes a rule from a route policy by sequence number.
-func (net *Network) RemoveRoutePolicyRule(ctx context.Context, policy string, seq int, opts ExecOpts) error {
+func (net *Network) RemoveRoutePolicyRule(ctx context.Context, sel ScopeSelector, policy string, seq int, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(policy)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		// Idempotent dry-run.
-		_, err := net.internal.GetRoutePolicy(policy)
-		if err != nil {
-			return nil
+		// Dry-run preview: network-scope only (scoped removes validated authoritatively under write lock).
+		if sel.Scope == "" || sel.Scope == spec.ScopeNetwork {
+			_, err := net.internal.GetRoutePolicy(policy)
+			if err != nil {
+				return nil
+			}
 		}
 		return nil
 	}
-	if err := net.internal.RemoveRuleFromRoutePolicy(policy, seq); err != nil {
+	if err := net.internal.RemoveRuleFromRoutePolicy(sel.Scope, sel.ScopeInstance, policy, seq); err != nil {
 		// Preserve pre-refactor idempotency: missing policy or rule
 		// returns nil at the public layer.
 		return nil
@@ -1139,6 +1238,9 @@ func (net *Network) UpdateMACVPN(ctx context.Context, req CreateMACVPNRequest, o
 // are preserved from the existing entry — the Add/RemoveQoSQueue verbs
 // remain the only way to mutate the queue list.
 func (net *Network) UpdateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("qos_policies").WithResource(req.Name)); err != nil {
 			return err
@@ -1155,7 +1257,7 @@ func (net *Network) UpdateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequ
 		Description: req.Description,
 		Queues:      existing.Queues,
 	}
-	return translateInternalError(net.internal.UpdateQoSPolicy(req.Name, policy))
+	return translateInternalError(net.internal.UpdateQoSPolicy(req.Scope, req.ScopeInstance, req.Name, policy))
 }
 
 // UpdateFilter replaces an existing filter's metadata. Rules are
@@ -1164,6 +1266,9 @@ func (net *Network) UpdateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequ
 func (net *Network) UpdateFilter(ctx context.Context, req CreateFilterRequest, opts ExecOpts) error {
 	if req.Type == "" {
 		return &ValidationError{Field: "type", Message: "required (ipv4, ipv6)"}
+	}
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("filters").WithResource(req.Name)); err != nil {
@@ -1182,7 +1287,7 @@ func (net *Network) UpdateFilter(ctx context.Context, req CreateFilterRequest, o
 		Type:        req.Type,
 		Rules:       existing.Rules,
 	}
-	return translateInternalError(net.internal.UpdateFilter(req.Name, fs))
+	return translateInternalError(net.internal.UpdateFilter(req.Scope, req.ScopeInstance, req.Name, fs))
 }
 
 // UpdatePrefixList replaces an existing prefix list's entries. Unlike
@@ -1212,6 +1317,9 @@ func (net *Network) UpdatePrefixList(ctx context.Context, req CreatePrefixListRe
 // Rules are preserved from the existing entry — the Add/RemoveRoutePolicyRule
 // verbs remain the only way to mutate the rule list.
 func (net *Network) UpdateRoutePolicy(ctx context.Context, req CreateRoutePolicyRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("route_policies").WithResource(req.Name)); err != nil {
 			return err
@@ -1228,5 +1336,5 @@ func (net *Network) UpdateRoutePolicy(ctx context.Context, req CreateRoutePolicy
 		Description: req.Description,
 		Rules:       existing.Rules,
 	}
-	return translateInternalError(net.internal.UpdateRoutePolicy(req.Name, rp))
+	return translateInternalError(net.internal.UpdateRoutePolicy(req.Scope, req.ScopeInstance, req.Name, rp))
 }

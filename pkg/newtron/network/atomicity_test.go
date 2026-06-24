@@ -133,7 +133,7 @@ func TestSnapshot_DoesNotRaceWithCreate(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < opsPerGoroutine; i++ {
-				_ = n.CreateFilter(fmt.Sprintf("f-%d-%d", w, i), &spec.FilterSpec{})
+				_ = n.CreateFilter("", "", fmt.Sprintf("f-%d-%d", w, i), &spec.FilterSpec{})
 				select {
 				case <-stop:
 					return
@@ -177,7 +177,7 @@ func TestAddFilterRule_AtomicAgainstConcurrentAdds(t *testing.T) {
 	n := loadTestNetwork(t)
 
 	// Seed a parent filter.
-	if err := n.CreateFilter("parent", &spec.FilterSpec{}); err != nil {
+	if err := n.CreateFilter("", "", "parent", &spec.FilterSpec{}); err != nil {
 		t.Fatalf("seed CreateFilter: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestAddFilterRule_AtomicAgainstConcurrentAdds(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func(seq int) {
 			defer wg.Done()
-			_ = n.AddFilterRule("parent", &spec.FilterRule{Sequence: seq, Action: "permit"})
+			_ = n.AddFilterRule("", "", "parent", &spec.FilterRule{Sequence: seq, Action: "permit"})
 		}(i + 1)
 	}
 	wg.Wait()
@@ -207,12 +207,12 @@ func TestAddFilterRule_AtomicAgainstConcurrentAdds(t *testing.T) {
 // must serialize (one wins, the other reads the updated state). Issue #209.
 func TestUpdateFilterRule_AtomicAgainstConcurrentUpdates(t *testing.T) {
 	n := loadTestNetwork(t)
-	if err := n.CreateFilter("parent", &spec.FilterSpec{}); err != nil {
+	if err := n.CreateFilter("", "", "parent", &spec.FilterSpec{}); err != nil {
 		t.Fatalf("seed CreateFilter: %v", err)
 	}
 	const N = 32
 	for i := 1; i <= N; i++ {
-		if err := n.AddFilterRule("parent", &spec.FilterRule{Sequence: i, Action: "permit"}); err != nil {
+		if err := n.AddFilterRule("", "", "parent", &spec.FilterRule{Sequence: i, Action: "permit"}); err != nil {
 			t.Fatalf("seed AddFilterRule: %v", err)
 		}
 	}
@@ -222,7 +222,7 @@ func TestUpdateFilterRule_AtomicAgainstConcurrentUpdates(t *testing.T) {
 	for i := 1; i <= N; i++ {
 		go func(seq int) {
 			defer wg.Done()
-			_ = n.UpdateFilterRule("parent", seq, &spec.FilterRule{Sequence: seq, Action: "deny"})
+			_ = n.UpdateFilterRule("", "", "parent", seq, &spec.FilterRule{Sequence: seq, Action: "deny"})
 		}(i)
 	}
 	wg.Wait()

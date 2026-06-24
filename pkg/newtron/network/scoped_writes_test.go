@@ -208,6 +208,36 @@ func TestNodeScopedWrite_SecretSafe(t *testing.T) {
 	}
 }
 
+// TestScopedSubRule_FilterRuleAtZone pins the scoped sub-rule path: a rule added
+// to a zone-scope filter override lands in the zone's filter, not the network
+// base, and its prefix-list reference is forward-checked against the network
+// floor.
+func TestScopedSubRule_FilterRuleAtZone(t *testing.T) {
+	n := loadScopedTestNetwork(t)
+	if err := n.CreatePrefixList(spec.ScopeNetwork, "", "BOGONS", []string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("create network prefix-list: %v", err)
+	}
+	if err := n.CreateFilter(spec.ScopeNetwork, "", "MGMT", &spec.FilterSpec{Type: "ipv4"}); err != nil {
+		t.Fatalf("create network filter base: %v", err)
+	}
+	if err := n.CreateFilter(spec.ScopeZone, "amer", "MGMT", &spec.FilterSpec{Type: "ipv4"}); err != nil {
+		t.Fatalf("create zone filter override: %v", err)
+	}
+
+	rule := &spec.FilterRule{Sequence: 10, Action: "permit", SrcPrefixList: "BOGONS"}
+	if err := n.AddFilterRule(spec.ScopeZone, "amer", "MGMT", rule); err != nil {
+		t.Fatalf("add rule to zone filter override: %v", err)
+	}
+
+	zf := n.spec.Zones["amer"].Filters["MGMT"]
+	if len(zf.Rules) != 1 || zf.Rules[0].Sequence != 10 {
+		t.Errorf("zone filter rules = %+v, want one rule seq=10", zf.Rules)
+	}
+	if nf := n.spec.Filters["MGMT"]; len(nf.Rules) != 0 {
+		t.Errorf("rule leaked into the network base filter: %+v", nf.Rules)
+	}
+}
+
 // TestScopedWrite_UnknownZoneRejected pins that an override targeting a
 // nonexistent zone is a not-found error, not a silent network write.
 func TestScopedWrite_UnknownZoneRejected(t *testing.T) {

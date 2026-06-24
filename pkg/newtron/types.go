@@ -752,12 +752,14 @@ type CreateMACVPNRequest struct {
 
 // CreateQoSPolicyRequest is the request for creating a QoS policy.
 type CreateQoSPolicyRequest struct {
+	ScopeSelector
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
 
 // AddQoSQueueRequest is the request for adding a queue to a QoS policy.
 type AddQoSQueueRequest struct {
+	ScopeSelector
 	Policy  string `json:"policy"`
 	QueueID int    `json:"queue_id"`
 	Name    string `json:"name"`
@@ -769,6 +771,7 @@ type AddQoSQueueRequest struct {
 
 // CreateFilterRequest is the request for creating a filter definition.
 type CreateFilterRequest struct {
+	ScopeSelector
 	Name        string `json:"name"`
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
@@ -776,6 +779,7 @@ type CreateFilterRequest struct {
 
 // AddFilterRuleRequest is the request for adding a rule to a filter.
 type AddFilterRuleRequest struct {
+	ScopeSelector
 	Filter        string `json:"filter"`
 	Sequence      int    `json:"seq"`
 	Action        string `json:"action"`
@@ -795,6 +799,7 @@ type AddFilterRuleRequest struct {
 // the existing queue (matches RemoveQoSQueue's parameter); NewQueueID
 // is optional — when non-nil the queue rotates to that slot. Issue #211.
 type UpdateQoSQueueRequest struct {
+	ScopeSelector
 	Policy     string `json:"policy"`
 	QueueID    int    `json:"queue_id"`
 	NewQueueID *int   `json:"new_queue_id,omitempty"`
@@ -808,6 +813,7 @@ type UpdateQoSQueueRequest struct {
 // UpdateRoutePolicyRuleRequest is the request for updating an existing
 // rule in a route policy. Mirrors UpdateFilterRuleRequest. Issue #210.
 type UpdateRoutePolicyRuleRequest struct {
+	ScopeSelector
 	Policy      string              `json:"policy"`
 	Sequence    int                 `json:"seq"`
 	NewSequence *int                `json:"new_seq,omitempty"`
@@ -824,6 +830,7 @@ type UpdateRoutePolicyRuleRequest struct {
 // rule keeps its current sequence. Remaining fields replace the rule's
 // current values. Issue #209.
 type UpdateFilterRuleRequest struct {
+	ScopeSelector
 	Filter        string `json:"filter"`
 	Sequence      int    `json:"seq"`
 	NewSequence   *int   `json:"new_seq,omitempty"`
@@ -860,6 +867,7 @@ type PrefixListDetail struct {
 
 // CreateRoutePolicyRequest is the request for creating a route policy.
 type CreateRoutePolicyRequest struct {
+	ScopeSelector
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
@@ -881,6 +889,7 @@ type CreatePlatformRequest struct {
 
 // AddRoutePolicyRuleRequest is the request for adding a rule to a route policy.
 type AddRoutePolicyRuleRequest struct {
+	ScopeSelector
 	Policy     string              `json:"policy"`
 	Sequence   int                 `json:"seq"`
 	Action     string              `json:"action"`

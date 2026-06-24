@@ -654,6 +654,7 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -661,7 +662,7 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteQoSPolicy(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeleteQoSPolicy(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -714,6 +715,7 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Policy  string `json:"policy"`
 		QueueID int    `json:"queue_id"`
 	}
@@ -722,7 +724,7 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemoveQoSQueue(r.Context(), req.Policy, req.QueueID, opts); err != nil {
+	if err := ne.net.RemoveQoSQueue(r.Context(), req.ScopeSelector, req.Policy, req.QueueID, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -753,6 +755,7 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -760,7 +763,7 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteFilter(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeleteFilter(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -813,6 +816,7 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Filter   string `json:"filter"`
 		Sequence int    `json:"seq"`
 	}
@@ -821,7 +825,7 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemoveFilterRule(r.Context(), req.Filter, req.Sequence, opts); err != nil {
+	if err := ne.net.RemoveFilterRule(r.Context(), req.ScopeSelector, req.Filter, req.Sequence, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -966,6 +970,7 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -973,7 +978,7 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteRoutePolicy(r.Context(), req.Name, opts); err != nil {
+	if err := ne.net.DeleteRoutePolicy(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -1026,6 +1031,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		Policy   string `json:"policy"`
 		Sequence int    `json:"seq"`
 	}
@@ -1034,7 +1040,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemoveRoutePolicyRule(r.Context(), req.Policy, req.Sequence, opts); err != nil {
+	if err := ne.net.RemoveRoutePolicyRule(r.Context(), req.ScopeSelector, req.Policy, req.Sequence, opts); err != nil {
 		writeError(w, err)
 		return
 	}
