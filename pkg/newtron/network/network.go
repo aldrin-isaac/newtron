@@ -1618,6 +1618,17 @@ func (n *Network) SaveProfile(name string, profile *spec.DeviceProfile) error {
 // profile. Symmetric with DeleteTopologyDevice's cascade pattern — both honor
 // §15 (operational symmetry; cascade is explicit, never implicit).
 func (n *Network) DeleteProfile(name string, force bool) error {
+	// Refuse (409), unless forced, if the profile still holds node-scope spec
+	// overrides — deleting the profile would silently remove them (§15). force
+	// proceeds: the overrides live in the profile file and go with it.
+	if !force {
+		if p, err := n.loader.LoadProfile(name); err == nil {
+			if ov := containedOverrides(&p.OverridableSpecs); len(ov) > 0 {
+				return &util.ConflictError{Resource: "profile", Name: name, References: ov}
+			}
+		}
+	}
+
 	// A profile and a topology device share their name 1:1 — the profile
 	// "reference" from topology is the matching name in topology.Devices.
 	topoMu := n.locks.lock(keyTopology)
@@ -1691,16 +1702,28 @@ func (n *Network) DeleteZone(name string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Check for profiles in this zone
-	profiles := n.loader.ListProfiles()
-	for _, pName := range profiles {
+	z, ok := n.spec.Zones[name]
+	if !ok {
+		return nil // idempotent: already absent
+	}
+
+	// Refuse (409) if anything depends on the zone: a profile assigned to it
+	// (profile.zone reference), or spec overrides it still holds (deleting the
+	// zone would silently remove them — §15). List every dependant so the
+	// operator can clear them first.
+	var refs []string
+	for _, pName := range n.loader.ListProfiles() {
 		p, err := n.loader.LoadProfile(pName)
 		if err != nil {
-			continue
+			return fmt.Errorf("loading profile %q while checking zone references: %w", pName, err)
 		}
 		if p.Zone == name {
-			return fmt.Errorf("cannot delete zone '%s': referenced by profile '%s'", name, pName)
+			refs = append(refs, "profile '"+pName+"'")
 		}
+	}
+	refs = append(refs, containedOverrides(&z.OverridableSpecs)...)
+	if len(refs) > 0 {
+		return &util.ConflictError{Resource: "zone", Name: name, References: refs}
 	}
 
 	delete(n.spec.Zones, name)

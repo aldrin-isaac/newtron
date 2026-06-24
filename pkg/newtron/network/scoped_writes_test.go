@@ -177,6 +177,103 @@ func TestNetworkDelete_BlockedByOverrideBelow(t *testing.T) {
 	}
 }
 
+// TestDeleteZone_BlockedByOverride pins that a zone holding spec overrides
+// cannot be deleted — deleting it would silently remove authored resources
+// (§15). A *util.ConflictError (→ 409) lists the held overrides.
+func TestDeleteZone_BlockedByOverride(t *testing.T) {
+	n := loadScopedTestNetwork(t)
+	if err := n.CreateService(spec.ScopeNetwork, "", "TRANSIT", &spec.ServiceSpec{ServiceType: "routed"}); err != nil {
+		t.Fatalf("create network base: %v", err)
+	}
+	if err := n.CreateService(spec.ScopeZone, "amer", "TRANSIT", &spec.ServiceSpec{ServiceType: "bridged"}); err != nil {
+		t.Fatalf("create zone override: %v", err)
+	}
+
+	err := n.DeleteZone("amer")
+	var conflict *util.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("delete zone holding an override: got %v, want *util.ConflictError (409)", err)
+	}
+
+	// Remove the override, then the zone delete succeeds.
+	if err := n.DeleteService(spec.ScopeZone, "amer", "TRANSIT"); err != nil {
+		t.Fatalf("delete zone override: %v", err)
+	}
+	if err := n.DeleteZone("amer"); err != nil {
+		t.Fatalf("delete zone after clearing its overrides: %v", err)
+	}
+}
+
+// TestDeleteZone_BlockedByProfileReference pins that a zone assigned to a
+// profile cannot be deleted, and that the refusal is a typed 409 (it returned a
+// plain 500 before this change).
+func TestDeleteZone_BlockedByProfileReference(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "network.json"),
+		[]byte(`{"schema_version":"1.0","zones":{"amer":{}}}`), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
+		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
+		t.Fatalf("write platforms.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
+		t.Fatalf("mkdir nodes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"),
+		[]byte(`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer"}`), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+
+	err = n.DeleteZone("amer")
+	var conflict *util.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("delete zone referenced by a profile: got %v, want *util.ConflictError (409)", err)
+	}
+}
+
+// TestDeleteProfile_BlockedByOverride pins that a profile holding node-scope
+// spec overrides cannot be deleted without force — a *util.ConflictError (→ 409)
+// listing the overrides. (Authored directly in the profile file, since node-scope
+// writes land in a later increment; the guard covers them regardless.)
+func TestDeleteProfile_BlockedByOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "network.json"),
+		[]byte(`{"schema_version":"1.0","zones":{"amer":{}},"prefix_lists":{"BOGONS":["10.0.0.0/8"]}}`), 0o644); err != nil {
+		t.Fatalf("write network.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
+		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
+		t.Fatalf("write platforms.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
+		t.Fatalf("mkdir nodes: %v", err)
+	}
+	// leaf1 carries a node-scope prefix-list override of the network BOGONS.
+	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"),
+		[]byte(`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer","prefix_lists":{"BOGONS":["10.1.0.0/16"]}}`), 0o644); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+
+	err = n.DeleteProfile("leaf1", false)
+	var conflict *util.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("delete profile holding an override: got %v, want *util.ConflictError (409)", err)
+	}
+	// force bypasses the guard (the override goes with the profile file).
+	if err := n.DeleteProfile("leaf1", true); err != nil {
+		t.Fatalf("force-delete profile with overrides: %v", err)
+	}
+}
+
 // TestNetworkDelete_BlockedByScopedConsumer pins the cross-scope reverse check:
 // a network base referenced by a ZONE-scoped consumer cannot be deleted, even
 // though no network-scope consumer exists. (A network IP-VPN referenced by a

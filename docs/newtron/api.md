@@ -1374,6 +1374,17 @@ at network. The invariant is enforced server-side:
 `route-policy`, and the sub-rule endpoints) follow in subsequent increments;
 until then a `node`-scope write returns **400**.
 
+**Deleting a scope container.** A zone or node profile that still holds spec
+overrides — or that something else references — cannot be deleted out from under
+them (§15):
+
+- `delete-zone` is refused (**409**) while a profile is assigned to the zone
+  (`zone` field) or the zone still holds spec overrides; the response lists every
+  dependant. Remove them first.
+- `delete-profile` is refused (**409**) while the profile holds node-scope spec
+  overrides (or, as before, while a topology device references it). `force=true`
+  proceeds — the overrides live in the profile file and are removed with it.
+
 ### Services
 
 #### POST /newtron/v1/networks/{netID}/create-service
