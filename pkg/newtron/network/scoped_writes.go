@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -160,4 +161,19 @@ func scopeLabel(scope, instance string) string {
 		return scope
 	}
 	return scope + " '" + instance + "'"
+}
+
+// containedOverrides lists the spec overrides held in a scope container (a zone
+// or a node profile), as sorted "KindSpec 'NAME'" strings. A zone/profile that
+// still holds overrides must not be deleted out from under them — deleting the
+// container would silently remove authored scoped resources. The reverse-delete
+// guard for the containers themselves (§15), symmetric with checkNoOverridesBelow
+// for the network base.
+func containedOverrides(specs *spec.OverridableSpecs) []string {
+	var out []string
+	specs.EachSpec(func(kind, name string, _ any) {
+		out = append(out, fmt.Sprintf("%s '%s'", kind, name))
+	})
+	sort.Strings(out)
+	return out
 }
