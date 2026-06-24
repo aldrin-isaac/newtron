@@ -1335,8 +1335,26 @@ per-endpoint logic:
   references it. The delete is refused with **409** (`ConflictError`) listing
   the referrers (e.g. *"PrefixListSpec 'BOGONS' has 2 references: ServiceSpec
   'EDGE' (import_prefix_list), FilterSpec 'MGMT' (src_prefix_list)"*). Remove
-  the references first; there is no force-cascade for specs (newtron will not
+  the references first; **there is no force-cascade for specs** (newtron will not
   auto-delete a consuming spec).
+
+  The 409 carries the conflict's **structured shape** in the envelope `data`
+  (§46), so clients branch on the payload rather than parsing the message:
+
+  ```json
+  { "data": { "resource": "PrefixListSpec", "name": "BOGONS",
+              "references": ["ServiceSpec 'EDGE' (import_prefix_list)", "FilterSpec 'MGMT' (src_prefix_list)"],
+              "force_available": false },
+    "error": "PrefixListSpec 'BOGONS' has 2 references: …" }
+  ```
+
+  `force_available` is **false** for spec deletes and for existence collisions,
+  and **true** only for the deletes that actually cascade (profile,
+  topology-device) — so a UI offers a "force delete" affordance only when the
+  payload says so. The message string mirrors this: it appends
+  *"— pass force=true to cascade"* only when `force_available` is true. Every
+  `ConflictError`-bearing 409 (spec, profile, zone, topology) uses this one
+  shape.
 
 #### Scoped writes (network / zone overrides)
 

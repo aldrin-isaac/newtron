@@ -28,19 +28,32 @@ var (
 //
 // References names the entities that block the mutation — operator can read
 // them off the error and act on each.
+//
+// Force reports whether passing force=true would cascade past the conflict.
+// It is true only for the deletes that actually support a cascade (profile,
+// topology-device); spec deletes and existence collisions leave it false, so
+// the message and the wire payload never advertise a force that doesn't exist.
+// The json tags are the §46 structured wire shape the API serializes into the
+// error envelope's Data (resource / name / references[] / force_available).
 type ConflictError struct {
-	Resource   string   // resource kind being deleted ("topology-device", "profile")
-	Name       string   // its name
-	References []string // referring entity descriptions, human-readable
+	Resource   string   `json:"resource"`        // resource kind being deleted ("topology-device", "profile", a spec kind)
+	Name       string   `json:"name"`            // its name
+	References []string `json:"references"`      // referring entity descriptions, human-readable
+	Force      bool     `json:"force_available"` // true when force=true would cascade the delete
 }
 
 func (e *ConflictError) Error() string {
+	var msg string
 	if len(e.References) == 1 {
-		return fmt.Sprintf("%s '%s' has 1 reference: %s — pass force=true to cascade",
-			e.Resource, e.Name, e.References[0])
+		msg = fmt.Sprintf("%s '%s' has 1 reference: %s", e.Resource, e.Name, e.References[0])
+	} else {
+		msg = fmt.Sprintf("%s '%s' has %d references: %s",
+			e.Resource, e.Name, len(e.References), strings.Join(e.References, ", "))
 	}
-	return fmt.Sprintf("%s '%s' has %d references: %s — pass force=true to cascade",
-		e.Resource, e.Name, len(e.References), strings.Join(e.References, ", "))
+	if e.Force {
+		msg += " — pass force=true to cascade"
+	}
+	return msg
 }
 
 func (e *ConflictError) Unwrap() error {

@@ -284,6 +284,14 @@ func writeError(w http.ResponseWriter, err error) {
 	if errors.As(err, &authz) {
 		envelope.Data = authz
 	}
+	// §46: a referential conflict carries its structured shape (resource, name,
+	// references[], force_available) in Data so clients branch on the payload —
+	// not on a parsed message — and render referrers + a force affordance only
+	// when force_available is true.
+	var conflict *newtron.ConflictError
+	if errors.As(err, &conflict) {
+		envelope.Data = conflict
+	}
 	json.NewEncoder(w).Encode(envelope)
 }
 
