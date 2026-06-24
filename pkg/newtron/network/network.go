@@ -421,25 +421,19 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 // Returns error if any service references it. Lookup is case-sensitive
 // (IPVPN names ARE SONiC VRF names — see GetIPVPN).
 func (n *Network) DeleteIPVPN(scope, instance, name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	canonical := util.NormalizeName(name)
-	if scope == "" || scope == spec.ScopeNetwork {
-		if err := n.checkNoConsumersAnyScope("IPVPNSpec", canonical); err != nil {
-			return err
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			if err := n.checkNoConsumersAnyScope("IPVPNSpec", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("IPVPNSpec", canonical); err != nil {
+				return err
+			}
 		}
-		if err := n.checkNoOverridesBelow("IPVPNSpec", canonical); err != nil {
-			return err
-		}
-	}
-	delete(container.IPVPNs, canonical)
-	return n.persistSpec()
+		delete(c.IPVPNs, canonical)
+		return nil
+	})
 }
 
 // checkRefsResolve is the single forward-dependency guard for every spec
@@ -477,25 +471,19 @@ func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
 // DeleteMACVPN removes a MAC-VPN definition from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteMACVPN(scope, instance, name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	canonical := util.NormalizeName(name)
-	if scope == "" || scope == spec.ScopeNetwork {
-		if err := n.checkNoConsumersAnyScope("MACVPNSpec", canonical); err != nil {
-			return err
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			if err := n.checkNoConsumersAnyScope("MACVPNSpec", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("MACVPNSpec", canonical); err != nil {
+				return err
+			}
 		}
-		if err := n.checkNoOverridesBelow("MACVPNSpec", canonical); err != nil {
-			return err
-		}
-	}
-	delete(container.MACVPNs, canonical)
-	return n.persistSpec()
+		delete(c.MACVPNs, canonical)
+		return nil
+	})
 }
 
 // SaveQoSPolicy creates or updates a QoS policy in network.json.
@@ -578,28 +566,22 @@ func (n *Network) SavePrefixList(name string, prefixes []string) error {
 
 // DeletePrefixList deletes a prefix list from the network spec.
 func (n *Network) DeletePrefixList(scope, instance, name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	canonical := util.NormalizeName(name)
-	if scope == "" || scope == spec.ScopeNetwork {
-		// Covers all consumers generically — filters, route policies, AND service
-		// routing (import/export_prefix_list), which the prior hand-coded scan
-		// missed.
-		if err := n.checkNoConsumersAnyScope("PrefixListSpec", canonical); err != nil {
-			return err
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			// Covers all consumers generically — filters, route policies, AND service
+			// routing (import/export_prefix_list), which the prior hand-coded scan
+			// missed.
+			if err := n.checkNoConsumersAnyScope("PrefixListSpec", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("PrefixListSpec", canonical); err != nil {
+				return err
+			}
 		}
-		if err := n.checkNoOverridesBelow("PrefixListSpec", canonical); err != nil {
-			return err
-		}
-	}
-	delete(container.PrefixLists, canonical)
-	return n.persistSpec()
+		delete(c.PrefixLists, canonical)
+		return nil
+	})
 }
 
 // SaveRoutePolicy saves a route policy to the network spec.
@@ -682,32 +664,26 @@ func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 // DeleteService removes a service definition from network.json.
 // Returns error if any interface has it applied (caller checks this).
 func (n *Network) DeleteService(scope, instance, name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	canonical := util.NormalizeName(name)
-	if scope == "" || scope == spec.ScopeNetwork {
-		// Deleting the network base: refuse while anything references it (any
-		// scope) or any override still sits below it. Uniform guard — no spec
-		// references a service today, but a future ref:"ServiceSpec" is covered
-		// for free. (Whether a service is still *applied* on a device is a
-		// separate, runtime concern the caller handles.)
-		if err := n.checkNoConsumersAnyScope("ServiceSpec", canonical); err != nil {
-			return err
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			// Deleting the network base: refuse while anything references it (any
+			// scope) or any override still sits below it. Uniform guard — no spec
+			// references a service today, but a future ref:"ServiceSpec" is covered
+			// for free. (Whether a service is still *applied* on a device is a
+			// separate, runtime concern the caller handles.)
+			if err := n.checkNoConsumersAnyScope("ServiceSpec", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("ServiceSpec", canonical); err != nil {
+				return err
+			}
 		}
-		if err := n.checkNoOverridesBelow("ServiceSpec", canonical); err != nil {
-			return err
-		}
-	}
-	// A scoped override delete is always safe: consumers fall back to the
-	// network base the floor invariant guarantees still exists.
-	delete(container.Services, canonical)
-	return n.persistSpec()
+		// A scoped override delete is always safe: consumers fall back to the
+		// network base the floor invariant guarantees still exists.
+		delete(c.Services, canonical)
+		return nil
+	})
 }
 
 // ListQoSPolicies returns all QoS policy names.
@@ -743,80 +719,62 @@ func (n *Network) ListQoSPolicies() []string {
 // CreateService atomically creates a new service definition. Returns an
 // error if a service with the given name already exists.
 func (n *Network) CreateService(scope, instance, name string, def *spec.ServiceSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.Services[name]; exists {
-		return fmt.Errorf("service '%s' already exists", name)
-	}
-	spec.NormalizeServiceRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	if err := n.checkOverrideBase(scope, "ServiceSpec", name); err != nil {
-		return err
-	}
-	if container.Services == nil {
-		container.Services = make(map[string]*spec.ServiceSpec)
-	}
-	container.Services[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.Services[name]; exists {
+			return fmt.Errorf("service '%s' already exists", name)
+		}
+		spec.NormalizeServiceRefs(def)
+		if err := n.checkRefsResolve(def); err != nil {
+			return err
+		}
+		if err := n.checkOverrideBase(scope, "ServiceSpec", name); err != nil {
+			return err
+		}
+		if c.Services == nil {
+			c.Services = make(map[string]*spec.ServiceSpec)
+		}
+		c.Services[name] = def
+		return nil
+	})
 }
 
 // CreateIPVPN atomically creates a new IP-VPN definition. Returns an error
 // if an IPVPN with the given name already exists.
 func (n *Network) CreateIPVPN(scope, instance, name string, def *spec.IPVPNSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.IPVPNs[name]; exists {
-		return fmt.Errorf("ipvpn '%s' already exists", name)
-	}
-	if err := n.checkOverrideBase(scope, "IPVPNSpec", name); err != nil {
-		return err
-	}
-	if container.IPVPNs == nil {
-		container.IPVPNs = make(map[string]*spec.IPVPNSpec)
-	}
-	container.IPVPNs[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.IPVPNs[name]; exists {
+			return fmt.Errorf("ipvpn '%s' already exists", name)
+		}
+		if err := n.checkOverrideBase(scope, "IPVPNSpec", name); err != nil {
+			return err
+		}
+		if c.IPVPNs == nil {
+			c.IPVPNs = make(map[string]*spec.IPVPNSpec)
+		}
+		c.IPVPNs[name] = def
+		return nil
+	})
 }
 
 // CreateMACVPN atomically creates a new MAC-VPN definition. Returns an error
 // if a MACVPN with the given name already exists.
 func (n *Network) CreateMACVPN(scope, instance, name string, def *spec.MACVPNSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.MACVPNs[name]; exists {
-		return fmt.Errorf("macvpn '%s' already exists", name)
-	}
-	if err := n.checkOverrideBase(scope, "MACVPNSpec", name); err != nil {
-		return err
-	}
-	if container.MACVPNs == nil {
-		container.MACVPNs = make(map[string]*spec.MACVPNSpec)
-	}
-	container.MACVPNs[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.MACVPNs[name]; exists {
+			return fmt.Errorf("macvpn '%s' already exists", name)
+		}
+		if err := n.checkOverrideBase(scope, "MACVPNSpec", name); err != nil {
+			return err
+		}
+		if c.MACVPNs == nil {
+			c.MACVPNs = make(map[string]*spec.MACVPNSpec)
+		}
+		c.MACVPNs[name] = def
+		return nil
+	})
 }
 
 // CreateQoSPolicy atomically creates a new QoS policy. Returns an error
@@ -862,26 +820,20 @@ func (n *Network) CreateFilter(name string, def *spec.FilterSpec) error {
 // CreatePrefixList atomically creates a new prefix list. Returns an error
 // if a prefix list with the given name already exists.
 func (n *Network) CreatePrefixList(scope, instance, name string, prefixes []string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.PrefixLists[name]; exists {
-		return fmt.Errorf("prefix list '%s' already exists", name)
-	}
-	if err := n.checkOverrideBase(scope, "PrefixListSpec", name); err != nil {
-		return err
-	}
-	if container.PrefixLists == nil {
-		container.PrefixLists = make(map[string][]string)
-	}
-	container.PrefixLists[name] = prefixes
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.PrefixLists[name]; exists {
+			return fmt.Errorf("prefix list '%s' already exists", name)
+		}
+		if err := n.checkOverrideBase(scope, "PrefixListSpec", name); err != nil {
+			return err
+		}
+		if c.PrefixLists == nil {
+			c.PrefixLists = make(map[string][]string)
+		}
+		c.PrefixLists[name] = prefixes
+		return nil
+	})
 }
 
 // CreateRoutePolicy atomically creates a new route policy. Returns an error
@@ -948,60 +900,42 @@ func (n *Network) CreateProfile(name string, profile *spec.DeviceProfile) error 
 
 // UpdateService atomically replaces an existing service definition.
 func (n *Network) UpdateService(scope, instance, name string, def *spec.ServiceSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.Services[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "service", id: name}
-	}
-	spec.NormalizeServiceRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	container.Services[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.Services[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "service", id: name}
+		}
+		spec.NormalizeServiceRefs(def)
+		if err := n.checkRefsResolve(def); err != nil {
+			return err
+		}
+		c.Services[name] = def
+		return nil
+	})
 }
 
 // UpdateIPVPN atomically replaces an existing IP-VPN definition.
 func (n *Network) UpdateIPVPN(scope, instance, name string, def *spec.IPVPNSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.IPVPNs[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "ipvpn", id: name}
-	}
-	container.IPVPNs[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.IPVPNs[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "ipvpn", id: name}
+		}
+		c.IPVPNs[name] = def
+		return nil
+	})
 }
 
 // UpdateMACVPN atomically replaces an existing MAC-VPN definition.
 func (n *Network) UpdateMACVPN(scope, instance, name string, def *spec.MACVPNSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.MACVPNs[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "macvpn", id: name}
-	}
-	container.MACVPNs[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.MACVPNs[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "macvpn", id: name}
+		}
+		c.MACVPNs[name] = def
+		return nil
+	})
 }
 
 // UpdateQoSPolicy atomically replaces an existing QoS policy.
@@ -1038,20 +972,14 @@ func (n *Network) UpdateFilter(name string, def *spec.FilterSpec) error {
 
 // UpdatePrefixList atomically replaces an existing prefix list.
 func (n *Network) UpdatePrefixList(scope, instance, name string, prefixes []string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	container, err := n.writeContainer(scope, instance)
-	if err != nil {
-		return err
-	}
 	name = util.NormalizeName(name)
-	if _, exists := container.PrefixLists[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "prefix-list", id: name}
-	}
-	container.PrefixLists[name] = prefixes
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.PrefixLists[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "prefix-list", id: name}
+		}
+		c.PrefixLists[name] = prefixes
+		return nil
+	})
 }
 
 // UpdateRoutePolicy atomically replaces an existing route policy.

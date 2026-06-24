@@ -35,7 +35,10 @@ func validateScopeSelector(sel ScopeSelector) error {
 		}
 		return nil
 	case spec.ScopeNode:
-		return &ValidationError{Field: "scope", Message: "node-scope spec writes are not yet supported (coming in P2b); use network or zone scope"}
+		if sel.ScopeInstance == "" {
+			return &ValidationError{Field: "scope_instance", Message: "required for node scope (the device/profile name)"}
+		}
+		return nil
 	default:
 		return &ValidationError{Field: "scope", Message: "must be 'network', 'zone', or 'node'"}
 	}

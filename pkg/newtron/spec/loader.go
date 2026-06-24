@@ -95,23 +95,9 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 	}
 	l.mu.RUnlock()
 
-	path := filepath.Join(l.specDir, "nodes", deviceName+".json")
-	data, err := os.ReadFile(path)
+	profile, err := l.readProfileFromDisk(deviceName)
 	if err != nil {
-		return nil, fmt.Errorf("reading profile %s: %w", deviceName, err)
-	}
-
-	var profile DeviceProfile
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return nil, fmt.Errorf("parsing profile %s: %w", deviceName, err)
-	}
-
-	// Normalize name keys and name-reference fields at load time.
-	normalizeOverridableSpecs(&profile.OverridableSpecs)
-
-	// Validate profile
-	if err := l.validateProfile(&profile); err != nil {
-		return nil, fmt.Errorf("validating profile %s: %w", deviceName, err)
+		return nil, err
 	}
 
 	// Double-check under the write lock — another goroutine may have raced
@@ -122,7 +108,32 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 	if existing, ok := l.profiles[deviceName]; ok {
 		return existing, nil
 	}
-	l.profiles[deviceName] = &profile
+	l.profiles[deviceName] = profile
+	return profile, nil
+}
+
+// readProfileFromDisk reads, parses, normalizes, and validates a profile from
+// nodes/<name>.json. It does NOT consult or update the cache, acquire the lock,
+// or resolve secrets — the returned profile carries its ${secret:...} references
+// verbatim, so it is safe to mutate and persist without leaking resolved values.
+func (l *Loader) readProfileFromDisk(name string) (*DeviceProfile, error) {
+	path := filepath.Join(l.specDir, "nodes", name+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading profile %s: %w", name, err)
+	}
+
+	var profile DeviceProfile
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return nil, fmt.Errorf("parsing profile %s: %w", name, err)
+	}
+
+	// Normalize name keys and name-reference fields at load time.
+	normalizeOverridableSpecs(&profile.OverridableSpecs)
+
+	if err := l.validateProfile(&profile); err != nil {
+		return nil, fmt.Errorf("validating profile %s: %w", name, err)
+	}
 	return &profile, nil
 }
 
@@ -441,6 +452,23 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 
 // SaveProfile writes a device profile to disk atomically (temp file + rename).
 func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
+	if err := l.writeProfileFile(name, profile); err != nil {
+		return err
+	}
+
+	// Update the in-memory cache under the write lock so concurrent
+	// LoadProfile readers see the new pointer atomically.
+	l.mu.Lock()
+	l.profiles[name] = profile
+	l.mu.Unlock()
+
+	return nil
+}
+
+// writeProfileFile marshals profile to nodes/<name>.json atomically (temp +
+// rename). It touches neither the lock nor the cache — callers handle cache
+// coherence around it.
+func (l *Loader) writeProfileFile(name string, profile *DeviceProfile) error {
 	profileDir := filepath.Join(l.specDir, "nodes")
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
@@ -474,13 +502,37 @@ func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
+	return nil
+}
 
-	// Update the in-memory cache under the write lock so concurrent
-	// LoadProfile readers see the new pointer atomically.
+// MutateProfile atomically applies fn to a profile and persists it, serialized
+// against every other profile write under the loader lock.
+//
+// It reads the profile FRESH from disk rather than from the cache, on purpose:
+// the cached pointer may have had its ${secret:...} fields resolved in place by
+// a prior read (network.loadProfile resolves secrets on the returned pointer),
+// and persisting that would write resolved secrets to disk. The on-disk form
+// keeps the references, so a round-trip through disk is secret-safe. After a
+// successful write the cache entry is invalidated, so the next LoadProfile
+// re-reads the updated file.
+//
+// fn must not call back into the loader (it would re-enter l.mu). It receives the
+// raw profile; callers mutate profile.OverridableSpecs for scoped spec writes.
+func (l *Loader) MutateProfile(name string, fn func(*DeviceProfile) error) error {
 	l.mu.Lock()
-	l.profiles[name] = profile
-	l.mu.Unlock()
+	defer l.mu.Unlock()
 
+	profile, err := l.readProfileFromDisk(name)
+	if err != nil {
+		return err
+	}
+	if err := fn(profile); err != nil {
+		return err
+	}
+	if err := l.writeProfileFile(name, profile); err != nil {
+		return err
+	}
+	delete(l.profiles, name) // invalidate; next LoadProfile re-reads fresh
 	return nil
 }
 
