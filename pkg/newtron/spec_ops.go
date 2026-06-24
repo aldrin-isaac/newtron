@@ -13,14 +13,14 @@ import (
 // Cross-scope spec inventory
 // ============================================================================
 
-// SpecInstances returns a flat inventory of every spec defined across all scopes
-// (network, each zone, each node profile), each tagged with the scope and
+// ListSpecInstances returns a flat inventory of every spec defined across all
+// scopes (network, each zone, each node profile), each tagged with the scope and
 // instance it lives at. It is the read surface behind a schema-driven UI's flat
 // spec list with scope/scope_instance filters; storage and resolution stay
 // hierarchical underneath ("flat at the boundary, hierarchical underneath",
 // DESIGN_PRINCIPLES_NEWTRON §7). Names are canonical. The existing per-kind list
 // endpoints (network scope) are unchanged — this is purely additive.
-func (net *Network) SpecInstances() ([]SpecInstance, error) {
+func (net *Network) ListSpecInstances() ([]SpecInstance, error) {
 	scoped, err := net.internal.ListScopedSpecs()
 	if err != nil {
 		return nil, err

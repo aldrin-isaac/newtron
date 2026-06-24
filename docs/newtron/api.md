@@ -902,9 +902,9 @@ GET /newtron/v1/networks/default/spec-instances
 
 This is a **locating** inventory, not a resolution. It does **not** merge
 overrides: a name defined at both `network` and a `node` appears as two separate
-entries (as `TRANSIT` does above). The override outcome -- what a given node
-*effectively* resolves -- is a separate per-node read, not this list. The
-endpoint is purely additive; the per-kind list/show endpoints (network scope)
+entries (as `TRANSIT` does above). It reports *where each definition lives*, not
+which one a given node ends up applying after the `node > zone > network` merge.
+The endpoint is purely additive; the per-kind list/show endpoints (network scope)
 are unchanged.
 
 #### GET /newtron/v1/networks/{netID}/services/{name}/projection
