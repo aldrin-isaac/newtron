@@ -504,16 +504,20 @@ func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
 
 // DeleteQoSPolicy removes a QoS policy from network.json.
 // Returns error if any service references it.
-func (n *Network) DeleteQoSPolicy(name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if err := n.checkNoConsumersAnyScope("QoSPolicy", name); err != nil {
-		return err
-	}
-	delete(n.spec.QoSPolicies, util.NormalizeName(name))
-	return n.persistSpec()
+func (n *Network) DeleteQoSPolicy(scope, instance, name string) error {
+	canonical := util.NormalizeName(name)
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			if err := n.checkNoConsumersAnyScope("QoSPolicy", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("QoSPolicy", canonical); err != nil {
+				return err
+			}
+		}
+		delete(c.QoSPolicies, canonical)
+		return nil
+	})
 }
 
 // SaveFilter creates or updates a filter in network.json.
@@ -537,16 +541,20 @@ func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 
 // DeleteFilter removes a filter from network.json.
 // Returns error if any service references it.
-func (n *Network) DeleteFilter(name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if err := n.checkNoConsumersAnyScope("FilterSpec", name); err != nil {
-		return err
-	}
-	delete(n.spec.Filters, util.NormalizeName(name))
-	return n.persistSpec()
+func (n *Network) DeleteFilter(scope, instance, name string) error {
+	canonical := util.NormalizeName(name)
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			if err := n.checkNoConsumersAnyScope("FilterSpec", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("FilterSpec", canonical); err != nil {
+				return err
+			}
+		}
+		delete(c.Filters, canonical)
+		return nil
+	})
 }
 
 // SavePrefixList saves a prefix list to the network spec.
@@ -604,16 +612,20 @@ func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
 }
 
 // DeleteRoutePolicy deletes a route policy from the network spec.
-func (n *Network) DeleteRoutePolicy(name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if err := n.checkNoConsumersAnyScope("RoutePolicy", name); err != nil {
-		return err
-	}
-	delete(n.spec.RoutePolicies, util.NormalizeName(name))
-	return n.persistSpec()
+func (n *Network) DeleteRoutePolicy(scope, instance, name string) error {
+	canonical := util.NormalizeName(name)
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if scope == "" || scope == spec.ScopeNetwork {
+			if err := n.checkNoConsumersAnyScope("RoutePolicy", canonical); err != nil {
+				return err
+			}
+			if err := n.checkNoOverridesBelow("RoutePolicy", canonical); err != nil {
+				return err
+			}
+		}
+		delete(c.RoutePolicies, canonical)
+		return nil
+	})
 }
 
 // ListPrefixLists returns all prefix list names.
@@ -779,42 +791,44 @@ func (n *Network) CreateMACVPN(scope, instance, name string, def *spec.MACVPNSpe
 
 // CreateQoSPolicy atomically creates a new QoS policy. Returns an error
 // if a policy with the given name already exists.
-func (n *Network) CreateQoSPolicy(name string, def *spec.QoSPolicy) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) CreateQoSPolicy(scope, instance, name string, def *spec.QoSPolicy) error {
 	name = util.NormalizeName(name)
-	if _, exists := n.spec.QoSPolicies[name]; exists {
-		return fmt.Errorf("QoS policy '%s' already exists", name)
-	}
-	if n.spec.QoSPolicies == nil {
-		n.spec.QoSPolicies = make(map[string]*spec.QoSPolicy)
-	}
-	n.spec.QoSPolicies[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.QoSPolicies[name]; exists {
+			return fmt.Errorf("QoS policy '%s' already exists", name)
+		}
+		if err := n.checkOverrideBase(scope, "QoSPolicy", name); err != nil {
+			return err
+		}
+		if c.QoSPolicies == nil {
+			c.QoSPolicies = make(map[string]*spec.QoSPolicy)
+		}
+		c.QoSPolicies[name] = def
+		return nil
+	})
 }
 
 // CreateFilter atomically creates a new filter. Returns an error if a
 // filter with the given name already exists.
-func (n *Network) CreateFilter(name string, def *spec.FilterSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) CreateFilter(scope, instance, name string, def *spec.FilterSpec) error {
 	name = util.NormalizeName(name)
-	if _, exists := n.spec.Filters[name]; exists {
-		return fmt.Errorf("filter '%s' already exists", name)
-	}
-	spec.NormalizeFilterRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	if n.spec.Filters == nil {
-		n.spec.Filters = make(map[string]*spec.FilterSpec)
-	}
-	n.spec.Filters[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.Filters[name]; exists {
+			return fmt.Errorf("filter '%s' already exists", name)
+		}
+		spec.NormalizeFilterRefs(def)
+		if err := n.checkRefsResolve(def); err != nil {
+			return err
+		}
+		if err := n.checkOverrideBase(scope, "FilterSpec", name); err != nil {
+			return err
+		}
+		if c.Filters == nil {
+			c.Filters = make(map[string]*spec.FilterSpec)
+		}
+		c.Filters[name] = def
+		return nil
+	})
 }
 
 // CreatePrefixList atomically creates a new prefix list. Returns an error
@@ -838,24 +852,25 @@ func (n *Network) CreatePrefixList(scope, instance, name string, prefixes []stri
 
 // CreateRoutePolicy atomically creates a new route policy. Returns an error
 // if a route policy with the given name already exists.
-func (n *Network) CreateRoutePolicy(name string, def *spec.RoutePolicy) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) CreateRoutePolicy(scope, instance, name string, def *spec.RoutePolicy) error {
 	name = util.NormalizeName(name)
-	if _, exists := n.spec.RoutePolicies[name]; exists {
-		return fmt.Errorf("route policy '%s' already exists", name)
-	}
-	spec.NormalizeRoutePolicyRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	if n.spec.RoutePolicies == nil {
-		n.spec.RoutePolicies = make(map[string]*spec.RoutePolicy)
-	}
-	n.spec.RoutePolicies[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.RoutePolicies[name]; exists {
+			return fmt.Errorf("route policy '%s' already exists", name)
+		}
+		spec.NormalizeRoutePolicyRefs(def)
+		if err := n.checkRefsResolve(def); err != nil {
+			return err
+		}
+		if err := n.checkOverrideBase(scope, "RoutePolicy", name); err != nil {
+			return err
+		}
+		if c.RoutePolicies == nil {
+			c.RoutePolicies = make(map[string]*spec.RoutePolicy)
+		}
+		c.RoutePolicies[name] = def
+		return nil
+	})
 }
 
 // CreateZone atomically creates a new zone. Returns an error if a zone
@@ -939,35 +954,31 @@ func (n *Network) UpdateMACVPN(scope, instance, name string, def *spec.MACVPNSpe
 }
 
 // UpdateQoSPolicy atomically replaces an existing QoS policy.
-func (n *Network) UpdateQoSPolicy(name string, def *spec.QoSPolicy) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) UpdateQoSPolicy(scope, instance, name string, def *spec.QoSPolicy) error {
 	name = util.NormalizeName(name)
-	if _, exists := n.spec.QoSPolicies[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "qos-policy", id: name}
-	}
-	n.spec.QoSPolicies[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.QoSPolicies[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "qos-policy", id: name}
+		}
+		c.QoSPolicies[name] = def
+		return nil
+	})
 }
 
 // UpdateFilter atomically replaces an existing filter.
-func (n *Network) UpdateFilter(name string, def *spec.FilterSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) UpdateFilter(scope, instance, name string, def *spec.FilterSpec) error {
 	name = util.NormalizeName(name)
-	if _, exists := n.spec.Filters[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "filter", id: name}
-	}
-	spec.NormalizeFilterRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	n.spec.Filters[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.Filters[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "filter", id: name}
+		}
+		spec.NormalizeFilterRefs(def)
+		if err := n.checkRefsResolve(def); err != nil {
+			return err
+		}
+		c.Filters[name] = def
+		return nil
+	})
 }
 
 // UpdatePrefixList atomically replaces an existing prefix list.
@@ -983,21 +994,19 @@ func (n *Network) UpdatePrefixList(scope, instance, name string, prefixes []stri
 }
 
 // UpdateRoutePolicy atomically replaces an existing route policy.
-func (n *Network) UpdateRoutePolicy(name string, def *spec.RoutePolicy) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) UpdateRoutePolicy(scope, instance, name string, def *spec.RoutePolicy) error {
 	name = util.NormalizeName(name)
-	if _, exists := n.spec.RoutePolicies[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "route-policy", id: name}
-	}
-	spec.NormalizeRoutePolicyRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	n.spec.RoutePolicies[name] = def
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		if _, exists := c.RoutePolicies[name]; !exists {
+			return &newtronErrors{notFound: true, resource: "route-policy", id: name}
+		}
+		spec.NormalizeRoutePolicyRefs(def)
+		if err := n.checkRefsResolve(def); err != nil {
+			return err
+		}
+		c.RoutePolicies[name] = def
+		return nil
+	})
 }
 
 // UpdateZone atomically replaces an existing zone.
@@ -1033,116 +1042,108 @@ func (n *Network) UpdateProfile(name string, profile *spec.DeviceProfile) error 
 // AddQoSQueueToPolicy atomically inserts a QoS queue at the given index in
 // a QoS policy. Returns an error if the policy doesn't exist or the index
 // is already populated.
-func (n *Network) AddQoSQueueToPolicy(policy string, queueID int, queue *spec.QoSQueue) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) AddQoSQueueToPolicy(scope, instance, policy string, queueID int, queue *spec.QoSQueue) error {
 	policy = util.NormalizeName(policy)
-	p, ok := n.spec.QoSPolicies[policy]
-	if !ok {
-		return fmt.Errorf("QoS policy '%s' not found", policy)
-	}
-	for len(p.Queues) <= queueID {
-		p.Queues = append(p.Queues, nil)
-	}
-	if p.Queues[queueID] != nil {
-		return fmt.Errorf("queue %d already exists in policy '%s'", queueID, policy)
-	}
-	p.Queues[queueID] = queue
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		p, ok := c.QoSPolicies[policy]
+		if !ok {
+			return fmt.Errorf("QoS policy '%s' not found", policy)
+		}
+		for len(p.Queues) <= queueID {
+			p.Queues = append(p.Queues, nil)
+		}
+		if p.Queues[queueID] != nil {
+			return fmt.Errorf("queue %d already exists in policy '%s'", queueID, policy)
+		}
+		p.Queues[queueID] = queue
+		return nil
+	})
 }
 
 // UpdateQoSQueueInPolicy atomically replaces a QoS queue's fields and
 // optionally relocates it to a different queue slot. currentID is the
 // existing slot; the queue's resulting QueueID may match or differ
 // (slot rotation). Issue #211.
-func (n *Network) UpdateQoSQueueInPolicy(policy string, currentID int, newQueueID int, newQueue *spec.QoSQueue) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) UpdateQoSQueueInPolicy(scope, instance, policy string, currentID int, newQueueID int, newQueue *spec.QoSQueue) error {
 	policy = util.NormalizeName(policy)
-	p, ok := n.spec.QoSPolicies[policy]
-	if !ok {
-		return fmt.Errorf("QoS policy '%s' not found", policy)
-	}
-	if currentID < 0 || currentID >= len(p.Queues) || p.Queues[currentID] == nil {
-		return fmt.Errorf("queue %d not found in policy '%s'", currentID, policy)
-	}
-	if newQueueID != currentID {
-		// Ensure the target slot is empty before relocating.
-		if newQueueID >= 0 && newQueueID < len(p.Queues) && p.Queues[newQueueID] != nil {
-			return fmt.Errorf("queue %d already exists in policy '%s'", newQueueID, policy)
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		p, ok := c.QoSPolicies[policy]
+		if !ok {
+			return fmt.Errorf("QoS policy '%s' not found", policy)
 		}
-		// Grow the slice to accommodate the new slot if needed.
-		for len(p.Queues) <= newQueueID {
-			p.Queues = append(p.Queues, nil)
+		if currentID < 0 || currentID >= len(p.Queues) || p.Queues[currentID] == nil {
+			return fmt.Errorf("queue %d not found in policy '%s'", currentID, policy)
 		}
-		p.Queues[currentID] = nil
-		p.Queues[newQueueID] = newQueue
-		// Trim trailing nils that may now be at the tail.
-		for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
-			p.Queues = p.Queues[:len(p.Queues)-1]
+		if newQueueID != currentID {
+			// Ensure the target slot is empty before relocating.
+			if newQueueID >= 0 && newQueueID < len(p.Queues) && p.Queues[newQueueID] != nil {
+				return fmt.Errorf("queue %d already exists in policy '%s'", newQueueID, policy)
+			}
+			// Grow the slice to accommodate the new slot if needed.
+			for len(p.Queues) <= newQueueID {
+				p.Queues = append(p.Queues, nil)
+			}
+			p.Queues[currentID] = nil
+			p.Queues[newQueueID] = newQueue
+			// Trim trailing nils that may now be at the tail.
+			for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
+				p.Queues = p.Queues[:len(p.Queues)-1]
+			}
+		} else {
+			// In-place edit.
+			p.Queues[currentID] = newQueue
 		}
-	} else {
-		// In-place edit.
-		p.Queues[currentID] = newQueue
-	}
-	return n.persistSpec()
+		return nil
+	})
 }
 
 // RemoveQoSQueueFromPolicy atomically removes a QoS queue at the given
 // index from a QoS policy. Returns an error if the policy doesn't exist
 // or the index is out of range / empty. Trims trailing nil slots after
 // removal to match the pre-refactor public behavior.
-func (n *Network) RemoveQoSQueueFromPolicy(policy string, queueID int) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) RemoveQoSQueueFromPolicy(scope, instance, policy string, queueID int) error {
 	policy = util.NormalizeName(policy)
-	p, ok := n.spec.QoSPolicies[policy]
-	if !ok {
-		return fmt.Errorf("QoS policy '%s' not found", policy)
-	}
-	if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
-		return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
-	}
-	p.Queues[queueID] = nil
-	for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
-		p.Queues = p.Queues[:len(p.Queues)-1]
-	}
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		p, ok := c.QoSPolicies[policy]
+		if !ok {
+			return fmt.Errorf("QoS policy '%s' not found", policy)
+		}
+		if queueID < 0 || queueID >= len(p.Queues) || p.Queues[queueID] == nil {
+			return fmt.Errorf("queue %d not found in policy '%s'", queueID, policy)
+		}
+		p.Queues[queueID] = nil
+		for len(p.Queues) > 0 && p.Queues[len(p.Queues)-1] == nil {
+			p.Queues = p.Queues[:len(p.Queues)-1]
+		}
+		return nil
+	})
 }
 
 // AddFilterRule atomically appends a rule to a filter and re-sorts the rule
 // slice by sequence number. Returns an error if the filter doesn't exist
 // or a rule with the same sequence already exists.
-func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) AddFilterRule(scope, instance, filter string, rule *spec.FilterRule) error {
 	filter = util.NormalizeName(filter)
-	f, ok := n.spec.Filters[filter]
-	if !ok {
-		return fmt.Errorf("filter '%s' not found", filter)
-	}
-	for _, r := range f.Rules {
-		if r.Sequence == rule.Sequence {
-			return fmt.Errorf("rule with priority %d already exists in filter '%s'", rule.Sequence, filter)
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		f, ok := c.Filters[filter]
+		if !ok {
+			return fmt.Errorf("filter '%s' not found", filter)
 		}
-	}
-	// Forward check on the rule's own references (e.g. src/dst_prefix_list).
-	if err := n.checkRefsResolve(rule); err != nil {
-		return err
-	}
-	f.Rules = append(f.Rules, rule)
-	sort.Slice(f.Rules, func(i, j int) bool {
-		return f.Rules[i].Sequence < f.Rules[j].Sequence
+		for _, r := range f.Rules {
+			if r.Sequence == rule.Sequence {
+				return fmt.Errorf("rule with priority %d already exists in filter '%s'", rule.Sequence, filter)
+			}
+		}
+		// Forward check on the rule's own references (e.g. src/dst_prefix_list).
+		if err := n.checkRefsResolve(rule); err != nil {
+			return err
+		}
+		f.Rules = append(f.Rules, rule)
+		sort.Slice(f.Rules, func(i, j int) bool {
+			return f.Rules[i].Sequence < f.Rules[j].Sequence
+		})
+		return nil
 	})
-	return n.persistSpec()
 }
 
 // UpdateFilterRule atomically replaces a filter rule's fields, optionally
@@ -1151,77 +1152,73 @@ func (n *Network) AddFilterRule(filter string, rule *spec.FilterRule) error {
 // new sequence collides with another rule. When newSequence is nil the
 // rule keeps its current sequence; when non-nil the rule's sequence
 // rotates to that value (renumber). Issue #209.
-func (n *Network) UpdateFilterRule(filter string, currentSeq int, newRule *spec.FilterRule) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) UpdateFilterRule(scope, instance, filter string, currentSeq int, newRule *spec.FilterRule) error {
 	filter = util.NormalizeName(filter)
-	f, ok := n.spec.Filters[filter]
-	if !ok {
-		return fmt.Errorf("filter '%s' not found", filter)
-	}
-	// Locate the rule by its current sequence.
-	var target *spec.FilterRule
-	for _, r := range f.Rules {
-		if r.Sequence == currentSeq {
-			target = r
-			break
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		f, ok := c.Filters[filter]
+		if !ok {
+			return fmt.Errorf("filter '%s' not found", filter)
 		}
-	}
-	if target == nil {
-		return fmt.Errorf("rule with priority %d not found in filter '%s'", currentSeq, filter)
-	}
-	// Forward check on the replacement rule's own references.
-	if err := n.checkRefsResolve(newRule); err != nil {
-		return err
-	}
-	// If the rule is being renumbered, ensure the target sequence isn't
-	// already occupied by another rule.
-	if newRule.Sequence != currentSeq {
+		// Locate the rule by its current sequence.
+		var target *spec.FilterRule
 		for _, r := range f.Rules {
-			if r.Sequence == newRule.Sequence {
-				return fmt.Errorf("rule with priority %d already exists in filter '%s'", newRule.Sequence, filter)
+			if r.Sequence == currentSeq {
+				target = r
+				break
 			}
 		}
-	}
-	// Replace target's fields with newRule's. Done in place (same pointer)
-	// so any external references stay valid; the slice doesn't need to
-	// rebuild.
-	*target = *newRule
-	// Re-sort by sequence — the rule may have rotated to a different slot.
-	sort.Slice(f.Rules, func(i, j int) bool {
-		return f.Rules[i].Sequence < f.Rules[j].Sequence
+		if target == nil {
+			return fmt.Errorf("rule with priority %d not found in filter '%s'", currentSeq, filter)
+		}
+		// Forward check on the replacement rule's own references.
+		if err := n.checkRefsResolve(newRule); err != nil {
+			return err
+		}
+		// If the rule is being renumbered, ensure the target sequence isn't
+		// already occupied by another rule.
+		if newRule.Sequence != currentSeq {
+			for _, r := range f.Rules {
+				if r.Sequence == newRule.Sequence {
+					return fmt.Errorf("rule with priority %d already exists in filter '%s'", newRule.Sequence, filter)
+				}
+			}
+		}
+		// Replace target's fields with newRule's. Done in place (same pointer)
+		// so any external references stay valid; the slice doesn't need to
+		// rebuild.
+		*target = *newRule
+		// Re-sort by sequence — the rule may have rotated to a different slot.
+		sort.Slice(f.Rules, func(i, j int) bool {
+			return f.Rules[i].Sequence < f.Rules[j].Sequence
+		})
+		return nil
 	})
-	return n.persistSpec()
 }
 
 // RemoveFilterRule atomically removes a rule from a filter by sequence
 // number. Returns an error if the filter or rule doesn't exist.
-func (n *Network) RemoveFilterRule(filter string, sequence int) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) RemoveFilterRule(scope, instance, filter string, sequence int) error {
 	filter = util.NormalizeName(filter)
-	f, ok := n.spec.Filters[filter]
-	if !ok {
-		return fmt.Errorf("filter '%s' not found", filter)
-	}
-	found := false
-	newRules := make([]*spec.FilterRule, 0, len(f.Rules))
-	for _, r := range f.Rules {
-		if r.Sequence == sequence {
-			found = true
-			continue
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		f, ok := c.Filters[filter]
+		if !ok {
+			return fmt.Errorf("filter '%s' not found", filter)
 		}
-		newRules = append(newRules, r)
-	}
-	if !found {
-		return fmt.Errorf("rule with priority %d not found in filter '%s'", sequence, filter)
-	}
-	f.Rules = newRules
-	return n.persistSpec()
+		found := false
+		newRules := make([]*spec.FilterRule, 0, len(f.Rules))
+		for _, r := range f.Rules {
+			if r.Sequence == sequence {
+				found = true
+				continue
+			}
+			newRules = append(newRules, r)
+		}
+		if !found {
+			return fmt.Errorf("rule with priority %d not found in filter '%s'", sequence, filter)
+		}
+		f.Rules = newRules
+		return nil
+	})
 }
 
 // AddPrefixToPrefixList atomically appends a prefix to a prefix list.
@@ -1272,91 +1269,85 @@ func (n *Network) RemovePrefixFromPrefixList(prefixList string, prefix string) e
 // AddRuleToRoutePolicy atomically appends a rule to a route policy and
 // re-sorts the rule slice by sequence number. Returns an error if the
 // policy doesn't exist or a rule with the same sequence already exists.
-func (n *Network) AddRuleToRoutePolicy(policy string, rule *spec.RoutePolicyRule) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) AddRuleToRoutePolicy(scope, instance, policy string, rule *spec.RoutePolicyRule) error {
 	policy = util.NormalizeName(policy)
-	rp, ok := n.spec.RoutePolicies[policy]
-	if !ok {
-		return fmt.Errorf("route policy '%s' not found", policy)
-	}
-	for _, r := range rp.Rules {
-		if r.Sequence == rule.Sequence {
-			return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", rule.Sequence, policy)
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		rp, ok := c.RoutePolicies[policy]
+		if !ok {
+			return fmt.Errorf("route policy '%s' not found", policy)
 		}
-	}
-	rp.Rules = append(rp.Rules, rule)
-	sort.Slice(rp.Rules, func(i, j int) bool {
-		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+		for _, r := range rp.Rules {
+			if r.Sequence == rule.Sequence {
+				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", rule.Sequence, policy)
+			}
+		}
+		rp.Rules = append(rp.Rules, rule)
+		sort.Slice(rp.Rules, func(i, j int) bool {
+			return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+		})
+		return nil
 	})
-	return n.persistSpec()
 }
 
 // UpdateRuleInRoutePolicy atomically replaces a route-policy rule's
 // fields, optionally rotating its sequence. Mirrors UpdateFilterRule's
 // contract. Issue #210.
-func (n *Network) UpdateRuleInRoutePolicy(policy string, currentSeq int, newRule *spec.RoutePolicyRule) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) UpdateRuleInRoutePolicy(scope, instance, policy string, currentSeq int, newRule *spec.RoutePolicyRule) error {
 	policy = util.NormalizeName(policy)
-	rp, ok := n.spec.RoutePolicies[policy]
-	if !ok {
-		return fmt.Errorf("route policy '%s' not found", policy)
-	}
-	var target *spec.RoutePolicyRule
-	for _, r := range rp.Rules {
-		if r.Sequence == currentSeq {
-			target = r
-			break
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		rp, ok := c.RoutePolicies[policy]
+		if !ok {
+			return fmt.Errorf("route policy '%s' not found", policy)
 		}
-	}
-	if target == nil {
-		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", currentSeq, policy)
-	}
-	if newRule.Sequence != currentSeq {
+		var target *spec.RoutePolicyRule
 		for _, r := range rp.Rules {
-			if r.Sequence == newRule.Sequence {
-				return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newRule.Sequence, policy)
+			if r.Sequence == currentSeq {
+				target = r
+				break
 			}
 		}
-	}
-	*target = *newRule
-	sort.Slice(rp.Rules, func(i, j int) bool {
-		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+		if target == nil {
+			return fmt.Errorf("rule with sequence %d not found in route policy '%s'", currentSeq, policy)
+		}
+		if newRule.Sequence != currentSeq {
+			for _, r := range rp.Rules {
+				if r.Sequence == newRule.Sequence {
+					return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", newRule.Sequence, policy)
+				}
+			}
+		}
+		*target = *newRule
+		sort.Slice(rp.Rules, func(i, j int) bool {
+			return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+		})
+		return nil
 	})
-	return n.persistSpec()
 }
 
 // RemoveRuleFromRoutePolicy atomically removes a rule from a route policy
 // by sequence number. Returns an error if the policy or rule doesn't exist.
-func (n *Network) RemoveRuleFromRoutePolicy(policy string, sequence int) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) RemoveRuleFromRoutePolicy(scope, instance, policy string, sequence int) error {
 	policy = util.NormalizeName(policy)
-	rp, ok := n.spec.RoutePolicies[policy]
-	if !ok {
-		return fmt.Errorf("route policy '%s' not found", policy)
-	}
-	found := false
-	newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
-	for _, r := range rp.Rules {
-		if r.Sequence == sequence {
-			found = true
-			continue
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		rp, ok := c.RoutePolicies[policy]
+		if !ok {
+			return fmt.Errorf("route policy '%s' not found", policy)
 		}
-		newRules = append(newRules, r)
-	}
-	if !found {
-		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", sequence, policy)
-	}
-	rp.Rules = newRules
-	return n.persistSpec()
+		found := false
+		newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
+		for _, r := range rp.Rules {
+			if r.Sequence == sequence {
+				found = true
+				continue
+			}
+			newRules = append(newRules, r)
+		}
+		if !found {
+			return fmt.Errorf("rule with sequence %d not found in route policy '%s'", sequence, policy)
+		}
+		rp.Rules = newRules
+		return nil
+	})
 }
 
 // ============================================================================
