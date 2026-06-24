@@ -286,6 +286,8 @@ Specs participate in a three-level hierarchy: **network → zone → node**. Eac
 
 Resolution is **union with lower-level-wins**: if the same spec name exists at multiple levels, the most specific level wins (node > zone > network). Specs at different levels with different names are all visible.
 
+Overrides are authored through the same write API as network specs — `scope`/`scope_instance` on the create/update/delete verbs (absent ⇒ network) — under the **network-floor invariant**: a spec may exist at zone/node scope only if it also exists at network, so resolution is total (every device's fallback bottoms out at the network base; nothing dangles). See [Design Principles §7](../DESIGN_PRINCIPLES_NEWTRON.md).
+
 ```
 ┌──────────────────────────┐
 │                          │

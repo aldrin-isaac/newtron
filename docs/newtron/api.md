@@ -1396,6 +1396,13 @@ injected at the schema layer for these kinds.
 write authors an *override* of a network-scope definition; storage stays
 hierarchical (network → zone → node, node wins), only the write surface is flat.
 
+These two fields are accepted by **every** write verb in this section — the
+`create-`/`update-`/`delete-` verbs for all overridable kinds **and** the
+sub-rule verbs (`add`/`update`/`remove`-`filter-rule`, `-qos-queue`,
+`-route-policy-rule`, `-prefix-list-entry`). The per-endpoint request-body tables
+below list only each verb's kind-specific fields and omit `scope`/`scope_instance`
+for brevity; they apply uniformly per this section.
+
 **Network-floor invariant.** A resource may exist at zone/node scope only if it
 also exists at network scope. This keeps resolution total (every node resolves at
 least the network base — no dangling references from any perspective) and means

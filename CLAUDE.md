@@ -333,11 +333,24 @@ and CONFIG_DB key names are canonical. Operations code never calls `NormalizeNam
 
 ## Definition Is Network-Scoped; Execution Is Device-Scoped
 
-*See `DESIGN_PRINCIPLES_NEWTRON.md` §7 for the full principle.*
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §7 for the full principle, including the
+network-floor invariant for scoped writes.*
 
 Specs exist at the network level, independent of any device. `ResolvedSpecs` is a
 per-node snapshot; `Get*` methods must fall through to `network.Get*` on miss.
 In newtrun, network-level steps call `r.Client.*` directly (no `devices:` field).
+
+**Scoped writes (network-floor invariant).** Specs are authored at network, zone,
+or node scope via `scope`/`scope_instance` on the write endpoints (absent ⇒
+network) — "flat at the boundary, hierarchical underneath." A resource may exist
+at zone/node scope **only if it also exists at network scope** (an override rests
+on a base), which keeps resolution total — no reference dangles from any device's
+perspective. Consequences: forward ref checks stay network-scoped (unchanged);
+deleting an override is free (consumers fall back to the base); deleting the
+network base, or a zone/profile still holding overrides, is refused while
+referenced anywhere or overridden below (`*util.ConflictError` → 409, bottom-up
+per §15). Scope is read-only provenance on `GET /spec-instances` and is declared
+in the schema (`scope` enum + scope-conditional `scope_instance` ref).
 
 ## Policy vs Infrastructure — Shared Object Lifecycles
 
