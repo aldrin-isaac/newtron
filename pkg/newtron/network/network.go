@@ -1417,7 +1417,7 @@ func (n *Network) DeleteProfile(name string, force bool) error {
 	if !force {
 		if p, err := n.loader.LoadProfile(name); err == nil {
 			if ov := containedOverrides(&p.OverridableSpecs); len(ov) > 0 {
-				return &util.ConflictError{Resource: "profile", Name: name, References: ov}
+				return &util.ConflictError{Resource: "profile", Name: name, References: ov, Force: true}
 			}
 		}
 	}
@@ -1436,6 +1436,7 @@ func (n *Network) DeleteProfile(name string, force bool) error {
 				Resource:   "profile",
 				Name:       name,
 				References: []string{"topology device '" + name + "'"},
+				Force:      true,
 			}
 		}
 		// Cascade: delete the topology device (which itself cascades to any
@@ -1724,6 +1725,7 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 			Resource:   "topology-device",
 			Name:       name,
 			References: refs,
+			Force:      true,
 		}
 	}
 

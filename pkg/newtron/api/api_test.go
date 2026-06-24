@@ -827,6 +827,62 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 	}
 }
 
+// TestWriteError_ConflictEnvelope pins the §46 structured conflict payload: a
+// ConflictError serializes its resource/name/references[]/force_available into
+// the envelope Data (so clients branch on the shape, not a parsed message), and
+// a spec-delete conflict neither advertises force in the message nor sets
+// force_available — while a force-capable (profile) conflict does both.
+func TestWriteError_ConflictEnvelope(t *testing.T) {
+	specConflict := &newtron.ConflictError{
+		Resource:   "IPVPNSpec",
+		Name:       "IRB",
+		References: []string{"ServiceSpec 'OVERLAY_IRB_A' (ipvpn)", "ServiceSpec 'OVERLAY_IRB_B' (ipvpn)"},
+		// Force defaults false — specs have no force-cascade.
+	}
+
+	w := httptest.NewRecorder()
+	writeError(w, specConflict)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", w.Code)
+	}
+	var resp httputil.APIResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+	}
+	if resp.Data == nil {
+		t.Fatal("Data empty; a conflict must carry its structured shape per §46")
+	}
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatalf("marshal Data: %v", err)
+	}
+	var got newtron.ConflictError
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode ConflictError from Data: %v", err)
+	}
+	if got.Resource != "IPVPNSpec" || got.Name != "IRB" || len(got.References) != 2 {
+		t.Errorf("structured conflict lost: %+v", got)
+	}
+	if got.Force {
+		t.Error("force_available should be false for a spec delete")
+	}
+	if strings.Contains(resp.Error, "force=true") {
+		t.Errorf("spec-delete message wrongly advertises force: %q", resp.Error)
+	}
+
+	// A force-capable conflict (profile / topology-device) does advertise force.
+	profileConflict := &newtron.ConflictError{
+		Resource:   "profile",
+		Name:       "leaf1",
+		References: []string{"topology device 'leaf1'"},
+		Force:      true,
+	}
+	if !strings.Contains(profileConflict.Error(), "force=true") {
+		t.Errorf("force-capable message should advertise force: %q", profileConflict.Error())
+	}
+}
+
 // TestProjectionDiff_HypotheticalCreateVLAN — newtron#4 (Phase 4). Loads the
 // 1node-vs spec, builds switch1 in topology mode (setup-device baseline),
 // then calls Node.ProjectionDiff with a hypothetical create-vlan op. Asserts
