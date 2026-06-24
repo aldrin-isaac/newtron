@@ -1368,13 +1368,29 @@ Every `create-`/`update-`/`delete-` body accepts two optional fields:
 | `scope_instance` | string | the zone or node name; required when `scope` is `zone`/`node`, empty for `network` |
 
 Both fields are **declared in the schema** (`GET /schema/{kind}`) for every
-overridable kind and its sub-rule kinds: `scope` as a `type:enum`
-(`network,zone,node`), `scope_instance` as a `type:string` gated by
-`applies_when`/`required_when` `{field:"scope", not_equals:"network"}`. A
-schema-driven form therefore renders the scope dropdown + conditional instance
-input automatically. The fields are not on the spec structs — `scope` is
-write-location metadata, not spec content — they are injected at the schema
-layer for these kinds.
+overridable kind and its sub-rule kinds:
+
+- `scope` — `type:enum` (`network,zone,node`) with `default:"network"`.
+- `scope_instance` — `type:ref`, gated by `applies_when`/`required_when`
+  `{field:"scope", not_equals:"network"}`, and a **sibling-conditional**
+  reference via `ref_when`: it resolves to `ZoneSpec` when `scope=zone` and
+  `DeviceProfile` when `scope=node`, so the UI offers a dropdown of the right
+  instances (zone names / node names) rather than free text.
+
+  ```jsonc
+  { "name": "scope_instance", "type": "ref",
+    "applies_when":  { "field": "scope", "not_equals": "network" },
+    "required_when": { "field": "scope", "not_equals": "network" },
+    "ref_when": [
+      { "when": { "field": "scope", "equals": "zone" }, "ref_kind": "ZoneSpec" },
+      { "when": { "field": "scope", "equals": "node" }, "ref_kind": "DeviceProfile" }
+    ] }
+  ```
+
+A schema-driven form therefore renders the scope dropdown + a conditional,
+correctly-populated instance dropdown automatically. The fields are not on the
+spec structs — `scope` is write-location metadata, not spec content — they are
+injected at the schema layer for these kinds.
 
 **Absent `scope` means `network` — existing callers are unaffected.** A scoped
 write authors an *override* of a network-scope definition; storage stays

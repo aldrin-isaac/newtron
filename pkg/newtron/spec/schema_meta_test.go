@@ -802,19 +802,36 @@ func TestScopeFieldsInjected(t *testing.T) {
 		if scope.Type != "enum" || !reflect.DeepEqual(scope.Enum, []string{ScopeNetwork, ScopeZone, ScopeNode}) {
 			t.Errorf("%s: scope field shape wrong: %+v", kind, scope)
 		}
+		if scope.Default != ScopeNetwork {
+			t.Errorf("%s: scope default = %v, want %q", kind, scope.Default, ScopeNetwork)
+		}
 		si := find(m, "scope_instance")
 		if si == nil {
 			t.Errorf("%s: missing injected 'scope_instance' field", kind)
 			continue
 		}
-		if si.Type != "string" {
-			t.Errorf("%s: scope_instance type = %q, want string", kind, si.Type)
+		if si.Type != "ref" {
+			t.Errorf("%s: scope_instance type = %q, want ref", kind, si.Type)
 		}
 		if si.AppliesWhen == nil || si.AppliesWhen.Field != "scope" || si.AppliesWhen.NotEquals != ScopeNetwork {
 			t.Errorf("%s: scope_instance AppliesWhen wrong: %+v", kind, si.AppliesWhen)
 		}
 		if si.RequiredWhen == nil || si.RequiredWhen.NotEquals != ScopeNetwork {
 			t.Errorf("%s: scope_instance RequiredWhen wrong: %+v", kind, si.RequiredWhen)
+		}
+		// Sibling-conditional ref: ZoneSpec when scope=zone, DeviceProfile when scope=node.
+		wantRef := map[any]string{ScopeZone: "ZoneSpec", ScopeNode: "DeviceProfile"}
+		if len(si.RefWhen) != 2 {
+			t.Errorf("%s: scope_instance RefWhen = %+v, want 2 branches", kind, si.RefWhen)
+		}
+		for _, rc := range si.RefWhen {
+			if rc.When == nil || rc.When.Field != "scope" {
+				t.Errorf("%s: RefWhen branch has bad predicate: %+v", kind, rc)
+				continue
+			}
+			if want := wantRef[rc.When.Equals]; want != rc.RefKind {
+				t.Errorf("%s: RefWhen scope=%v → %q, want %q", kind, rc.When.Equals, rc.RefKind, want)
+			}
 		}
 	}
 

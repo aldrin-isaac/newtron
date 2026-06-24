@@ -78,6 +78,30 @@ type FieldMeta struct {
 	// server-side; the apply path naturally ignores fields irrelevant to
 	// the chosen shape (e.g. a static service never reads peer_as).
 	AppliesWhen *RequiredWhen `json:"applies_when,omitempty"`
+
+	// Default is the value a UI pre-fills when the operator supplies none
+	// (and which the server applies for an absent optional field). Optional;
+	// omitted when the field has no default. E.g. scope defaults to "network".
+	Default any `json:"default,omitempty"`
+
+	// RefWhen declares sibling-conditional reference targets: when an entry's
+	// When predicate matches the live form, this field is a reference to that
+	// entry's RefKind and a UI renders a dropdown of that kind's names. It lets
+	// one field point at different kinds by a sibling's value — scope_instance
+	// references ZoneSpec when scope=zone and DeviceProfile when scope=node.
+	// Used on type=ref fields in place of the single static RefKind. Evaluated
+	// client-side like RequiredWhen/AppliesWhen; newtron does not evaluate it.
+	RefWhen []RefCondition `json:"ref_when,omitempty"`
+}
+
+// RefCondition is one branch of a FieldMeta.RefWhen: when the When predicate
+// matches the form's sibling values, the field references RefKind (a dropdown
+// of that kind's names). The first matching branch wins; if none match the
+// field has no resolved ref target (a UI falls back to free text or, with
+// AppliesWhen false, hides the field entirely).
+type RefCondition struct {
+	When    *RequiredWhen `json:"when"`
+	RefKind string        `json:"ref_kind"`
 }
 
 // RequiredWhen is a conditional-required predicate evaluated against the
@@ -491,11 +515,11 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 // schema-driven UI render the override form (a scope dropdown + a
 // conditionally-shown instance) with no client-side special-casing.
 //
-// scope is optional; absent means network (the server's default). There is no
-// declared default in the schema today, so the network-default is conveyed by
-// optionality + network being first in the enum. scope_instance applies and is
-// required only when scope is not network — using the NotEquals predicate the
-// RequiredWhen grammar already supports.
+// scope is optional and declares Default "network" (the server's default for an
+// absent value). scope_instance applies and is required only when scope is not
+// network, and is a sibling-conditional reference — a dropdown of zone names
+// when scope=zone, of node/profile names when scope=node — so the override form
+// offers the right instances instead of free text.
 func scopeFields() []FieldMeta {
 	notNetwork := &RequiredWhen{Field: "scope", NotEquals: ScopeNetwork}
 	return []FieldMeta{
@@ -505,14 +529,19 @@ func scopeFields() []FieldMeta {
 			Description: "Where this definition lives: network (the default), or a zone/node override of the network base.",
 			Type:        "enum",
 			Enum:        []string{ScopeNetwork, ScopeZone, ScopeNode},
+			Default:     ScopeNetwork,
 		},
 		{
 			Name:         "scope_instance",
 			Label:        "Scope Instance",
 			Description:  "The zone or node name for a scoped override; omit for network scope.",
-			Type:         "string",
+			Type:         "ref",
 			AppliesWhen:  notNetwork,
 			RequiredWhen: notNetwork,
+			RefWhen: []RefCondition{
+				{When: &RequiredWhen{Field: "scope", Equals: ScopeZone}, RefKind: "ZoneSpec"},
+				{When: &RequiredWhen{Field: "scope", Equals: ScopeNode}, RefKind: "DeviceProfile"},
+			},
 		},
 	}
 }
