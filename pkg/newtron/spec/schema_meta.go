@@ -211,6 +211,15 @@ type SchemaRegistration struct {
 	// struct-reflected fields. Example: an IP-VPN's vrf_name, derived as
 	// "Vrf_"+name.
 	ComputedFields []FieldMeta
+
+	// Scoped marks a kind whose write endpoints accept scope / scope_instance
+	// (the network-floor scoped-writes surface, DESIGN_PRINCIPLES_NEWTRON §7) —
+	// the overridable spec kinds and their sub-rule kinds. When set, the schema
+	// injects the two writable scope-discriminator fields (see scopeFields) so a
+	// schema-driven UI renders the override form without special-casing. The
+	// fields are not on the Sample struct: scope/scope_instance are
+	// write-location metadata, not spec content.
+	Scoped bool
 }
 
 // schemaKind carries a registered kind's reflect.Type plus the static
@@ -227,6 +236,7 @@ type schemaKind struct {
 	requiredWhen    map[string]*RequiredWhen
 	appliesWhen     map[string]*RequiredWhen
 	computedFields  []FieldMeta
+	scoped          bool
 }
 
 // schemaRegistry holds every spec kind that participates in the schema
@@ -276,6 +286,7 @@ func RegisterSchemaKind(reg SchemaRegistration) {
 		requiredWhen:    reg.RequiredWhen,
 		appliesWhen:     reg.AppliesWhen,
 		computedFields:  reg.ComputedFields,
+		scoped:          reg.Scoped,
 	}
 }
 
@@ -445,6 +456,12 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 	}
 	// Append read-only, server-derived fields (not on the Sample struct).
 	fields = append(fields, sk.computedFields...)
+	// Append the writable scope-discriminator fields for kinds whose writes
+	// are scoped. They carry their own AppliesWhen/RequiredWhen, so the
+	// predicate-attach loop below leaves them as-is.
+	if sk.scoped {
+		fields = append(fields, scopeFields()...)
+	}
 	// Attach RequiredWhen / AppliesWhen predicates to their target fields.
 	// Validated at registration time, so every key here matches a real field.
 	for i := range fields {
@@ -465,6 +482,39 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 		Fields:      fields,
 	}
 	return meta
+}
+
+// scopeFields returns the two writable scope-discriminator fields injected into
+// every scoped (overridable / sub-rule) kind's schema. They are not on the spec
+// structs — scope/scope_instance are write-location metadata, not spec content
+// (DESIGN_PRINCIPLES_NEWTRON §7) — so they are declared here, letting a
+// schema-driven UI render the override form (a scope dropdown + a
+// conditionally-shown instance) with no client-side special-casing.
+//
+// scope is optional; absent means network (the server's default). There is no
+// declared default in the schema today, so the network-default is conveyed by
+// optionality + network being first in the enum. scope_instance applies and is
+// required only when scope is not network — using the NotEquals predicate the
+// RequiredWhen grammar already supports.
+func scopeFields() []FieldMeta {
+	notNetwork := &RequiredWhen{Field: "scope", NotEquals: ScopeNetwork}
+	return []FieldMeta{
+		{
+			Name:        "scope",
+			Label:       "Scope",
+			Description: "Where this definition lives: network (the default), or a zone/node override of the network base.",
+			Type:        "enum",
+			Enum:        []string{ScopeNetwork, ScopeZone, ScopeNode},
+		},
+		{
+			Name:         "scope_instance",
+			Label:        "Scope Instance",
+			Description:  "The zone or node name for a scoped override; omit for network scope.",
+			Type:         "string",
+			AppliesWhen:  notNetwork,
+			RequiredWhen: notNetwork,
+		},
+	}
 }
 
 // extractFields walks a struct's fields and produces a FieldMeta for each

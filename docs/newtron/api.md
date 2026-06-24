@@ -1367,6 +1367,15 @@ Every `create-`/`update-`/`delete-` body accepts two optional fields:
 | `scope` | string | `network` (default), `zone`, or `node` |
 | `scope_instance` | string | the zone or node name; required when `scope` is `zone`/`node`, empty for `network` |
 
+Both fields are **declared in the schema** (`GET /schema/{kind}`) for every
+overridable kind and its sub-rule kinds: `scope` as a `type:enum`
+(`network,zone,node`), `scope_instance` as a `type:string` gated by
+`applies_when`/`required_when` `{field:"scope", not_equals:"network"}`. A
+schema-driven form therefore renders the scope dropdown + conditional instance
+input automatically. The fields are not on the spec structs — `scope` is
+write-location metadata, not spec content — they are injected at the schema
+layer for these kinds.
+
 **Absent `scope` means `network` — existing callers are unaffected.** A scoped
 write authors an *override* of a network-scope definition; storage stays
 hierarchical (network → zone → node, node wins), only the write surface is flat.
