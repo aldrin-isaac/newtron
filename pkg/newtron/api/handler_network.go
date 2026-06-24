@@ -118,7 +118,7 @@ func (s *Server) handleSpecInstances(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	instances, err := ne.net.SpecInstances()
+	instances, err := ne.net.ListSpecInstances()
 	if err != nil {
 		writeError(w, err)
 		return

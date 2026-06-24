@@ -39,8 +39,8 @@ type ScopedSpec struct {
 // a stable wire order.
 //
 // It does not resolve overrides: a name defined at both network and a node
-// appears as two entries. The override outcome (what a given node effectively
-// resolves) is a separate, per-node read, not this inventory.
+// appears as two entries. It reports where each definition lives, not which one
+// a given node applies after the node > zone > network merge.
 func (n *Network) ListScopedSpecs() ([]ScopedSpec, error) {
 	var out []ScopedSpec
 	collect := func(scope, instance string) func(kind, name string, _ any) {
