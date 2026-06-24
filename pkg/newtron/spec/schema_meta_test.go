@@ -767,3 +767,65 @@ func TestAppliesWhen_PanicsOnUnknownConditionField(t *testing.T) {
 		},
 	})
 }
+
+// TestScopeFieldsInjected pins the scoped-writes schema surface (P2): every
+// kind whose writes accept scope/scope_instance (the overridable spec kinds and
+// their sub-rule kinds) declares both fields in its schema, so a schema-driven
+// UI renders the override form with no special-casing; non-overridable kinds do
+// not. scope is an enum; scope_instance is gated by AppliesWhen/RequiredWhen
+// scope != network.
+func TestScopeFieldsInjected(t *testing.T) {
+	find := func(m *SchemaMeta, name string) *FieldMeta {
+		for i := range m.Fields {
+			if m.Fields[i].Name == name {
+				return &m.Fields[i]
+			}
+		}
+		return nil
+	}
+
+	scoped := []string{
+		"ServiceSpec", "IPVPNSpec", "MACVPNSpec", "QoSPolicy", "FilterSpec",
+		"RoutePolicy", "PrefixListSpec", // top-level overridable
+		"FilterRule", "QoSQueue", "RoutePolicyRule", "PrefixListEntry", // sub-rules
+	}
+	for _, kind := range scoped {
+		m := LookupSchema(kind)
+		if m == nil {
+			t.Fatalf("%s: no schema registered", kind)
+		}
+		scope := find(m, "scope")
+		if scope == nil {
+			t.Errorf("%s: missing injected 'scope' field", kind)
+			continue
+		}
+		if scope.Type != "enum" || !reflect.DeepEqual(scope.Enum, []string{ScopeNetwork, ScopeZone, ScopeNode}) {
+			t.Errorf("%s: scope field shape wrong: %+v", kind, scope)
+		}
+		si := find(m, "scope_instance")
+		if si == nil {
+			t.Errorf("%s: missing injected 'scope_instance' field", kind)
+			continue
+		}
+		if si.Type != "string" {
+			t.Errorf("%s: scope_instance type = %q, want string", kind, si.Type)
+		}
+		if si.AppliesWhen == nil || si.AppliesWhen.Field != "scope" || si.AppliesWhen.NotEquals != ScopeNetwork {
+			t.Errorf("%s: scope_instance AppliesWhen wrong: %+v", kind, si.AppliesWhen)
+		}
+		if si.RequiredWhen == nil || si.RequiredWhen.NotEquals != ScopeNetwork {
+			t.Errorf("%s: scope_instance RequiredWhen wrong: %+v", kind, si.RequiredWhen)
+		}
+	}
+
+	// Non-overridable kinds must NOT carry the scope surface.
+	for _, kind := range []string{"PlatformSpec", "ZoneSpec", "DeviceProfile"} {
+		m := LookupSchema(kind)
+		if m == nil {
+			t.Fatalf("%s: no schema registered", kind)
+		}
+		if find(m, "scope") != nil || find(m, "scope_instance") != nil {
+			t.Errorf("%s: must not carry scope fields (not an overridable kind)", kind)
+		}
+	}
+}

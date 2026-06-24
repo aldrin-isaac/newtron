@@ -44,6 +44,7 @@ func init() {
 	// ====================================================================
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "ServiceSpec",
+		Scoped:      true,
 		Label:       "Service",
 		Description: "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces.",
 		Sample:      ServiceSpec{},
@@ -96,6 +97,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "IPVPNSpec",
+		Scoped:      true,
 		Label:       "IP-VPN",
 		Description: "A Layer-3 VPN — a VRF + L3VNI + route targets that L3 services attach to.",
 		Sample:      IPVPNSpec{},
@@ -121,6 +123,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "MACVPNSpec",
+		Scoped:      true,
 		Label:       "MAC-VPN",
 		Description: "A Layer-2 VPN — a VLAN + L2VNI + (optional) anycast gateway that L2 services attach to.",
 		Sample:      MACVPNSpec{},
@@ -136,6 +139,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "QoSPolicy",
+		Scoped:      true,
 		Label:       "QoS Policy",
 		Description: "A declarative queue policy — strict / DWRR scheduling, DSCP mapping, optional ECN.",
 		Sample:      QoSPolicy{},
@@ -151,6 +155,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "FilterSpec",
+		Scoped:      true,
 		Label:       "Filter",
 		Description: "A reusable ACL — an ordered list of permit/deny rules.",
 		Sample:      FilterSpec{},
@@ -166,6 +171,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "RoutePolicy",
+		Scoped:      true,
 		Label:       "Route Policy",
 		Description: "A reusable BGP route-policy — an ordered list of match-and-set rules.",
 		Sample:      RoutePolicy{},
@@ -211,6 +217,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "PrefixListSpec",
+		Scoped:      true,
 		Label:       "Prefix List",
 		Description: "A reusable list of CIDR prefixes referenced by filter rules and route policies.",
 		Sample:      PrefixListSpec{},
@@ -253,6 +260,7 @@ func init() {
 	queueIDMax := 7
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "QoSQueue",
+		Scoped:      true,
 		Label:       "QoS Queue",
 		Description: "One queue (traffic class) within a QoS policy.",
 		Sample:      QoSQueue{},
@@ -286,6 +294,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "FilterRule",
+		Scoped:      true,
 		Label:       "Filter Rule",
 		Description: "One match-and-action rule inside a filter.",
 		Sample:      FilterRule{},
@@ -299,6 +308,7 @@ func init() {
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "RoutePolicyRule",
+		Scoped:      true,
 		Label:       "Route Policy Rule",
 		Description: "One match-and-action rule inside a route policy.",
 		Sample:      RoutePolicyRule{},
@@ -318,6 +328,7 @@ func init() {
 	// spec-side identity) the prefix IS the entry — no Update verb.
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "PrefixListEntry",
+		Scoped:      true,
 		Label:       "Prefix List Entry",
 		Description: "One CIDR prefix inside a prefix list.",
 		Sample:      PrefixListEntry{},
