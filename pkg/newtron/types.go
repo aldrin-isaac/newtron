@@ -855,6 +855,7 @@ type CreatePrefixListRequest struct {
 
 // AddPrefixListEntryRequest is the request for adding an entry to a prefix list.
 type AddPrefixListEntryRequest struct {
+	ScopeSelector
 	PrefixList string `json:"prefix_list"`
 	Prefix     string `json:"prefix"`
 }

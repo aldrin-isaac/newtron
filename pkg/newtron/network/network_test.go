@@ -253,7 +253,7 @@ func TestResolvedSpecs_FindMACVPNByVNI_DynamicFallback(t *testing.T) {
 }
 
 func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
-	// §39: Specs added via SaveService after ResolvedSpecs was built
+	// §39: Specs added via CreateService after ResolvedSpecs was built
 	// must be visible through the live fallback to network.Get*.
 	n := &Network{
 		spec: &spec.NetworkSpecFile{
@@ -277,7 +277,7 @@ func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
 		t.Fatalf("pre-existing service should be visible: %v", err)
 	}
 
-	// Dynamically add a service (simulates SaveService writing to n.spec.Services)
+	// Dynamically add a service (simulates CreateService writing to n.spec.Services)
 	n.spec.Services["NEW_DYNAMIC"] = &spec.ServiceSpec{
 		Description: "created after snapshot",
 		ServiceType: "routed",

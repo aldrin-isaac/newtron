@@ -238,6 +238,29 @@ func TestScopedSubRule_FilterRuleAtZone(t *testing.T) {
 	}
 }
 
+// TestScopedSubRule_PrefixEntryAtZone pins the scoped prefix-list entry path
+// (the prefix-list analog of filter rules): a prefix added at zone scope lands
+// in the zone's prefix-list override, not the network base.
+func TestScopedSubRule_PrefixEntryAtZone(t *testing.T) {
+	n := loadScopedTestNetwork(t)
+	if err := n.CreatePrefixList(spec.ScopeNetwork, "", "BOGONS", []string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("create network prefix-list base: %v", err)
+	}
+	if err := n.CreatePrefixList(spec.ScopeZone, "amer", "BOGONS", []string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("create zone prefix-list override: %v", err)
+	}
+	if err := n.AddPrefixToPrefixList(spec.ScopeZone, "amer", "BOGONS", "192.168.0.0/16"); err != nil {
+		t.Fatalf("add prefix to zone override: %v", err)
+	}
+
+	if zpl := n.spec.Zones["amer"].PrefixLists["BOGONS"]; len(zpl) != 2 {
+		t.Errorf("zone prefix-list = %v, want 2 entries", zpl)
+	}
+	if npl := n.spec.PrefixLists["BOGONS"]; len(npl) != 1 {
+		t.Errorf("prefix leaked into the network base prefix-list: %v", npl)
+	}
+}
+
 // TestScopedWrite_UnknownZoneRejected pins that an override targeting a
 // nonexistent zone is a not-found error, not a silent network write.
 func TestScopedWrite_UnknownZoneRejected(t *testing.T) {

@@ -44,7 +44,7 @@ func loadTestNetwork(t *testing.T) *Network {
 // atomicity contract from #101 PR B: N goroutines call CreateService("X")
 // simultaneously; exactly one returns nil and the rest return
 // "service 'X' already exists". Pre-refactor the public layer composed
-// internal.GetService + internal.SaveService as separate critical sections
+// internal.GetService + a separate internal save as two critical sections
 // and two creators could both pass the existence check.
 func TestCreateService_AtomicAgainstConcurrentCreates(t *testing.T) {
 	n := loadTestNetwork(t)
@@ -114,7 +114,7 @@ func TestCreateIPVPN_AtomicAgainstConcurrentCreates(t *testing.T) {
 // TestSnapshot_DoesNotRaceWithCreate runs CreateFilter and FiltersSnapshot
 // concurrently under the race detector. Pre-refactor public ListIPVPNs
 // iterated the raw Spec() map without holding any lock — a concurrent
-// SaveFilter mutating that map would panic the runtime. The Snapshot
+// map write would panic the runtime. The Snapshot
 // methods take RLock and return a fresh copy, so iteration on the copy
 // can't race any writer.
 func TestSnapshot_DoesNotRaceWithCreate(t *testing.T) {
@@ -170,7 +170,7 @@ func TestSnapshot_DoesNotRaceWithCreate(t *testing.T) {
 // contract for the Add* family: concurrent AddFilterRule calls inserting
 // distinct sequence numbers must all land, not silently overwrite each
 // other. Pre-refactor public composed internal.GetFilter + mutate +
-// internal.SaveFilter as separate critical sections — two concurrent
+// a separate internal save as two critical sections — two concurrent
 // adders could each load a copy of the same filter, append their rule,
 // and last-writer-wins on save.
 func TestAddFilterRule_AtomicAgainstConcurrentAdds(t *testing.T) {

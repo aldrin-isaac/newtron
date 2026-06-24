@@ -1372,7 +1372,8 @@ at network. The invariant is enforced server-side:
 **Scope coverage:** all spec kinds — `service`, `ipvpn`, `macvpn`, `prefix-list`,
 and the rule-bearing `filter`, `qos-policy`, `route-policy` (including their
 sub-rule endpoints `add`/`update`/`remove-filter-rule`, `…-qos-queue`,
-`…-route-policy-rule`) — at `network`, `zone`, and `node` scope (`scope_instance`
+`…-route-policy-rule`, and `add`/`remove-prefix-list-entry`) — at `network`,
+`zone`, and `node` scope (`scope_instance`
 is the device/profile name for node scope). A sub-rule write targets the
 filter/policy **at that scope**: e.g. `add-filter-rule` with `scope:zone` adds the
 rule to the zone's filter override (which must already exist at that scope), not
