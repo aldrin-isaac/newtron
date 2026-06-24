@@ -400,23 +400,6 @@ func (n *Network) persistSpec() error {
 	return n.loader.SaveNetwork(n.spec)
 }
 
-// SaveIPVPN creates or updates an IP-VPN definition in network.json.
-// The name is canonicalized like every other spec name; the on-device
-// VRF name is derived from it (util.DeriveVRFNameForIPVPN).
-func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-
-	if n.spec.IPVPNs == nil {
-		n.spec.IPVPNs = make(map[string]*spec.IPVPNSpec)
-	}
-	n.spec.IPVPNs[name] = def
-	return n.persistSpec()
-}
-
 // DeleteIPVPN removes an IP-VPN definition from network.json.
 // Returns error if any service references it. Lookup is case-sensitive
 // (IPVPN names ARE SONiC VRF names — see GetIPVPN).
@@ -452,22 +435,6 @@ func (n *Network) checkRefsResolve(value any) error {
 	return &spec.ReferenceError{Errors: errs}
 }
 
-// SaveMACVPN creates or updates a MAC-VPN definition in network.json.
-func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-	// MACVPNSpec has no name-reference fields to normalize.
-
-	if n.spec.MACVPNs == nil {
-		n.spec.MACVPNs = make(map[string]*spec.MACVPNSpec)
-	}
-	n.spec.MACVPNs[name] = def
-	return n.persistSpec()
-}
-
 // DeleteMACVPN removes a MAC-VPN definition from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteMACVPN(scope, instance, name string) error {
@@ -484,22 +451,6 @@ func (n *Network) DeleteMACVPN(scope, instance, name string) error {
 		delete(c.MACVPNs, canonical)
 		return nil
 	})
-}
-
-// SaveQoSPolicy creates or updates a QoS policy in network.json.
-func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-	// QoSPolicy has no name-reference fields to normalize.
-
-	if n.spec.QoSPolicies == nil {
-		n.spec.QoSPolicies = make(map[string]*spec.QoSPolicy)
-	}
-	n.spec.QoSPolicies[name] = def
-	return n.persistSpec()
 }
 
 // DeleteQoSPolicy removes a QoS policy from network.json.
@@ -520,25 +471,6 @@ func (n *Network) DeleteQoSPolicy(scope, instance, name string) error {
 	})
 }
 
-// SaveFilter creates or updates a filter in network.json.
-func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-	spec.NormalizeFilterRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-
-	if n.spec.Filters == nil {
-		n.spec.Filters = make(map[string]*spec.FilterSpec)
-	}
-	n.spec.Filters[name] = def
-	return n.persistSpec()
-}
-
 // DeleteFilter removes a filter from network.json.
 // Returns error if any service references it.
 func (n *Network) DeleteFilter(scope, instance, name string) error {
@@ -555,21 +487,6 @@ func (n *Network) DeleteFilter(scope, instance, name string) error {
 		delete(c.Filters, canonical)
 		return nil
 	})
-}
-
-// SavePrefixList saves a prefix list to the network spec.
-func (n *Network) SavePrefixList(name string, prefixes []string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-
-	if n.spec.PrefixLists == nil {
-		n.spec.PrefixLists = make(map[string][]string)
-	}
-	n.spec.PrefixLists[name] = prefixes
-	return n.persistSpec()
 }
 
 // DeletePrefixList deletes a prefix list from the network spec.
@@ -590,25 +507,6 @@ func (n *Network) DeletePrefixList(scope, instance, name string) error {
 		delete(c.PrefixLists, canonical)
 		return nil
 	})
-}
-
-// SaveRoutePolicy saves a route policy to the network spec.
-func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-
-	if n.spec.RoutePolicies == nil {
-		n.spec.RoutePolicies = make(map[string]*spec.RoutePolicy)
-	}
-	spec.NormalizeRoutePolicyRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-	n.spec.RoutePolicies[name] = def
-	return n.persistSpec()
 }
 
 // DeleteRoutePolicy deletes a route policy from the network spec.
@@ -652,25 +550,6 @@ func (n *Network) ListRoutePolicies() []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// SaveService creates or updates a service definition in network.json.
-func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	name = util.NormalizeName(name)
-	spec.NormalizeServiceRefs(def)
-	if err := n.checkRefsResolve(def); err != nil {
-		return err
-	}
-
-	if n.spec.Services == nil {
-		n.spec.Services = make(map[string]*spec.ServiceSpec)
-	}
-	n.spec.Services[name] = def
-	return n.persistSpec()
 }
 
 // DeleteService removes a service definition from network.json.
@@ -1223,47 +1102,42 @@ func (n *Network) RemoveFilterRule(scope, instance, filter string, sequence int)
 
 // AddPrefixToPrefixList atomically appends a prefix to a prefix list.
 // Returns an error if the list doesn't exist.
-func (n *Network) AddPrefixToPrefixList(prefixList string, prefix string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) AddPrefixToPrefixList(scope, instance, prefixList, prefix string) error {
 	prefixList = util.NormalizeName(prefixList)
-	prefixes, ok := n.spec.PrefixLists[prefixList]
-	if !ok {
-		return fmt.Errorf("prefix list '%s' not found", prefixList)
-	}
-	prefixes = append(prefixes, prefix)
-	n.spec.PrefixLists[prefixList] = prefixes
-	return n.persistSpec()
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		prefixes, ok := c.PrefixLists[prefixList]
+		if !ok {
+			return fmt.Errorf("prefix list '%s' not found", prefixList)
+		}
+		c.PrefixLists[prefixList] = append(prefixes, prefix)
+		return nil
+	})
 }
 
 // RemovePrefixFromPrefixList atomically removes a prefix from a prefix
 // list. Returns an error if the list or prefix doesn't exist.
-func (n *Network) RemovePrefixFromPrefixList(prefixList string, prefix string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (n *Network) RemovePrefixFromPrefixList(scope, instance, prefixList, prefix string) error {
 	prefixList = util.NormalizeName(prefixList)
-	prefixes, ok := n.spec.PrefixLists[prefixList]
-	if !ok {
-		return fmt.Errorf("prefix list '%s' not found", prefixList)
-	}
-	found := false
-	newPrefixes := make([]string, 0, len(prefixes))
-	for _, p := range prefixes {
-		if p == prefix {
-			found = true
-			continue
+	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
+		prefixes, ok := c.PrefixLists[prefixList]
+		if !ok {
+			return fmt.Errorf("prefix list '%s' not found", prefixList)
 		}
-		newPrefixes = append(newPrefixes, p)
-	}
-	if !found {
-		return fmt.Errorf("prefix '%s' not found in prefix list '%s'", prefix, prefixList)
-	}
-	n.spec.PrefixLists[prefixList] = newPrefixes
-	return n.persistSpec()
+		found := false
+		newPrefixes := make([]string, 0, len(prefixes))
+		for _, p := range prefixes {
+			if p == prefix {
+				found = true
+				continue
+			}
+			newPrefixes = append(newPrefixes, p)
+		}
+		if !found {
+			return fmt.Errorf("prefix '%s' not found in prefix list '%s'", prefix, prefixList)
+		}
+		c.PrefixLists[prefixList] = newPrefixes
+		return nil
+	})
 }
 
 // AddRuleToRoutePolicy atomically appends a rule to a route policy and
@@ -1599,19 +1473,6 @@ func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
 		return nil, fmt.Errorf("zone '%s' not found", name)
 	}
 	return z, nil
-}
-
-// SaveZone creates or updates a zone in network.json.
-func (n *Network) SaveZone(name string, zone *spec.ZoneSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if n.spec.Zones == nil {
-		n.spec.Zones = make(map[string]*spec.ZoneSpec)
-	}
-	n.spec.Zones[name] = zone
-	return n.persistSpec()
 }
 
 // DeleteZone removes a zone from network.json.

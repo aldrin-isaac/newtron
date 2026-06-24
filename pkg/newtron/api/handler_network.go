@@ -913,6 +913,7 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
+		newtron.ScopeSelector
 		PrefixList string `json:"prefix_list"`
 		Prefix     string `json:"prefix"`
 	}
@@ -921,7 +922,7 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.RemovePrefixListEntry(r.Context(), req.PrefixList, req.Prefix, opts); err != nil {
+	if err := ne.net.RemovePrefixListEntry(r.Context(), req.ScopeSelector, req.PrefixList, req.Prefix, opts); err != nil {
 		writeError(w, err)
 		return
 	}

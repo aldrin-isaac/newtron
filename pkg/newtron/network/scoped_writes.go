@@ -12,9 +12,11 @@ import (
 // ("flat at the boundary, hierarchical underneath", P2).
 //
 // A spec write targets a scope (network / zone / node) and an instance (the
-// zone or node name; empty for network). writeContainer resolves the target
-// OverridableSpecs; the per-kind write methods mutate that container instead of
-// always n.spec.
+// zone or node name; empty for network). withWriteTarget resolves the target
+// OverridableSpecs, runs the per-kind closure against it under the right lock,
+// and persists — so the write methods mutate that container instead of always
+// n.spec. network/zone live in network.json (keyNetworkSpec); node lives in
+// nodes/<name>.json (persisted via loader.MutateProfile, which is secret-safe).
 //
 // Integrity follows the NETWORK-FLOOR invariant (DESIGN_PRINCIPLES_NEWTRON §7):
 // a resource may exist at zone/node scope only if it also exists at network
@@ -28,7 +30,7 @@ import (
 //     is a floor. So deleting an override is always safe (consumers fall back to
 //     the base); only deleting the network base needs guarding.
 //
-// The two new guards both reuse the #285 reflection (FindConsumers / HasSpec)
+// The two delete guards both reuse the #285 reflection (FindConsumers / HasSpec)
 // applied across every scope's container:
 //
 //   - checkOverrideBase — a scoped create/update requires the network base.
@@ -36,12 +38,9 @@ import (
 //     refused while anything references it (any scope) or any override sits
 //     below it.
 //
-// All helpers here assume the caller already holds keyNetworkSpec (they read
-// n.spec and the zone/profile containers directly, never re-locking).
-//
-// Node scope is not yet wired through writeContainer — it lands in P2b together
-// with the profile-file persist path and its locking. The public layer rejects
-// node-scope writes until then.
+// The integrity helpers read n.spec and the zone containers directly and assume
+// the caller already holds keyNetworkSpec; withWriteTarget holds it (write lock
+// for network/zone, read lock for node so the floor base stays stable).
 
 // withWriteTarget resolves the OverridableSpecs a scoped write targets, runs fn
 // against it under the right lock, and persists. It is the single place that
@@ -136,9 +135,11 @@ func (n *Network) eachScopeContainer(fn func(scope, instance string, specs *spec
 }
 
 // checkNoConsumersAnyScope refuses to delete (kind, name) while any spec at any
-// scope references it. It is the cross-scope generalization of checkNoConsumers,
-// needed once scoped consumers can reference a network base. Returns
-// *util.ConflictError (→ HTTP 409). Caller holds keyNetworkSpec.
+// scope references it — the cross-scope reverse-dependency guard for every spec
+// delete (§15), needed once scoped consumers can reference a network base. The
+// reference graph is read generically from the `ref:`/`kind:` tags
+// (OverridableSpecs.FindConsumers). Returns *util.ConflictError (→ HTTP 409).
+// Caller holds keyNetworkSpec.
 func (n *Network) checkNoConsumersAnyScope(kind, name string) error {
 	canonical := util.NormalizeName(name)
 	var refs []string

@@ -14,14 +14,11 @@ import (
 // ============================================================================
 
 // validateScopeSelector validates the optional scope discriminators on a spec
-// write at the public boundary (§33). It returns a *ValidationError (→ 400) for
-// an unknown scope, a missing instance on a scoped write, or an instance given
-// for network scope. The network-floor invariant itself (an override requires a
-// network base) is enforced internally, under the write lock, where existence is
-// authoritative.
-//
-// Node scope is accepted by the vocabulary but not yet wired through the write
-// path; it is rejected here until P2b lands the profile-file persist path.
+// write at the public boundary (§33): network (default), zone, or node. It
+// returns a *ValidationError (→ 400) for an unknown scope, a missing instance on
+// a zone/node write, or an instance given for network scope. The network-floor
+// invariant itself (an override requires a network base) is enforced internally,
+// under the write lock, where existence is authoritative.
 func validateScopeSelector(sel ScopeSelector) error {
 	switch sel.Scope {
 	case "", spec.ScopeNetwork:
@@ -781,47 +778,47 @@ func (net *Network) DeletePrefixList(ctx context.Context, sel ScopeSelector, nam
 
 // AddPrefixListEntry adds a prefix to a prefix list.
 func (net *Network) AddPrefixListEntry(ctx context.Context, req AddPrefixListEntryRequest, opts ExecOpts) error {
+	if err := validateScopeSelector(req.ScopeSelector); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(req.PrefixList)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		prefixes, err := net.internal.GetPrefixList(req.PrefixList)
-		if err != nil {
-			return err
-		}
-		for _, p := range prefixes {
-			if p == req.Prefix {
-				return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", req.Prefix, req.PrefixList)
+		// Dry-run preview: network-scope only (scoped adds validated
+		// authoritatively under the write lock).
+		if req.Scope == "" || req.Scope == spec.ScopeNetwork {
+			prefixes, err := net.internal.GetPrefixList(req.PrefixList)
+			if err != nil {
+				return err
+			}
+			for _, p := range prefixes {
+				if p == req.Prefix {
+					return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", req.Prefix, req.PrefixList)
+				}
 			}
 		}
 		return nil
 	}
-	return net.internal.AddPrefixToPrefixList(req.PrefixList, req.Prefix)
+	return net.internal.AddPrefixToPrefixList(req.Scope, req.ScopeInstance, req.PrefixList, req.Prefix)
 }
 
-// RemovePrefixListEntry removes a prefix from a prefix list.
-func (net *Network) RemovePrefixListEntry(ctx context.Context, prefixList, prefix string, opts ExecOpts) error {
+// RemovePrefixListEntry removes a prefix from a prefix list at the given scope.
+func (net *Network) RemovePrefixListEntry(ctx context.Context, sel ScopeSelector, prefixList, prefix string, opts ExecOpts) error {
+	if err := validateScopeSelector(sel); err != nil {
+		return err
+	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("prefix_lists").WithResource(prefixList)); err != nil {
 			return err
 		}
 	}
 	if !opts.Execute {
-		// Idempotent dry-run: silently return nil for missing list/prefix.
-		prefixes, err := net.internal.GetPrefixList(prefixList)
-		if err != nil {
-			return nil
-		}
-		for _, p := range prefixes {
-			if p == prefix {
-				return nil
-			}
-		}
-		return nil
+		return nil // idempotent dry-run
 	}
-	err := net.internal.RemovePrefixFromPrefixList(prefixList, prefix)
+	err := net.internal.RemovePrefixFromPrefixList(sel.Scope, sel.ScopeInstance, prefixList, prefix)
 	if err != nil {
 		// Preserve the pre-refactor idempotency: missing list or prefix
 		// is not an error at the public layer.

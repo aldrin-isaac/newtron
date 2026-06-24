@@ -39,7 +39,7 @@ func (r *ResolvedSpecs) GetService(name string) (*spec.ServiceSpec, error) {
 		return v, nil
 	}
 	// Fall through to network-level specs for dynamically added entries
-	// (SaveService writes to n.spec.Services after merge was built).
+	// (CreateService writes to n.spec.Services after merge was built).
 	return r.network.GetService(name)
 }
 
@@ -110,6 +110,6 @@ func (r *ResolvedSpecs) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
 		}
 	}
 	// Fall through to network-level specs for dynamically added entries
-	// (SaveMACVPN writes to n.spec.MACVPNs after merge was built).
+	// (CreateMACVPN writes to n.spec.MACVPNs after merge was built).
 	return r.network.FindMACVPNByVNI(vni)
 }
