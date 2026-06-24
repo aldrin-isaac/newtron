@@ -9,6 +9,37 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
 
+// TestExtractError pins that the underlying failure reason is pulled out of the
+// APIResponse envelope's `error` field (the same string the caller saw live),
+// and that bodies without a usable message yield "" so the middleware falls back
+// to the HTTP status text.
+func TestExtractError(t *testing.T) {
+	body, err := json.Marshal(httputil.APIResponse{Error: "l3vni must be an integer in 1..16777215"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := extractError(body); got != "l3vni must be an integer in 1..16777215" {
+		t.Errorf("extractError = %q; want the underlying reason", got)
+	}
+
+	// A structured conflict envelope still surfaces its `error` message.
+	conflict := []byte(`{"error":"IPVPNSpec 'IRB' has 2 references: ...","data":{"resource":"IPVPNSpec","references":["..."],"force_available":false}}`)
+	if got := extractError(conflict); got == "" {
+		t.Errorf("extractError on a conflict envelope = %q; want the message", got)
+	}
+
+	// Bodies with no usable message → "" (caller falls back to status text).
+	for name, in := range map[string][]byte{
+		"empty":        nil,
+		"no-error-key": []byte(`{"data":{"name":"transit"}}`),
+		"not-json":     []byte(`<html>500</html>`),
+	} {
+		if got := extractError(in); got != "" {
+			t.Errorf("%s: extractError = %q; want empty", name, got)
+		}
+	}
+}
+
 // TestExtractChanges pins that the change-set is pulled out of the standard
 // APIResponse envelope a device write returns, and that shapes without a
 // change-set (spec-authoring results, errors, garbage) yield nil rather than
