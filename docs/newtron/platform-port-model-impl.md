@@ -124,15 +124,17 @@ from the note as if the stride code did not exist, then reuse what survives.
 - [x] **Verify (unit):** `go test ./... -count=1` green; `go vet ./...` clean.
       Static: all **66** switch link-endpoints across every topology resolve
       against the new tables (30 host endpoints correctly skipped — coalesced).
-- [~] **Verify (cold-deploy, §42):** **VS GREEN** — cold-deployed `2node-vs`
+- [x] **Verify (cold-deploy, §42):** **VS GREEN** — cold-deployed `2node-vs`
       (9 nodes, table-driven link allocation succeeded; 32 stride-4 ports;
       `Ethernet0` reached `oper=up`/kernel `carrier=1` after admin-up on both
-      peered switches → NIC mapping correct end-to-end). **VPP: blocked** — the
-      only VPP network (`4node-ngdp`) fails profile validation on a **pre-existing**
-      gap (no `network.json` → `zone "amer"` undefined), unrelated to this change.
-      VPP is otherwise covered: byte-exact render unit tests, served stride-1
-      table, and static port resolution. A full VPP cold-deploy needs
-      `4node-ngdp`'s spec completed first (separate work).
+      peered switches → NIC mapping correct end-to-end). **VPP GREEN** —
+      cold-deployed `4node-ngdp` (4 VPP nodes) after authoring its `network.json`
+      (zone `amer`; the pre-existing gap). spine1's VPP-synthesized CONFIG_DB has
+      **exactly `Ethernet0`+`Ethernet1` (stride-1)** — its two wired links — with
+      kernel `carrier=1` and `oper=up` on both. This is the decisive proof of the
+      Phase-2 `Force10-S6000_vpp` stride-1 fix: the Phase-1 stride-4 error would
+      have synthesized `Ethernet0`+`Ethernet4` and the `spine1:Ethernet1` link
+      would not exist.
 - [x] **Conformance audit (ai-instructions §9).** Dimensions checked: §18 (table
       lookup realizes the note's model); §11 (comments + the `VMInterfaceMap`
       tooltip made honest); DPN §40/§5 (grep-verified zero refs to
@@ -145,10 +147,11 @@ from the note as if the stride code did not exist, then reuse what survives.
       resolution, VS cold-deploy + carrier green, order-preservation reasoning).
       `parseLinuxEthIndex` correctly retained (coalesced path). No dimension omitted.
 
-> **Phase 3 gate:** the VS cold-deploy is green; the VPP cold-deploy is blocked
-> by an unrelated pre-existing gap. Before Phase 3 deletes `vm_interface_map`,
-> either complete `4node-ngdp`'s spec and run the VPP cold-deploy, or accept the
-> VPP unit+static coverage as sufficient — an explicit decision, not a silent skip.
+> **Phase 3 gate — satisfied (retrospectively).** Phase 3 landed on the
+> reasoning that deleting the already-unread `vm_interface_map` is inert. The VPP
+> cold-deploy has since been run (above): `4node-ngdp`'s `network.json` was
+> authored and the lab cold-deployed green, confirming the stride-1 synthesis on
+> real VPP hardware. Both paths are now cold-validated.
 
 ## Phase 3 — Remove the old model (greenfield cleanup, DPN §40)
 
