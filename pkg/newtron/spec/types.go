@@ -282,6 +282,15 @@ type PlatformSpec struct {
 	DefaultSpeed string   `json:"default_speed" label:"Default Port Speed" tooltip:"Default speed for each data port (e.g. \"100G\")"`
 	Breakouts    []string `json:"breakouts,omitempty" label:"Supported Breakouts" tooltip:"Breakout modes this platform can accept"`
 
+	// Ports is the explicit per-port inventory — the device-native interface
+	// name → QEMU NIC slot mapping for every front-panel port. Generated at
+	// onboarding from the platform's port authority (SONiC port_config.ini or
+	// platform.json; see platform_from_*.go). Currently additive alongside
+	// vm_interface_map, which still drives newtlab's NIC resolution; the model
+	// that makes this table the single source of that mapping is described in
+	// docs/newtron/platform-port-model.md.
+	Ports []PortSpec `json:"ports,omitempty" label:"Ports" tooltip:"Per-port inventory: device-native name → QEMU NIC slot, generated from the platform's port authority"`
+
 	// newtlab VM fields
 	VMImage             string         `json:"vm_image,omitempty" label:"VM Image" tooltip:"Path or URL to the platform's VM disk image"`
 	VMMemory            int            `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Default VM memory size"`
@@ -295,6 +304,20 @@ type PlatformSpec struct {
 	VMImageRelease      string         `json:"vm_image_release,omitempty" label:"VM Image Release" tooltip:"Release tag selecting release-specific boot patches (e.g. \"202405\")"`
 	VMSkipBootstrap     bool           `json:"vm_skip_bootstrap,omitempty" label:"Skip Bootstrap" tooltip:"Image is pre-bootstrapped — skip console-driven network bring-up"`
 	UnsupportedFeatures []string       `json:"unsupported_features,omitempty" label:"Unsupported Features" tooltip:"Features this platform cannot handle (e.g. \"acl\", \"evpn-vxlan\")"`
+}
+
+// PortSpec is one front-panel port in a platform's generated port model — the
+// device-native interface name paired with the QEMU NIC slot that backs it.
+// The ordered set of PortSpecs is the explicit form of the name → NIC mapping
+// that vm_interface_map's stride schemes express as a formula; an explicit
+// table is the only form that covers non-strided naming (e.g. vJunos
+// "ge-0/0/0"). Generated, not hand-authored, for SONiC platforms (see
+// platform_from_*.go); the design is in docs/newtron/platform-port-model.md.
+type PortSpec struct {
+	Name     string `json:"name" label:"Port Name" tooltip:"Device-native interface name (e.g. \"Ethernet0\", \"ge-0/0/0\")"`
+	NICIndex int    `json:"nic_index" label:"NIC Index" tooltip:"QEMU data-NIC slot backing this port (1-based; NIC 0 is management)" min:"1"`
+	Speed    string `json:"speed,omitempty" label:"Speed" tooltip:"Port speed (e.g. \"40G\"); defaults to the platform default_speed when omitted"`
+	Lanes    []int  `json:"lanes,omitempty" label:"Lanes" tooltip:"SerDes lanes backing this port, when known (informational)"`
 }
 
 // PrefixListEntry describes the form shape of one entry inside a prefix

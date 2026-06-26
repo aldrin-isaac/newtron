@@ -58,6 +58,10 @@ import (
 //     common value). Per-port speed variation is real (management
 //     ports run at 10G on chassis platforms with 400G data ports);
 //     picking the dominant value gives the headline.
+//   - ports = one PortSpec per data row, in file order. NIC slots are
+//     assigned by that order (row N → data NIC N); each port carries its
+//     own name, per-row speed, and lanes (when the header has a lanes
+//     column). This is the explicit form of the name → NIC mapping.
 //   - breakouts = empty. port_config.ini does NOT carry breakout-mode
 //     information. Operators onboarding a port_config.ini platform
 //     who need breakouts will hand-author them post-generation or
@@ -85,7 +89,7 @@ func FromPortConfigINI(data []byte, opts SONiCImportOptions) (*PlatformSpec, err
 	if opts.HWSKU == "" {
 		return nil, fmt.Errorf("HWSKU is required (supply via SONiCImportOptions.HWSKU)")
 	}
-	speedCol, err := findSpeedColumnIndex(data)
+	cols, err := findColumns(data)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +97,7 @@ func FromPortConfigINI(data []byte, opts SONiCImportOptions) (*PlatformSpec, err
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("port_config.ini: no data rows (only comments / blanks); cannot derive port_count")
 	}
-	defaultSpeed, err := pickDominantSpeed(rows, speedCol)
+	defaultSpeed, err := pickDominantSpeed(rows, cols.speed)
 	if err != nil {
 		return nil, fmt.Errorf("port_config.ini: %w", err)
 	}
@@ -103,7 +107,8 @@ func FromPortConfigINI(data []byte, opts SONiCImportOptions) (*PlatformSpec, err
 		DeviceType:   "switch",
 		PortCount:    len(rows),
 		DefaultSpeed: defaultSpeed,
-		Breakouts:    nil,            // not derivable from port_config.ini
+		Breakouts:    nil, // not derivable from port_config.ini
+		Ports:        buildPortsFromRows(rows, cols),
 		Dataplane:    opts.Dataplane, // operator-supplied
 		// Universal-safe default — see the function doc on why this is fixed,
 		// not inferred from the port-name stride.
@@ -111,13 +116,67 @@ func FromPortConfigINI(data []byte, opts SONiCImportOptions) (*PlatformSpec, err
 	}, nil
 }
 
-// findSpeedColumnIndex scans for the header row — the first
-// comment line that contains BOTH `name` AND `speed` as
-// whitespace-separated tokens. The leading `#` and any
+// portConfigColumns holds the header column positions findColumns located.
+// name and speed are required (findColumns errors otherwise); lanes is
+// optional — lanesCol is -1 when the header has no `lanes` column.
+type portConfigColumns struct {
+	name  int
+	speed int
+	lanes int
+}
+
+// buildPortsFromRows produces the explicit per-port inventory. NIC slots are
+// assigned by data-row order — the port_config.ini row order IS the
+// authoritative QEMU NIC ordering (the Nth data port is backed by data NIC N;
+// NIC 0 is management, never a row here). Each port carries its own speed (the
+// row's speed cell) and lanes (when the header had a lanes column). A row too
+// short to reach the name column cannot name a port and is skipped.
+func buildPortsFromRows(rows [][]string, cols portConfigColumns) []PortSpec {
+	ports := make([]PortSpec, 0, len(rows))
+	for i, row := range rows {
+		if cols.name >= len(row) {
+			continue
+		}
+		p := PortSpec{Name: row[cols.name], NICIndex: i + 1}
+		if cols.speed < len(row) {
+			if kbps, err := strconv.Atoi(row[cols.speed]); err == nil {
+				p.Speed = kbpsToCanonical(kbps)
+			}
+		}
+		if cols.lanes >= 0 && cols.lanes < len(row) {
+			p.Lanes = parseLanes(row[cols.lanes])
+		}
+		ports = append(ports, p)
+	}
+	return ports
+}
+
+// parseLanes splits a port_config.ini lanes cell ("101,102") into its integer
+// serdes lanes. Unparseable entries are skipped; an all-unparseable cell
+// yields nil so lanes stays omitted on the wire.
+func parseLanes(cell string) []int {
+	parts := strings.Split(cell, ",")
+	lanes := make([]int, 0, len(parts))
+	for _, p := range parts {
+		if n, err := strconv.Atoi(strings.TrimSpace(p)); err == nil {
+			lanes = append(lanes, n)
+		}
+	}
+	if len(lanes) == 0 {
+		return nil
+	}
+	return lanes
+}
+
+// findColumns scans for the header row — the first comment line that contains
+// BOTH `name` AND `speed` as whitespace-separated tokens — and returns the
+// positions of name, speed, and (when present) lanes. The leading `#` and any
 // surrounding whitespace are stripped before tokenization, so
-// `# name lanes alias index speed` and `#name lanes alias index
-// speed` both parse identically.
-func findSpeedColumnIndex(data []byte) (int, error) {
+// `# name lanes alias index speed` and `#name lanes alias index speed` both
+// parse identically. Chassis platforms extend the column set (role,
+// asic_port_name, …); header-driven lookup by token name handles that without
+// special-casing.
+func findColumns(data []byte) (portConfigColumns, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -125,20 +184,22 @@ func findSpeedColumnIndex(data []byte) (int, error) {
 			continue
 		}
 		tokens := strings.Fields(strings.TrimLeft(line, "#"))
-		nameIdx, speedIdx := -1, -1
+		cols := portConfigColumns{name: -1, speed: -1, lanes: -1}
 		for i, tok := range tokens {
 			switch tok {
 			case "name":
-				nameIdx = i
+				cols.name = i
 			case "speed":
-				speedIdx = i
+				cols.speed = i
+			case "lanes":
+				cols.lanes = i
 			}
 		}
-		if nameIdx >= 0 && speedIdx >= 0 {
-			return speedIdx, nil
+		if cols.name >= 0 && cols.speed >= 0 {
+			return cols, nil
 		}
 	}
-	return -1, fmt.Errorf("port_config.ini: no header row (expected a `# ... name ... speed ...` comment line as the column legend)")
+	return portConfigColumns{}, fmt.Errorf("port_config.ini: no header row (expected a `# ... name ... speed ...` comment line as the column legend)")
 }
 
 // readDataRows returns every non-comment, non-blank line tokenized

@@ -38,11 +38,12 @@ func TestKbpsToCanonical(t *testing.T) {
 	}
 }
 
-// TestFindSpeedColumnIndex pins the header-detection grammar.
-// SONiC port_config.ini files vary in column count (5 for ToRs,
-// 10 for chassis platforms), so the parser MUST find columns by
-// name from the header rather than by fixed offset.
-func TestFindSpeedColumnIndex(t *testing.T) {
+// TestFindColumns pins the header-detection grammar. SONiC port_config.ini
+// files vary in column count (5 for ToRs, 10 for chassis platforms), so the
+// parser MUST find columns by name from the header rather than by fixed
+// offset. `want` is the speed column; for the standard headers here name is
+// col 0 and lanes col 1, asserted too so the generalization is exercised.
+func TestFindColumns(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
@@ -78,18 +79,26 @@ func TestFindSpeedColumnIndex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := findSpeedColumnIndex([]byte(c.input))
+			got, err := findColumns([]byte(c.input))
 			if c.wantErr {
 				if err == nil {
-					t.Fatalf("expected error; got col=%d", got)
+					t.Fatalf("expected error; got cols=%+v", got)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got != c.want {
-				t.Errorf("col = %d; want %d", got, c.want)
+			if got.speed != c.want {
+				t.Errorf("speed col = %d; want %d", got.speed, c.want)
+			}
+			// Every header in this table has name first and lanes second;
+			// findColumns must locate both, not just speed.
+			if got.name != 0 {
+				t.Errorf("name col = %d; want 0", got.name)
+			}
+			if got.lanes != 1 {
+				t.Errorf("lanes col = %d; want 1", got.lanes)
 			}
 		})
 	}
@@ -178,19 +187,22 @@ func TestFromPortConfigINI_RealFixtures(t *testing.T) {
 		hwsku         string
 		wantPortCount int
 		wantSpeed     string
+		wantFirst     *PortSpec // exact first port, hand-verified from the fixture (nil = skip)
 	}{
 		// Dell S6100: 16 4-port modules + 2 management = 66.
 		// 40G data ports dominate; 10G mgmt is the minority.
-		{"dell-s6100", "Force10-S6100", 66, "40G"},
+		// First fixture row: `Ethernet0 101,102 fortyGigE1/1/1 0 40000`.
+		{"dell-s6100", "Force10-S6100", 66, "40G",
+			&PortSpec{Name: "Ethernet0", NICIndex: 1, Speed: "40G", Lanes: []int{101, 102}}},
 		// Dell Z9664f: 64x400G + 2 mgmt = 66 (data dominates).
-		{"dell-z9664f", "DellEMC-Z9664f-O64", 66, "400G"},
+		{"dell-z9664f", "DellEMC-Z9664f-O64", 66, "400G", nil},
 		// Arista 7280CR3-C32D4: 32x100G + 4x400G + ? mgmt — the
 		// hand count from the fixture is 36 (32+4).
-		{"arista-7280cr3", "Arista-7280CR3-C32D4", 36, "100G"},
+		{"arista-7280cr3", "Arista-7280CR3-C32D4", 36, "100G", nil},
 		// Nokia 7250 IXR-X3B line card 0: 18 data + 2 mgmt = 20
 		// (chassis line-card port_config.ini covers just one
 		// card, not the whole chassis).
-		{"nokia-7250-x3b-lc0", "Nokia-IXR7250-X3B", 20, "400G"},
+		{"nokia-7250-x3b-lc0", "Nokia-IXR7250-X3B", 20, "400G", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.fixture, func(t *testing.T) {
@@ -221,6 +233,29 @@ func TestFromPortConfigINI_RealFixtures(t *testing.T) {
 			// generated platform doesn't trip ResolveNICIndex's empty-map error.
 			if got.VMInterfaceMap != "sequential" {
 				t.Errorf("VMInterfaceMap: got %q, want \"sequential\" (universal-safe default)", got.VMInterfaceMap)
+			}
+			// Ports: one per data row, NIC slots assigned 1..N in file order.
+			// Every fixture row carries a name, so len(Ports) == PortCount.
+			if len(got.Ports) != c.wantPortCount {
+				t.Fatalf("len(Ports): got %d, want %d", len(got.Ports), c.wantPortCount)
+			}
+			for i, p := range got.Ports {
+				if p.NICIndex != i+1 {
+					t.Errorf("Ports[%d].NICIndex: got %d, want %d", i, p.NICIndex, i+1)
+				}
+				if p.Name == "" {
+					t.Errorf("Ports[%d].Name is empty", i)
+				}
+				if p.Speed == "" {
+					t.Errorf("Ports[%d] (%s).Speed is empty", i, p.Name)
+				}
+			}
+			if c.wantFirst != nil {
+				first := got.Ports[0]
+				if first.Name != c.wantFirst.Name || first.NICIndex != c.wantFirst.NICIndex ||
+					first.Speed != c.wantFirst.Speed || !reflect.DeepEqual(first.Lanes, c.wantFirst.Lanes) {
+					t.Errorf("Ports[0]: got %+v, want %+v", first, *c.wantFirst)
+				}
 			}
 		})
 	}

@@ -4,6 +4,136 @@
   "description": "SONiC 202505 with Cisco Silicon One virtual PFE (Palladium2)",
   "port_count": 32,
   "default_speed": "100G",
+  "ports": [
+    {
+      "name": "Ethernet0",
+      "nic_index": 1
+    },
+    {
+      "name": "Ethernet1",
+      "nic_index": 2
+    },
+    {
+      "name": "Ethernet2",
+      "nic_index": 3
+    },
+    {
+      "name": "Ethernet3",
+      "nic_index": 4
+    },
+    {
+      "name": "Ethernet4",
+      "nic_index": 5
+    },
+    {
+      "name": "Ethernet5",
+      "nic_index": 6
+    },
+    {
+      "name": "Ethernet6",
+      "nic_index": 7
+    },
+    {
+      "name": "Ethernet7",
+      "nic_index": 8
+    },
+    {
+      "name": "Ethernet8",
+      "nic_index": 9
+    },
+    {
+      "name": "Ethernet9",
+      "nic_index": 10
+    },
+    {
+      "name": "Ethernet10",
+      "nic_index": 11
+    },
+    {
+      "name": "Ethernet11",
+      "nic_index": 12
+    },
+    {
+      "name": "Ethernet12",
+      "nic_index": 13
+    },
+    {
+      "name": "Ethernet13",
+      "nic_index": 14
+    },
+    {
+      "name": "Ethernet14",
+      "nic_index": 15
+    },
+    {
+      "name": "Ethernet15",
+      "nic_index": 16
+    },
+    {
+      "name": "Ethernet16",
+      "nic_index": 17
+    },
+    {
+      "name": "Ethernet17",
+      "nic_index": 18
+    },
+    {
+      "name": "Ethernet18",
+      "nic_index": 19
+    },
+    {
+      "name": "Ethernet19",
+      "nic_index": 20
+    },
+    {
+      "name": "Ethernet20",
+      "nic_index": 21
+    },
+    {
+      "name": "Ethernet21",
+      "nic_index": 22
+    },
+    {
+      "name": "Ethernet22",
+      "nic_index": 23
+    },
+    {
+      "name": "Ethernet23",
+      "nic_index": 24
+    },
+    {
+      "name": "Ethernet24",
+      "nic_index": 25
+    },
+    {
+      "name": "Ethernet25",
+      "nic_index": 26
+    },
+    {
+      "name": "Ethernet26",
+      "nic_index": 27
+    },
+    {
+      "name": "Ethernet27",
+      "nic_index": 28
+    },
+    {
+      "name": "Ethernet28",
+      "nic_index": 29
+    },
+    {
+      "name": "Ethernet29",
+      "nic_index": 30
+    },
+    {
+      "name": "Ethernet30",
+      "nic_index": 31
+    },
+    {
+      "name": "Ethernet31",
+      "nic_index": 32
+    }
+  ],
   "vm_image": "~/.newtlab/images/sonic-ciscovs.qcow2",
   "vm_memory": 8192,
   "vm_cpus": 6,
