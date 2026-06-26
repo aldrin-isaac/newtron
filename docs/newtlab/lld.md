@@ -73,7 +73,7 @@ type PlatformSpec struct {
 | `vm_memory` | int | 4096 | RAM in MB |
 | `vm_cpus` | int | 2 | vCPU count |
 | `vm_nic_driver` | string | `"e1000"` | QEMU NIC model (`e1000`, `virtio-net-pci`) |
-| `vm_interface_map` | string | `"stride-4"` | NIC-to-interface mapping scheme (§5.3) |
+| `vm_interface_map` | string | `"sequential"` | NIC-ordering / VPP port-stride scheme; generators default to `sequential` (§5.3) |
 | `vm_cpu_features` | string | `""` | QEMU `-cpu host,<features>` suffix |
 | `vm_credentials` | *VMCredentials | nil | Image-baked login credentials |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for boot |
@@ -268,7 +268,7 @@ first non-zero value wins.
 | Memory | `vm_memory` | `vm_memory` | 4096 |
 | CPUs | `vm_cpus` | `vm_cpus` | 2 |
 | NICDriver | — | `vm_nic_driver` | `"e1000"` |
-| InterfaceMap | — | `vm_interface_map` | `"stride-4"` |
+| InterfaceMap | — | `vm_interface_map` | `"sequential"` |
 | CPUFeatures | — | `vm_cpu_features` | `""` |
 | SSHUser | `ssh_user` | — | `"admin"` |
 | SSHPass | `ssh_pass` | `vm_credentials.pass` | `""` |
@@ -576,10 +576,31 @@ QEMU NIC index. Data NICs start at index 1 (NIC 0 is management — see §3.4).
 | `linux` | `ethN` → `N` | eth1 → 1, eth2 → 2 |
 | `custom` | Direct lookup in caller-provided map | (arbitrary mapping, not yet wired to platform spec) |
 
-`sequential` is used by platforms where data ports are Ethernet0, 1, 2, ...
-(e.g., CiscoVS, VPP). `stride-4` is the built-in default where ports are
-Ethernet0, 4, 8, ... (legacy VS images). `linux` is used by host devices with
-`ethN` naming.
+**The schemes are ordering keys, not absolute slots.** `AllocateLinks` (§5.2)
+assigns each wired link a NIC index; the QEMU builder then sorts links by that
+index and emits the data NICs **contiguously** (PCI slots 4, 5, 6, …), and the
+guest maps the Nth data NIC to the Nth `port_config.ini` row. So only the
+*relative order* a scheme produces matters — for any monotonically-named
+platform, `sequential` and `stride-4` yield the same order and therefore the
+same VM. **`sequential` is universally correct** (it orders ports by their
+Ethernet index, which matches the port table's row order); `stride-4` is the same
+ordering plus a divisibility check on the port name. The authoritative port order
+is the `port_config.ini` row order, and a correct name↔port mapping requires the
+topology to wire ports **contiguously from Ethernet0** (RCA-013 / RCA-020 — no
+gaps). `linux` is used by host devices with `ethN` naming.
+
+`vm_interface_map` also drives a second thing: the **VPP boot patch's
+port-naming stride** (`buildPatchVars` → `PortStride`: `stride-4` → 4, otherwise
+→ 1), which *generates* the device's port names on VPP platforms. A VPP platform
+must therefore be `sequential` (VPP renumbers ports to a contiguous stride-1
+scheme at boot; RCA-013). Because the correct value depends on the deployment
+(VPP renumbers; ASIC-sim images keep the HWSKU naming) rather than on the source
+port file, it is **not inferred from `port_config.ini`** — the platform
+generators (`FromPortConfigINI` / `FromSONiCPlatformJSON`) emit `sequential`, an
+**unset map resolves to `sequential`** (`node.go`), and `PortStride` defaults to
+1 to match — so generator output, hand-authored-without-the-field, and explicit
+`sequential` all behave identically. The operator overrides to `stride-4`
+(validation) or `custom` (irregular layouts) only when a platform needs it.
 
 ### 5.4 Worker Placement
 

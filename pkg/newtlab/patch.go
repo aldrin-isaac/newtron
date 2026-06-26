@@ -51,7 +51,7 @@ type RedisPatch struct {
 type PatchVars struct {
 	NumPorts   int
 	PCIAddrs   []string
-	PortStride int // 1 for sequential, 4 for stride-4 (default)
+	PortStride int // 1 for sequential (default), 4 for stride-4
 	HWSkuDir   string
 	PortSpeed  int
 	Platform   string
@@ -265,9 +265,12 @@ func buildPatchVars(node *NodeConfig, platform *spec.PlatformSpec) *PatchVars {
 		speed = 25000
 	}
 
-	portStride := 4 // default: stride-4 (e.g. Ethernet0, Ethernet4, Ethernet8)
-	if platform.VMInterfaceMap == "sequential" {
-		portStride = 1 // sequential: Ethernet0, Ethernet1, Ethernet2
+	// Mirrors the interface-map default (sequential): an unset map and an
+	// explicit "sequential" both generate contiguous Ethernet0,1,2 names; only
+	// an explicit "stride-4" produces Ethernet0,4,8.
+	portStride := 1 // default: sequential (Ethernet0, Ethernet1, Ethernet2)
+	if platform.VMInterfaceMap == "stride-4" {
+		portStride = 4 // stride-4: Ethernet0, Ethernet4, Ethernet8
 	}
 
 	return &PatchVars{

@@ -62,6 +62,21 @@ import (
 //     information. Operators onboarding a port_config.ini platform
 //     who need breakouts will hand-author them post-generation or
 //     wait for a hwsku.json parser (separate follow-up).
+//   - vm_interface_map = "sequential" — a fixed default, NOT derived from
+//     the port names. It is deliberately not inferred: vm_interface_map is a
+//     *deployment* property, not a property of the source port_config.ini.
+//     The same Force10-S6000 file is "sequential" for the VPP variant (VPP
+//     renumbers ports to a contiguous stride-1 scheme at boot — RCA-013/-020)
+//     and works as "sequential" for the ASIC-sim VS, so inferring "stride-4"
+//     from the stride-4 names would regress VPP. "sequential" is universally
+//     correct: it orders QEMU NICs by Ethernet index (matching port_config.ini
+//     row order for any naming) and yields PortStride=1 for the VPP boot patch.
+//     Operators override to "stride-4" (port-name validation) or "custom"
+//     (irregular layouts) when a platform needs it.
+//
+// What this derivation does NOT provide — the VM fields (vm_image, vm_memory,
+// vm_cpus, vm_nic_driver, credentials, …) are deployment choices absent from
+// port_config.ini; the operator completes them after generation.
 //
 // Errors on: empty opts.HWSKU; no header row (no comment line
 // containing `name` AND `speed`); no `speed` column in the
@@ -88,8 +103,11 @@ func FromPortConfigINI(data []byte, opts SONiCImportOptions) (*PlatformSpec, err
 		DeviceType:   "switch",
 		PortCount:    len(rows),
 		DefaultSpeed: defaultSpeed,
-		Breakouts:    nil, // not derivable from port_config.ini
-		Dataplane:    opts.Dataplane,
+		Breakouts:    nil,            // not derivable from port_config.ini
+		Dataplane:    opts.Dataplane, // operator-supplied
+		// Universal-safe default — see the function doc on why this is fixed,
+		// not inferred from the port-name stride.
+		VMInterfaceMap: "sequential",
 	}, nil
 }
 

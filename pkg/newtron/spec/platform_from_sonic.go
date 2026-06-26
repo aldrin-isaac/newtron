@@ -15,13 +15,17 @@
 //     the speed each port runs at without a breakout split)
 //   - Breakouts: sorted union of every breakout_modes key across
 //     every interface
+//   - VMInterfaceMap: "sequential" — the universal-safe default (see
+//     FromPortConfigINI for why it is fixed, not inferred from the port
+//     naming). It is the one VM field with a sound default, so it is set
+//     here rather than left for the operator.
 //
 // What the operator provides via flags (NOT derivable from
 // platform.json): HWSKU, Description, DeviceType ("switch"),
-// Dataplane, and every VM/lab field (VMImage, VMMemory, etc.).
-// PlatformSpec leaves them at their zero values; the operator
-// fills them in for simulator platforms or omits them for real
-// hardware.
+// Dataplane, and the remaining VM/lab fields (VMImage, VMMemory, VMCPUs,
+// VMNICDriver, …) — genuine deployment choices with no universal default.
+// PlatformSpec leaves those at their zero values; the operator fills them
+// in for simulator platforms or omits them for real hardware.
 //
 // What the issue body assumed but reality refuted: SONiC
 // platform.json does NOT carry a default_brkout_mode field at the
@@ -143,6 +147,9 @@ func FromSONiCPlatformJSON(data []byte, opts SONiCImportOptions) (*PlatformSpec,
 		DefaultSpeed: defaultSpeed,
 		Breakouts:    breakouts,
 		Dataplane:    opts.Dataplane,
+		// Universal-safe default; not inferred from port naming (see
+		// FromPortConfigINI doc / RCA-013).
+		VMInterfaceMap: "sequential",
 	}, nil
 }
 

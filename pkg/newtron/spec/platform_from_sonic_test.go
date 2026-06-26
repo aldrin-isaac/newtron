@@ -118,12 +118,18 @@ func TestFromSONiCPlatformJSON_Z9332f_RealFixture(t *testing.T) {
 	if got.Dataplane != "" {
 		t.Errorf("Dataplane: got %q, want \"\" (real-hardware default)", got.Dataplane)
 	}
-	// VM fields are NOT derivable from platform.json and the
-	// generator must leave them zero so the operator can fill them
-	// in for simulator platforms or omit them for real hardware.
+	// VM deployment fields are NOT derivable from platform.json and the
+	// generator must leave them zero so the operator can fill them in for
+	// simulator platforms or omit them for real hardware.
 	if got.VMImage != "" || got.VMMemory != 0 || got.VMCPUs != 0 {
 		t.Errorf("VM fields should be zero (not derivable from SONiC platform.json); got VMImage=%q VMMemory=%d VMCPUs=%d",
 			got.VMImage, got.VMMemory, got.VMCPUs)
+	}
+	// VMInterfaceMap is the exception — the one VM field with a universal-safe
+	// default ("sequential"; see FromPortConfigINI / RCA-013), so it is set, not
+	// left zero.
+	if got.VMInterfaceMap != "sequential" {
+		t.Errorf("VMInterfaceMap: got %q, want \"sequential\" (universal-safe default)", got.VMInterfaceMap)
 	}
 }
 
