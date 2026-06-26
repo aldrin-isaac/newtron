@@ -269,7 +269,7 @@ func (l *Lab) coalesceHostVMs() {
 			Memory:       templateNC.Memory,
 			CPUs:         templateNC.CPUs,
 			NICDriver:    templateNC.NICDriver,
-			InterfaceMap: templateNC.InterfaceMap,
+			Ports:        templateNC.Ports,
 			CPUFeatures:  templateNC.CPUFeatures,
 			SSHUser:      templateNC.SSHUser,
 			SSHPass:      templateNC.SSHPass,

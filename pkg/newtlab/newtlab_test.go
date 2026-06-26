@@ -19,105 +19,59 @@ import (
 // Interface Map Tests
 // ============================================================================
 
-func TestResolveNICIndex_Stride4(t *testing.T) {
-	tests := []struct {
-		iface   string
-		want    int
-		wantErr bool
-	}{
-		{"Ethernet0", 1, false},
-		{"Ethernet4", 2, false},
-		{"Ethernet8", 3, false},
-		{"Ethernet12", 4, false},
-		{"Ethernet1", 0, true},  // not divisible by 4
-		{"Ethernet3", 0, true},  // not divisible by 4
-		{"Loopback0", 0, true},  // not Ethernet
+func TestResolveNICIndex(t *testing.T) {
+	// The lookup is by exact name against the platform's port inventory, so a
+	// stride-4 table (Force10-S6000_vs shape), a stride-1 table (cisco/VPP
+	// shape), and a linux eth-named table (vjunos) all resolve uniformly.
+	stride4 := []spec.PortSpec{
+		{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}, {Name: "Ethernet8", NICIndex: 3},
 	}
-
-	for _, tt := range tests {
-		got, err := ResolveNICIndex("stride-4", tt.iface, nil)
-		if tt.wantErr {
-			if err == nil {
-				t.Errorf("ResolveNICIndex(stride-4, %q) = %d, want error", tt.iface, got)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("ResolveNICIndex(stride-4, %q) error: %v", tt.iface, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("ResolveNICIndex(stride-4, %q) = %d, want %d", tt.iface, got, tt.want)
-		}
+	stride1 := []spec.PortSpec{
+		{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3},
 	}
-}
-
-func TestResolveNICIndex_Sequential(t *testing.T) {
-	tests := []struct {
+	cases := []struct {
+		name  string
+		ports []spec.PortSpec
 		iface string
 		want  int
 	}{
-		{"Ethernet0", 1},
-		{"Ethernet1", 2},
-		{"Ethernet2", 3},
-		{"Ethernet3", 4},
+		{"stride4 Ethernet0", stride4, "Ethernet0", 1},
+		{"stride4 Ethernet8", stride4, "Ethernet8", 3},
+		{"stride1 Ethernet1", stride1, "Ethernet1", 2},
+		{"linux eth-style", []spec.PortSpec{{Name: "eth1", NICIndex: 1}, {Name: "eth2", NICIndex: 2}}, "eth2", 2},
 	}
-
-	for _, tt := range tests {
-		got, err := ResolveNICIndex("sequential", tt.iface, nil)
-		if err != nil {
-			t.Errorf("ResolveNICIndex(sequential, %q) error: %v", tt.iface, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("ResolveNICIndex(sequential, %q) = %d, want %d", tt.iface, got, tt.want)
-		}
-	}
-}
-
-func TestResolveNICIndex_Custom(t *testing.T) {
-	customMap := map[string]int{
-		"Ethernet0": 3,
-		"Ethernet4": 1,
-	}
-
-	got, err := ResolveNICIndex("custom", "Ethernet0", customMap)
-	if err != nil {
-		t.Fatalf("ResolveNICIndex(custom, Ethernet0) error: %v", err)
-	}
-	if got != 3 {
-		t.Errorf("ResolveNICIndex(custom, Ethernet0) = %d, want 3", got)
-	}
-
-	_, err = ResolveNICIndex("custom", "Ethernet8", customMap)
-	if err == nil {
-		t.Error("ResolveNICIndex(custom, Ethernet8) should error for missing key")
-	}
-
-	_, err = ResolveNICIndex("custom", "Ethernet0", nil)
-	if err == nil {
-		t.Error("ResolveNICIndex(custom, Ethernet0, nil) should error for nil map")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := ResolveNICIndex(c.ports, c.iface)
+			if err != nil {
+				t.Fatalf("ResolveNICIndex(%q): unexpected error: %v", c.iface, err)
+			}
+			if got != c.want {
+				t.Errorf("ResolveNICIndex(%q) = %d, want %d", c.iface, got, c.want)
+			}
+		})
 	}
 }
 
-func TestParseEthernetIndex(t *testing.T) {
-	tests := []struct {
-		name string
-		want int
-	}{
-		{"Ethernet0", 0},
-		{"Ethernet4", 4},
-		{"Ethernet12", 12},
-		{"Loopback0", -1},
-		{"PortChannel100", -1},
-		{"", -1},
+// TestResolveNICIndex_Validation pins the two error paths the table lookup adds:
+// a name absent from the inventory (the deploy-time guard against a mis-typed or
+// out-of-range topology port) and an empty inventory. Each error names the
+// offending interface so an operator can act on it.
+func TestResolveNICIndex_Validation(t *testing.T) {
+	ports := []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}}
+
+	_, err := ResolveNICIndex(ports, "Ethernet200")
+	if err == nil {
+		t.Fatal("ResolveNICIndex(Ethernet200) should error — not in the inventory")
+	}
+	if !strings.Contains(err.Error(), "Ethernet200") || !strings.Contains(err.Error(), "not in the platform port inventory") {
+		t.Errorf("error missing actionable detail: %v", err)
 	}
 
-	for _, tt := range tests {
-		got := parseEthernetIndex(tt.name)
-		if got != tt.want {
-			t.Errorf("parseEthernetIndex(%q) = %d, want %d", tt.name, got, tt.want)
-		}
+	if _, err := ResolveNICIndex(nil, "Ethernet0"); err == nil {
+		t.Fatal("ResolveNICIndex on empty inventory should error")
+	} else if !strings.Contains(err.Error(), "no port inventory") {
+		t.Errorf("empty-inventory error missing phrase: %v", err)
 	}
 }
 
@@ -174,7 +128,7 @@ func TestResolveNodeConfig_PlatformDefaults(t *testing.T) {
 		VMMemory:      4096,
 		VMCPUs:        2,
 		VMNICDriver:   "virtio-net-pci",
-		VMInterfaceMap: "sequential",
+		Ports:         []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}},
 		VMCPUFeatures: "+sse4.2",
 		VMBootTimeout: 300,
 		VMCredentials: &spec.VMCredentials{User: "admin", Pass: "admin"},
@@ -194,8 +148,8 @@ func TestResolveNodeConfig_PlatformDefaults(t *testing.T) {
 	if nc.NICDriver != "virtio-net-pci" {
 		t.Errorf("NICDriver = %q, want virtio-net-pci", nc.NICDriver)
 	}
-	if nc.InterfaceMap != "sequential" {
-		t.Errorf("InterfaceMap = %q, want sequential", nc.InterfaceMap)
+	if len(nc.Ports) != 2 || nc.Ports[0].Name != "Ethernet0" || nc.Ports[1].NICIndex != 2 {
+		t.Errorf("Ports = %+v, want the platform's 2-port inventory", nc.Ports)
 	}
 	if nc.CPUFeatures != "+sse4.2" {
 		t.Errorf("CPUFeatures = %q, want +sse4.2", nc.CPUFeatures)
@@ -229,8 +183,8 @@ func TestResolveNodeConfig_BuiltInDefaults(t *testing.T) {
 	if nc.NICDriver != "e1000" {
 		t.Errorf("NICDriver = %q, want e1000 (default)", nc.NICDriver)
 	}
-	if nc.InterfaceMap != "sequential" {
-		t.Errorf("InterfaceMap = %q, want sequential (default)", nc.InterfaceMap)
+	if len(nc.Ports) != 0 {
+		t.Errorf("Ports = %+v, want empty (platform declares none)", nc.Ports)
 	}
 	if nc.BootTimeout != 180 {
 		t.Errorf("BootTimeout = %d, want 180 (default)", nc.BootTimeout)
@@ -273,14 +227,14 @@ func TestResolveNodeConfig_MgmtNIC(t *testing.T) {
 func TestAllocateLinks(t *testing.T) {
 	nodes := map[string]*NodeConfig{
 		"spine1": {
-			Name:         "spine1",
-			InterfaceMap: "stride-4",
-			NICs:         []NICConfig{{Index: 0, NetdevID: "mgmt", Interface: "mgmt"}},
+			Name:  "spine1",
+			Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}, {Name: "Ethernet8", NICIndex: 3}},
+			NICs:  []NICConfig{{Index: 0, NetdevID: "mgmt", Interface: "mgmt"}},
 		},
 		"leaf1": {
-			Name:         "leaf1",
-			InterfaceMap: "stride-4",
-			NICs:         []NICConfig{{Index: 0, NetdevID: "mgmt", Interface: "mgmt"}},
+			Name:  "leaf1",
+			Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}, {Name: "Ethernet8", NICIndex: 3}},
+			NICs:  []NICConfig{{Index: 0, NetdevID: "mgmt", Interface: "mgmt"}},
 		},
 	}
 
@@ -345,8 +299,8 @@ func TestAllocateLinks(t *testing.T) {
 
 func TestAllocateLinks_PortSequence(t *testing.T) {
 	nodes := map[string]*NodeConfig{
-		"a": {Name: "a", InterfaceMap: "sequential", NICs: []NICConfig{{Index: 0, NetdevID: "mgmt"}}},
-		"b": {Name: "b", InterfaceMap: "sequential", NICs: []NICConfig{{Index: 0, NetdevID: "mgmt"}}},
+		"a": {Name: "a", Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3}}, NICs: []NICConfig{{Index: 0, NetdevID: "mgmt"}}},
+		"b": {Name: "b", Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3}}, NICs: []NICConfig{{Index: 0, NetdevID: "mgmt"}}},
 	}
 
 	links := []*spec.TopologyLink{

@@ -1,3 +1,3 @@
-{{- range $i, $_ := .PCIAddrs}}
-Ethernet{{mul $i $.PortStride}} bobm{{$i}}
+{{- range $i, $p := .Ports}}
+{{$p.Name}} bobm{{$i}}
 {{- end}}

@@ -17,8 +17,12 @@ type NodeConfig struct {
 	Memory       int    // resolved: profile > platform > 4096
 	CPUs         int    // resolved: profile > platform > 2
 	NICDriver    string // resolved: platform > "e1000"
-	InterfaceMap string // resolved: platform > "sequential"
-	CPUFeatures  string // resolved: platform > ""
+	// Ports is the platform's explicit port inventory (name → NIC slot),
+	// copied from PlatformSpec.Ports. AllocateLinks resolves a topology
+	// interface name to its NIC slot by looking it up here. Empty for coalesced
+	// host VMs, which resolve via NICBase + parseLinuxEthIndex instead.
+	Ports       []spec.PortSpec
+	CPUFeatures string // resolved: platform > ""
 	SSHUser      string // resolved: profile ssh_user > "admin"
 	SSHPass      string // resolved: profile ssh_pass > platform credentials pass
 	ConsoleUser  string // resolved: platform vm_credentials user (image default user)
@@ -97,14 +101,13 @@ func ResolveNodeConfig(
 		nc.NICDriver = "e1000"
 	}
 
-	// InterfaceMap: platform > "sequential". "sequential" is the universal-safe
-	// default — it orders QEMU NICs by Ethernet index for any port naming (see
-	// newtlab/lld.md §5.3); it matches what the platform generators emit, so an
-	// unset map and a generated platform behave identically.
-	if platform != nil && platform.VMInterfaceMap != "" {
-		nc.InterfaceMap = platform.VMInterfaceMap
-	} else {
-		nc.InterfaceMap = "sequential"
+	// Ports: the platform's explicit port inventory. AllocateLinks resolves
+	// topology interface names to NIC slots against this table. Switch
+	// platforms carry it (generated; see docs/newtron/platform-port-model.md);
+	// host platforms leave it empty (their nodes coalesce and resolve via
+	// NICBase instead).
+	if platform != nil {
+		nc.Ports = platform.Ports
 	}
 
 	// CPUFeatures: platform > ""
