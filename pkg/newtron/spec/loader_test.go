@@ -318,7 +318,11 @@ func TestLoader_ValidationErrors(t *testing.T) {
 	}
 }
 
-func TestLoader_LoadMissingNetworkSpec(t *testing.T) {
+// TestLoader_LoadEmptyDir pins that a directory with neither network.json nor
+// topology.json is rejected — it is not a network. (network.json alone is a
+// scaffolded/offline network; topology.json alone is a lab-only network; both
+// load. Only the empty-directory case errors.)
+func TestLoader_LoadEmptyDir(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -326,9 +330,48 @@ func TestLoader_LoadMissingNetworkSpec(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	loader := NewLoader(tmpDir, nil)
-	err = loader.Load()
-	if err == nil {
-		t.Error("Load() should fail when network.json is missing")
+	if err := loader.Load(); err == nil {
+		t.Error("Load() should fail when neither network.json nor topology.json is present")
+	}
+}
+
+// TestLoader_LabOnlyTopology pins that a directory with a topology.json but no
+// network.json loads as a lab-only network with an empty spec rather than
+// erroring. These are deploy-only topologies — newtlab spins up the VMs from
+// the topology, node profiles, and global platforms while an external system
+// (e.g. the vJunos topologies configured by netconf.pl) owns device config.
+// network.json is optional, symmetric with the already-optional topology.json.
+func TestLoader_LabOnlyTopology(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "newtron-labonly-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// topology.json + a node profile, but deliberately NO network.json.
+	topo := `{"version":"1.0","devices":{"r1":{}},"links":[]}`
+	if err := os.WriteFile(filepath.Join(tmpDir, "topology.json"), []byte(topo), 0644); err != nil {
+		t.Fatalf("Failed to write topology.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "nodes"), 0755); err != nil {
+		t.Fatalf("Failed to create nodes dir: %v", err)
+	}
+	node := `{"platform":"vjunos-router","zone":"lab"}`
+	if err := os.WriteFile(filepath.Join(tmpDir, "nodes", "r1.json"), []byte(node), 0644); err != nil {
+		t.Fatalf("Failed to write node profile: %v", err)
+	}
+
+	loader := NewLoader(tmpDir, nil)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() with no network.json should succeed (lab-only); got: %v", err)
+	}
+	net := loader.GetNetwork()
+	if net == nil {
+		t.Fatal("GetNetwork() returned nil; want empty NetworkSpecFile")
+	}
+	if len(net.Services) != 0 || len(net.Zones) != 0 {
+		t.Errorf("lab-only network should have empty spec; got %d services, %d zones",
+			len(net.Services), len(net.Zones))
 	}
 }
 

@@ -51,9 +51,21 @@ func NewLoader(specDir string, platforms map[string]*PlatformSpec) *Loader {
 
 // Load loads all specification files
 func (l *Loader) Load() error {
+	// A network directory must carry at least one of network.json or
+	// topology.json. network.json alone is a scaffolded/offline network
+	// (services/VPNs defined, no substrate yet); topology.json alone is a
+	// lab-only network (newtlab deploys the VMs, an external system such as
+	// netconf.pl owns device config). Neither file means the directory is not
+	// a network at all — reject it rather than load an empty placeholder.
+	_, netStatErr := os.Stat(filepath.Join(l.specDir, "network.json"))
+	_, topoStatErr := os.Stat(filepath.Join(l.specDir, "topology.json"))
+	if os.IsNotExist(netStatErr) && os.IsNotExist(topoStatErr) {
+		return fmt.Errorf("not a network directory: neither network.json nor topology.json present in %s", l.specDir)
+	}
+
 	var err error
 
-	// Load network spec
+	// Load network spec (optional — empty spec when only topology.json exists).
 	l.network, err = l.loadNetworkSpec()
 	if err != nil {
 		return fmt.Errorf("loading network spec: %w", err)
@@ -141,6 +153,18 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 	path := filepath.Join(l.specDir, "network.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// network.json is optional — symmetric with topology.json. A
+			// directory with only a topology.json is a lab-only network:
+			// newtlab deploys the VMs from the topology, node profiles, and
+			// global platforms, while an external system owns device config
+			// (e.g. the vJunos topologies configured by netconf.pl). No
+			// services, VPNs, or zones are defined, so the projection starts
+			// empty — the §1 abstract-node "topology offline" state. validate()
+			// and validateTopology() both tolerate the empty spec (they range
+			// over the empty maps and check only topology-local references).
+			return &NetworkSpecFile{}, nil
+		}
 		return nil, err
 	}
 
