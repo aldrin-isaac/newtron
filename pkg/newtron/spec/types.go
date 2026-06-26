@@ -53,7 +53,12 @@ type OverridableSpecs struct {
 
 // NetworkSpecFile represents the global network specification file (network.json).
 type NetworkSpecFile struct {
-	Version     string              `json:"version"`
+	Version string `json:"version"`
+	// Description is operator-facing documentation for the whole network —
+	// what topology or scenario this spec set exercises. Optional; omitted
+	// from the wire when empty. Modeled here so it round-trips through load
+	// and SaveNetwork rather than being silently dropped as an unknown field.
+	Description string              `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this network"`
 	SuperUsers  []string            `json:"super_users"`
 	UserGroups  map[string][]string `json:"user_groups"` // Group name → user list
 	// Permissions maps each action (e.g. "device.write") to its grants.
