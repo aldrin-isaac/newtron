@@ -48,17 +48,17 @@ override.
 ```go
 type PlatformSpec struct {
     // SONiC platform fields (omitted for brevity)
-    HWSKU        string   `json:"hwsku"`
-    PortCount    int      `json:"port_count"`
-    DefaultSpeed string   `json:"default_speed"`
-    DeviceType   string   `json:"device_type,omitempty"` // "switch" (default) or "host"
+    HWSKU        string     `json:"hwsku"`
+    PortCount    int        `json:"port_count"`
+    DefaultSpeed string     `json:"default_speed"`
+    DeviceType   string     `json:"device_type,omitempty"` // "switch" (default) or "host"
+    Ports        []PortSpec `json:"ports,omitempty"`       // name → QEMU NIC-slot inventory (§5.3)
 
     // newtlab VM fields
     VMImage              string         `json:"vm_image,omitempty"`
     VMMemory             int            `json:"vm_memory,omitempty"`
     VMCPUs               int            `json:"vm_cpus,omitempty"`
     VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
-    VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
     VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
     VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
@@ -73,7 +73,7 @@ type PlatformSpec struct {
 | `vm_memory` | int | 4096 | RAM in MB |
 | `vm_cpus` | int | 2 | vCPU count |
 | `vm_nic_driver` | string | `"e1000"` | QEMU NIC model (`e1000`, `virtio-net-pci`) |
-| `vm_interface_map` | string | `"sequential"` | NIC-ordering / VPP port-stride scheme; generators default to `sequential` (§5.3) |
+| `ports` | []PortSpec | (generated) | Per-port `name → nic_index` inventory; `ResolveNICIndex` resolves topology interfaces against it (§5.3) |
 | `vm_cpu_features` | string | `""` | QEMU `-cpu host,<features>` suffix |
 | `vm_credentials` | *VMCredentials | nil | Image-baked login credentials |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for boot |
@@ -268,7 +268,7 @@ first non-zero value wins.
 | Memory | `vm_memory` | `vm_memory` | 4096 |
 | CPUs | `vm_cpus` | `vm_cpus` | 2 |
 | NICDriver | — | `vm_nic_driver` | `"e1000"` |
-| InterfaceMap | — | `vm_interface_map` | `"sequential"` |
+| Ports | — | `ports` | (none) |
 | CPUFeatures | — | `vm_cpu_features` | `""` |
 | SSHUser | `ssh_user` | — | `"admin"` |
 | SSHPass | `ssh_pass` | `vm_credentials.pass` | `""` |
@@ -305,7 +305,7 @@ type LinkConfig struct {
 type LinkEndpoint struct {
     Device    string // device name
     Interface string // SONiC interface name
-    NICIndex  int    // QEMU NIC index (from interface map)
+    NICIndex  int    // QEMU NIC index (from the platform port inventory)
 }
 ```
 
@@ -566,41 +566,46 @@ After all links are created:
 
 ### 5.3 Interface Map Resolution
 
-`ResolveNICIndex()` in `iface_map.go` converts a SONiC interface name to a
-QEMU NIC index. Data NICs start at index 1 (NIC 0 is management — see §3.4).
+`ResolveNICIndex()` in `iface_map.go` converts a device-native interface name to
+a QEMU NIC index by looking it up in the platform's explicit port inventory
+(`PlatformSpec.Ports`). Each `PortSpec` pairs a name (`Ethernet0`, `ge-0/0/0`)
+with its `nic_index`; the lookup returns that index. Data NICs start at index 1
+(NIC 0 is management — see §3.4). The inventory is generated at platform
+onboarding from the platform's port authority (`port_config.ini` row order, or
+`platform.json`'s front-panel index) — see `docs/newtron/platform-port-model.md`.
 
-| Scheme | Formula | Example |
-|--------|---------|---------|
-| `sequential` | `EthernetN` → `N + 1` | Ethernet0 → 1, Ethernet1 → 2, Ethernet2 → 3 |
-| `stride-4` | `EthernetN` → `N/4 + 1` (N must be divisible by 4) | Ethernet0 → 1, Ethernet4 → 2, Ethernet8 → 3 |
-| `linux` | `ethN` → `N` | eth1 → 1, eth2 → 2 |
-| `custom` | Direct lookup in caller-provided map | (arbitrary mapping, not yet wired to platform spec) |
+| Platform shape | Inventory (name → nic_index) | Source of names |
+|----------------|------------------------------|-----------------|
+| stride-4 (Force10-S6000 VS) | Ethernet0→1, Ethernet4→2, Ethernet8→3, … | image HWSKU `port_config.ini` |
+| stride-1 (CiscoVS, VPP) | Ethernet0→1, Ethernet1→2, Ethernet2→3, … | contiguous (VPP renames at boot) |
+| linux (vJunos) | eth1→1, eth2→2, … | host-style `ethN` |
 
-**The schemes are ordering keys, not absolute slots.** `AllocateLinks` (§5.2)
-assigns each wired link a NIC index; the QEMU builder then sorts links by that
-index and emits the data NICs **contiguously** (PCI slots 4, 5, 6, …), and the
-guest maps the Nth data NIC to the Nth `port_config.ini` row. So only the
-*relative order* a scheme produces matters — for any monotonically-named
-platform, `sequential` and `stride-4` yield the same order and therefore the
-same VM. **`sequential` is universally correct** (it orders ports by their
-Ethernet index, which matches the port table's row order); `stride-4` is the same
-ordering plus a divisibility check on the port name. The authoritative port order
-is the `port_config.ini` row order, and a correct name↔port mapping requires the
-topology to wire ports **contiguously from Ethernet0** (RCA-013 / RCA-020 — no
-gaps). `linux` is used by host devices with `ethN` naming.
+**One table replaces the former scheme formulas.** A single inventory covers any
+naming — strided, contiguous, or non-`Ethernet` (`ge-0/0/0`) — so there is no
+per-scheme arithmetic and no unreachable `custom` path. `AllocateLinks` (§5.2)
+resolves each wired link's interface to its `nic_index`, then **validates**: an
+interface absent from the platform's inventory fails at deploy time, naming the
+device, platform, and a sample of valid ports, rather than producing a VM whose
+NIC maps to nothing.
 
-`vm_interface_map` also drives a second thing: the **VPP boot patch's
-port-naming stride** (`buildPatchVars` → `PortStride`: `stride-4` → 4, otherwise
-→ 1), which *generates* the device's port names on VPP platforms. A VPP platform
-must therefore be `sequential` (VPP renumbers ports to a contiguous stride-1
-scheme at boot; RCA-013). Because the correct value depends on the deployment
-(VPP renumbers; ASIC-sim images keep the HWSKU naming) rather than on the source
-port file, it is **not inferred from `port_config.ini`** — the platform
-generators (`FromPortConfigINI` / `FromSONiCPlatformJSON`) emit `sequential`, an
-**unset map resolves to `sequential`** (`node.go`), and `PortStride` defaults to
-1 to match — so generator output, hand-authored-without-the-field, and explicit
-`sequential` all behave identically. The operator overrides to `stride-4`
-(validation) or `custom` (irregular layouts) only when a platform needs it.
+`nic_index` is an ordering key, not an absolute slot. The QEMU builder sorts the
+wired links by index and emits the data NICs **contiguously** (PCI slots 4, 5, 6,
+…); the guest maps the Nth data NIC to the Nth `port_config.ini` row. Correct
+name↔port mapping therefore requires the topology to wire ports **contiguously
+from the lowest index** (RCA-020 — no gaps). (The inventory makes contiguity
+checkable rather than implicit; relaxing the no-gaps rule is a separate decision.)
+
+**VPP port synthesis.** VPP images carry no `port_config.ini`, so the boot patch
+*generates* one. `buildPatchVars` takes the first *N* entries of the platform's
+inventory (N = the node's wired data NICs) and the three VPP templates render the
+device's `port_config.ini` / `PORT` entries from those names directly — no stride
+formula. A VPP platform's inventory lists its post-rename contiguous
+`Ethernet0,1,2…` names (RCA-013), so the synthesized table matches what VPP
+expects.
+
+Host devices (`device_type: host`) are coalesced into shared VMs and resolve
+their `ethN` links via `NICBase` + `parseLinuxEthIndex`, not the inventory, so
+host platforms need no `ports` table.
 
 ### 5.4 Worker Placement
 

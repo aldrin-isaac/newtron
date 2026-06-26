@@ -259,7 +259,7 @@ ignores this section; it is newtlab-specific.
 
 ### platforms.json — VM Settings
 
-Each platform defines the SONiC image, VM resources, and interface mapping:
+Each platform defines the SONiC image, VM resources, and (generated) port inventory:
 
 ```json
 {
@@ -272,7 +272,6 @@ Each platform defines the SONiC image, VM resources, and interface mapping:
       "vm_memory": 8192,
       "vm_cpus": 6,
       "vm_nic_driver": "e1000",
-      "vm_interface_map": "sequential",
       "vm_credentials": { "user": "aldrin", "pass": "YourPaSsWoRd" },
       "vm_boot_timeout": 600,
       "dataplane": "ciscovs"
@@ -287,7 +286,7 @@ Each platform defines the SONiC image, VM resources, and interface mapping:
 | `vm_memory` | 4096 | Memory in MB. |
 | `vm_cpus` | 2 | Number of vCPUs. |
 | `vm_nic_driver` | `"e1000"` | QEMU NIC driver: `"e1000"` or `"virtio-net-pci"`. |
-| `vm_interface_map` | `"stride-4"` | How NIC index maps to SONiC interface names. |
+| `ports` | *(generated)* | Per-port `name → nic_index` inventory. Produced by `newtron platform generate`, not hand-authored (see "Port inventory" below). |
 | `vm_cpu_features` | `""` | QEMU CPU feature flags (e.g., `"+sse4.2"` for VPP). |
 | `vm_credentials` | *(none)* | Image-baked username and password. |
 | `vm_boot_timeout` | 180 | Seconds to wait for SSH readiness. |
@@ -307,7 +306,6 @@ Each platform defines the SONiC image, VM resources, and interface mapping:
     "vm_memory": 4096,
     "vm_cpus": 4,
     "vm_nic_driver": "virtio-net-pci",
-    "vm_interface_map": "sequential",
     "vm_cpu_features": "+sse4.2",
     "vm_credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
     "vm_boot_timeout": 300,
@@ -319,17 +317,20 @@ Each platform defines the SONiC image, VM resources, and interface mapping:
 VPP requires `virtio-net-pci` (not `e1000`) and the `+sse4.2` CPU feature
 flag. CiscoVS uses `e1000` and needs no special CPU features.
 
-#### Interface Maps
+#### Port inventory
 
-Different SONiC images map QEMU NIC indices to interface names differently.
-NIC 0 is always reserved for management.
+Each switch platform carries an explicit `ports` inventory — a list of
+`{name, nic_index}` entries that maps each device-native interface name to its
+QEMU NIC slot (NIC 0 is always management). newtlab resolves every topology link
+against it and rejects an interface the platform does not list.
 
-| Map Type | NIC 1 | NIC 2 | NIC 3 | NIC 4 | Used By |
-|----------|-------|-------|-------|-------|---------|
-| `sequential` | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | CiscoVS, VPP |
-| `stride-4` | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | Legacy VS |
-| `linux` | eth1 | eth2 | eth3 | eth4 | Alpine host VMs |
-| `custom` | *(caller-provided map, not yet configurable via platform spec)* | | | | Vendor-specific |
+You do **not** hand-author this table: `newtron platform generate` produces it
+from the platform's port authority (`port_config.ini` row order, or
+`platform.json`'s front-panel index) and writes it into the platform file. The
+naming follows the image — stride-4 (`Ethernet0,4,8…`) for the Force10-S6000 VS,
+contiguous (`Ethernet0,1,2…`) for CiscoVS and VPP (VPP renames at boot), `ethN`
+for host platforms. Host platforms (`device_type: host`) need no `ports` table —
+they coalesce into shared VMs and resolve `ethN` directly.
 
 ### Profile VM Overrides
 
@@ -355,13 +356,13 @@ VM configuration resolves per-field (first non-zero wins):
 | Memory | `vm_memory` | `vm_memory` | 4096 MB |
 | CPUs | `vm_cpus` | `vm_cpus` | 2 |
 | NIC driver | — | `vm_nic_driver` | `"e1000"` |
-| Interface map | — | `vm_interface_map` | `"stride-4"` |
+| Ports | — | `ports` | *(generated)* |
 | CPU features | — | `vm_cpu_features` | `""` |
 | SSH user | `ssh_user` | — | `"admin"` |
 | SSH password | `ssh_pass` | `vm_credentials.pass` | `""` |
 | Boot timeout | — | `vm_boot_timeout` | 180s |
 
-NIC driver, interface map, CPU features, and boot timeout are platform-only —
+NIC driver, port inventory, CPU features, and boot timeout are platform-only —
 profiles cannot override them.
 
 ---
@@ -841,7 +842,6 @@ This creates `~/.newtlab/images/alpine-testhost.qcow2` with:
     "vm_memory": 256,
     "vm_cpus": 1,
     "vm_nic_driver": "virtio-net-pci",
-    "vm_interface_map": "linux",
     "vm_credentials": { "user": "root", "pass": "root" },
     "vm_boot_timeout": 60
   }
@@ -1246,23 +1246,24 @@ Common causes:
   ```bash
   ss -tlnp | grep <link_port_base>
   ```
-- **Wrong interface map** — if `show interfaces status` shows different
-  interface names than expected, the `vm_interface_map` in `platforms.json`
-  doesn't match the image. CiscoVS and VPP use `sequential`; legacy VS uses
-  `stride-4`.
+- **Port inventory mismatch** — if `show interfaces status` shows different
+  interface names than the platform's `ports` table lists, the table doesn't
+  match the image. Regenerate it with `newtron platform generate` from the
+  image's `port_config.ini`/`platform.json`.
 - **Port conflict** — another process on the newtlink port range.
 - **Remote bridge not started** — in multi-host mode, check the remote
   newtlink binary: `ssh server-b "~/.newtlab/bin/newtlink --version"`.
 
 ### Wrong Interface Names
 
-If `show interfaces status` shows different Ethernet numbering than expected:
+If `show interfaces status` shows different Ethernet numbering than the
+platform's `ports` table lists:
 
-- CiscoVS uses `sequential` → Ethernet0, Ethernet1, Ethernet2, ...
-- VPP uses `sequential` → Ethernet0, Ethernet1, Ethernet2, ...
-- Legacy VS uses `stride-4` → Ethernet0, Ethernet4, Ethernet8, ...
+- CiscoVS and VPP use contiguous naming → Ethernet0, Ethernet1, Ethernet2, ...
+- Force10-S6000 VS uses stride-4 → Ethernet0, Ethernet4, Ethernet8, ...
 
-Set the correct `vm_interface_map` in `platforms.json` for your image.
+Regenerate the platform's `ports` table with `newtron platform generate` from
+the image's `port_config.ini`/`platform.json` so it matches the running image.
 
 ### Boot Patches Failed
 

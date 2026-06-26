@@ -125,12 +125,6 @@ func TestFromSONiCPlatformJSON_Z9332f_RealFixture(t *testing.T) {
 		t.Errorf("VM fields should be zero (not derivable from SONiC platform.json); got VMImage=%q VMMemory=%d VMCPUs=%d",
 			got.VMImage, got.VMMemory, got.VMCPUs)
 	}
-	// VMInterfaceMap is the exception — the one VM field with a universal-safe
-	// default ("sequential"; see FromPortConfigINI / RCA-013), so it is set, not
-	// left zero.
-	if got.VMInterfaceMap != "sequential" {
-		t.Errorf("VMInterfaceMap: got %q, want \"sequential\" (universal-safe default)", got.VMInterfaceMap)
-	}
 	// Ports: one per interface (34), sorted by front-panel index, NIC slots
 	// 1..34. platform.json carries no per-port speed, so Speed is empty (the
 	// consumer falls back to default_speed); lanes come from the `lanes` field.

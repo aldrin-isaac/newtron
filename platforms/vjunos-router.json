@@ -42,7 +42,6 @@
   "vm_memory": 5120,
   "vm_cpus": 4,
   "vm_nic_driver": "virtio-net-pci",
-  "vm_interface_map": "linux",
   "vm_credentials": {
     "user": "root",
     "pass": "lab123"

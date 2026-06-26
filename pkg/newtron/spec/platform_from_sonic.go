@@ -18,11 +18,8 @@
 //   - Ports: one PortSpec per interface, sorted by front-panel index;
 //     NIC slots assigned 1..N by that order. Carries name and lanes
 //     (per-port speed is not in platform.json — it falls back to
-//     default_speed). The explicit form of the name → NIC mapping.
-//   - VMInterfaceMap: "sequential" — the universal-safe default (see
-//     FromPortConfigINI for why it is fixed, not inferred from the port
-//     naming). It is the one VM field with a sound default, so it is set
-//     here rather than left for the operator.
+//     default_speed). The explicit name → NIC mapping newtlab resolves
+//     topology ports against.
 //
 // What the operator provides via flags (NOT derivable from
 // platform.json): HWSKU, Description, DeviceType ("switch"),
@@ -156,9 +153,6 @@ func FromSONiCPlatformJSON(data []byte, opts SONiCImportOptions) (*PlatformSpec,
 		Breakouts:    breakouts,
 		Ports:        buildPortsFromInterfaces(raw.Interfaces),
 		Dataplane:    opts.Dataplane,
-		// Universal-safe default; not inferred from port naming (see
-		// FromPortConfigINI doc / RCA-013).
-		VMInterfaceMap: "sequential",
 	}, nil
 }
 
