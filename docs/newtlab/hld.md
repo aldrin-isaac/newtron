@@ -158,7 +158,7 @@ required — the same directory structure serves both tools.
 | File | What newtlab uses |
 |------|-------------------|
 | `topology.json` | `devices` (names, interfaces), `links` (endpoint pairs), `newtlab` section (port bases, servers) |
-| `platforms.json` | VM defaults per platform: image path, memory, CPUs, NIC driver, interface map, credentials, boot timeout, dataplane type, image release |
+| `platforms.json` | VM defaults per platform: image path, memory, CPUs, NIC driver, port inventory, credentials, boot timeout, dataplane type, image release |
 | `nodes/<device>.json` | Per-device overrides: platform selection, SSH credentials, VM resource overrides, host pinning (`vm_host`) |
 
 newtlab reads `devices` and `links` from the same `topology.json` that
@@ -213,18 +213,21 @@ a uniform system MAC across all interfaces.
 On destroy, newtlab restores the original `mgmt_ip` and removes the runtime
 fields — profiles return to their pre-deploy state.
 
-**Interface maps.** Different SONiC platforms map QEMU NIC indices to
-interface names differently. The platform's `vm_interface_map` field
-controls this mapping:
+**Port inventory.** Different SONiC platforms name and order their ports
+differently. Each platform carries an explicit `ports` inventory — a
+`name → nic_index` table generated at onboarding from the platform's port
+authority (`port_config.ini` / `platform.json`) — that newtlab resolves topology
+interfaces against:
 
-| Map | NIC 1 | NIC 2 | NIC 3 | NIC 4 | Used by |
-|-----|-------|-------|-------|-------|---------|
-| `stride-4` | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | VS (built-in default) |
-| `sequential` | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | VPP, CiscoVS |
-| `linux` | eth1 | eth2 | eth3 | eth4 | Alpine hosts |
+| Platform shape | NIC 1 | NIC 2 | NIC 3 | NIC 4 | Used by |
+|----------------|-------|-------|-------|-------|---------|
+| stride-4 names | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | Force10-S6000 VS |
+| contiguous names | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | VPP, CiscoVS |
+| linux names | eth1 | eth2 | eth3 | eth4 | Alpine hosts |
 
-NIC 0 is always the management interface (`eth0`). newtlab uses the
-interface map to determine which QEMU NIC index carries each topology link.
+NIC 0 is always the management interface (`eth0`). `ResolveNICIndex` looks up
+each topology link's interface in this inventory to find its QEMU NIC index, and
+rejects an interface the platform does not have.
 
 **Resolution order** for VM configuration (first non-empty wins):
 
@@ -552,9 +555,9 @@ Host devices follow a simpler lifecycle than switches:
   `newtron` skip them entirely.
 - **No BGP refresh.** Hosts don't run FRR; the post-provision soft-clear
   skips them.
-- **Linux interface map.** Host platforms use `"linux"` mapping where QEMU
-  NIC index N maps directly to `ethN` (NIC 0 = eth0 management, NIC 1+ =
-  data interfaces), unlike switches which use `stride-4` or `sequential`.
+- **Host interfaces.** Host devices use `ethN` naming and are coalesced into
+  shared VMs, resolving each `ethN` to a NIC slot via `NICBase` +
+  `parseLinuxEthIndex` rather than a platform `ports` inventory.
 
 Host devices connect to leaf switches via newtlink the same way switches
 connect to each other — the networking model is identical. The differences
@@ -888,17 +891,17 @@ focusing on the moments where layers interact in non-obvious ways.
 
 newtlab resolves `2node-ngdp` to `networks/2node-ngdp/`. It loads
 `topology.json` (two switches, links between them), `platforms.json`
-(CiscoVS platform: `sequential` interface map, `e1000` NIC driver, 8 GB
-memory), and both device profiles. Configuration resolution merges profile
+(CiscoVS platform: contiguous (stride-1) port inventory, `e1000` NIC driver,
+8 GB memory), and both device profiles. Configuration resolution merges profile
 overrides with platform defaults; port allocation assigns SSH, console, and
 link ports by sorted device index.
 
-**Non-obvious detail:** link allocation must resolve the interface map
-*before* building QEMU commands. The topology says `spine1:Ethernet0 ↔
-leaf1:Ethernet0`. With `sequential`, Ethernet0 is NIC index 1 (not 0 — NIC 0
-is management). The interface map determines which QEMU `-netdev socket`
-argument carries this link. A wrong mapping means traffic goes to the wrong
-port — the VMs boot fine but can't reach each other.
+**Non-obvious detail:** link allocation must resolve each interface to its NIC
+index *before* building QEMU commands. The topology says `spine1:Ethernet0 ↔
+leaf1:Ethernet0`. The platform's port inventory maps Ethernet0 to NIC index 1
+(not 0 — NIC 0 is management). That mapping determines which QEMU `-netdev
+socket` argument carries this link; a wrong mapping means traffic goes to the
+wrong port — the VMs boot fine but can't reach each other.
 
 ### Bridge Before VMs
 

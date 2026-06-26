@@ -1,5 +1,11 @@
 # RCA-013: Boot patch port naming mismatch (stride-4 vs sequential)
 
+> **Status (superseded):** the `vm_interface_map` / `PortStride` mechanism this
+> RCA centers on has been replaced by the explicit platform port inventory
+> (`PlatformSpec.Ports`) — the VPP boot-patch templates now render port names
+> from that table, not a stride formula. See
+> `docs/newtron/platform-port-model.md`. Retained for the historical root cause.
+
 **Platform**: sonic-vpp only.
 
 ## Symptom

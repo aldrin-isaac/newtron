@@ -138,7 +138,6 @@
   "vm_memory": 8192,
   "vm_cpus": 6,
   "vm_nic_driver": "e1000",
-  "vm_interface_map": "sequential",
   "vm_credentials": {
     "user": "aldrin",
     "pass": "YourPaSsWoRd"

@@ -122,7 +122,6 @@ docker restart bgp
     "vm_memory": 4096,
     "vm_cpus": 4,
     "vm_nic_driver": "virtio-net-pci",
-    "vm_interface_map": "sequential",
     "vm_cpu_features": "+sse4.2",
     "vm_credentials": {"user": "admin", "pass": "YourPaSsWoRd"},
     "vm_boot_timeout": 300,

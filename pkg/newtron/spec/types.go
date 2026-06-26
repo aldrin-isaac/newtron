@@ -67,7 +67,7 @@ type NetworkSpecFile struct {
 	// accepted on the wire and produces one PermissionGrant with an
 	// empty Where (matches every Context).
 	Permissions map[string]PermissionGrants `json:"permissions"`
-	Zones       map[string]*ZoneSpec `json:"zones"`
+	Zones       map[string]*ZoneSpec        `json:"zones"`
 
 	OverridableSpecs // Embedded — all 7 overridable spec maps
 }
@@ -217,7 +217,6 @@ type FilterRule struct {
 
 // RoutePolicy defines a BGP route policy for import/export filtering.
 // Referenced by service routing via import_policy/export_policy.
-//
 type RoutePolicy struct {
 	Description string             `json:"description,omitempty" label:"Description" tooltip:"Operator-facing description of this route policy"`
 	Rules       []*RoutePolicyRule `json:"rules" label:"Rules" tooltip:"Ordered list of rules evaluated by sequence number" item_kind:"RoutePolicyRule"`
@@ -250,7 +249,7 @@ type RoutePolicySet struct {
 // PlatformSpecFile represents the hardware platform specification file (platforms.json).
 // This defines what types of switches are supported (HWSKU, ports, speeds).
 type PlatformSpecFile struct {
-	Version   string                  `json:"version"`
+	Version   string                   `json:"version"`
 	Platforms map[string]*PlatformSpec `json:"platforms"`
 }
 
@@ -285,9 +284,8 @@ type PlatformSpec struct {
 	// Ports is the explicit per-port inventory — the device-native interface
 	// name → QEMU NIC slot mapping for every front-panel port. Generated at
 	// onboarding from the platform's port authority (SONiC port_config.ini or
-	// platform.json; see platform_from_*.go). Currently additive alongside
-	// vm_interface_map, which still drives newtlab's NIC resolution; the model
-	// that makes this table the single source of that mapping is described in
+	// platform.json; see platform_from_*.go). newtlab resolves every topology
+	// interface against it (ResolveNICIndex); see
 	// docs/newtron/platform-port-model.md.
 	Ports []PortSpec `json:"ports,omitempty" label:"Ports" tooltip:"Per-port inventory: device-native name → QEMU NIC slot, generated from the platform's port authority"`
 
@@ -296,7 +294,6 @@ type PlatformSpec struct {
 	VMMemory            int            `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Default VM memory size"`
 	VMCPUs              int            `json:"vm_cpus,omitempty" label:"VM vCPUs" tooltip:"Default VM vCPU count"`
 	VMNICDriver         string         `json:"vm_nic_driver,omitempty" label:"VM NIC Driver" tooltip:"QEMU NIC driver (e.g. \"virtio-net-pci\")"`
-	VMInterfaceMap      string         `json:"vm_interface_map,omitempty" label:"VM Interface Map" tooltip:"Superseded by the explicit ports table (docs/newtron/platform-port-model.md) — newtlab no longer reads this; retained transiently on existing platform files and removed in a follow-up."`
 	VMCPUFeatures       string         `json:"vm_cpu_features,omitempty" label:"VM CPU Features" tooltip:"QEMU CPU feature flags"`
 	VMCredentials       *VMCredentials `json:"vm_credentials,omitempty" label:"VM Credentials" tooltip:"Default SSH credentials baked into the VM image"`
 	VMBootTimeout       int            `json:"vm_boot_timeout,omitempty" label:"VM Boot Timeout (s)" tooltip:"Seconds to wait for VM to reach SSH"`
@@ -308,11 +305,11 @@ type PlatformSpec struct {
 
 // PortSpec is one front-panel port in a platform's generated port model — the
 // device-native interface name paired with the QEMU NIC slot that backs it.
-// The ordered set of PortSpecs is the explicit form of the name → NIC mapping
-// that vm_interface_map's stride schemes express as a formula; an explicit
-// table is the only form that covers non-strided naming (e.g. vJunos
-// "ge-0/0/0"). Generated, not hand-authored, for SONiC platforms (see
-// platform_from_*.go); the design is in docs/newtron/platform-port-model.md.
+// The ordered set of PortSpecs is the explicit name → NIC mapping newtlab
+// resolves topology interfaces against — the only form that covers non-strided
+// naming (e.g. vJunos "ge-0/0/0") as well as Ethernet stride layouts. Generated,
+// not hand-authored, for SONiC platforms (see platform_from_*.go); the design
+// is in docs/newtron/platform-port-model.md.
 type PortSpec struct {
 	Name     string `json:"name" label:"Port Name" tooltip:"Device-native interface name (e.g. \"Ethernet0\", \"ge-0/0/0\")"`
 	NICIndex int    `json:"nic_index" label:"NIC Index" tooltip:"QEMU data-NIC slot backing this port (1-based; NIC 0 is management)" min:"1"`
@@ -493,7 +490,7 @@ type ResolvedProfile struct {
 	DeviceName string
 	MgmtIP     string
 	LoopbackIP string
-	Zone     string
+	Zone       string
 	Platform   string
 
 	// Resolved from inheritance
@@ -501,8 +498,8 @@ type ResolvedProfile struct {
 	ClusterID        string // RR cluster ID; from profile EVPN config or defaults to loopback IP
 
 	// Derived at runtime
-	RouterID     string   // = LoopbackIP
-	VTEPSourceIP string   // = LoopbackIP
+	RouterID        string         // = LoopbackIP
+	VTEPSourceIP    string         // = LoopbackIP
 	BGPNeighbors    []string       // From profile EVPN peers → lookup loopback IPs
 	BGPNeighborASNs map[string]int // peer loopback IP → peer UnderlayASN (for eBGP overlay)
 
@@ -526,11 +523,11 @@ type ResolvedProfile struct {
 // ServiceType constants
 const (
 	ServiceTypeEVPNIRB     = "evpn-irb"     // L2+L3 overlay: requires ipvpn + macvpn
-	ServiceTypeEVPNBridged = "evpn-bridged"  // L2 overlay: requires macvpn
-	ServiceTypeEVPNRouted  = "evpn-routed"   // L3 overlay: requires ipvpn
-	ServiceTypeIRB         = "irb"           // Local L2+L3: vlan + ip at apply time
-	ServiceTypeBridged     = "bridged"       // Local L2: vlan at apply time
-	ServiceTypeRouted      = "routed"        // Local L3: ip at apply time
+	ServiceTypeEVPNBridged = "evpn-bridged" // L2 overlay: requires macvpn
+	ServiceTypeEVPNRouted  = "evpn-routed"  // L3 overlay: requires ipvpn
+	ServiceTypeIRB         = "irb"          // Local L2+L3: vlan + ip at apply time
+	ServiceTypeBridged     = "bridged"      // Local L2: vlan at apply time
+	ServiceTypeRouted      = "routed"       // Local L3: ip at apply time
 )
 
 // VRFType constants
@@ -558,7 +555,7 @@ const (
 // automated provisioning.
 type TopologySpecFile struct {
 	Version     string                     `json:"version"`
-	Platform    string                     `json:"platform,omitempty"`    // default platform for all devices
+	Platform    string                     `json:"platform,omitempty"` // default platform for all devices
 	Description string                     `json:"description,omitempty"`
 	Devices     map[string]*TopologyDevice `json:"devices"`
 	Links       []*TopologyLink            `json:"links,omitempty"`
@@ -588,8 +585,8 @@ type NewtLabConfig struct {
 // Switch devices have Steps (provisioning intent) and Ports (physical port config).
 // Host devices are empty entries — detection is via platform profile, not a type field.
 type TopologyDevice struct {
-	Steps []TopologyStep                `json:"steps,omitempty"`
-	Ports map[string]map[string]string  `json:"ports,omitempty"`
+	Steps []TopologyStep               `json:"steps,omitempty"`
+	Ports map[string]map[string]string `json:"ports,omitempty"`
 }
 
 // TopologyStep is a single provisioning operation in the topology.
@@ -624,4 +621,3 @@ func (t *TopologySpecFile) DeviceNames() []string {
 	sort.Strings(names)
 	return names
 }
-

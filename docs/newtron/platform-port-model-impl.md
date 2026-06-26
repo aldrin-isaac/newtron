@@ -152,16 +152,44 @@ from the note as if the stride code did not exist, then reuse what survives.
 
 ## Phase 3 — Remove the old model (greenfield cleanup, DPN §40)
 
-- [ ] Delete `VMInterfaceMap` (`types.go:290`), `NodeConfig.InterfaceMap` + the
-      `"sequential"` fallback (`node.go`), the `PortStride` field
-      (`patch.go:54`), and any `custom`-scheme remnants.
-- [ ] Regenerate the 5 platform files **without** `vm_interface_map`. —
-      `platforms/*.json`
-- [ ] Drop removed-field assertions. — `schema_meta_test.go`,
-      `newtlab_test.go`, `patch_test.go`
-- [ ] **Verify:** `go test ./... -count=1`; `go vet ./...`; schema no longer
-      lists `vm_interface_map` (Phase 0 heads-up already delivered).
-- [ ] **Conformance audit (ai-instructions §9).**
+Note: `NodeConfig.InterfaceMap`, `PortStride`, the `custom` branch, and `mul`
+were already removed in Phase 2 (when their consumers switched to the table), so
+Phase 3 is the narrower removal of the now-orphaned `VMInterfaceMap` field + its
+data. Because Phase 2 left `vm_interface_map` **unread by any code**, this
+deletion is functionally inert — it cannot regress anything (verified: zero
+`.VMInterfaceMap` reads repo-wide). That is also why it proceeds without the
+blocked VPP cold-deploy: there is no code path the field could still affect.
+
+- [x] Delete `VMInterfaceMap` from `PlatformSpec` (`types.go`); removed the
+      generators' assignment + doc bullets (`platform_from_*.go`); refreshed the
+      two now-stale `Ports`/`PortSpec` comments. — `pkg/newtron/spec/`
+- [x] Removed `vm_interface_map` from all 5 platform files. — `platforms/*.json`
+- [x] Dropped the `VMInterfaceMap == "sequential"` assertions in the generator
+      tests. — `platform_from_port_config_ini_test.go`, `platform_from_sonic_test.go`
+      (`schema_meta_test.go` needed no change — reflection-derived.)
+- [x] **Docs swept** (Documentation Freshness Protocol): rewrote `newtlab/lld.md`
+      §5.3 + struct/field/resolution tables to the ports-inventory model;
+      `newtlab/hld.md` (Interface-maps section, host interfaces, CiscoVS detail,
+      platforms.json line); `newtlab/howto.md` (examples, field tables, the
+      Interface-Maps → Port-inventory section, troubleshooting); `newtron/lld.md`
+      PlatformSpec listing; the two `docs/platforms/*.md` examples; a superseded
+      banner on `rca/013`. Left as historical/unrelated: `rca/014`, `rca/040`, and
+      the DESIGN_PRINCIPLES "interface map" (a different concept — the newtron
+      Node's state).
+- [x] **Verify:** `go test ./... -count=1` green; `go vet ./...` clean; fresh
+      server confirms `GET /schema/PlatformSpec` no longer lists `vm_interface_map`
+      and platform data still serves `ports`. Repo-wide grep: no
+      `vm_interface_map`/`VMInterfaceMap`/`PortStride`/`parseEthernetIndex` in code
+      (only the design/tracker docs that describe the migration + the historical RCAs).
+- [x] **Conformance audit (ai-instructions §9).** §40/§5 (grep-verified zero code
+      refs to the removed field/symbols; no shim/alias); §11 (refreshed the two
+      stale type comments; design-note status banner corrected to "implemented";
+      lld/hld/howto describe current behavior; RCA-013 marked superseded not
+      rewritten); §13 (`ports` named consistently across spec/lld/hld/howto);
+      §27 (image `port_config.ini` remains the port authority; `ports` is its
+      generated projection); editing-guidelines §13 (lld §5.3 fully rewritten, not
+      patched) + Freshness Protocol (full-repo sweep after targeted fixes). No
+      dimension omitted.
 
 ## Phase 4 — DEFERRED
 

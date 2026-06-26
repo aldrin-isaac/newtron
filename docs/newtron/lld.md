@@ -455,11 +455,11 @@ type PlatformSpec struct {
     PortCount           int           `json:"port_count"`
     DefaultSpeed        string        `json:"default_speed"`
     Breakouts           []string      `json:"breakouts,omitempty"`
+    Ports               []PortSpec    `json:"ports,omitempty"` // name → nic_index inventory (newtlab/lld.md §5.3)
     VMImage             string        `json:"vm_image,omitempty"`
     VMMemory            string        `json:"vm_memory,omitempty"`
     VMCPUs              int           `json:"vm_cpus,omitempty"`
     VMNICDriver         string        `json:"vm_nic_driver,omitempty"`
-    VMInterfaceMap      string        `json:"vm_interface_map,omitempty"`
     VMCPUFeatures       string        `json:"vm_cpu_features,omitempty"`
     VMCredentials       *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout       int           `json:"vm_boot_timeout,omitempty"`

@@ -1,10 +1,12 @@
 # Platform Port Model
 
-**Status: design proposal — not implemented.** This note describes a change to
-`PlatformSpec` and newtlab's NIC allocation. It does not yet exist in code.
-Where it says "today," it describes current behavior with file references so the
-gap is auditable; where it says "proposed," it describes the target. CLAUDE.md's
-doc index is not updated until the change lands.
+**Status: implemented** (phases 1–3 — PRs #306, #307, and this change). This note
+is the design rationale: the *why* behind the explicit `PlatformSpec.Ports`
+inventory that replaced `vm_interface_map`. Its "today" passages describe the
+*pre-change* baseline (the stride schemes) and are retained as the historical
+contrast that motivated the design — they are **not** current behavior. For how
+NIC resolution works now, see `docs/newtlab/lld.md` §5.3; the phase-by-phase
+record is in `platform-port-model-impl.md`.
 
 ## 1. Purpose
 
