@@ -50,28 +50,58 @@ from the note as if the stride code did not exist, then reuse what survives.
 
 ## Phase 1 — Storage + producers (additive, behavior-preserving)
 
-- [ ] Add `PortSpec` struct (`name`, `nic_index`, `speed,omitempty`,
+- [x] Add `PortSpec` struct (`name`, `nic_index`, `speed,omitempty`,
       `lanes,omitempty`) + `Ports []PortSpec` field on `PlatformSpec` — keep
-      `VMInterfaceMap`. — `pkg/newtron/spec/types.go` (near :290)
-- [ ] `FromPortConfigINI`: emit `Ports` with `nic_index` by data-row order. —
-      `pkg/newtron/spec/platform_from_port_config_ini.go:100`
-- [ ] `FromSONiCPlatformJSON`: emit `Ports` ordered by the interface index. —
-      `pkg/newtron/spec/platform_from_sonic.go:142`
-- [ ] Regenerate `Force10-S6000_vs`, `Force10-S6000_vpp`,
-      `cisco-p200-32x100-vs` from `port_config.ini`; hand-author `alpine-host`,
-      `vjunos-router` tables. Files now carry **both** `vm_interface_map` and
-      `ports`. — `platforms/*.json`
-- [ ] Assert `Ports` contents (names, nic_index, speed) in generator tests. —
-      `platform_from_port_config_ini_test.go`, `platform_from_sonic_test.go`
-- [ ] Update PlatformSpec field-set assertions for the new field. —
-      `pkg/newtron/spec/schema_meta_test.go`
-- [ ] **Verify:** `go test ./... -count=1`; `go vet ./...`; fresh-load registers
-      all platforms; confirm newtlab behavior unchanged (still reads
-      `VMInterfaceMap`).
-- [ ] **Conformance audit (ai-instructions §9).**
+      `VMInterfaceMap`. — `types.go:312` (PortSpec), `:284` (Ports field)
+- [x] `FromPortConfigINI`: emit `Ports` with `nic_index` by data-row order;
+      per-row speed + lanes. Generalized the header finder to `findColumns`
+      (name/speed/lanes). — `platform_from_port_config_ini.go`
+- [x] `FromSONiCPlatformJSON`: emit `Ports` sorted by front-panel index
+      (`sonicInterface` now reads `index`/`lanes`). — `platform_from_sonic.go`
+- [x] Populate `Force10-S6000_vs`, `Force10-S6000_vpp`, `cisco-p200-32x100-vs`
+      with `ports` (both fields now present). — `platforms/*.json`
+      **Deviation (documented):** no in-repo `port_config.ini` exists for these
+      HWSKUs, so their tables are **reconstructed from the known stride
+      convention** (Force10-S6000 stride-4 `Ethernet0,4,…,124`; cisco-p200
+      stride-1 `Ethernet0..31`), `nic_index` by order, `speed` omitted (falls
+      back to `default_speed`), `lanes` omitted (no authoritative source). The
+      generators themselves are proven against the testdata fixtures.
+- [x] Assert `Ports` contents (names, nic_index, speed, lanes — hand-verified
+      first port) in generator tests. — `platform_from_port_config_ini_test.go`,
+      `platform_from_sonic_test.go`
+- [x] PlatformSpec schema: reflection auto-surfaces `ports` (verified live —
+      `type:array, item_kind:PortSpec`); `schema_meta_test.go` needed no change.
+- [x] **Verify:** `go test ./... -count=1` green; `go vet ./...` clean; fresh
+      server returns `ports` on `GET …/platforms/{name}` and lists the field on
+      `GET /schema/PlatformSpec`; newtlab untouched (still reads `VMInterfaceMap`).
+- [x] **Conformance audit (ai-instructions §9).** Dimensions checked: §18
+      (design from note — PortSpec matches the note's schema); §11/editing-§11
+      (honest status comment — "additive alongside vm_interface_map"); DPN §40
+      (transient dual-field is staged migration, not a shim — vm_interface_map
+      still drives behavior); DPN §27 (Ports populated by the owning spec
+      package); §13 (`nic_index` matches newtlab `NICIndex`/`ResolveNICIndex`);
+      §5 (clean rename — no dangling `findSpeedColumnIndex`); §3 (every new
+      helper justified); §16 (specific-value, hand-verified assertions);
+      Regression (newtlab unchanged, full suite green). No dimension omitted.
+
+> **Deviation from the original plan:** host-platform tables (`alpine-host`,
+> `vjunos-router`) were moved to **Phase 2**. Rationale: the SONiC switch tables
+> are pure projections of a known stride convention (zero behavioral decision),
+> but the host "linux"-scheme → bounded-table conversion is a *semantic* choice
+> (port budget; the `eth0`-in-links subtlety) entangled with Phase 2's
+> validation behavior and cold-deploy gate. It belongs with the consumer change
+> that exercises it, not the additive storage phase. Observed today: host eth
+> usage maxes at `eth2`; no topology uses `ge-/xe-` naming (vJunos wires
+> `eth1/eth2` via the linux scheme).
 
 ## Phase 2 — Consumers switch to the table (behavior-preserving)
 
+- [ ] **Author host-platform tables** (moved from Phase 1): `alpine-host`,
+      `vjunos-router` get `ports` sized to their NIC budget (`eth1..ethN` →
+      `nic 1..N`; vjunos already declares `port_count: 8`; give `alpine-host` a
+      `port_count` + matching table). Budget must cover observed usage (≤ `eth2`
+      today) with headroom. Validated by the cold-deploy gate below. —
+      `platforms/alpine-host.json`, `platforms/vjunos-router.json`
 - [ ] `ResolveNICIndex` → table lookup over the platform's `Ports`; delete
       `parseEthernetIndex` + the dead `custom` branch; **keep**
       `parseLinuxEthIndex`. — `pkg/newtlab/iface_map.go`

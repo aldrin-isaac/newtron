@@ -15,6 +15,10 @@
 //     the speed each port runs at without a breakout split)
 //   - Breakouts: sorted union of every breakout_modes key across
 //     every interface
+//   - Ports: one PortSpec per interface, sorted by front-panel index;
+//     NIC slots assigned 1..N by that order. Carries name and lanes
+//     (per-port speed is not in platform.json — it falls back to
+//     default_speed). The explicit form of the name → NIC mapping.
 //   - VMInterfaceMap: "sequential" — the universal-safe default (see
 //     FromPortConfigINI for why it is fixed, not inferred from the port
 //     naming). It is the one VM field with a sound default, so it is set
@@ -42,6 +46,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // ErrEmptyInterfaces is returned by FromSONiCPlatformJSON when the
@@ -64,11 +69,14 @@ type sonicPlatformFile struct {
 	Interfaces map[string]sonicInterface `json:"interfaces"`
 }
 
-// sonicInterface is the subset of each port entry the translator
-// reads. lanes and index are deliberately ignored — newtron
-// PlatformSpec doesn't carry per-lane front-panel metadata
-// (filed-out under §non-goals in #185).
+// sonicInterface is the subset of each port entry the translator reads.
+// Index and Lanes feed the per-port inventory (Ports): Index is the
+// front-panel port number, repeated once per lane in the file (e.g.
+// "1,1,1,1") so its leading value is taken; Lanes lists the serdes lanes.
+// BreakoutModes feeds the headline-speed and breakouts derivations.
 type sonicInterface struct {
+	Index         string                     `json:"index"`
+	Lanes         string                     `json:"lanes"`
 	BreakoutModes map[string]json.RawMessage `json:"breakout_modes"`
 }
 
@@ -146,11 +154,61 @@ func FromSONiCPlatformJSON(data []byte, opts SONiCImportOptions) (*PlatformSpec,
 		PortCount:    len(raw.Interfaces),
 		DefaultSpeed: defaultSpeed,
 		Breakouts:    breakouts,
+		Ports:        buildPortsFromInterfaces(raw.Interfaces),
 		Dataplane:    opts.Dataplane,
 		// Universal-safe default; not inferred from port naming (see
 		// FromPortConfigINI doc / RCA-013).
 		VMInterfaceMap: "sequential",
 	}, nil
+}
+
+// buildPortsFromInterfaces produces the explicit per-port inventory from a
+// platform.json interfaces map. The map has no inherent order, so ports are
+// sorted by front-panel index (the leading value of the `index` field), then
+// by name as a stable tiebreak. NIC slots are assigned by that sorted order
+// (1..N; NIC 0 is management). Lanes come from the `lanes` field; platform.json
+// carries no per-port speed (it lives in breakout_modes / the headline), so
+// PortSpec.Speed is left empty and the consumer falls back to default_speed.
+func buildPortsFromInterfaces(interfaces map[string]sonicInterface) []PortSpec {
+	type entry struct {
+		name  string
+		index int
+		lanes []int
+	}
+	entries := make([]entry, 0, len(interfaces))
+	for name, iface := range interfaces {
+		entries = append(entries, entry{
+			name:  name,
+			index: leadingInt(iface.Index),
+			lanes: parseLanes(iface.Lanes),
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].index != entries[j].index {
+			return entries[i].index < entries[j].index
+		}
+		return entries[i].name < entries[j].name
+	})
+	ports := make([]PortSpec, 0, len(entries))
+	for i, e := range entries {
+		ports = append(ports, PortSpec{Name: e.name, NICIndex: i + 1, Lanes: e.lanes})
+	}
+	return ports
+}
+
+// leadingInt returns the first comma-separated integer in s (e.g. "1,1,1,1" →
+// 1), or 0 when s has no parseable leading value. SONiC platform.json repeats
+// the front-panel index once per lane; the leading value is the port number.
+func leadingInt(s string) int {
+	first := s
+	if i := strings.IndexByte(s, ','); i >= 0 {
+		first = s[:i]
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(first))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // modeRE captures the speed component from a SONiC breakout-mode

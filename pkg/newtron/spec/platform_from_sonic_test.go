@@ -131,6 +131,29 @@ func TestFromSONiCPlatformJSON_Z9332f_RealFixture(t *testing.T) {
 	if got.VMInterfaceMap != "sequential" {
 		t.Errorf("VMInterfaceMap: got %q, want \"sequential\" (universal-safe default)", got.VMInterfaceMap)
 	}
+	// Ports: one per interface (34), sorted by front-panel index, NIC slots
+	// 1..34. platform.json carries no per-port speed, so Speed is empty (the
+	// consumer falls back to default_speed); lanes come from the `lanes` field.
+	if len(got.Ports) != 34 {
+		t.Fatalf("len(Ports): got %d, want 34", len(got.Ports))
+	}
+	for i, p := range got.Ports {
+		if p.NICIndex != i+1 {
+			t.Errorf("Ports[%d].NICIndex: got %d, want %d", i, p.NICIndex, i+1)
+		}
+		if p.Speed != "" {
+			t.Errorf("Ports[%d] (%s).Speed: got %q, want empty (platform.json has no per-port speed)", i, p.Name, p.Speed)
+		}
+	}
+	// Lowest front-panel index (Ethernet0, index "1,1,1,…") sorts to NIC 1;
+	// Ethernet8 (index 2) follows. Hand-verified from the fixture.
+	wantFirst := PortSpec{Name: "Ethernet0", NICIndex: 1, Lanes: []int{33, 34, 35, 36, 37, 38, 39, 40}}
+	if !reflect.DeepEqual(got.Ports[0], wantFirst) {
+		t.Errorf("Ports[0]: got %+v, want %+v", got.Ports[0], wantFirst)
+	}
+	if got.Ports[1].Name != "Ethernet8" {
+		t.Errorf("Ports[1].Name: got %q, want Ethernet8 (front-panel index 2)", got.Ports[1].Name)
+	}
 }
 
 // TestFromSONiCPlatformJSON_Arista7060_RealFixture covers a
