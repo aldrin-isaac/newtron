@@ -75,7 +75,7 @@ scenario overrides this default for every call that scenario makes.
 |------|---------|---------|
 | `--listen` | `127.0.0.1:18080` | Bind address. Non-loopback values trigger a startup warning. |
 | `--idle-timeout` | `5m` | newtron SSH connection idle timeout. |
-| `--networks-base` | `networks` | Root of the network tree. At boot, every `<base>/<name>/topology.json` is auto-registered as a network with `id=<name>`. Also resolves the on-disk dir for `POST /newtron/v1/networks {id}` (`<base>/<id>`), drives newtrun's suite discovery (`<base>/<name>/suites/<suite>/`), and newtlab's lab-spec resolution. One flag, four roles. |
+| `--networks-base` | `networks` | Root of the network tree. At boot, every `<base>/<name>/topology.json` is auto-registered as a network with `id=<name>`. `network.json` is optional: a directory with only a `topology.json` registers as a **lab-only** network (empty spec — newtlab deploys the VMs while an external system, e.g. netconf.pl for vJunos, owns device config). Also resolves the on-disk dir for `POST /newtron/v1/networks {id}` (`<base>/<id>`), drives newtrun's suite discovery (`<base>/<name>/suites/<suite>/`), and newtlab's lab-spec resolution. One flag, four roles. |
 
 ### Identity (auth-design.md §L1-L2c)
 
