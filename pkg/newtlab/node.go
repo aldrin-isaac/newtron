@@ -17,7 +17,7 @@ type NodeConfig struct {
 	Memory       int    // resolved: profile > platform > 4096
 	CPUs         int    // resolved: profile > platform > 2
 	NICDriver    string // resolved: platform > "e1000"
-	InterfaceMap string // resolved: platform > "stride-4"
+	InterfaceMap string // resolved: platform > "sequential"
 	CPUFeatures  string // resolved: platform > ""
 	SSHUser      string // resolved: profile ssh_user > "admin"
 	SSHPass      string // resolved: profile ssh_pass > platform credentials pass
@@ -97,11 +97,14 @@ func ResolveNodeConfig(
 		nc.NICDriver = "e1000"
 	}
 
-	// InterfaceMap: platform > "stride-4"
+	// InterfaceMap: platform > "sequential". "sequential" is the universal-safe
+	// default — it orders QEMU NICs by Ethernet index for any port naming (see
+	// newtlab/lld.md §5.3); it matches what the platform generators emit, so an
+	// unset map and a generated platform behave identically.
 	if platform != nil && platform.VMInterfaceMap != "" {
 		nc.InterfaceMap = platform.VMInterfaceMap
 	} else {
-		nc.InterfaceMap = "stride-4"
+		nc.InterfaceMap = "sequential"
 	}
 
 	// CPUFeatures: platform > ""

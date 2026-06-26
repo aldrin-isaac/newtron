@@ -229,8 +229,8 @@ func TestResolveNodeConfig_BuiltInDefaults(t *testing.T) {
 	if nc.NICDriver != "e1000" {
 		t.Errorf("NICDriver = %q, want e1000 (default)", nc.NICDriver)
 	}
-	if nc.InterfaceMap != "stride-4" {
-		t.Errorf("InterfaceMap = %q, want stride-4 (default)", nc.InterfaceMap)
+	if nc.InterfaceMap != "sequential" {
+		t.Errorf("InterfaceMap = %q, want sequential (default)", nc.InterfaceMap)
 	}
 	if nc.BootTimeout != 180 {
 		t.Errorf("BootTimeout = %d, want 180 (default)", nc.BootTimeout)

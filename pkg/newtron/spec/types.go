@@ -282,7 +282,7 @@ type PlatformSpec struct {
 	VMMemory            int            `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Default VM memory size"`
 	VMCPUs              int            `json:"vm_cpus,omitempty" label:"VM vCPUs" tooltip:"Default VM vCPU count"`
 	VMNICDriver         string         `json:"vm_nic_driver,omitempty" label:"VM NIC Driver" tooltip:"QEMU NIC driver (e.g. \"virtio-net-pci\")"`
-	VMInterfaceMap      string         `json:"vm_interface_map,omitempty" label:"VM Interface Map" tooltip:"How QEMU NICs map to data ports"`
+	VMInterfaceMap      string         `json:"vm_interface_map,omitempty" label:"VM Interface Map" tooltip:"SONiC interface name → QEMU NIC ordering scheme: sequential (universal default — orders ports by Ethernet index), stride-4 (validating, for stride-4-named platforms), linux, or custom. Also sets the VPP boot-patch port-naming stride (RCA-013)."`
 	VMCPUFeatures       string         `json:"vm_cpu_features,omitempty" label:"VM CPU Features" tooltip:"QEMU CPU feature flags"`
 	VMCredentials       *VMCredentials `json:"vm_credentials,omitempty" label:"VM Credentials" tooltip:"Default SSH credentials baked into the VM image"`
 	VMBootTimeout       int            `json:"vm_boot_timeout,omitempty" label:"VM Boot Timeout (s)" tooltip:"Seconds to wait for VM to reach SSH"`

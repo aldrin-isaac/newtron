@@ -215,6 +215,13 @@ func TestFromPortConfigINI_RealFixtures(t *testing.T) {
 			if len(got.Breakouts) != 0 {
 				t.Errorf("Breakouts: got %v, want empty (port_config.ini does not carry breakout modes)", got.Breakouts)
 			}
+			// vm_interface_map is a fixed universal-safe default — "sequential",
+			// never inferred from the port-name stride (deployment property; see
+			// FromPortConfigINI doc / RCA-013). A non-empty map also means a
+			// generated platform doesn't trip ResolveNICIndex's empty-map error.
+			if got.VMInterfaceMap != "sequential" {
+				t.Errorf("VMInterfaceMap: got %q, want \"sequential\" (universal-safe default)", got.VMInterfaceMap)
+			}
 		})
 	}
 }
