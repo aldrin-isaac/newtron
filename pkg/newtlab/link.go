@@ -126,15 +126,15 @@ func AllocateLinks(
 		}
 
 		if !aResolved {
-			aNIC, err = ResolveNICIndex(nodeA.InterfaceMap, aIface, nil)
+			aNIC, err = ResolveNICIndex(nodeA.Ports, aIface)
 			if err != nil {
-				return nil, fmt.Errorf("newtlab: allocate links: link %d A: %w", i, err)
+				return nil, fmt.Errorf("newtlab: allocate links: link %d A (device %q, platform %q): %w", i, aDevice, nodeA.Platform, err)
 			}
 		}
 		if !zResolved {
-			zNIC, err = ResolveNICIndex(nodeZ.InterfaceMap, zIface, nil)
+			zNIC, err = ResolveNICIndex(nodeZ.Ports, zIface)
 			if err != nil {
-				return nil, fmt.Errorf("newtlab: allocate links: link %d Z: %w", i, err)
+				return nil, fmt.Errorf("newtlab: allocate links: link %d Z (device %q, platform %q): %w", i, zDevice, nodeZ.Platform, err)
 			}
 		}
 

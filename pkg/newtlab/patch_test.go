@@ -133,12 +133,19 @@ func TestBuildPatchVars(t *testing.T) {
 		DefaultSpeed:   "25000",
 		Dataplane:      "vpp",
 		VMImageRelease: "202405",
+		Ports: []spec.PortSpec{
+			{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3},
+		},
 	}
 
 	vars := buildPatchVars(node, platform)
 
 	if vars.NumPorts != 2 {
 		t.Errorf("NumPorts = %d, want 2", vars.NumPorts)
+	}
+	// Ports is truncated to the node's wired data NICs (2), in slot order.
+	if len(vars.Ports) != 2 || vars.Ports[0].Name != "Ethernet0" || vars.Ports[1].Name != "Ethernet1" {
+		t.Errorf("Ports = %+v, want first 2 of the inventory (Ethernet0, Ethernet1)", vars.Ports)
 	}
 	if len(vars.PCIAddrs) != 2 {
 		t.Errorf("PCIAddrs len = %d, want 2", len(vars.PCIAddrs))
@@ -161,12 +168,14 @@ func TestBuildPatchVars(t *testing.T) {
 }
 
 func TestRenderTemplate_PortConfig(t *testing.T) {
+	// Real VPP synthesis is stride-1 (the boot patch renumbers ports), so the
+	// inventory drives contiguous Ethernet0,1,2 names; lanes mirror the index.
 	vars := &PatchVars{
-		NumPorts:   2,
-		PCIAddrs:   []string{"0000:00:03.0", "0000:00:04.0"},
-		PortStride: 4,
-		HWSkuDir:   "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000",
-		PortSpeed:  25000,
+		NumPorts:  2,
+		PCIAddrs:  []string{"0000:00:03.0", "0000:00:04.0"},
+		Ports:     []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}},
+		HWSkuDir:  "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000",
+		PortSpeed: 25000,
 	}
 
 	content, err := renderTemplate("port_config.ini.tmpl", "patches/vpp/always", vars)
@@ -179,12 +188,12 @@ func TestRenderTemplate_PortConfig(t *testing.T) {
 		t.Error("missing header line")
 	}
 
-	// Should contain port entries
+	// name  lanes(=index)  alias(=name)  index  speed
 	if !strings.Contains(content, "Ethernet0  0  Ethernet0  0  25000") {
 		t.Errorf("missing Ethernet0 entry, got:\n%s", content)
 	}
-	if !strings.Contains(content, "Ethernet4  4  Ethernet4  1  25000") {
-		t.Errorf("missing Ethernet4 entry, got:\n%s", content)
+	if !strings.Contains(content, "Ethernet1  1  Ethernet1  1  25000") {
+		t.Errorf("missing Ethernet1 entry, got:\n%s", content)
 	}
 }
 
@@ -218,9 +227,9 @@ func TestRenderTemplate_SyncdVPPEnv(t *testing.T) {
 
 func TestRenderTemplate_IFMap(t *testing.T) {
 	vars := &PatchVars{
-		NumPorts:   3,
-		PCIAddrs:   []string{"0000:00:03.0", "0000:00:04.0", "0000:00:05.0"},
-		PortStride: 4,
+		NumPorts: 3,
+		PCIAddrs: []string{"0000:00:03.0", "0000:00:04.0", "0000:00:05.0"},
+		Ports:    []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3}},
 	}
 
 	content, err := renderTemplate("sonic_vpp_ifmap.ini.tmpl", "patches/vpp/always", vars)
@@ -231,20 +240,20 @@ func TestRenderTemplate_IFMap(t *testing.T) {
 	if !strings.Contains(content, "Ethernet0 bobm0") {
 		t.Errorf("missing Ethernet0 mapping, got:\n%s", content)
 	}
-	if !strings.Contains(content, "Ethernet4 bobm1") {
-		t.Errorf("missing Ethernet4 mapping, got:\n%s", content)
+	if !strings.Contains(content, "Ethernet1 bobm1") {
+		t.Errorf("missing Ethernet1 mapping, got:\n%s", content)
 	}
-	if !strings.Contains(content, "Ethernet8 bobm2") {
-		t.Errorf("missing Ethernet8 mapping, got:\n%s", content)
+	if !strings.Contains(content, "Ethernet2 bobm2") {
+		t.Errorf("missing Ethernet2 mapping, got:\n%s", content)
 	}
 }
 
 func TestRenderTemplate_PortEntries(t *testing.T) {
 	vars := &PatchVars{
-		NumPorts:   2,
-		PCIAddrs:   []string{"0000:00:03.0", "0000:00:04.0"},
-		PortStride: 4,
-		PortSpeed:  25000,
+		NumPorts:  2,
+		PCIAddrs:  []string{"0000:00:03.0", "0000:00:04.0"},
+		Ports:     []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}},
+		PortSpeed: 25000,
 	}
 
 	content, err := renderTemplate("port_entries.tmpl", "patches/vpp/always", vars)
@@ -258,8 +267,8 @@ func TestRenderTemplate_PortEntries(t *testing.T) {
 	if !strings.Contains(content, `HSET "PORT|Ethernet0" admin_status up alias Ethernet0 index 0 lanes 0 speed 25000`) {
 		t.Errorf("missing Ethernet0 redis entry, got:\n%s", content)
 	}
-	if !strings.Contains(content, `HSET "PORT|Ethernet4" admin_status up alias Ethernet4 index 1 lanes 4 speed 25000`) {
-		t.Errorf("missing Ethernet4 redis entry, got:\n%s", content)
+	if !strings.Contains(content, `HSET "PORT|Ethernet1" admin_status up alias Ethernet1 index 1 lanes 1 speed 25000`) {
+		t.Errorf("missing Ethernet1 redis entry, got:\n%s", content)
 	}
 }
 

@@ -96,32 +96,59 @@ from the note as if the stride code did not exist, then reuse what survives.
 
 ## Phase 2 — Consumers switch to the table (behavior-preserving)
 
-- [ ] **Author host-platform tables** (moved from Phase 1): `alpine-host`,
-      `vjunos-router` get `ports` sized to their NIC budget (`eth1..ethN` →
-      `nic 1..N`; vjunos already declares `port_count: 8`; give `alpine-host` a
-      `port_count` + matching table). Budget must cover observed usage (≤ `eth2`
-      today) with headroom. Validated by the cold-deploy gate below. —
-      `platforms/alpine-host.json`, `platforms/vjunos-router.json`
-- [ ] `ResolveNICIndex` → table lookup over the platform's `Ports`; delete
-      `parseEthernetIndex` + the dead `custom` branch; **keep**
-      `parseLinuxEthIndex`. — `pkg/newtlab/iface_map.go`
-- [ ] `AllocateLinks`: resolve via lookup **and validate** the port exists in the
-      platform's table — clear deploy-time error
-      (`port "Ethernet200" not on platform "X" (32 ports: …)`). —
+- [x] **Author host-platform tables** (refined): only `vjunos-router` needs one
+      (`eth1..eth8` → `nic 1..8`; `device_type:"switch"` → not coalesced → hits
+      the table). **`alpine-host` needs none** — `coalesceHostVMs` coalesces all
+      `device_type:"host"` nodes, which resolve via `NICBase`+`parseLinuxEthIndex`
+      and never reach `ResolveNICIndex` (this dissolves the `eth0`-in-links
+      concern: those are the coalesced path). — `platforms/vjunos-router.json`
+- [x] `ResolveNICIndex(ports, name)` → table lookup; deleted `parseEthernetIndex`
+      + the dead `custom` branch; kept `parseLinuxEthIndex`; added
+      `samplePortNames` for actionable errors. — `pkg/newtlab/iface_map.go`
+- [x] `AllocateLinks`: resolves via lookup **and validates** — a name absent from
+      the inventory errors with device+platform+inventory context. —
       `pkg/newtlab/link.go`
-- [ ] Node carries the platform's `Ports` instead of the `InterfaceMap` scheme. —
-      `pkg/newtlab/node.go`, `pkg/newtlab/newtlab.go:272`
-- [ ] `buildPatchVars` + the three VPP templates render port names from the
-      `Ports` table (first `dataNICs` by nic_index), retiring `PortStride`. —
-      `pkg/newtlab/patch.go:271`, `pkg/newtlab/patches/vpp/always/*.tmpl`
-- [ ] Rewrite NIC-resolution tests to table lookup; add an out-of-range port
-      validation test. — `pkg/newtlab/newtlab_test.go`, `pkg/newtlab/patch_test.go`
-- [ ] **Verify (unit):** `go test ./... -count=1`; `go vet ./...`.
-- [ ] **Verify (cold-deploy, CLAUDE.md §42 — regression-critical):** freshly
-      deploy `2node-vs-primitive` (VS NIC mapping) **and** a VPP lab (synthesized
-      `port_config.ini`); both green. `vm_interface_map` is now code-unused but
-      still present as a safety reference during validation.
-- [ ] **Conformance audit (ai-instructions §9).**
+- [x] `NodeConfig.InterfaceMap` (scheme string) → `NodeConfig.Ports`
+      (`[]spec.PortSpec`), set from `platform.Ports`. — `node.go`, `newtlab.go:272`
+- [x] `buildPatchVars` + the three VPP templates render port names from the
+      `Ports` table (first `dataNICs`), retiring `PortStride`; removed the now-dead
+      `mul` template func. **Fixed a Phase-1 error:** `Force10-S6000_vpp`'s table
+      was stride-4 (copied from `_vs`); the VPP boot patch renames to stride-1, so
+      corrected to `Ethernet0..31`. — `patch.go`, `patches/vpp/always/*.tmpl`,
+      `platforms/Force10-S6000_vpp.json`
+- [x] Rewrote NIC-resolution tests to table lookup + a validation test (absent +
+      empty inventory); rewrote the three VPP render tests to stride-1 (byte-exact,
+      matching real VPP). — `newtlab_test.go`, `patch_test.go`
+- [x] Made `VMInterfaceMap`'s now-stale tooltip honest (superseded; pending
+      removal in Phase 3). — `types.go`
+- [x] **Verify (unit):** `go test ./... -count=1` green; `go vet ./...` clean.
+      Static: all **66** switch link-endpoints across every topology resolve
+      against the new tables (30 host endpoints correctly skipped — coalesced).
+- [~] **Verify (cold-deploy, §42):** **VS GREEN** — cold-deployed `2node-vs`
+      (9 nodes, table-driven link allocation succeeded; 32 stride-4 ports;
+      `Ethernet0` reached `oper=up`/kernel `carrier=1` after admin-up on both
+      peered switches → NIC mapping correct end-to-end). **VPP: blocked** — the
+      only VPP network (`4node-ngdp`) fails profile validation on a **pre-existing**
+      gap (no `network.json` → `zone "amer"` undefined), unrelated to this change.
+      VPP is otherwise covered: byte-exact render unit tests, served stride-1
+      table, and static port resolution. A full VPP cold-deploy needs
+      `4node-ngdp`'s spec completed first (separate work).
+- [x] **Conformance audit (ai-instructions §9).** Dimensions checked: §18 (table
+      lookup realizes the note's model); §11 (comments + the `VMInterfaceMap`
+      tooltip made honest); DPN §40/§5 (grep-verified zero refs to
+      `parseEthernetIndex`/`PortStride`/`InterfaceMap`/`mul` — clean deletion, no
+      aliases); DPN §27 (`NodeConfig.Ports` sourced from `platform.Ports`); §13
+      (`NICIndex` matches `NICConfig.Index`/`PortSpec.NICIndex`; `PatchVars.Ports`
+      reuses `spec.PortSpec`); §3 (`samplePortNames` justified by error
+      actionability); §16 (specific-value + error-phrase + byte-exact +
+      real-hardware carrier tests); Regression (full suite green, 66/66 static
+      resolution, VS cold-deploy + carrier green, order-preservation reasoning).
+      `parseLinuxEthIndex` correctly retained (coalesced path). No dimension omitted.
+
+> **Phase 3 gate:** the VS cold-deploy is green; the VPP cold-deploy is blocked
+> by an unrelated pre-existing gap. Before Phase 3 deletes `vm_interface_map`,
+> either complete `4node-ngdp`'s spec and run the VPP cold-deploy, or accept the
+> VPP unit+static coverage as sufficient — an explicit decision, not a silent skip.
 
 ## Phase 3 — Remove the old model (greenfield cleanup, DPN §40)
 

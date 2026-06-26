@@ -49,19 +49,23 @@ type RedisPatch struct {
 
 // PatchVars holds the variables available to all boot patch templates.
 type PatchVars struct {
-	NumPorts   int
-	PCIAddrs   []string
-	PortStride int // 1 for sequential (default), 4 for stride-4
-	HWSkuDir   string
-	PortSpeed  int
-	Platform   string
-	Dataplane  string
-	Release    string
+	NumPorts int
+	PCIAddrs []string
+	// Ports is the platform's port inventory truncated to the node's wired data
+	// NICs (NumPorts), in NIC-slot order. The VPP port-synthesis templates range
+	// over it to emit the device's port_config.ini / PORT entries — the port
+	// names come straight from the table (RCA-013), replacing the old
+	// stride-formula naming.
+	Ports     []spec.PortSpec
+	HWSkuDir  string
+	PortSpeed int
+	Platform  string
+	Dataplane string
+	Release   string
 }
 
 // templateFuncs provides helper functions for boot patch templates.
 var templateFuncs = template.FuncMap{
-	"mul": func(a, b int) int { return a * b },
 	"add": func(a, b int) int { return a + b },
 }
 
@@ -265,23 +269,25 @@ func buildPatchVars(node *NodeConfig, platform *spec.PlatformSpec) *PatchVars {
 		speed = 25000
 	}
 
-	// Mirrors the interface-map default (sequential): an unset map and an
-	// explicit "sequential" both generate contiguous Ethernet0,1,2 names; only
-	// an explicit "stride-4" produces Ethernet0,4,8.
-	portStride := 1 // default: sequential (Ethernet0, Ethernet1, Ethernet2)
-	if platform.VMInterfaceMap == "stride-4" {
-		portStride = 4 // stride-4: Ethernet0, Ethernet4, Ethernet8
+	// VPP port synthesis (RCA-013): VPP has no in-image port_config.ini, so the
+	// boot patch generates one. The port names come from the platform's port
+	// inventory — the first dataNICs entries, in NIC-slot order. The VPP
+	// variant's table lists its post-rename contiguous Ethernet0,1,2… names, so
+	// this reproduces the former stride-1 synthesis without the stride formula.
+	ports := platform.Ports
+	if dataNICs < len(ports) {
+		ports = ports[:dataNICs]
 	}
 
 	return &PatchVars{
-		NumPorts:   dataNICs,
-		PCIAddrs:   QEMUPCIAddrs(dataNICs),
-		PortStride: portStride,
-		HWSkuDir:   fmt.Sprintf("/usr/share/sonic/device/x86_64-kvm_x86_64-r0/%s", platform.HWSKU),
-		PortSpeed:  speed,
-		Platform:   node.Platform,
-		Dataplane:  platform.Dataplane,
-		Release:    platform.VMImageRelease,
+		NumPorts:  dataNICs,
+		PCIAddrs:  QEMUPCIAddrs(dataNICs),
+		Ports:     ports,
+		HWSkuDir:  fmt.Sprintf("/usr/share/sonic/device/x86_64-kvm_x86_64-r0/%s", platform.HWSKU),
+		PortSpeed: speed,
+		Platform:  node.Platform,
+		Dataplane: platform.Dataplane,
+		Release:   platform.VMImageRelease,
 	}
 }
 
