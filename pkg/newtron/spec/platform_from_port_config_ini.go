@@ -119,11 +119,14 @@ type portConfigColumns struct {
 // short to reach the name column cannot name a port and is skipped.
 func buildPortsFromRows(rows [][]string, cols portConfigColumns) []PortSpec {
 	ports := make([]PortSpec, 0, len(rows))
-	for i, row := range rows {
+	for _, row := range rows {
 		if cols.name >= len(row) {
 			continue
 		}
-		p := PortSpec{Name: row[cols.name], NICIndex: i + 1}
+		// NIC slot is the position among EMITTED ports, not the raw row index —
+		// so a skipped (too-short) row can't gap the assignment (the consumer
+		// requires contiguous 1..N; matches buildPortsFromInterfaces).
+		p := PortSpec{Name: row[cols.name], NICIndex: len(ports) + 1}
 		if cols.speed < len(row) {
 			if kbps, err := strconv.Atoi(row[cols.speed]); err == nil {
 				p.Speed = kbpsToCanonical(kbps)

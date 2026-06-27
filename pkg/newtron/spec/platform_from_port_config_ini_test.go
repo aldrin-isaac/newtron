@@ -38,6 +38,31 @@ func TestKbpsToCanonical(t *testing.T) {
 	}
 }
 
+// TestBuildPortsFromRows_SkipIsContiguous pins that a row too short to reach the
+// name column is skipped WITHOUT gapping nic_index — the emitted ports stay
+// contiguous 1..N (the consumer requires no gaps). Assigning by emitted position
+// rather than the raw row index is what guarantees this.
+func TestBuildPortsFromRows_SkipIsContiguous(t *testing.T) {
+	cols := portConfigColumns{name: 2, speed: 4, lanes: 0}
+	rows := [][]string{
+		{"1,2", "a", "Ethernet0", "0", "100000"}, // valid
+		{"1,2", "a"},                              // too short to reach name (col 2) → skipped
+		{"5,6", "a", "Ethernet4", "1", "100000"}, // valid
+	}
+	got := buildPortsFromRows(rows, cols)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (the short row is skipped)", len(got))
+	}
+	// Contiguous: Ethernet0→1, Ethernet4→2 — NOT 1 and 3 (which a raw-row-index
+	// assignment would produce, gapping over the skipped row).
+	if got[0].Name != "Ethernet0" || got[0].NICIndex != 1 {
+		t.Errorf("ports[0] = %+v, want Ethernet0/nic1", got[0])
+	}
+	if got[1].Name != "Ethernet4" || got[1].NICIndex != 2 {
+		t.Errorf("ports[1] = %+v, want Ethernet4/nic2 (contiguous, not gapped)", got[1])
+	}
+}
+
 // TestFindColumns pins the header-detection grammar. SONiC port_config.ini
 // files vary in column count (5 for ToRs, 10 for chassis platforms), so the
 // parser MUST find columns by name from the header rather than by fixed
