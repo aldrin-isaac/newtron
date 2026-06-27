@@ -2,40 +2,48 @@
   "name": "vjunos-router",
   "description": "Juniper vJunos-router 25.4R1 (AMD-host-patched flat qcow2)",
   "device_type": "switch",
-  "port_count": 8,
+  "port_count": 10,
   "default_speed": "1G",
   "ports": [
     {
-      "name": "eth1",
+      "name": "ge-0/0/0",
       "nic_index": 1
     },
     {
-      "name": "eth2",
+      "name": "ge-0/0/1",
       "nic_index": 2
     },
     {
-      "name": "eth3",
+      "name": "ge-0/0/2",
       "nic_index": 3
     },
     {
-      "name": "eth4",
+      "name": "ge-0/0/3",
       "nic_index": 4
     },
     {
-      "name": "eth5",
+      "name": "ge-0/0/4",
       "nic_index": 5
     },
     {
-      "name": "eth6",
+      "name": "ge-0/0/5",
       "nic_index": 6
     },
     {
-      "name": "eth7",
+      "name": "ge-0/0/6",
       "nic_index": 7
     },
     {
-      "name": "eth8",
+      "name": "ge-0/0/7",
       "nic_index": 8
+    },
+    {
+      "name": "ge-0/0/8",
+      "nic_index": 9
+    },
+    {
+      "name": "ge-0/0/9",
+      "nic_index": 10
     }
   ],
   "vm_image": "~/vm/images/vJunos-router-25.4R1.12-patched.qcow2",
