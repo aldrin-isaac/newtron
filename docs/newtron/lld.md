@@ -486,8 +486,19 @@ type TopologySpecFile struct {
 }
 
 type TopologyDevice struct {
-    Steps []TopologyStep               `json:"steps,omitempty"`
-    Ports map[string]map[string]string  `json:"ports,omitempty"`
+    Steps []TopologyStep         `json:"steps,omitempty"`
+    Ports map[string]*PortConfig `json:"ports,omitempty"` // keyed by port name
+}
+
+// PortConfig — operator-configurable PORT-table fields for one port, mirroring
+// the YANG-derived PORT constraints (device/sonic/schema.go). Registered as the
+// "PortConfig" schema kind so a universal UI renders the config form; converted
+// to CONFIG_DB string fields at the boundary via Fields().
+type PortConfig struct {
+    AdminStatus string `json:"admin_status,omitempty"` // enum up,down
+    MTU         int    `json:"mtu,omitempty"`          // 68..9216
+    Speed       string `json:"speed,omitempty"`        // enum 1G..400G
+    Description string `json:"description,omitempty"`
 }
 
 type TopologyStep struct {

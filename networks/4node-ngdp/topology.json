@@ -21,8 +21,8 @@
         {"url": "/interfaces/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.2/31", "peer_as": 65012}}
       ],
       "ports": {
-        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet1": {"admin_status": "up", "mtu": "9100"}
+        "Ethernet0": {"admin_status": "up", "mtu": 9100},
+        "Ethernet1": {"admin_status": "up", "mtu": 9100}
       }
     },
     "spine2": {
@@ -44,8 +44,8 @@
         {"url": "/interfaces/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.6/31", "peer_as": 65012}}
       ],
       "ports": {
-        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet1": {"admin_status": "up", "mtu": "9100"}
+        "Ethernet0": {"admin_status": "up", "mtu": 9100},
+        "Ethernet1": {"admin_status": "up", "mtu": 9100}
       }
     },
     "leaf1": {
@@ -57,10 +57,10 @@
         {"url": "/interfaces/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.5/31", "peer_as": 65002}}
       ],
       "ports": {
-        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet1": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet2": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet3": {"admin_status": "up", "mtu": "9100"}
+        "Ethernet0": {"admin_status": "up", "mtu": 9100},
+        "Ethernet1": {"admin_status": "up", "mtu": 9100},
+        "Ethernet2": {"admin_status": "up", "mtu": 9100},
+        "Ethernet3": {"admin_status": "up", "mtu": 9100}
       }
     },
     "leaf2": {
@@ -72,10 +72,10 @@
         {"url": "/interfaces/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.7/31", "peer_as": 65002}}
       ],
       "ports": {
-        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet1": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet2": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet3": {"admin_status": "up", "mtu": "9100"}
+        "Ethernet0": {"admin_status": "up", "mtu": 9100},
+        "Ethernet1": {"admin_status": "up", "mtu": 9100},
+        "Ethernet2": {"admin_status": "up", "mtu": 9100},
+        "Ethernet3": {"admin_status": "up", "mtu": 9100}
       }
     }
   },

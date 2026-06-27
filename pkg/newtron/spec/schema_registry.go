@@ -306,6 +306,30 @@ func init() {
 			Delete: "/newtron/v1/networks/{netID}/remove-filter-rule",
 		},
 	})
+	// PortConfig has no dedicated CRUD verbs — unlike the other sub-rule kinds
+	// it is authored under a topology device's `ports` map and persisted via the
+	// topology-device update (PUT /topology/nodes/{name}). The schema kind exists
+	// to give a universal UI the config form; the operator picks the port name
+	// from the platform's `ports` inventory (the immutable identifier here).
+	// Not Scoped: port config is authored on a concrete topology device, not at
+	// network/zone/node scope (it is not an overridable spec), so it takes no
+	// scope/scope_instance discriminators.
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:        "PortConfig",
+		Label:       "Port Config",
+		Description: "Per-port PORT-table config (admin status, MTU, speed, description) for one physical port on a topology device, keyed by port name. Written via the topology-device update; fields mirror the YANG-derived PORT constraints.",
+		Sample:      PortConfig{},
+		Identifier:  "port",
+		ParentRef:   "device",
+		IdentifierField: &FieldMeta{
+			Name:        "port",
+			Label:       "Port",
+			Description: "Device-native port name (e.g. \"Ethernet0\") — chosen from the platform's ports inventory. Immutable; it is the map key.",
+			Type:        "string",
+			Required:    true,
+			Immutable:   true,
+		},
+	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "RoutePolicyRule",
 		Scoped:      true,

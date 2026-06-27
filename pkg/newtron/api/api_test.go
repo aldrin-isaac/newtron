@@ -1028,8 +1028,8 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
 	dev := &spec.TopologyDevice{
-		Ports: map[string]map[string]string{
-			"Ethernet0": {"admin_status": "up", "mtu": "9100"},
+		Ports: map[string]*spec.PortConfig{
+			"Ethernet0": {AdminStatus: "up", MTU: 9100},
 		},
 	}
 	if err := net.AddTopologyDevice(context.Background(), "switch2", dev); err != nil {
@@ -1067,8 +1067,8 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
 	dev := &spec.TopologyDevice{
-		Ports: map[string]map[string]string{
-			"Ethernet0": {"admin_status": "up"},
+		Ports: map[string]*spec.PortConfig{
+			"Ethernet0": {AdminStatus: "up"},
 		},
 	}
 	if err := net.AddTopologyDevice(context.Background(), "switch2", dev); err != nil {
@@ -1123,9 +1123,9 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
 	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
-		Ports: map[string]map[string]string{
-			"Ethernet0": {"admin_status": "up"},
-			"Ethernet4": {"admin_status": "up"},
+		Ports: map[string]*spec.PortConfig{
+			"Ethernet0": {AdminStatus: "up"},
+			"Ethernet4": {AdminStatus: "up"},
 		},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
@@ -1167,7 +1167,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
 	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
-		Ports: map[string]map[string]string{"Ethernet0": {"admin_status": "up"}},
+		Ports: map[string]*spec.PortConfig{"Ethernet0": {AdminStatus: "up"}},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
@@ -1203,9 +1203,9 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 	}
 	// Replace switch1 with a different Ports map (no steps for simplicity).
 	replacement := &spec.TopologyDevice{
-		Ports: map[string]map[string]string{
-			"Ethernet0":  {"admin_status": "up", "mtu": "1500"},
-			"Ethernet64": {"admin_status": "down"},
+		Ports: map[string]*spec.PortConfig{
+			"Ethernet0":  {AdminStatus: "up", MTU: 1500},
+			"Ethernet64": {AdminStatus: "down"},
 		},
 	}
 	if err := net.UpdateTopologyDevice(context.Background(), "switch1", replacement); err != nil {
@@ -1213,8 +1213,8 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 	}
 	topo := net.GetTopology()
 	got := topo.Devices["switch1"]
-	if got.Ports["Ethernet0"]["mtu"] != "1500" {
-		t.Errorf("Update did not replace Ethernet0 fields; got %v", got.Ports["Ethernet0"])
+	if got.Ports["Ethernet0"].MTU != 1500 {
+		t.Errorf("Update did not replace Ethernet0 fields; got %+v", got.Ports["Ethernet0"])
 	}
 	if len(got.Steps) != 0 {
 		t.Error("Update should have replaced Steps with empty (full-replacement semantics)")
@@ -1238,7 +1238,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
 	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
-		Ports: map[string]map[string]string{"Ethernet0": {"admin_status": "up"}},
+		Ports: map[string]*spec.PortConfig{"Ethernet0": {AdminStatus: "up"}},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
