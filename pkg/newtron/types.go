@@ -1216,8 +1216,8 @@ type TopologyView struct {
 
 // TopologyDeviceView mirrors spec.TopologyDevice with provenance-bearing steps.
 type TopologyDeviceView struct {
-	Steps []TopologyStep                `json:"steps,omitempty"`
-	Ports map[string]map[string]string `json:"ports,omitempty"`
+	Steps []TopologyStep              `json:"steps,omitempty"`
+	Ports map[string]*spec.PortConfig `json:"ports,omitempty"`
 }
 
 // ============================================================================

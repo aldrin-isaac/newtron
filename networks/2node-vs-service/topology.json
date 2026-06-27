@@ -12,12 +12,12 @@
         {"url": "/interfaces/Ethernet16/apply-service", "params": {"service": "overlay-irb-a"}}
       ],
       "ports": {
-        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet4": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet8": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet12": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet16": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet20": {"admin_status": "up", "mtu": "9100"}
+        "Ethernet0": {"admin_status": "up", "mtu": 9100},
+        "Ethernet4": {"admin_status": "up", "mtu": 9100},
+        "Ethernet8": {"admin_status": "up", "mtu": 9100},
+        "Ethernet12": {"admin_status": "up", "mtu": 9100},
+        "Ethernet16": {"admin_status": "up", "mtu": 9100},
+        "Ethernet20": {"admin_status": "up", "mtu": 9100}
       }
     },
     "switch2": {
@@ -30,12 +30,12 @@
         {"url": "/interfaces/Ethernet16/apply-service", "params": {"service": "overlay-irb-b"}}
       ],
       "ports": {
-        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet4": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet8": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet12": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet16": {"admin_status": "up", "mtu": "9100"},
-        "Ethernet20": {"admin_status": "up", "mtu": "9100"}
+        "Ethernet0": {"admin_status": "up", "mtu": 9100},
+        "Ethernet4": {"admin_status": "up", "mtu": 9100},
+        "Ethernet8": {"admin_status": "up", "mtu": 9100},
+        "Ethernet12": {"admin_status": "up", "mtu": 9100},
+        "Ethernet16": {"admin_status": "up", "mtu": 9100},
+        "Ethernet20": {"admin_status": "up", "mtu": 9100}
       }
     },
     "host1": {},

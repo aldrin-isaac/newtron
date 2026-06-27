@@ -3,6 +3,7 @@ package spec
 
 import (
 	"sort"
+	"strconv"
 )
 
 // ============================================================================
@@ -585,8 +586,47 @@ type NewtLabConfig struct {
 // Switch devices have Steps (provisioning intent) and Ports (physical port config).
 // Host devices are empty entries — detection is via platform profile, not a type field.
 type TopologyDevice struct {
-	Steps []TopologyStep               `json:"steps,omitempty"`
-	Ports map[string]map[string]string `json:"ports,omitempty"`
+	Steps []TopologyStep         `json:"steps,omitempty"`
+	Ports map[string]*PortConfig `json:"ports,omitempty"` // keyed by port name (e.g. "Ethernet0")
+}
+
+// PortConfig is the operator-configurable PORT-table config for one physical
+// port, authored under a TopologyDevice's `ports` map (keyed by port name).
+// Its fields mirror the YANG-derived PORT constraints in
+// device/sonic/schema.go — the same set the delivery layer validates — so
+// authoring-time and delivery-time agree. Registered as a schema kind so a
+// universal UI (newtcon) renders the form; the operator picks the port from
+// the platform's `ports` inventory, configures it here, and the entry is
+// written to the device's CONFIG_DB PORT table on provisioning (RegisterPort).
+type PortConfig struct {
+	AdminStatus string `json:"admin_status,omitempty" label:"Admin Status" tooltip:"Whether the port is administratively enabled" enum:"up,down"`
+	MTU         int    `json:"mtu,omitempty" label:"MTU" tooltip:"Maximum transmission unit in bytes" min:"68" max:"9216"`
+	Speed       string `json:"speed,omitempty" label:"Speed" tooltip:"Port speed; must be one the platform supports" enum:"1G,10G,25G,40G,50G,100G,200G,400G"`
+	Description string `json:"description,omitempty" label:"Description" tooltip:"Operator-facing port description"`
+}
+
+// Fields renders the typed config as CONFIG_DB PORT-table string fields,
+// omitting unset values. Normalize-at-the-boundary: the typed spec becomes the
+// string hash SONiC stores (mtu 9100 → "9100"). Returns an empty (non-nil) map
+// when nothing is set.
+func (p *PortConfig) Fields() map[string]string {
+	f := map[string]string{}
+	if p == nil {
+		return f
+	}
+	if p.AdminStatus != "" {
+		f["admin_status"] = p.AdminStatus
+	}
+	if p.MTU != 0 {
+		f["mtu"] = strconv.Itoa(p.MTU)
+	}
+	if p.Speed != "" {
+		f["speed"] = p.Speed
+	}
+	if p.Description != "" {
+		f["description"] = p.Description
+	}
+	return f
 }
 
 // TopologyStep is a single provisioning operation in the topology.

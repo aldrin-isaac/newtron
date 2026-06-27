@@ -71,8 +71,8 @@ func (tp *TopologyProvisioner) BuildAbstractNode(deviceName string) (*node.Node,
 	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved, tp.network.topologyName, tp.network.portResolver)
 
 	// Register physical ports (enables GetInterface for interface-scoped steps)
-	for portName, fields := range topoDev.Ports {
-		n.RegisterPort(portName, fields)
+	for portName, pc := range topoDev.Ports {
+		n.RegisterPort(portName, pc.Fields())
 	}
 
 	// Replay each step against the abstract node
@@ -121,8 +121,8 @@ func (tp *TopologyProvisioner) BuildEmptyAbstractNode(deviceName string) (*node.
 	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved, tp.network.topologyName, tp.network.portResolver)
 
 	// Register physical ports (enables GetInterface for interface-scoped steps)
-	for portName, fields := range topoDev.Ports {
-		n.RegisterPort(portName, fields)
+	for portName, pc := range topoDev.Ports {
+		n.RegisterPort(portName, pc.Fields())
 	}
 
 	return n, nil
