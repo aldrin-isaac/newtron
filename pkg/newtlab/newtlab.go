@@ -30,6 +30,10 @@ type SpecClient interface {
 	GetTopology() (*spec.TopologySpecFile, error)
 	ListPlatforms() (map[string]*spec.PlatformSpec, error)
 	ShowProfile(name string) (*spec.DeviceProfile, error)
+	// NetworkID is the network this client is bound to. Provision forwards it
+	// to the reconcile subprocess so the CLI stays on the lab's network instead
+	// of falling back to the default (see reconcileArgs).
+	NetworkID() string
 }
 
 // HostVMGroup represents virtual hosts coalesced into one VM.
@@ -1124,6 +1128,19 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	return SaveState(state)
 }
 
+// reconcileArgs builds the argv for the per-device `newtron … intent reconcile`
+// subprocess. It forwards --network-id when set so the CLI stays on the lab's
+// network instead of resolving to the default (the newtron CLI resolves
+// flag > env > settings > default; without the flag a non-default lab's device
+// isn't found). Mirrors newtrun's pkg/newtrun/steps_cli.go forwarding.
+func reconcileArgs(device, networkID string) []string {
+	args := []string{device}
+	if networkID != "" {
+		args = append(args, "--network-id", networkID)
+	}
+	return append(args, "--topology", "intent", "reconcile", "-x")
+}
+
 // Provision runs newtron provisioning for all (or specified) devices.
 // The context is threaded into exec.CommandContext for cancellation.
 func (l *Lab) Provision(ctx context.Context, parallel int) error {
@@ -1162,7 +1179,7 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), name, "--topology", "intent", "reconcile", "-x")
+			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), reconcileArgs(name, l.specClient.NetworkID())...)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				mu.Lock()

@@ -328,6 +328,18 @@ func TestAllocateLinks_PortSequence(t *testing.T) {
 	}
 }
 
+// TestReconcileArgs pins that Provision forwards --network-id to the reconcile
+// subprocess so a non-default-network lab reconciles its own network (not the
+// CLI's default), and omits the flag when no id is set.
+func TestReconcileArgs(t *testing.T) {
+	if got := strings.Join(reconcileArgs("switch1", "2node-vs"), " "); got != "switch1 --network-id 2node-vs --topology intent reconcile -x" {
+		t.Errorf("with network id: got %q", got)
+	}
+	if got := strings.Join(reconcileArgs("switch1", ""), " "); got != "switch1 --topology intent reconcile -x" {
+		t.Errorf("empty network id should omit --network-id: got %q", got)
+	}
+}
+
 // ============================================================================
 // State Tests
 // ============================================================================
