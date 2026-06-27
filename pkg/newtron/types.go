@@ -1216,8 +1216,32 @@ type TopologyView struct {
 
 // TopologyDeviceView mirrors spec.TopologyDevice with provenance-bearing steps.
 type TopologyDeviceView struct {
-	Steps []TopologyStep              `json:"steps,omitempty"`
-	Ports map[string]*spec.PortConfig `json:"ports,omitempty"`
+	Steps []TopologyStep         `json:"steps,omitempty"`
+	Ports map[string]*PortConfig `json:"ports,omitempty"`
+}
+
+// PortConfig is the public view of a topology device's per-port config — the
+// domain-vocabulary mirror of spec.PortConfig, so TopologyDeviceView exposes no
+// internal spec type at the API boundary (§33). The wire shape is identical.
+type PortConfig struct {
+	AdminStatus string `json:"admin_status,omitempty"`
+	MTU         int    `json:"mtu,omitempty"`
+	Speed       string `json:"speed,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// toPortConfigView mirrors a spec.PortConfig into the public PortConfig at the
+// API boundary; nil maps to nil so a null port entry round-trips faithfully.
+func toPortConfigView(pc *spec.PortConfig) *PortConfig {
+	if pc == nil {
+		return nil
+	}
+	return &PortConfig{
+		AdminStatus: pc.AdminStatus,
+		MTU:         pc.MTU,
+		Speed:       pc.Speed,
+		Description: pc.Description,
+	}
 }
 
 // ============================================================================
