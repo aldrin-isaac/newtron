@@ -1,0 +1,448 @@
+{
+  "name": "Accton-AS4630-54TE",
+  "hwsku": "Accton-AS4630-54TE",
+  "description": "Accton AS4630-54TE (48x1G + uplinks) — community SONiC",
+  "device_type": "switch",
+  "port_count": 54,
+  "default_speed": "1G",
+  "ports": [
+    {
+      "name": "Ethernet0",
+      "nic_index": 1,
+      "speed": "1G",
+      "lanes": [
+        26
+      ]
+    },
+    {
+      "name": "Ethernet1",
+      "nic_index": 2,
+      "speed": "1G",
+      "lanes": [
+        25
+      ]
+    },
+    {
+      "name": "Ethernet2",
+      "nic_index": 3,
+      "speed": "1G",
+      "lanes": [
+        28
+      ]
+    },
+    {
+      "name": "Ethernet3",
+      "nic_index": 4,
+      "speed": "1G",
+      "lanes": [
+        27
+      ]
+    },
+    {
+      "name": "Ethernet4",
+      "nic_index": 5,
+      "speed": "1G",
+      "lanes": [
+        30
+      ]
+    },
+    {
+      "name": "Ethernet5",
+      "nic_index": 6,
+      "speed": "1G",
+      "lanes": [
+        29
+      ]
+    },
+    {
+      "name": "Ethernet6",
+      "nic_index": 7,
+      "speed": "1G",
+      "lanes": [
+        32
+      ]
+    },
+    {
+      "name": "Ethernet7",
+      "nic_index": 8,
+      "speed": "1G",
+      "lanes": [
+        31
+      ]
+    },
+    {
+      "name": "Ethernet8",
+      "nic_index": 9,
+      "speed": "1G",
+      "lanes": [
+        38
+      ]
+    },
+    {
+      "name": "Ethernet9",
+      "nic_index": 10,
+      "speed": "1G",
+      "lanes": [
+        37
+      ]
+    },
+    {
+      "name": "Ethernet10",
+      "nic_index": 11,
+      "speed": "1G",
+      "lanes": [
+        40
+      ]
+    },
+    {
+      "name": "Ethernet11",
+      "nic_index": 12,
+      "speed": "1G",
+      "lanes": [
+        39
+      ]
+    },
+    {
+      "name": "Ethernet12",
+      "nic_index": 13,
+      "speed": "1G",
+      "lanes": [
+        34
+      ]
+    },
+    {
+      "name": "Ethernet13",
+      "nic_index": 14,
+      "speed": "1G",
+      "lanes": [
+        33
+      ]
+    },
+    {
+      "name": "Ethernet14",
+      "nic_index": 15,
+      "speed": "1G",
+      "lanes": [
+        36
+      ]
+    },
+    {
+      "name": "Ethernet15",
+      "nic_index": 16,
+      "speed": "1G",
+      "lanes": [
+        35
+      ]
+    },
+    {
+      "name": "Ethernet16",
+      "nic_index": 17,
+      "speed": "1G",
+      "lanes": [
+        46
+      ]
+    },
+    {
+      "name": "Ethernet17",
+      "nic_index": 18,
+      "speed": "1G",
+      "lanes": [
+        45
+      ]
+    },
+    {
+      "name": "Ethernet18",
+      "nic_index": 19,
+      "speed": "1G",
+      "lanes": [
+        48
+      ]
+    },
+    {
+      "name": "Ethernet19",
+      "nic_index": 20,
+      "speed": "1G",
+      "lanes": [
+        47
+      ]
+    },
+    {
+      "name": "Ethernet20",
+      "nic_index": 21,
+      "speed": "1G",
+      "lanes": [
+        42
+      ]
+    },
+    {
+      "name": "Ethernet21",
+      "nic_index": 22,
+      "speed": "1G",
+      "lanes": [
+        41
+      ]
+    },
+    {
+      "name": "Ethernet22",
+      "nic_index": 23,
+      "speed": "1G",
+      "lanes": [
+        44
+      ]
+    },
+    {
+      "name": "Ethernet23",
+      "nic_index": 24,
+      "speed": "1G",
+      "lanes": [
+        43
+      ]
+    },
+    {
+      "name": "Ethernet24",
+      "nic_index": 25,
+      "speed": "1G",
+      "lanes": [
+        2
+      ]
+    },
+    {
+      "name": "Ethernet25",
+      "nic_index": 26,
+      "speed": "1G",
+      "lanes": [
+        1
+      ]
+    },
+    {
+      "name": "Ethernet26",
+      "nic_index": 27,
+      "speed": "1G",
+      "lanes": [
+        4
+      ]
+    },
+    {
+      "name": "Ethernet27",
+      "nic_index": 28,
+      "speed": "1G",
+      "lanes": [
+        3
+      ]
+    },
+    {
+      "name": "Ethernet28",
+      "nic_index": 29,
+      "speed": "1G",
+      "lanes": [
+        6
+      ]
+    },
+    {
+      "name": "Ethernet29",
+      "nic_index": 30,
+      "speed": "1G",
+      "lanes": [
+        5
+      ]
+    },
+    {
+      "name": "Ethernet30",
+      "nic_index": 31,
+      "speed": "1G",
+      "lanes": [
+        8
+      ]
+    },
+    {
+      "name": "Ethernet31",
+      "nic_index": 32,
+      "speed": "1G",
+      "lanes": [
+        7
+      ]
+    },
+    {
+      "name": "Ethernet32",
+      "nic_index": 33,
+      "speed": "1G",
+      "lanes": [
+        10
+      ]
+    },
+    {
+      "name": "Ethernet33",
+      "nic_index": 34,
+      "speed": "1G",
+      "lanes": [
+        9
+      ]
+    },
+    {
+      "name": "Ethernet34",
+      "nic_index": 35,
+      "speed": "1G",
+      "lanes": [
+        12
+      ]
+    },
+    {
+      "name": "Ethernet35",
+      "nic_index": 36,
+      "speed": "1G",
+      "lanes": [
+        11
+      ]
+    },
+    {
+      "name": "Ethernet36",
+      "nic_index": 37,
+      "speed": "1G",
+      "lanes": [
+        14
+      ]
+    },
+    {
+      "name": "Ethernet37",
+      "nic_index": 38,
+      "speed": "1G",
+      "lanes": [
+        13
+      ]
+    },
+    {
+      "name": "Ethernet38",
+      "nic_index": 39,
+      "speed": "1G",
+      "lanes": [
+        16
+      ]
+    },
+    {
+      "name": "Ethernet39",
+      "nic_index": 40,
+      "speed": "1G",
+      "lanes": [
+        15
+      ]
+    },
+    {
+      "name": "Ethernet40",
+      "nic_index": 41,
+      "speed": "1G",
+      "lanes": [
+        18
+      ]
+    },
+    {
+      "name": "Ethernet41",
+      "nic_index": 42,
+      "speed": "1G",
+      "lanes": [
+        17
+      ]
+    },
+    {
+      "name": "Ethernet42",
+      "nic_index": 43,
+      "speed": "1G",
+      "lanes": [
+        20
+      ]
+    },
+    {
+      "name": "Ethernet43",
+      "nic_index": 44,
+      "speed": "1G",
+      "lanes": [
+        19
+      ]
+    },
+    {
+      "name": "Ethernet44",
+      "nic_index": 45,
+      "speed": "1G",
+      "lanes": [
+        22
+      ]
+    },
+    {
+      "name": "Ethernet45",
+      "nic_index": 46,
+      "speed": "1G",
+      "lanes": [
+        21
+      ]
+    },
+    {
+      "name": "Ethernet46",
+      "nic_index": 47,
+      "speed": "1G",
+      "lanes": [
+        24
+      ]
+    },
+    {
+      "name": "Ethernet47",
+      "nic_index": 48,
+      "speed": "1G",
+      "lanes": [
+        23
+      ]
+    },
+    {
+      "name": "Ethernet48",
+      "nic_index": 49,
+      "speed": "25G",
+      "lanes": [
+        67
+      ]
+    },
+    {
+      "name": "Ethernet49",
+      "nic_index": 50,
+      "speed": "25G",
+      "lanes": [
+        66
+      ]
+    },
+    {
+      "name": "Ethernet50",
+      "nic_index": 51,
+      "speed": "25G",
+      "lanes": [
+        65
+      ]
+    },
+    {
+      "name": "Ethernet51",
+      "nic_index": 52,
+      "speed": "25G",
+      "lanes": [
+        68
+      ]
+    },
+    {
+      "name": "Ethernet52",
+      "nic_index": 53,
+      "speed": "100G",
+      "lanes": [
+        73,
+        74,
+        75,
+        76
+      ]
+    },
+    {
+      "name": "Ethernet56",
+      "nic_index": 54,
+      "speed": "100G",
+      "lanes": [
+        69,
+        70,
+        71,
+        72
+      ]
+    }
+  ]
+}
