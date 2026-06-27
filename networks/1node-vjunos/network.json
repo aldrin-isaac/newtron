@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "description": "Single vJunos-router lab — opennetconf smoke tests via --newtlab. newtlab deploys the VM; netconf.pl owns device config.",
+  "super_users": null,
+  "user_groups": null,
+  "permissions": null,
+  "zones": {
+    "lab": {}
+  }
+}

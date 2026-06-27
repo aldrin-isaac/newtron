@@ -255,14 +255,16 @@ Greenfield (§40 — delete, don't deprecate):
 
 ## 10. Open Questions
 
-1. **Junos projection source.** SONiC's table regenerates from an in-image file;
-   Junos has no equivalent. Is the chassis/card model in `netconf.pl`'s
+1. **Junos projection source.** ~~SONiC's table regenerates from an in-image
+   file; Junos has no equivalent. Is the chassis/card model in `netconf.pl`'s
    `platforms.yaml` the authority newtron generates from, or does newtron author
-   the Junos `ports` table directly? This couples to any future
-   newtron↔netconf.pl integration.
-2. **`vm_interface_map`'s fate.** Fully removed, or retained as a generator-only
-   input (CLI flag on `newtron platform generate`) that never reaches
-   `PlatformSpec`?
+   the Junos `ports` table directly?~~ **Resolved (Phase 4): authored directly.**
+   `vjunos-router` carries a hand-authored `ge-0/0/0..9` table (mirroring
+   netconf.pl's `vJunos-Router-PFE` card) — self-contained, no cross-repo
+   coupling. A `FromJunosChassis` generator that reads `platforms.yaml` remains a
+   future option if a real newtron↔netconf.pl integration is built.
+2. **`vm_interface_map`'s fate.** ~~Fully removed, or retained as a
+   generator-only input?~~ **Resolved (Phase 3): fully removed.**
 3. **Breakouts × ports.** A port broken out 4× becomes four logical sub-ports
    (`Ethernet0/1`…). Does the `ports` table enumerate the base ports only (and
    breakouts stay a separate dimension), or the active logical ports after a

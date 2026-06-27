@@ -194,10 +194,32 @@ blocked VPP cold-deploy: there is no code path the field could still affect.
       patched) + Freshness Protocol (full-repo sweep after targeted fixes). No
       dimension omitted.
 
-## Phase 4 — DEFERRED
+## Phase 4 — vJunos Junos-native naming (§10 Q1 resolved)
 
-- vJunos generator / netconf.pl projection source — gated on the integration
-  decision (note §10 Q1). Not scheduled here.
+Decision (§10 Q1): **author `ge-0/0/N` directly** in newtron rather than
+generate from netconf.pl's `platforms.yaml` — self-contained, no cross-repo
+coupling; the generator option stays available if a real integration is built.
+
+- [x] `vjunos-router.json` ports `eth1..8` → `ge-0/0/0..9` (10 ports, matching
+      netconf.pl's `vJunos-Router-PFE` card: `porttype ge`, FPC 0/PIC 0,
+      `validports 0-9`); `port_count` 8 → 10. — `platforms/vjunos-router.json`
+- [x] `2node-vjunos` links `eth1/eth2` → `ge-0/0/0`/`ge-0/0/1`. —
+      `networks/2node-vjunos/topology.json`
+- [x] Authored `network.json` (zone `lab`) for `1node-vjunos` + `2node-vjunos`
+      (the same lab-only gap as `4node-ngdp`) — completes the last incomplete
+      networks from #303.
+- [x] **Zero code change** — `ResolveNICIndex` is a pure table lookup, so
+      `ge-0/0/0` resolves with no parsing. This is the payoff the explicit-table
+      model was built for (non-strided naming).
+- [x] **Verify (cold-deploy, §42) — GREEN.** Cold-deployed `2node-vjunos`
+      (2 vJunos VMs). On r1, `show interfaces terse`: the two wired ports
+      `ge-0/0/0` and `ge-0/0/1` are **up/up** (carrier present); the unwired
+      `ge-0/0/2`/`ge-0/0/3` are up/**down**; `fxp0` (mgmt) up. The table-driven
+      NIC mapping resolves real Junos naming end-to-end on the device.
+
+All four phases are now implemented and cold-validated (VS, VPP, and vJunos).
+Remaining design-note open questions (§10 Q3 breakouts × ports, Q4 no-gaps
+relaxation) are independent of vJunos and stay deferred.
 
 ---
 
