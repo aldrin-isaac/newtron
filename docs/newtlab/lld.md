@@ -1196,9 +1196,11 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 ### Phase 3 — Provision
 
 `Lab.Provision(ctx, parallel)` runs topology reconcile with semaphore-bounded
-concurrency. Shells out to `newtron <name> --topology intent reconcile -x`
-rather than importing `pkg/newtron/network` — this keeps newtlab and newtron
-loosely coupled (newtlab only needs the `newtron` binary on PATH).
+concurrency. Shells out to `newtron <name> --network-id <id> --topology intent
+reconcile -x` (the lab's network id is forwarded via `reconcileArgs` so the
+subprocess reconciles the lab's own network, not the CLI default) rather than
+importing `pkg/newtron/network` — this keeps newtlab and newtron loosely coupled
+(newtlab only needs the `newtron` binary on PATH).
 
 - Goroutine per device, bounded by `parallel` semaphore.
 - For each switch (host devices skipped): `exec.CommandContext(ctx, "newtron", name, "--topology", "intent", "reconcile", "-x")`.
