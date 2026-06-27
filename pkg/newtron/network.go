@@ -197,7 +197,13 @@ func (net *Network) TopologyView() *TopologyView {
 		Devices:     make(map[string]*TopologyDeviceView, len(topo.Devices)),
 	}
 	for name, dev := range topo.Devices {
-		dv := &TopologyDeviceView{Ports: dev.Ports}
+		dv := &TopologyDeviceView{}
+		if len(dev.Ports) > 0 {
+			dv.Ports = make(map[string]*PortConfig, len(dev.Ports))
+			for portName, pc := range dev.Ports {
+				dv.Ports[portName] = toPortConfigView(pc)
+			}
+		}
 		for _, s := range dev.Steps {
 			kind, specName := DeriveSpecRef(s.URL, s.Params)
 			dv.Steps = append(dv.Steps, TopologyStep{
