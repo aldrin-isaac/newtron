@@ -507,9 +507,10 @@ Provisioning devices...
 ✓ Provisioning complete
 ```
 
-Provisioning runs `newtron <device> --topology intent reconcile -x` for each
-switch — a topology-mode full reconcile that replays the topology.json steps
-and delivers the resulting CONFIG_DB projection to the device.
+Provisioning runs `newtron <device> --network-id <id> --topology intent reconcile -x`
+for each switch — a topology-mode full reconcile that replays the topology.json
+steps and delivers the resulting CONFIG_DB projection to the device (the lab's
+network id is forwarded so the reconcile targets the lab's own network).
 Host and host-vm devices are skipped (they have no CONFIG_DB).
 
 After all devices are provisioned, newtlab waits 5 seconds and then runs

@@ -138,9 +138,11 @@ state directory tracks everything needed for destroy, stop/start, and status.
 - **newtron** is invoked as a sibling binary during the optional
   provisioning step. newtlab finds it adjacent to its own binary or on
   PATH. For each switch, newtlab runs
-  `newtron <name> --topology intent reconcile -x` (topology-mode full
-  reconcile), which replays topology.json steps and delivers the
-  resulting CONFIG_DB projection to the device.
+  `newtron <name> --network-id <id> --topology intent reconcile -x`
+  (topology-mode full reconcile), which replays topology.json steps and delivers
+  the resulting CONFIG_DB projection to the device. The lab's network id is
+  forwarded so the subprocess reconciles the lab's own network rather than the
+  CLI's default.
 - **State directory** (`~/.newtlab/labs/<name>/`) holds everything needed to
   manage the lab after deployment: PIDs, overlay disks, logs, bridge config,
   and `state.json`.
@@ -809,8 +811,8 @@ the original `mgmt_ip` and removes the runtime fields.
 ### Provisioning Shells Out
 
 When `--provision` is passed, newtlab invokes
-`newtron <name> --topology intent reconcile -x` as a subprocess for each
-switch device. This is intentional:
+`newtron <name> --network-id <id> --topology intent reconcile -x` as a
+subprocess for each switch device. This is intentional:
 
 - **No library coupling.** newtlab depends on spec types for reading
   topology files, but has no dependency on newtron's device operations,
@@ -949,8 +951,8 @@ configuration) begins.
 ### Provisioning and the Parallel Race
 
 Because `--provision` was passed, newtlab invokes
-`newtron <name> --topology intent reconcile -x` for each switch as a
-subprocess. newtron reads the patched profiles, connects via SSH tunnel,
+`newtron <name> --network-id <id> --topology intent reconcile -x` for each
+switch as a subprocess. newtron reads the patched profiles, connects via SSH tunnel,
 replays the topology.json steps to build the expected CONFIG_DB projection,
 and delivers it to the device. Both switches provision in parallel.
 

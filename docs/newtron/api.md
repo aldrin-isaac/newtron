@@ -1179,7 +1179,7 @@ with the resolution path included.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Topology device name; must match a profile filename. |
-| `device` | TopologyDevice | yes | Typed entry: `ports` (interface declarations) and optional `steps[]` (intent operations to replay when the node is built). May be empty for a bare declaration; subsequent operations + `intent save --topology` populate `steps[]`. |
+| `device` | TopologyDevice | yes | Typed entry: `ports` (map of port name → `PortConfig`: `admin_status`/`mtu`/`speed`/`description` — form at `GET /schema/PortConfig`) and optional `steps[]` (intent operations to replay when the node is built). May be empty for a bare declaration; subsequent operations + `intent save --topology` populate `steps[]`. |
 
 **Response (201):** the persisted `TopologyDevice`.
 
