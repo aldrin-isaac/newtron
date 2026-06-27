@@ -1,0 +1,406 @@
+{
+  "name": "Celestica-DS1000",
+  "hwsku": "DS1000",
+  "description": "Celestica DS1000 — community SONiC",
+  "device_type": "switch",
+  "port_count": 56,
+  "default_speed": "10G",
+  "breakouts": [
+    "1x1000[100,10]",
+    "1x10G[1G]"
+  ],
+  "ports": [
+    {
+      "name": "Ethernet0",
+      "nic_index": 1,
+      "lanes": [
+        26
+      ]
+    },
+    {
+      "name": "Ethernet1",
+      "nic_index": 2,
+      "lanes": [
+        25
+      ]
+    },
+    {
+      "name": "Ethernet2",
+      "nic_index": 3,
+      "lanes": [
+        28
+      ]
+    },
+    {
+      "name": "Ethernet3",
+      "nic_index": 4,
+      "lanes": [
+        27
+      ]
+    },
+    {
+      "name": "Ethernet4",
+      "nic_index": 5,
+      "lanes": [
+        30
+      ]
+    },
+    {
+      "name": "Ethernet5",
+      "nic_index": 6,
+      "lanes": [
+        29
+      ]
+    },
+    {
+      "name": "Ethernet6",
+      "nic_index": 7,
+      "lanes": [
+        32
+      ]
+    },
+    {
+      "name": "Ethernet7",
+      "nic_index": 8,
+      "lanes": [
+        31
+      ]
+    },
+    {
+      "name": "Ethernet8",
+      "nic_index": 9,
+      "lanes": [
+        34
+      ]
+    },
+    {
+      "name": "Ethernet9",
+      "nic_index": 10,
+      "lanes": [
+        33
+      ]
+    },
+    {
+      "name": "Ethernet10",
+      "nic_index": 11,
+      "lanes": [
+        36
+      ]
+    },
+    {
+      "name": "Ethernet11",
+      "nic_index": 12,
+      "lanes": [
+        35
+      ]
+    },
+    {
+      "name": "Ethernet12",
+      "nic_index": 13,
+      "lanes": [
+        38
+      ]
+    },
+    {
+      "name": "Ethernet13",
+      "nic_index": 14,
+      "lanes": [
+        37
+      ]
+    },
+    {
+      "name": "Ethernet14",
+      "nic_index": 15,
+      "lanes": [
+        40
+      ]
+    },
+    {
+      "name": "Ethernet15",
+      "nic_index": 16,
+      "lanes": [
+        39
+      ]
+    },
+    {
+      "name": "Ethernet16",
+      "nic_index": 17,
+      "lanes": [
+        42
+      ]
+    },
+    {
+      "name": "Ethernet17",
+      "nic_index": 18,
+      "lanes": [
+        41
+      ]
+    },
+    {
+      "name": "Ethernet18",
+      "nic_index": 19,
+      "lanes": [
+        44
+      ]
+    },
+    {
+      "name": "Ethernet19",
+      "nic_index": 20,
+      "lanes": [
+        43
+      ]
+    },
+    {
+      "name": "Ethernet20",
+      "nic_index": 21,
+      "lanes": [
+        50
+      ]
+    },
+    {
+      "name": "Ethernet21",
+      "nic_index": 22,
+      "lanes": [
+        49
+      ]
+    },
+    {
+      "name": "Ethernet22",
+      "nic_index": 23,
+      "lanes": [
+        52
+      ]
+    },
+    {
+      "name": "Ethernet23",
+      "nic_index": 24,
+      "lanes": [
+        51
+      ]
+    },
+    {
+      "name": "Ethernet24",
+      "nic_index": 25,
+      "lanes": [
+        2
+      ]
+    },
+    {
+      "name": "Ethernet25",
+      "nic_index": 26,
+      "lanes": [
+        1
+      ]
+    },
+    {
+      "name": "Ethernet26",
+      "nic_index": 27,
+      "lanes": [
+        4
+      ]
+    },
+    {
+      "name": "Ethernet27",
+      "nic_index": 28,
+      "lanes": [
+        3
+      ]
+    },
+    {
+      "name": "Ethernet28",
+      "nic_index": 29,
+      "lanes": [
+        6
+      ]
+    },
+    {
+      "name": "Ethernet29",
+      "nic_index": 30,
+      "lanes": [
+        5
+      ]
+    },
+    {
+      "name": "Ethernet30",
+      "nic_index": 31,
+      "lanes": [
+        8
+      ]
+    },
+    {
+      "name": "Ethernet31",
+      "nic_index": 32,
+      "lanes": [
+        7
+      ]
+    },
+    {
+      "name": "Ethernet32",
+      "nic_index": 33,
+      "lanes": [
+        10
+      ]
+    },
+    {
+      "name": "Ethernet33",
+      "nic_index": 34,
+      "lanes": [
+        9
+      ]
+    },
+    {
+      "name": "Ethernet34",
+      "nic_index": 35,
+      "lanes": [
+        12
+      ]
+    },
+    {
+      "name": "Ethernet35",
+      "nic_index": 36,
+      "lanes": [
+        11
+      ]
+    },
+    {
+      "name": "Ethernet36",
+      "nic_index": 37,
+      "lanes": [
+        14
+      ]
+    },
+    {
+      "name": "Ethernet37",
+      "nic_index": 38,
+      "lanes": [
+        13
+      ]
+    },
+    {
+      "name": "Ethernet38",
+      "nic_index": 39,
+      "lanes": [
+        16
+      ]
+    },
+    {
+      "name": "Ethernet39",
+      "nic_index": 40,
+      "lanes": [
+        15
+      ]
+    },
+    {
+      "name": "Ethernet40",
+      "nic_index": 41,
+      "lanes": [
+        18
+      ]
+    },
+    {
+      "name": "Ethernet41",
+      "nic_index": 42,
+      "lanes": [
+        17
+      ]
+    },
+    {
+      "name": "Ethernet42",
+      "nic_index": 43,
+      "lanes": [
+        20
+      ]
+    },
+    {
+      "name": "Ethernet43",
+      "nic_index": 44,
+      "lanes": [
+        19
+      ]
+    },
+    {
+      "name": "Ethernet44",
+      "nic_index": 45,
+      "lanes": [
+        22
+      ]
+    },
+    {
+      "name": "Ethernet45",
+      "nic_index": 46,
+      "lanes": [
+        21
+      ]
+    },
+    {
+      "name": "Ethernet46",
+      "nic_index": 47,
+      "lanes": [
+        24
+      ]
+    },
+    {
+      "name": "Ethernet47",
+      "nic_index": 48,
+      "lanes": [
+        23
+      ]
+    },
+    {
+      "name": "Ethernet48",
+      "nic_index": 49,
+      "lanes": [
+        60
+      ]
+    },
+    {
+      "name": "Ethernet49",
+      "nic_index": 50,
+      "lanes": [
+        58
+      ]
+    },
+    {
+      "name": "Ethernet50",
+      "nic_index": 51,
+      "lanes": [
+        59
+      ]
+    },
+    {
+      "name": "Ethernet51",
+      "nic_index": 52,
+      "lanes": [
+        57
+      ]
+    },
+    {
+      "name": "Ethernet52",
+      "nic_index": 53,
+      "lanes": [
+        62
+      ]
+    },
+    {
+      "name": "Ethernet53",
+      "nic_index": 54,
+      "lanes": [
+        64
+      ]
+    },
+    {
+      "name": "Ethernet54",
+      "nic_index": 55,
+      "lanes": [
+        61
+      ]
+    },
+    {
+      "name": "Ethernet55",
+      "nic_index": 56,
+      "lanes": [
+        63
+      ]
+    }
+  ]
+}
