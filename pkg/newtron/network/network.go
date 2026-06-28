@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 
@@ -287,6 +288,35 @@ func (n *Network) GetAuthorization() Authorization {
 		Permissions: n.spec.Permissions,
 		SuperUsers:  n.spec.SuperUsers,
 	}
+}
+
+// AddSuperUser adds username to the network's super_users (idempotent) and
+// persists network.json. The live auth.Checker reads this same n.spec.SuperUsers
+// slice, so the grant takes effect immediately — no reload. Caller is the API
+// layer after the meta-authorization gate (spec.author scoped to super_users).
+func (n *Network) AddSuperUser(username string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+	if slices.Contains(n.spec.SuperUsers, username) {
+		return nil
+	}
+	n.spec.SuperUsers = append(n.spec.SuperUsers, username)
+	return n.persistSpec()
+}
+
+// RemoveSuperUser drops username from the network's super_users (idempotent) and
+// persists. Takes effect immediately for the live checker.
+func (n *Network) RemoveSuperUser(username string) error {
+	mu := n.locks.lock(keyNetworkSpec)
+	mu.Lock()
+	defer mu.Unlock()
+	idx := slices.Index(n.spec.SuperUsers, username)
+	if idx < 0 {
+		return nil
+	}
+	n.spec.SuperUsers = slices.Delete(n.spec.SuperUsers, idx, idx+1)
+	return n.persistSpec()
 }
 
 // GetService returns a service definition by name.

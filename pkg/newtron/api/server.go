@@ -84,6 +84,10 @@ type Server struct {
 	// path. false → checkPermission stays inert; pre-L3 behavior.
 	enforceAuthorization bool
 
+	// globalSuperUsers are super-users across every network (server-level),
+	// layered above each network's own super_users when authorization is enabled.
+	globalSuperUsers []string
+
 	// enforceWriteControl gates executing network mutations on the per-network
 	// write-control reservation. false → reservation endpoints work but
 	// enforcement is a no-op.
@@ -184,6 +188,13 @@ type Config struct {
 	// cmd/newt-server.
 	EnforceAuthorization bool
 
+	// GlobalSuperUsers are super-users across every registered network, layered
+	// above each network.json's own super_users — a global super-user bypasses
+	// every permission check on every network without being named in any
+	// network.json. Composed in from --super-users / NEWTRON_SUPER_USERS on
+	// cmd/newt-server. Only meaningful with EnforceAuthorization.
+	GlobalSuperUsers []string
+
 	// EnforceWriteControl gates every executing network mutation on the
 	// per-network write-control reservation: a caller must hold control (via
 	// POST .../control/request) before any write, else 409. Default-closed when
@@ -236,7 +247,12 @@ func NewServer(cfg Config) *Server {
 		platforms:            cfg.Platforms,
 		auditLogPath:         cfg.AuditLogPath,
 		enforceAuthorization: cfg.EnforceAuthorization,
+		globalSuperUsers:     cfg.GlobalSuperUsers,
 		enforceWriteControl:  cfg.EnforceWriteControl,
+	}
+	if len(cfg.GlobalSuperUsers) > 0 {
+		// Audit trail: who holds cross-network super-user is recorded at startup.
+		logger.Printf("global super-users (all networks): %v", cfg.GlobalSuperUsers)
 	}
 	if cfg.SpecWatch {
 		w, err := netpkg.NewSpecWatcher(logger, 0, func(id string) error {
@@ -323,7 +339,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
 	if s.enforceAuthorization {
-		net.EnableAuthorization()
+		net.EnableAuthorization(s.globalSuperUsers...)
 	}
 
 	s.mu.Lock()
@@ -382,7 +398,7 @@ func (s *Server) ReloadNetwork(id string) error {
 		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
 	}
 	if s.enforceAuthorization {
-		net.EnableAuthorization()
+		net.EnableAuthorization(s.globalSuperUsers...)
 	}
 
 	// Replace with new entity

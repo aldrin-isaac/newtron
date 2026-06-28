@@ -13,13 +13,25 @@ import (
 // Context.Caller — the Checker holds no ambient "current user."
 type Checker struct {
 	network *spec.NetworkSpecFile
+	// globalSuperUsers are super-users across every network (server-level, from
+	// --super-users / NEWTRON_SUPER_USERS), OR'd with this network's own
+	// super_users. A global super-user bypasses every permission check on every
+	// network without being named in any network.json.
+	globalSuperUsers map[string]bool
 }
 
-// NewChecker builds a Checker bound to network. The returned Checker
-// is stateless w.r.t. caller identity — every Check reads the username
-// from its Context argument.
-func NewChecker(network *spec.NetworkSpecFile) *Checker {
-	return &Checker{network: network}
+// NewChecker builds a Checker bound to network. globalSuperUsers (optional) are
+// super-users for every network, layered above the network's own super_users.
+// The returned Checker is stateless w.r.t. caller identity — every Check reads
+// the username from its Context argument.
+func NewChecker(network *spec.NetworkSpecFile, globalSuperUsers ...string) *Checker {
+	g := make(map[string]bool, len(globalSuperUsers))
+	for _, u := range globalSuperUsers {
+		if u != "" {
+			g[u] = true
+		}
+	}
+	return &Checker{network: network, globalSuperUsers: g}
 }
 
 // Check decides whether ctx.Caller has permission. A nil ctx or an
@@ -69,7 +81,7 @@ func (c *Checker) checkUser(username string, permission Permission, ctx *Context
 }
 
 func (c *Checker) isSuperUser(username string) bool {
-	return slices.Contains(c.network.SuperUsers, username)
+	return c.globalSuperUsers[username] || slices.Contains(c.network.SuperUsers, username)
 }
 
 // HasPermissionEntry reports whether the loaded grant table has any

@@ -81,6 +81,36 @@ func TestChecker_SuperUser(t *testing.T) {
 	}
 }
 
+func TestChecker_GlobalSuperUser(t *testing.T) {
+	network := createTestNetworkSpec() // super_users: ["admin", "root"] — NOT "global-admin"
+	checker := NewChecker(network, "global-admin", "")
+
+	// A global super-user not named in this network's super_users still bypasses.
+	if !checker.isSuperUser("global-admin") {
+		t.Error("global super-user 'global-admin' should bypass on every network")
+	}
+	if err := checker.Check(PermServiceApply, callerCtx("global-admin")); err != nil {
+		t.Errorf("global super-user denied: %v", err)
+	}
+	// Per-network super-user still works; empty entries are ignored; a normal
+	// user is unaffected.
+	if !checker.isSuperUser("admin") {
+		t.Error("per-network super-user should still bypass")
+	}
+	if checker.isSuperUser("") {
+		t.Error("empty username must never be a super-user")
+	}
+	if checker.isSuperUser("nobody") {
+		t.Error("a non-listed user must not be a super-user")
+	}
+
+	// Without the global list, 'global-admin' is just a normal user.
+	plain := NewChecker(network)
+	if plain.isSuperUser("global-admin") {
+		t.Error("global-admin is not a per-network super-user; without the global list it must not bypass")
+	}
+}
+
 func TestChecker_GlobalPermissions(t *testing.T) {
 	network := createTestNetworkSpec()
 	checker := NewChecker(network)

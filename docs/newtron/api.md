@@ -62,6 +62,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
 | GET | `/networks/{n}/topology/nodes` | List topology device names |
 | GET | `/networks/{n}/authorization` | Read user_groups + permissions + super_users from network.json |
+| POST | `/networks/{n}/super-users` | Grant a user per-network super-user status (`{user}`) |
+| DELETE | `/networks/{n}/super-users/{user}` | Revoke a user's per-network super-user status |
 | GET | `/networks/{n}/nodes/{node}/host-connection` | Get host SSH connection |
 | GET | `/networks/{n}/features` | List features (also: `/{name}/dependencies`, `/{name}/unsupported-due-to`) |
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
@@ -1109,6 +1111,42 @@ Super-users continue to bypass. See [auth-design.md §L3](auth-design.md)
 and [authorization-howto.md §"Reading the grant table"](authorization-howto.md).
 
 _Lands newtron#150 (initial) + newtron#187 (gate)._
+
+#### POST /newtron/v1/networks/{netID}/super-users
+
+Grants a user **per-network super-user** status — they bypass every
+permission check on this network. Lets an authorized operator manage
+super-users through the API instead of hand-editing `network.json`'s
+`super_users` list; the change is persisted and takes effect
+immediately for the live checker (no reload).
+
+**Body:** `{ "user": "<username>" }` (`user` required).
+
+**Response (200):** `{"status": "added", "user": "<username>"}`.
+Idempotent — adding a user already present is a 200 no-op.
+
+**Authorization:** gated by the meta-authorization — `spec.author`
+scoped to the `super_users` field (`where: {field: "super_users"}`).
+An IAM-operator role granted `spec.author` over `super_users` can
+manage super-users; a service-architect scoped `!super_users` cannot.
+Per-network and global super-users bypass this gate as always. The
+mutation is audited (caller, before/after) like any other write.
+
+**Errors:** 400 when `user` is empty; 403 when the caller lacks the
+meta-authorization (enforcing mode); 404 when `{netID}` is not
+registered.
+
+#### DELETE /newtron/v1/networks/{netID}/super-users/{user}
+
+Revokes a user's per-network super-user status. Same meta-authorization
+gate as the POST. **Response (200):** `{"status": "removed", "user":
+"<username>"}`. Idempotent — removing a user not present is a 200 no-op.
+
+This endpoint manages only the per-network `super_users` list. **Global
+super-users** (set server-wide via `--super-users` / `$NEWTRON_SUPER_USERS`
+on `newt-server`) are not network state and cannot be added or removed
+here — they are configured at the process and audited at startup. See
+[auth-design.md §L3](auth-design.md).
 
 ### Audit log
 

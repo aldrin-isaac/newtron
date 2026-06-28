@@ -58,8 +58,12 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 // new spec. In-process spec mutations after EnableAuthorization
 // (CreateService, DeleteNodeSpec, …) are observed through the same
 // spec pointer — no re-call needed for grant changes to take effect.
-func (net *Network) EnableAuthorization() {
-	net.auth = auth.NewChecker(net.internal.Spec())
+//
+// globalSuperUsers are super-users across every network (server-level), layered
+// above this network's own super_users list — a global super-user bypasses
+// every permission check here without being named in network.json.
+func (net *Network) EnableAuthorization(globalSuperUsers ...string) {
+	net.auth = auth.NewChecker(net.internal.Spec(), globalSuperUsers...)
 }
 
 // InitDevice prepares a device for newtron management. This is a one-time

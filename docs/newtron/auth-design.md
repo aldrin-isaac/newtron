@@ -886,6 +886,32 @@ clause. The bootstrap path remains "edit `network.json` on disk and
 restart"; once running, only configured grantees can change the
 grant table.
 
+**Managing per-network super-users via the API.** Editing
+`network.json` on disk is the bootstrap path, not the steady-state
+one. An operator holding the `spec.author` + `where: {field:
+"super_users"}` meta-authorization manages the list through
+`POST /networks/{n}/super-users` and `DELETE
+/networks/{n}/super-users/{user}` (see [api.md](api.md)) — no file
+editing, no restart. The mutation persists `network.json` atomically
+and the live `auth.Checker` reads the same `super_users` slice, so a
+grant or revocation takes effect on the next request. Each call is
+audited as a write (caller, before/after) like any spec mutation.
+
+**Global super-users (cross-network tier).** A super-user named in a
+`network.json` bypasses checks *on that network only*. For an operator
+who must hold super-user across *every* network and function of the
+newtron engine — without being enrolled in each network's
+`super_users` — `newt-server` accepts a server-level list via
+`--super-users` (or `$NEWTRON_SUPER_USERS`), comma-separated. The
+checker OR's this global list with each network's own `super_users`
+(`auth.Checker.isSuperUser`), so a global super-user bypasses
+everywhere. The list is process configuration, not network state: it
+is logged at startup for the audit trail, and is *not* managed by the
+per-network super-user API above (which only touches a single
+network's `super_users`). Like all enforcement, the global tier is
+only consulted under `--enforce-authorization`; with enforcement off
+it is inert.
+
 The L5 implementation ships these dimensions in `auth.Context`:
 `Device`, `Service`, `Interface`, `Resource`, and `Field` (the
 meta-authorization dimension). Spec/profile/topology mutation
