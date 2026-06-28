@@ -700,17 +700,17 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 
 // connectHostSSH establishes a plain SSH connection to a host device.
 func connectHostSSH(c *client.Client, name string) (*ssh.Client, error) {
-	profile, err := c.GetHostProfile(name)
+	conn, err := c.GetHostConnection(name)
 	if err != nil {
-		return nil, fmt.Errorf("loading host profile: %w", err)
+		return nil, fmt.Errorf("loading host connection: %w", err)
 	}
 
-	user := profile.SSHUser
+	user := conn.SSHUser
 	if user == "" {
 		user = "root"
 	}
-	pass := profile.SSHPass
-	port := profile.SSHPort
+	pass := conn.SSHPass
+	port := conn.SSHPort
 	if port == 0 {
 		port = 22
 	}
@@ -724,7 +724,7 @@ func connectHostSSH(c *client.Client, name string) (*ssh.Client, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	addr := fmt.Sprintf("%s:%d", profile.MgmtIP, port)
+	addr := fmt.Sprintf("%s:%d", conn.MgmtIP, port)
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("SSH dial %s: %w", addr, err)

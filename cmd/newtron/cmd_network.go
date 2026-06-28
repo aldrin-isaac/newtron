@@ -151,19 +151,19 @@ Examples:
   newtron network host host1 --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		nodeSpec, err := app.client.GetHostProfile(args[0])
+		conn, err := app.client.GetHostConnection(args[0])
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(nodeSpec)
+			return json.NewEncoder(os.Stdout).Encode(conn)
 		}
 
 		fmt.Printf("Host: %s\n", bold(args[0]))
-		fmt.Printf("Management IP: %s\n", nodeSpec.MgmtIP)
-		fmt.Printf("SSH User: %s\n", nodeSpec.SSHUser)
-		fmt.Printf("SSH Port: %d\n", nodeSpec.SSHPort)
+		fmt.Printf("Management IP: %s\n", conn.MgmtIP)
+		fmt.Printf("SSH User: %s\n", conn.SSHUser)
+		fmt.Printf("SSH Port: %d\n", conn.SSHPort)
 		return nil
 	},
 }

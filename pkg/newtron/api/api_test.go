@@ -145,7 +145,7 @@ func TestAPICompleteness(t *testing.T) {
 			"DeleteTopologyLink":   true, // #16: DELETE /networks/{netID}/topology/links/{device}/{interface}
 			"TopologyNodeNames":    true,
 			"IsHostDevice":         true,
-			"GetHostProfile":       true,
+			"GetHostConnection":    true,
 			"InitDevice":           true,
 			// Connection
 			"ListNodes": true,
@@ -423,7 +423,7 @@ func TestAPICompleteness(t *testing.T) {
 			"TopologyView":            "spec read",
 			"TopologyNodeNames":       "spec read",
 			"IsHostDevice":            "spec read",
-			"GetHostProfile":          "spec read",
+			"GetHostConnection":       "spec read",
 			"ListNodes":               "spec read",
 			"ProbeOnline":             "device read (TCP probe + newtlab port resolve)",
 			"TopologyDrift":           "device read (diff topology against device CONFIG_DB)",

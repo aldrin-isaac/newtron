@@ -59,7 +59,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
 | GET | `/networks/{n}/topology/nodes` | List topology device names |
 | GET | `/networks/{n}/authorization` | Read user_groups + permissions + super_users from network.json |
-| GET | `/networks/{n}/hosts/{name}` | Get host profile |
+| GET | `/networks/{n}/nodes/{node}/host-connection` | Get host SSH connection |
 | GET | `/networks/{n}/features` | List features (also: `/{name}/dependencies`, `/{name}/unsupported-due-to`) |
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
 | POST | `/networks/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
@@ -1262,13 +1262,13 @@ List device names from the topology file.
 
 ### Hosts
 
-#### GET /newtron/v1/networks/{netID}/hosts/{name}
+#### GET /newtron/v1/networks/{netID}/nodes/{node}/host-connection
 
-Get the host profile for a virtual host device. Returns 404 for switch devices
+Get the SSH connection for a host node. Returns 404 for switch devices
 (even if they exist in the topology) -- the client uses 200 vs 404 from this
 endpoint to classify devices as hosts vs switches.
 
-**Response (200):** `HostProfile` (see [S13](#hostprofile))
+**Response (200):** `HostConnection` (see [S13](#hostconnection))
 
 **Status codes:** 200 success, 404 not a host device or not found
 
@@ -4256,9 +4256,9 @@ Returned by `GET .../routes/{vrf}/{prefix...}` and `GET .../routes-asic/{prefix.
 
 ### Host Types
 
-#### HostProfile
+#### HostConnection
 
-Returned by `GET .../hosts/{name}`.
+Returned by `GET .../nodes/{node}/host-connection`.
 
 | Field | Type | Description |
 |-------|------|-------------|

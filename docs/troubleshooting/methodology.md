@@ -61,7 +61,7 @@ Always parse both formats. Never assume vtysh JSON output is stable.
 When newtrun or CLI operations appear to do nothing:
 1. **Check server logs** — are HTTP requests arriving at all?
 2. **Test endpoints directly** — `curl http://localhost:18080/newtron/v1/networks/default/...`
-3. **Verify device classification** — `curl .../hosts/{name}` should return 404 for switches (RCA-043)
+3. **Verify device classification** — `curl .../nodes/{node}/host-connection` should return 404 for switches (RCA-043)
 4. **Check actor serialization** — operations on the same device are serialized through NodeActor
 
 ### Common API Issues

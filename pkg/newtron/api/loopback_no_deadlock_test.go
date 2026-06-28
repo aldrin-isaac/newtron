@@ -85,7 +85,7 @@ func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		url := ts.URL + "/newtron/v1/networks/default/hosts/host1"
+		url := ts.URL + "/newtron/v1/networks/default/nodes/host1/host-connection"
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
 			done <- err
@@ -99,7 +99,7 @@ func TestAPI_LoopbackHTTPDoesNotDeadlock(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			done <- fmt.Errorf("/hosts/host1: status %d", resp.StatusCode)
+			done <- fmt.Errorf("/nodes/host1/host-connection: status %d", resp.StatusCode)
 			return
 		}
 		done <- nil
