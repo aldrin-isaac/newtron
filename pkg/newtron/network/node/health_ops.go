@@ -47,7 +47,7 @@ func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error
 	expected := make(map[string][]string)
 	seenOverlay := make(map[string]bool)
 
-	// Source 1: ConfigureBGPOverlay overlay peers (device intent + resolved profile)
+	// Source 1: ConfigureBGPOverlay overlay peers (device intent + resolved nodeSpec)
 	deviceIntent := n.GetIntent("device")
 	if deviceIntent != nil && deviceIntent.Params["source_ip"] != "" && n.resolved != nil {
 		for _, peerIP := range n.resolved.BGPNeighbors {

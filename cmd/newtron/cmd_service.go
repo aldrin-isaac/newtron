@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -226,7 +226,7 @@ var serviceApplyCmd = &cobra.Command{
 This operation configures:
   - VRF binding and EVPN settings
   - ACL rules from the service's filter specs
-  - QoS profile
+  - QoS nodeSpec
 
 By default, this shows what would change (dry-run).
 Use -x to actually apply the changes.

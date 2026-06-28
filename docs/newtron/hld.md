@@ -310,7 +310,7 @@ Overrides are authored through the same write API as network specs — `scope`/`
 ┌──────────────────────────┐
 │                          │
 │          Node            │
-│ (nodes/{device}.json) │
+│ (nodes/{node}.json) │
 │                          │
 └──────────────────────────┘
   │

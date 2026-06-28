@@ -277,7 +277,7 @@ except these" — the shape the meta-authorization scenario below uses.
 
 | Dimension | What populates it |
 |---|---|
-| `device` | The device being acted on (URL `/nodes/{device}/*`, or the device name passed to topology mutations) |
+| `device` | The device being acted on (URL `/nodes/{node}/*`, or the device name passed to topology mutations) |
 | `service` | The service being applied or mutated (URL `/services/{name}`, or `service` field in interface apply-service body) |
 | `interface` | The interface being mutated (URL `/interfaces/{name}/*`) |
 | `resource` | The generic identifier of the thing being acted on — populated alongside the more specific dimension when applicable |

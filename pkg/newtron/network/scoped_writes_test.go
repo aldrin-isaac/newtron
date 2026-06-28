@@ -114,9 +114,9 @@ func TestScopedWrite_PerZoneIPVPNOverride(t *testing.T) {
 }
 
 // buildNodeScopeNetwork writes a network with a network-scope IP-VPN base and a
-// switch profile "leaf1", returning the Network and its dir so node-scope tests
-// can inspect the on-disk profile. secretStore may be nil.
-func buildNodeScopeNetwork(t *testing.T, secretStore secret.Store, profileJSON string) (*Network, string) {
+// switch nodeSpec "leaf1", returning the Network and its dir so node-scope tests
+// can inspect the on-disk nodeSpec. secretStore may be nil.
+func buildNodeScopeNetwork(t *testing.T, secretStore secret.Store, nodeSpecJSON string) (*Network, string) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
@@ -130,8 +130,8 @@ func buildNodeScopeNetwork(t *testing.T, secretStore secret.Store, profileJSON s
 	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir nodes: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"), []byte(profileJSON), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"), []byte(nodeSpecJSON), 0o644); err != nil {
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 	n, err := NewNetwork(dir, "", nil, secretStore, nil)
 	if err != nil {
@@ -141,7 +141,7 @@ func buildNodeScopeNetwork(t *testing.T, secretStore secret.Store, profileJSON s
 }
 
 // TestNodeScopedWrite_FloorAndPersist pins node-scope writes end to end: the
-// override is floor-checked against the network base, persisted to the profile
+// override is floor-checked against the network base, persisted to the nodeSpec
 // file (not network.json), and a missing base is rejected.
 func TestNodeScopedWrite_FloorAndPersist(t *testing.T) {
 	n, dir := buildNodeScopeNetwork(t, nil,
@@ -159,13 +159,13 @@ func TestNodeScopedWrite_FloorAndPersist(t *testing.T) {
 		t.Fatalf("node override of VRF_BLUE: %v", err)
 	}
 
-	// It landed in the profile FILE, not network.json.
+	// It landed in the nodeSpec FILE, not network.json.
 	data, err := os.ReadFile(filepath.Join(dir, "nodes", "leaf1.json"))
 	if err != nil {
-		t.Fatalf("read profile: %v", err)
+		t.Fatalf("read nodeSpec: %v", err)
 	}
 	if !strings.Contains(string(data), `"VRF_BLUE"`) || !strings.Contains(string(data), `3000`) {
-		t.Errorf("profile file missing the node override:\n%s", data)
+		t.Errorf("nodeSpec file missing the node override:\n%s", data)
 	}
 	if n.spec.IPVPNs["VRF_BLUE"].L3VNI != 1000 {
 		t.Errorf("network base L3VNI = %d, want 1000 (unchanged)", n.spec.IPVPNs["VRF_BLUE"].L3VNI)
@@ -173,9 +173,9 @@ func TestNodeScopedWrite_FloorAndPersist(t *testing.T) {
 }
 
 // TestNodeScopedWrite_SecretSafe pins the landmine guard: a node-scope write
-// must not persist secret-resolved values. The profile's ssh_pass is a
+// must not persist secret-resolved values. The nodeSpec's ssh_pass is a
 // ${secret:...} reference; after a write (with the cache primed by a prior read
-// that resolves the reference in place), the on-disk profile must still hold the
+// that resolves the reference in place), the on-disk nodeSpec must still hold the
 // raw reference, not the resolved literal.
 func TestNodeScopedWrite_SecretSafe(t *testing.T) {
 	store := newFileStoreWith(t, map[string]string{"leaf1_pass": "REAL-PASSWORD"})
@@ -198,10 +198,10 @@ func TestNodeScopedWrite_SecretSafe(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(dir, "nodes", "leaf1.json"))
 	if err != nil {
-		t.Fatalf("read profile: %v", err)
+		t.Fatalf("read nodeSpec: %v", err)
 	}
 	if !strings.Contains(string(data), "${secret:leaf1_pass}") {
-		t.Errorf("on-disk profile lost its ${secret:...} reference (resolved secret leaked to disk):\n%s", data)
+		t.Errorf("on-disk nodeSpec lost its ${secret:...} reference (resolved secret leaked to disk):\n%s", data)
 	}
 	if strings.Contains(string(data), "REAL-PASSWORD") {
 		t.Errorf("resolved secret REAL-PASSWORD was written to disk:\n%s", data)
@@ -354,10 +354,10 @@ func TestDeleteZone_BlockedByOverride(t *testing.T) {
 	}
 }
 
-// TestDeleteZone_BlockedByProfileReference pins that a zone assigned to a
-// profile cannot be deleted, and that the refusal is a typed 409 (it returned a
+// TestDeleteZone_BlockedByNodeSpecReference pins that a zone assigned to a
+// nodeSpec cannot be deleted, and that the refusal is a typed 409 (it returned a
 // plain 500 before this change).
-func TestDeleteZone_BlockedByProfileReference(t *testing.T) {
+func TestDeleteZone_BlockedByNodeSpecReference(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
 		[]byte(`{"schema_version":"1.0","zones":{"amer":{}}}`), 0o644); err != nil {
@@ -372,7 +372,7 @@ func TestDeleteZone_BlockedByProfileReference(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"),
 		[]byte(`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer"}`), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
@@ -382,15 +382,15 @@ func TestDeleteZone_BlockedByProfileReference(t *testing.T) {
 	err = n.DeleteZone("amer")
 	var conflict *util.ConflictError
 	if !errors.As(err, &conflict) {
-		t.Fatalf("delete zone referenced by a profile: got %v, want *util.ConflictError (409)", err)
+		t.Fatalf("delete zone referenced by a nodeSpec: got %v, want *util.ConflictError (409)", err)
 	}
 }
 
-// TestDeleteProfile_BlockedByOverride pins that a profile holding node-scope
+// TestDeleteNodeSpec_BlockedByOverride pins that a nodeSpec holding node-scope
 // spec overrides cannot be deleted without force — a *util.ConflictError (→ 409)
-// listing the overrides. (Authored directly in the profile file, since node-scope
+// listing the overrides. (Authored directly in the nodeSpec file, since node-scope
 // writes land in a later increment; the guard covers them regardless.)
-func TestDeleteProfile_BlockedByOverride(t *testing.T) {
+func TestDeleteNodeSpec_BlockedByOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
 		[]byte(`{"schema_version":"1.0","zones":{"amer":{}},"prefix_lists":{"BOGONS":["10.0.0.0/8"]}}`), 0o644); err != nil {
@@ -406,7 +406,7 @@ func TestDeleteProfile_BlockedByOverride(t *testing.T) {
 	// leaf1 carries a node-scope prefix-list override of the network BOGONS.
 	if err := os.WriteFile(filepath.Join(dir, "nodes", "leaf1.json"),
 		[]byte(`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer","prefix_lists":{"BOGONS":["10.1.0.0/16"]}}`), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
@@ -416,11 +416,11 @@ func TestDeleteProfile_BlockedByOverride(t *testing.T) {
 	err = n.DeleteNodeSpec("leaf1", false)
 	var conflict *util.ConflictError
 	if !errors.As(err, &conflict) {
-		t.Fatalf("delete profile holding an override: got %v, want *util.ConflictError (409)", err)
+		t.Fatalf("delete nodeSpec holding an override: got %v, want *util.ConflictError (409)", err)
 	}
-	// force bypasses the guard (the override goes with the profile file).
+	// force bypasses the guard (the override goes with the nodeSpec file).
 	if err := n.DeleteNodeSpec("leaf1", true); err != nil {
-		t.Fatalf("force-delete profile with overrides: %v", err)
+		t.Fatalf("force-delete nodeSpec with overrides: %v", err)
 	}
 }
 

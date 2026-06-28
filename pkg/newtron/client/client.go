@@ -37,7 +37,6 @@ func (e *ServerError) Error() string {
 	return fmt.Sprintf("server error (%d): %s", e.StatusCode, e.Message)
 }
 
-
 // New creates a new Client. Functional options configure transport-
 // level concerns (TLS for L2a inter-service mTLS, etc.) without
 // changing the signature for the common case.
@@ -220,7 +219,7 @@ func execQuery(opts newtron.ExecOpts) string {
 
 // withForce appends force=true to a path's query string when force is set,
 // choosing ? or & based on whether the path already carries parameters.
-// Used by the cascade-capable deletes (profile, spec bindings).
+// Used by the cascade-capable deletes (nodeSpec, spec bindings).
 func withForce(path string, force bool) string {
 	if !force {
 		return path
@@ -270,7 +269,6 @@ func (c *Client) doPost(path string, body any, result any) error {
 	defer resp.Body.Close()
 	return c.decodeResponse(resp, result)
 }
-
 
 // RequestOption modifies an outbound *http.Request before send. Use
 // WithHeader (and other future option constructors) to attach

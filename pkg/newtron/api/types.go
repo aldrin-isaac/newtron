@@ -137,7 +137,7 @@ type ProjectionDiffRequest struct {
 
 // TopologyNodeCreateRequest is the body for POST .../topology/create-node.
 // Name addresses the new entry; Device carries the typed TopologyNode as
-// stored in topology.json (profile is implicit via name; Ports + Steps may
+// stored in topology.json (nodeSpec is implicit via name; Ports + Steps may
 // be empty for a bare declaration, or pre-populated for one-shot create).
 type TopologyNodeCreateRequest struct {
 	Name   string             `json:"name"`

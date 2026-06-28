@@ -113,7 +113,7 @@ func TestAPICompleteness(t *testing.T) {
 			"AddRoutePolicyRule":    true,
 			"UpdateRoutePolicyRule": true,
 			"RemoveRoutePolicyRule": true,
-			// Profiles and Zones
+			// NodeSpecs and Zones
 			"ListNodeSpecs":  true,
 			"ShowNodeSpec":   true,
 			"CreateNodeSpec": true,
@@ -831,7 +831,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 // ConflictError serializes its resource/name/references[]/force_available into
 // the envelope Data (so clients branch on the shape, not a parsed message), and
 // a spec-delete conflict neither advertises force in the message nor sets
-// force_available — while a force-capable (profile) conflict does both.
+// force_available — while a force-capable (nodeSpec) conflict does both.
 func TestWriteError_ConflictEnvelope(t *testing.T) {
 	specConflict := &newtron.ConflictError{
 		Resource:   "IPVPNSpec",
@@ -871,15 +871,15 @@ func TestWriteError_ConflictEnvelope(t *testing.T) {
 		t.Errorf("spec-delete message wrongly advertises force: %q", resp.Error)
 	}
 
-	// A force-capable conflict (profile / topology-device) does advertise force.
-	profileConflict := &newtron.ConflictError{
-		Resource:   "profile",
+	// A force-capable conflict (nodeSpec / topology-device) does advertise force.
+	nodeSpecConflict := &newtron.ConflictError{
+		Resource:   "nodeSpec",
 		Name:       "leaf1",
 		References: []string{"topology device 'leaf1'"},
 		Force:      true,
 	}
-	if !strings.Contains(profileConflict.Error(), "force=true") {
-		t.Errorf("force-capable message should advertise force: %q", profileConflict.Error())
+	if !strings.Contains(nodeSpecConflict.Error(), "force=true") {
+		t.Errorf("force-capable message should advertise force: %q", nodeSpecConflict.Error())
 	}
 }
 
@@ -1054,18 +1054,18 @@ func copyTestSpecDir(t *testing.T) string {
 }
 
 // TestTopologyCRUD_AddDeleteDevice — newtron#15 (Phase 5). Round-trip a new
-// topology device entry: write a profile + a TopologyNode spec, verify the
+// topology device entry: write a nodeSpec + a TopologyNode spec, verify the
 // add lands in topology.json, then delete and verify removal. Cleanup is
 // implicit via t.TempDir().
 func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 	specDir := copyTestSpecDir(t)
-	// Add a profile for switch2 (matches the 1:1 name convention).
+	// Add a node spec for switch2 (matches the 1:1 name convention).
 	if err := os.WriteFile(
 		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
@@ -1104,7 +1104,7 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
@@ -1160,7 +1160,7 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
@@ -1205,7 +1205,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
@@ -1266,17 +1266,17 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 	}
 }
 
-// TestTopologyCRUD_DeleteProfile_CascadeSymmetry — newtron#15 follow-on:
+// TestTopologyCRUD_DeleteNodeSpec_CascadeSymmetry — newtron#15 follow-on:
 // DeleteNodeSpec refuses when a topology device shares the name; force=true
 // cascades through DeleteTopologyDevice (which itself cascades to links).
-func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
+func TestTopologyCRUD_DeleteNodeSpec_CascadeSymmetry(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	if err := os.WriteFile(
 		filepath.Join(specDir, "nodes", "switch2.json"),
 		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
 		0o644,
 	); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
 	if err != nil {
@@ -1291,7 +1291,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	// Refuses without force.
 	err = net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, false)
 	if err == nil {
-		t.Fatal("expected conflict on profile-delete-with-topology-device, got nil")
+		t.Fatal("expected conflict on nodeSpec-delete-with-topology-device, got nil")
 	}
 	var conflict *newtron.ConflictError
 	if !errors.As(err, &conflict) {
@@ -1300,7 +1300,7 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 
 	// Force cascade.
 	if err := net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
-		t.Fatalf("force-delete profile: %v", err)
+		t.Fatalf("force-delete nodeSpec: %v", err)
 	}
 	topo := net.GetTopology()
 	if topo.Nodes["switch2"] != nil {

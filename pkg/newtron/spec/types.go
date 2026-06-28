@@ -485,9 +485,9 @@ type NodeSpec struct {
 }
 
 // ResolvedNodeSpec contains fully resolved device values
-// after applying inheritance (profile > region > global) and derivation.
+// after applying inheritance (nodeSpec > region > global) and derivation.
 type ResolvedNodeSpec struct {
-	// From profile
+	// From nodeSpec
 	DeviceName string
 	MgmtIP     string
 	LoopbackIP string
@@ -496,15 +496,15 @@ type ResolvedNodeSpec struct {
 
 	// Resolved from inheritance
 	IsRouteReflector bool
-	ClusterID        string // RR cluster ID; from profile EVPN config or defaults to loopback IP
+	ClusterID        string // RR cluster ID; from nodeSpec EVPN config or defaults to loopback IP
 
 	// Derived at runtime
 	RouterID        string         // = LoopbackIP
 	VTEPSourceIP    string         // = LoopbackIP
-	BGPNeighbors    []string       // From profile EVPN peers → lookup loopback IPs
+	BGPNeighbors    []string       // From nodeSpec EVPN peers → lookup loopback IPs
 	BGPNeighborASNs map[string]int // peer loopback IP → peer UnderlayASN (for eBGP overlay)
 
-	// From profile (optional)
+	// From nodeSpec (optional)
 	MAC string
 
 	// SSH credentials for Redis tunnel. SSH port is runtime state
@@ -584,7 +584,7 @@ type NewtLabConfig struct {
 
 // TopologyNode defines a device's configuration within a topology.
 // Switch devices have Steps (provisioning intent) and Ports (physical port config).
-// Host devices are empty entries — detection is via platform profile, not a type field.
+// Host devices are empty entries — detection is via platform nodeSpec, not a type field.
 type TopologyNode struct {
 	Steps []TopologyStep         `json:"steps,omitempty"`
 	Ports map[string]*PortConfig `json:"ports,omitempty"` // keyed by port name (e.g. "Ethernet0")

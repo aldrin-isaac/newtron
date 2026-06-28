@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"errors"
 	"path/filepath"
 	"sync"
 	"time"
@@ -91,7 +91,6 @@ type Server struct {
 	watcher *netpkg.SpecWatcher
 }
 
-
 // Config carries every knob NewServer accepts. Uses a struct rather
 // than positional params so the auth-design.md layered work (L1
 // audit log + Unix socket + header; L2a mTLS; L2b PAM; L3 enforce)
@@ -151,7 +150,7 @@ type Config struct {
 	// SecretStore is the operator-configured secret backend
 	// (auth-design.md L0). When non-nil, networks loaded through
 	// RegisterNetwork / ReloadNetwork resolve ${secret:KEY}
-	// references in profile and platform spec values. nil means no
+	// references in nodeSpec and platform spec values. nil means no
 	// resolution: plaintext spec values pass through, references
 	// become hard errors at load. Composed in by cmd/newt-server
 	// from a --secret-store=PATH flag.
@@ -267,7 +266,6 @@ func NewServer(cfg Config) *Server {
 func (s *Server) Handler() http.Handler {
 	return s.HTTPServer().Handler
 }
-
 
 // CreateNetwork is the high-level operator API matching POST
 // /newtron/v1/networks: name a network by id and the server resolves
@@ -421,7 +419,7 @@ func (s *Server) getNetworkInfo(id string) *NetworkInfo {
 func networkInfoFor(id string, entity *networkEntity) NetworkInfo {
 	return NetworkInfo{
 		ID:          id,
-		Dir:     entity.specDir,
+		Dir:         entity.specDir,
 		HasTopology: entity.net.HasTopology(),
 		Topology:    networkName(entity.specDir),
 		Nodes:       entity.net.ListNodes(),

@@ -28,7 +28,7 @@ steps:
 
   # Spot-check specific CONFIG_DB entries to prove they exist.
 
-  # BGP_GLOBALS must have the correct ASN from the profile
+  # BGP_GLOBALS must have the correct ASN from the node spec
   - name: verify-bgp-globals-sw1
     action: newtron
     devices: [switch1]

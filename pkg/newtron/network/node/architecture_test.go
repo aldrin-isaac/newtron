@@ -37,7 +37,7 @@ func newRawAbstractNode() *Node {
 		prefixLists:   map[string][]string{},
 		routePolicies: map[string]*spec.RoutePolicy{},
 	}
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		UnderlayASN: 65001,
 		EVPN:        &spec.EVPNConfig{},
 	}
@@ -47,7 +47,7 @@ func newRawAbstractNode() *Node {
 		LoopbackIP:  "10.0.0.1",
 		DeviceName:  "test-leaf",
 	}
-	n := NewAbstract(sp, "test-leaf", profile, resolved, "", nil)
+	n := NewAbstract(sp, "test-leaf", nodeSpec, resolved, "", nil)
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "speed": "100G"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "speed": "100G"})
 	return n

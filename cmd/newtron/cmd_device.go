@@ -37,19 +37,19 @@ var deviceSetupCmd = &cobra.Command{
 
 This writes the 'device' root intent and configures:
   - DEVICE_METADATA (hostname, BGP ASN, type, HWSKU, routing config mode)
-  - Loopback interface (from profile loopback_ip)
-  - BGP globals (from profile underlay_asn)
-  - VTEP (optional, if --vtep-source is provided or profile has VTEP config)
+  - Loopback interface (from nodeSpec loopback_ip)
+  - BGP globals (from nodeSpec underlay_asn)
+  - VTEP (optional, if --vtep-source is provided or nodeSpec has VTEP config)
 
 This is the required first operation after 'init' — the intent DAG requires
 a 'device' root before any service operations (apply, vrf, evpn, etc.).
 
 Values not provided via flags are derived from the node spec. The
-profile already has hostname (device name), BGP ASN (underlay_asn), and
+nodeSpec already has hostname (device name), BGP ASN (underlay_asn), and
 loopback IP — so running without flags uses sensible defaults.
 
 Examples:
-  newtron leaf1 device setup -x                    # all values from profile
+  newtron leaf1 device setup -x                    # all values from nodeSpec
   newtron leaf1 device setup --type LeafRouter -x  # override device type
   newtron leaf1 device setup --vtep-source 10.0.0.1 -x  # enable VTEP`,
 	RunE: func(cmd *cobra.Command, args []string) error {

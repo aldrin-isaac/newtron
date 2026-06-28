@@ -48,7 +48,7 @@ import (
 //
 //   - network → n.spec.OverridableSpecs, under keyNetworkSpec, persist network.json
 //   - zone    → the zone's OverridableSpecs, under keyNetworkSpec, persist network.json
-//   - node    → the profile's OverridableSpecs, persisted to nodes/<name>.json via
+//   - node    → the nodeSpec's OverridableSpecs, persisted to nodes/<name>.json via
 //     loader.MutateNodeSpec (serialized, secret-safe). The network-spec RLock is
 //     held for the duration so the floor base that fn checks (checkOverrideBase)
 //     can't be deleted mid-write, and so lock order stays keyNetworkSpec → loader.
@@ -108,10 +108,10 @@ func (n *Network) checkOverrideBase(scope, kind, name string) error {
 }
 
 // eachScopeContainer invokes fn for every scope's OverridableSpecs container —
-// network, each zone, each node profile — with the scope token and instance
+// network, each zone, each node nodeSpec — with the scope token and instance
 // name. The single cross-scope walk the reverse-integrity guards build on.
-// Caller holds keyNetworkSpec (n.spec and zones are read directly; profiles load
-// via the loader's own lock). A profile that fails to load is a fail-closed
+// Caller holds keyNetworkSpec (n.spec and zones are read directly; nodeSpecs load
+// via the loader's own lock). A nodeSpec that fails to load is a fail-closed
 // error, never a silent skip.
 func (n *Network) eachScopeContainer(fn func(scope, instance string, specs *spec.OverridableSpecs) error) error {
 	if err := fn(spec.ScopeNetwork, "", &n.spec.OverridableSpecs); err != nil {
@@ -123,11 +123,11 @@ func (n *Network) eachScopeContainer(fn func(scope, instance string, specs *spec
 		}
 	}
 	for _, name := range n.ListNodeSpecs() {
-		profile, err := n.GetNodeSpec(name)
+		nodeSpec, err := n.GetNodeSpec(name)
 		if err != nil {
-			return fmt.Errorf("loading profile %q for cross-scope integrity check: %w", name, err)
+			return fmt.Errorf("loading node spec %q for cross-scope integrity check: %w", name, err)
 		}
-		if err := fn(spec.ScopeNode, name, &profile.OverridableSpecs); err != nil {
+		if err := fn(spec.ScopeNode, name, &nodeSpec.OverridableSpecs); err != nil {
 			return err
 		}
 	}
@@ -192,7 +192,7 @@ func scopeLabel(scope, instance string) string {
 }
 
 // containedOverrides lists the spec overrides held in a scope container (a zone
-// or a node profile), as sorted "KindSpec 'NAME'" strings. A zone/profile that
+// or a node nodeSpec), as sorted "KindSpec 'NAME'" strings. A zone/nodeSpec that
 // still holds overrides must not be deleted out from under them — deleting the
 // container would silently remove authored scoped resources. The reverse-delete
 // guard for the containers themselves (§15), symmetric with checkNoOverridesBelow

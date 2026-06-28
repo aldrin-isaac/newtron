@@ -34,7 +34,7 @@ type ScopedSpec struct {
 }
 
 // ListScopedSpecs returns every spec defined anywhere in the hierarchy —
-// network, every zone, and every node profile — each tagged with the scope and
+// network, every zone, and every node nodeSpec — each tagged with the scope and
 // instance it lives at. The result is sorted (scope, instance, kind, name) for
 // a stable wire order.
 //
@@ -63,15 +63,15 @@ func (n *Network) ListScopedSpecs() ([]ScopedSpec, error) {
 		}
 	}()
 
-	// Node profiles load independently of the network-spec lock. A profile that
+	// Node nodeSpecs load independently of the network-spec lock. A nodeSpec that
 	// fails to load is a fail-closed error (a malformed node spec must not be
 	// silently dropped from the inventory) rather than a silent skip.
 	for _, name := range n.ListNodeSpecs() {
-		profile, err := n.GetNodeSpec(name)
+		nodeSpec, err := n.GetNodeSpec(name)
 		if err != nil {
-			return nil, fmt.Errorf("loading profile %q for spec inventory: %w", name, err)
+			return nil, fmt.Errorf("loading node spec %q for spec inventory: %w", name, err)
 		}
-		profile.EachSpec(collect(spec.ScopeNode, name))
+		nodeSpec.EachSpec(collect(spec.ScopeNode, name))
 	}
 
 	sort.Slice(out, func(i, j int) bool {

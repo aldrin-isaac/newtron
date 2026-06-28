@@ -76,14 +76,14 @@ func createTestSpecDir(t *testing.T) string {
 		t.Fatalf("Failed to write platforms.json: %v", err)
 	}
 
-	// Create profiles directory
-	profilesDir := filepath.Join(tmpDir, "nodes")
-	if err := os.MkdirAll(profilesDir, 0755); err != nil {
-		t.Fatalf("Failed to create profiles dir: %v", err)
+	// Create nodeSpecs directory
+	nodesDir := filepath.Join(tmpDir, "nodes")
+	if err := os.MkdirAll(nodesDir, 0755); err != nil {
+		t.Fatalf("Failed to create nodeSpecs dir: %v", err)
 	}
 
-	// Create test profile
-	profileJSON := `{
+	// Create test nodeSpec
+	nodeSpecJSON := `{
 		"mgmt_ip": "192.168.1.10",
 		"loopback_ip": "10.0.0.10",
 		"zone": "amer",
@@ -92,12 +92,12 @@ func createTestSpecDir(t *testing.T) string {
 			"peers": ["spine1-ny", "spine2-ny"]
 		}
 	}`
-	if err := os.WriteFile(filepath.Join(profilesDir, "leaf1-ny.json"), []byte(profileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write profile: %v", err)
+	if err := os.WriteFile(filepath.Join(nodesDir, "leaf1-ny.json"), []byte(nodeSpecJSON), 0644); err != nil {
+		t.Fatalf("Failed to write nodeSpec: %v", err)
 	}
 
-	// Create spine profile for EVPN peer lookup
-	spineProfileJSON := `{
+	// Create spine node spec for EVPN peer lookup
+	spineNodeSpecJSON := `{
 		"mgmt_ip": "192.168.1.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -105,11 +105,11 @@ func createTestSpecDir(t *testing.T) string {
 			"route_reflector": true
 		}
 	}`
-	if err := os.WriteFile(filepath.Join(profilesDir, "spine1-ny.json"), []byte(spineProfileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write spine1 profile: %v", err)
+	if err := os.WriteFile(filepath.Join(nodesDir, "spine1-ny.json"), []byte(spineNodeSpecJSON), 0644); err != nil {
+		t.Fatalf("Failed to write spine1 nodeSpec: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(profilesDir, "spine2-ny.json"), []byte(spineProfileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write spine2 profile: %v", err)
+	if err := os.WriteFile(filepath.Join(nodesDir, "spine2-ny.json"), []byte(spineNodeSpecJSON), 0644); err != nil {
+		t.Fatalf("Failed to write spine2 nodeSpec: %v", err)
 	}
 
 	return tmpDir
@@ -141,7 +141,7 @@ func TestLoader_Load(t *testing.T) {
 	// + ResolvePlatformSecrets, covered by their own tests).
 }
 
-func TestLoader_LoadProfile(t *testing.T) {
+func TestLoader_LoadNodeSpec(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -150,23 +150,23 @@ func TestLoader_LoadProfile(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	profile, err := loader.LoadNodeSpec("leaf1-ny")
+	nodeSpec, err := loader.LoadNodeSpec("leaf1-ny")
 	if err != nil {
 		t.Fatalf("LoadNodeSpec() failed: %v", err)
 	}
 
-	if profile.MgmtIP != "192.168.1.10" {
-		t.Errorf("MgmtIP = %q, want %q", profile.MgmtIP, "192.168.1.10")
+	if nodeSpec.MgmtIP != "192.168.1.10" {
+		t.Errorf("MgmtIP = %q, want %q", nodeSpec.MgmtIP, "192.168.1.10")
 	}
-	if profile.LoopbackIP != "10.0.0.10" {
-		t.Errorf("LoopbackIP = %q, want %q", profile.LoopbackIP, "10.0.0.10")
+	if nodeSpec.LoopbackIP != "10.0.0.10" {
+		t.Errorf("LoopbackIP = %q, want %q", nodeSpec.LoopbackIP, "10.0.0.10")
 	}
-	if profile.Zone != "amer" {
-		t.Errorf("Zone = %q, want %q", profile.Zone, "amer")
+	if nodeSpec.Zone != "amer" {
+		t.Errorf("Zone = %q, want %q", nodeSpec.Zone, "amer")
 	}
 }
 
-func TestLoader_LoadProfile_Caching(t *testing.T) {
+func TestLoader_LoadNodeSpec_Caching(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -180,16 +180,16 @@ func TestLoader_LoadProfile_Caching(t *testing.T) {
 	p2, _ := loader.LoadNodeSpec("leaf1-ny")
 
 	if p1 != p2 {
-		t.Error("LoadNodeSpec should return cached profile")
+		t.Error("LoadNodeSpec should return cached nodeSpec")
 	}
 }
 
-// TestLoader_LoadProfile_ConcurrentSameKey pins the cache mutex: N goroutines
+// TestLoader_LoadNodeSpec_ConcurrentSameKey pins the cache mutex: N goroutines
 // calling LoadNodeSpec for the same key under the race detector must complete
 // without "concurrent map read and map write" panics. Pre-mutex this test
 // reliably failed under `go test -race` because the cache write in
-// LoadNodeSpec mutated l.profiles without coordination.
-func TestLoader_LoadProfile_ConcurrentSameKey(t *testing.T) {
+// LoadNodeSpec mutated l.nodeSpecs without coordination.
+func TestLoader_LoadNodeSpec_ConcurrentSameKey(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -224,10 +224,10 @@ func TestLoader_LoadProfile_ConcurrentSameKey(t *testing.T) {
 	}
 }
 
-// TestLoader_LoadProfile_ConcurrentMixedKeys exercises the cache mutex with
+// TestLoader_LoadNodeSpec_ConcurrentMixedKeys exercises the cache mutex with
 // different keys racing simultaneously. Same regression target — concurrent
 // map writes panic under -race without the mutex.
-func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
+func TestLoader_LoadNodeSpec_ConcurrentMixedKeys(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -236,7 +236,7 @@ func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	// Profiles present in createTestSpecDir; if more get added there, this
+	// NodeSpecs present in createTestSpecDir; if more get added there, this
 	// test trivially still passes.
 	keys := []string{"leaf1-ny", "leaf2-ny", "spine1-ny"}
 	const rounds = 8
@@ -247,7 +247,7 @@ func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
 			go func(k string) {
 				defer wg.Done()
 				if _, err := loader.LoadNodeSpec(k); err != nil {
-					// Profile may not exist in fixture; that's fine — we
+					// NodeSpec may not exist in fixture; that's fine — we
 					// only care about the absence of races, not that every
 					// key resolves.
 					_ = err
@@ -258,7 +258,7 @@ func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
 	wg.Wait()
 }
 
-func TestLoader_LoadProfile_NotFound(t *testing.T) {
+func TestLoader_LoadNodeSpec_NotFound(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -269,7 +269,7 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 
 	_, err := loader.LoadNodeSpec("nonexistent")
 	if err == nil {
-		t.Error("LoadNodeSpec() should fail for nonexistent profile")
+		t.Error("LoadNodeSpec() should fail for nonexistent nodeSpec")
 	}
 }
 
@@ -338,7 +338,7 @@ func TestLoader_LoadEmptyDir(t *testing.T) {
 // TestLoader_LabOnlyTopology pins that a directory with a topology.json but no
 // network.json loads as a lab-only network with an empty spec rather than
 // erroring. These are deploy-only topologies — newtlab spins up the VMs from
-// the topology, node profiles, and global platforms while an external system
+// the topology, node nodeSpecs, and global platforms while an external system
 // (e.g. the vJunos topologies configured by netconf.pl) owns device config.
 // network.json is optional, symmetric with the already-optional topology.json.
 func TestLoader_LabOnlyTopology(t *testing.T) {
@@ -348,7 +348,7 @@ func TestLoader_LabOnlyTopology(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// topology.json + a node profile, but deliberately NO network.json.
+	// topology.json + a node nodeSpec, but deliberately NO network.json.
 	topo := `{"version":"1.0","nodes":{"r1":{}},"links":[]}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "topology.json"), []byte(topo), 0644); err != nil {
 		t.Fatalf("Failed to write topology.json: %v", err)
@@ -358,7 +358,7 @@ func TestLoader_LabOnlyTopology(t *testing.T) {
 	}
 	node := `{"platform":"vjunos-router","zone":"lab"}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "nodes", "r1.json"), []byte(node), 0644); err != nil {
-		t.Fatalf("Failed to write node profile: %v", err)
+		t.Fatalf("Failed to write node nodeSpec: %v", err)
 	}
 
 	loader := NewLoader(tmpDir, nil)
@@ -394,7 +394,7 @@ func TestLoader_LoadInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestLoader_LoadProfile_InvalidJSON(t *testing.T) {
+func TestLoader_LoadNodeSpec_InvalidJSON(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -403,13 +403,13 @@ func TestLoader_LoadProfile_InvalidJSON(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	// Create profile with invalid JSON
-	profilePath := filepath.Join(tmpDir, "nodes", "bad-profile.json")
-	if err := os.WriteFile(profilePath, []byte("invalid json {"), 0644); err != nil {
-		t.Fatalf("Failed to write bad profile: %v", err)
+	// Create nodeSpec with invalid JSON
+	nodeSpecPath := filepath.Join(tmpDir, "nodes", "bad-nodeSpec.json")
+	if err := os.WriteFile(nodeSpecPath, []byte("invalid json {"), 0644); err != nil {
+		t.Fatalf("Failed to write bad nodeSpec: %v", err)
 	}
 
-	_, err := loader.LoadNodeSpec("bad-profile")
+	_, err := loader.LoadNodeSpec("bad-nodeSpec")
 	if err == nil {
 		t.Error("LoadNodeSpec() should fail with invalid JSON")
 	}
@@ -607,7 +607,7 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 	}
 }
 
-func TestLoader_ValidateProfileZoneReference(t *testing.T) {
+func TestLoader_ValidateNodeSpecZoneReference(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -616,24 +616,24 @@ func TestLoader_ValidateProfileZoneReference(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	// Profile referencing unknown zone
-	profileJSON := `{
+	// NodeSpec referencing unknown zone
+	nodeSpecJSON := `{
 		"mgmt_ip": "192.168.1.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "unknown-zone"
 	}`
-	profilePath := filepath.Join(tmpDir, "nodes", "bad-zone.json")
-	if err := os.WriteFile(profilePath, []byte(profileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write profile: %v", err)
+	nodeSpecPath := filepath.Join(tmpDir, "nodes", "bad-zone.json")
+	if err := os.WriteFile(nodeSpecPath, []byte(nodeSpecJSON), 0644); err != nil {
+		t.Fatalf("Failed to write nodeSpec: %v", err)
 	}
 
 	_, err := loader.LoadNodeSpec("bad-zone")
 	if err == nil {
-		t.Error("LoadNodeSpec() should fail when profile references unknown zone")
+		t.Error("LoadNodeSpec() should fail when nodeSpec references unknown zone")
 	}
 }
 
-func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
+func TestLoader_ValidateNodeSpec_InvalidIPs(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -643,53 +643,53 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		profileJSON string
-		expectErr   bool
+		name         string
+		nodeSpecJSON string
+		expectErr    bool
 	}{
 		{
-			name:        "invalid mgmt_ip",
-			profileJSON: `{"mgmt_ip": "invalid-ip", "loopback_ip": "10.0.0.1", "zone": "amer"}`,
-			expectErr:   true,
+			name:         "invalid mgmt_ip",
+			nodeSpecJSON: `{"mgmt_ip": "invalid-ip", "loopback_ip": "10.0.0.1", "zone": "amer"}`,
+			expectErr:    true,
 		},
 		{
-			name:        "invalid loopback_ip",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "invalid-ip", "zone": "amer"}`,
-			expectErr:   true,
+			name:         "invalid loopback_ip",
+			nodeSpecJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "invalid-ip", "zone": "amer"}`,
+			expectErr:    true,
 		},
 		{
-			name:        "missing mgmt_ip",
-			profileJSON: `{"loopback_ip": "10.0.0.1", "zone": "amer"}`,
-			expectErr:   true,
+			name:         "missing mgmt_ip",
+			nodeSpecJSON: `{"loopback_ip": "10.0.0.1", "zone": "amer"}`,
+			expectErr:    true,
 		},
 		{
-			name:        "missing loopback_ip",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "zone": "amer"}`,
-			expectErr:   true,
+			name:         "missing loopback_ip",
+			nodeSpecJSON: `{"mgmt_ip": "192.168.1.1", "zone": "amer"}`,
+			expectErr:    true,
 		},
 		{
-			name:        "missing zone",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1"}`,
-			expectErr:   true,
+			name:         "missing zone",
+			nodeSpecJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1"}`,
+			expectErr:    true,
 		},
 		{
-			name:        "unknown zone",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "zone": "unknown-zone"}`,
-			expectErr:   true,
+			name:         "unknown zone",
+			nodeSpecJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "zone": "unknown-zone"}`,
+			expectErr:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			profilePath := filepath.Join(tmpDir, "nodes", "test-profile.json")
-			if err := os.WriteFile(profilePath, []byte(tt.profileJSON), 0644); err != nil {
-				t.Fatalf("Failed to write profile: %v", err)
+			nodeSpecPath := filepath.Join(tmpDir, "nodes", "test-nodeSpec.json")
+			if err := os.WriteFile(nodeSpecPath, []byte(tt.nodeSpecJSON), 0644); err != nil {
+				t.Fatalf("Failed to write nodeSpec: %v", err)
 			}
 
-			// Clear cached profile
-			delete(loader.profiles, "test-profile")
+			// Clear cached nodeSpec
+			delete(loader.nodeSpecs, "test-nodeSpec")
 
-			_, err := loader.LoadNodeSpec("test-profile")
+			_, err := loader.LoadNodeSpec("test-nodeSpec")
 			if tt.expectErr && err == nil {
 				t.Error("LoadNodeSpec() should fail with validation error")
 			}

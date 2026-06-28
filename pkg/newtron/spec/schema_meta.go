@@ -518,7 +518,7 @@ func buildSchemaMeta(sk schemaKind) SchemaMeta {
 // scope is optional and declares Default "network" (the server's default for an
 // absent value). scope_instance applies and is required only when scope is not
 // network, and is a sibling-conditional reference — a dropdown of zone names
-// when scope=zone, of node/profile names when scope=node — so the override form
+// when scope=zone, of node/nodeSpec names when scope=node — so the override form
 // offers the right instances instead of free text.
 func scopeFields() []FieldMeta {
 	notNetwork := &RequiredWhen{Field: "scope", NotEquals: ScopeNetwork}

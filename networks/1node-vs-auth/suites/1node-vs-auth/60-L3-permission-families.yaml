@@ -31,7 +31,7 @@ description: |
   Coverage expansion: the original 20-L3-spec-mutations-gated scenario
   only walks the spec.author + qos.create + filter.create families.
   Mallory's portion of this split-per-identity scenario: mallory (not in
-  any group) is denied on profile mutations, zone mutations, and topology
+  any group) is denied on node mutations, zone mutations, and topology
   mutations. Verifies the spec.author gate reaches handlers beyond
   services/qos/filters.
 
@@ -39,12 +39,12 @@ requires: [L3-permission-families-root]
 as: mallory
 
 steps:
-  # Profile mutations — mallory denied
-  - name: mallory-create-profile-denied
+  # Node mutations — mallory denied
+  - name: mallory-create-node-denied
     action: newtron
     method: POST
-    url: /create-profile
-    params: {name: profile-mallory, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.99", zone: amer, platform: sonic-vs}
+    url: /create-node
+    params: {name: node-mallory, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.99", zone: amer, platform: sonic-vs}
     expect_failure: true
 
   # Zone mutations
@@ -74,27 +74,27 @@ description: |
   Coverage expansion: the original 20-L3-spec-mutations-gated scenario
   only walks the spec.author + qos.create + filter.create families.
   Alice's portion of this split-per-identity scenario: alice (spec-team
-  has spec.author) is allowed on profile mutations and zone mutations.
+  has spec.author) is allowed on node mutations and zone mutations.
   Verifies the spec.author gate reaches handlers beyond services/qos/filters.
 
 requires: [L3-permission-families-mallory]
 as: alice
 
 steps:
-  # Profile mutations — alice (spec-team has spec.author) succeeds.
+  # Node mutations — alice (spec-team has spec.author) succeeds.
   # Verifies the spec.author gate reaches handlers beyond
   # services/qos/filters.
-  - name: alice-create-profile-allowed
+  - name: alice-create-node-allowed
     action: newtron
     method: POST
-    url: /create-profile
-    params: {name: profile-alice, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.98", zone: amer, platform: sonic-vs}
+    url: /create-node
+    params: {name: node-alice, mgmt_ip: "127.0.0.1", loopback_ip: "10.0.0.98", zone: amer, platform: sonic-vs}
 
-  - name: alice-cleanup-profile
+  - name: alice-cleanup-node
     action: newtron
     method: POST
-    url: /delete-profile
-    params: {name: profile-alice}
+    url: /delete-node
+    params: {name: node-alice}
 
   # Zone mutations
   - name: alice-create-zone-allowed

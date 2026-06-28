@@ -19,7 +19,7 @@ steps:
     action: newtron
     method: POST
     url: /create-service
-    params: {name: svc-mallory, type: routed}
+    params: {name: svc-mallory, service_type: routed}
     expect_failure: true
 
   # qos.create family — denied caller
@@ -77,7 +77,7 @@ steps:
     action: newtron
     method: POST
     url: /create-service
-    params: {name: svc-alice-l3, type: routed}
+    params: {name: svc-alice-l3, service_type: routed}
 
   - name: alice-cleans-up-svc
     action: newtron

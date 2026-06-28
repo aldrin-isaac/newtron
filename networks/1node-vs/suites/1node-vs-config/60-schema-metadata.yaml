@@ -288,9 +288,9 @@ steps:
         (.fields | map(select(.name == "anycast_ip")) | .[0].format) == "cidr" and
         (.fields | map(select(.name == "anycast_mac")) | .[0].format) == "mac"
 
-  - name: schema-DeviceProfile-loopback-cidr
+  - name: schema-NodeSpec-loopback-cidr
     action: newtron
-    url: /schema/DeviceProfile
+    url: /schema/NodeSpec
     expect:
       jq: |
         (.fields | map(select(.name == "loopback_ip")) | .[0].format) == "cidr"
@@ -375,7 +375,7 @@ steps:
       # a hard count against the known registry size — if a kind is
       # added or removed intentionally, the author updates both this
       # number and the corresponding /schema-list-has-X step above.
-      jq: '(.schemas | length) == 17'
+      jq: '(.schemas | length) == 18'
 
   # ====================================================================
   # GET /schema/ServiceSpec — required_when on ipvpn / macvpn (PR #243).

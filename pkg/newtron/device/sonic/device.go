@@ -41,7 +41,7 @@ type NotReadyError interface {
 // Device represents a SONiC switch.
 type Device struct {
 	Name     string
-	Profile  *spec.ResolvedNodeSpec
+	NodeSpec *spec.ResolvedNodeSpec
 	ConfigDB *ConfigDB
 	StateDB  *StateDB
 
@@ -72,10 +72,10 @@ type Device struct {
 }
 
 // NewDevice creates a new device instance
-func NewDevice(name string, profile *spec.ResolvedNodeSpec) *Device {
+func NewDevice(name string, nodeSpec *spec.ResolvedNodeSpec) *Device {
 	return &Device{
-		Name:    name,
-		Profile: profile,
+		Name:     name,
+		NodeSpec: nodeSpec,
 	}
 }
 
@@ -103,19 +103,19 @@ func (d *Device) Connect(ctx context.Context) error {
 	}()
 
 	var addr string
-	if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
+	if d.NodeSpec.SSHUser != "" && d.NodeSpec.SSHPass != "" {
 		sshPort, err := d.resolveSSHPort(ctx)
 		if err != nil {
 			return fmt.Errorf("resolving SSH port for %s: %w", d.Name, err)
 		}
-		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, sshPort)
+		tun, err := NewSSHTunnel(d.NodeSpec.MgmtIP, d.NodeSpec.SSHUser, d.NodeSpec.SSHPass, sshPort)
 		if err != nil {
 			return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
 		}
 		d.tunnel = tun
 		addr = tun.LocalAddr()
 	} else {
-		addr = fmt.Sprintf("%s:6379", d.Profile.MgmtIP)
+		addr = fmt.Sprintf("%s:6379", d.NodeSpec.MgmtIP)
 	}
 
 	// Connect to CONFIG_DB (DB 4)
@@ -366,7 +366,7 @@ func (d *Device) ConnAddr() string {
 	if d.tunnel != nil {
 		return d.tunnel.LocalAddr()
 	}
-	return fmt.Sprintf("%s:6379", d.Profile.MgmtIP)
+	return fmt.Sprintf("%s:6379", d.NodeSpec.MgmtIP)
 }
 
 // Tunnel returns the SSH tunnel for direct access (e.g., newtrun SSH commands).

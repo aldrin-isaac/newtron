@@ -174,17 +174,17 @@ func TestUpdateFilter_PreservesRules(t *testing.T) {
 	}
 }
 
-// TestUpdateProfile_RoundTrip exercises the profile path
-// specifically — Profile lives in nodes/<name>.json, distinct
+// TestUpdateNodeSpec_RoundTrip exercises the nodeSpec path
+// specifically — NodeSpec lives in nodes/<name>.json, distinct
 // from the other spec kinds that live in network.json. The Loader
 // path (UpdateNodeSpec in spec/loader.go) is what changes, not the
-// Network spec persist path. The test creates a profile, updates
+// Network spec persist path. The test creates a nodeSpec, updates
 // the mgmt_ip, and reads it back to confirm the new value landed
 // on disk and in the loader cache.
-func TestUpdateProfile_RoundTrip(t *testing.T) {
+func TestUpdateNodeSpec_RoundTrip(t *testing.T) {
 	s := scaffoldNetwork(t, "default")
 
-	// Profile requires a zone to exist first.
+	// NodeSpec requires a zone to exist first.
 	if w := post(t, s, "/newtron/v1/networks/default/create-zone", map[string]any{
 		"name": "amer",
 	}); w.Code != http.StatusCreated {
@@ -225,16 +225,16 @@ func TestUpdateProfile_RoundTrip(t *testing.T) {
 		t.Errorf("mgmt_ip: got %q, want 10.0.0.99", env.Data.MgmtIP)
 	}
 
-	// Round-trip the on-disk file too: re-read the profile JSON and
+	// Round-trip the on-disk file too: re-read the nodeSpec JSON and
 	// confirm the new mgmt_ip landed atomically.
 	specDir := s.networks["default"].specDir
 	raw, err := os.ReadFile(filepath.Join(specDir, "nodes", "switch1.json"))
 	if err != nil {
-		t.Fatalf("read profile file: %v", err)
+		t.Fatalf("read nodeSpec file: %v", err)
 	}
 	var onDisk map[string]any
 	if err := json.Unmarshal(raw, &onDisk); err != nil {
-		t.Fatalf("unmarshal profile file: %v", err)
+		t.Fatalf("unmarshal nodeSpec file: %v", err)
 	}
 	if mgmt, _ := onDisk["mgmt_ip"].(string); mgmt != "10.0.0.99" {
 		t.Errorf("on-disk mgmt_ip: got %q, want 10.0.0.99", mgmt)

@@ -18,7 +18,7 @@ steps:
     action: newtron
     method: POST
     url: /create-service
-    params: {name: svc-architect, type: routed}
+    params: {name: svc-architect, service_type: routed}
 
   - name: architect-cleans-up-service
     action: newtron
@@ -47,7 +47,7 @@ steps:
     action: newtron
     method: POST
     url: /create-service
-    params: {name: svc-iam, type: routed}
+    params: {name: svc-iam, service_type: routed}
     expect_failure: true
 
 ---

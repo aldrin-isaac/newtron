@@ -61,14 +61,14 @@ func TestResolvedSpecs_MergeNodeWins(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{"svc": nodeSvc},
 		},
 	}
 
-	rs := n.buildResolvedSpecs(profile)
+	rs := n.buildResolvedSpecs(nodeSpec)
 	got, err := rs.GetService("svc")
 	if err != nil {
 		t.Fatalf("GetService() failed: %v", err)
@@ -99,9 +99,9 @@ func TestResolvedSpecs_MergeZoneWinsOverNetwork(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{Zone: "amer"}
+	nodeSpec := &spec.NodeSpec{Zone: "amer"}
 
-	rs := n.buildResolvedSpecs(profile)
+	rs := n.buildResolvedSpecs(nodeSpec)
 	got, err := rs.GetFilter("f1")
 	if err != nil {
 		t.Fatalf("GetFilter() failed: %v", err)
@@ -136,7 +136,7 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
@@ -145,7 +145,7 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 		},
 	}
 
-	rs := n.buildResolvedSpecs(profile)
+	rs := n.buildResolvedSpecs(nodeSpec)
 
 	// Network-level IPVPN should be visible
 	if _, err := rs.GetIPVPN("NET"); err != nil {
@@ -180,7 +180,7 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			MACVPNs: map[string]*spec.MACVPNSpec{
@@ -189,7 +189,7 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 		},
 	}
 
-	rs := n.buildResolvedSpecs(profile)
+	rs := n.buildResolvedSpecs(nodeSpec)
 
 	// Find network-level by VNI
 	name, def := rs.FindMACVPNByVNI(1000)
@@ -227,8 +227,8 @@ func TestResolvedSpecs_FindMACVPNByVNI_DynamicFallback(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{Zone: "amer"}
-	rs := n.buildResolvedSpecs(profile)
+	nodeSpec := &spec.NodeSpec{Zone: "amer"}
+	rs := n.buildResolvedSpecs(nodeSpec)
 
 	// Pre-existing MACVPN should be found
 	name, def := rs.FindMACVPNByVNI(1000)
@@ -269,8 +269,8 @@ func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{Zone: "amer"}
-	rs := n.buildResolvedSpecs(profile)
+	nodeSpec := &spec.NodeSpec{Zone: "amer"}
+	rs := n.buildResolvedSpecs(nodeSpec)
 
 	// Pre-existing service should be in the merged snapshot
 	if _, err := rs.GetService("EXISTING"); err != nil {
@@ -298,8 +298,8 @@ func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
 	}
 }
 
-func TestResolvedSpecs_LiveFallback_ProfileOverrideStillWins(t *testing.T) {
-	// §39: Profile-level override must still win over network-level,
+func TestResolvedSpecs_LiveFallback_NodeSpecOverrideStillWins(t *testing.T) {
+	// §39: NodeSpec-level override must still win over network-level,
 	// even when the network level has been modified after snapshot build.
 	n := &Network{
 		spec: &spec.NetworkSpecFile{
@@ -315,36 +315,36 @@ func TestResolvedSpecs_LiveFallback_ProfileOverrideStillWins(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
-				"SVC": {Description: "profile-level"},
+				"SVC": {Description: "nodeSpec-level"},
 			},
 		},
 	}
 
-	rs := n.buildResolvedSpecs(profile)
+	rs := n.buildResolvedSpecs(nodeSpec)
 
-	// Profile override should win
+	// NodeSpec override should win
 	svc, err := rs.GetService("SVC")
 	if err != nil {
 		t.Fatalf("GetService failed: %v", err)
 	}
-	if svc.Description != "profile-level" {
-		t.Errorf("profile should win, got %q", svc.Description)
+	if svc.Description != "nodeSpec-level" {
+		t.Errorf("nodeSpec should win, got %q", svc.Description)
 	}
 
 	// Now modify the network-level spec
 	n.spec.Services["SVC"] = &spec.ServiceSpec{Description: "network-modified"}
 
-	// Profile override should STILL win (snapshot has it)
+	// NodeSpec override should STILL win (snapshot has it)
 	svc, err = rs.GetService("SVC")
 	if err != nil {
 		t.Fatalf("GetService after network modify failed: %v", err)
 	}
-	if svc.Description != "profile-level" {
-		t.Errorf("profile should still win after network modify, got %q", svc.Description)
+	if svc.Description != "nodeSpec-level" {
+		t.Errorf("nodeSpec should still win after network modify, got %q", svc.Description)
 	}
 }
 
@@ -360,8 +360,8 @@ func TestResolvedSpecs_GetPlatformDelegatesToNetwork(t *testing.T) {
 		},
 	}
 
-	profile := &spec.NodeSpec{Zone: "amer"}
-	rs := n.buildResolvedSpecs(profile)
+	nodeSpec := &spec.NodeSpec{Zone: "amer"}
+	rs := n.buildResolvedSpecs(nodeSpec)
 
 	p, err := rs.GetPlatform("as7726")
 	if err != nil {

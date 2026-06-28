@@ -7,7 +7,7 @@ import (
 )
 
 // TestListScopedSpecs_AllThreeScopes pins the cross-scope inventory: a spec
-// defined at the network scope, one at a zone, and one at a node profile must
+// defined at the network scope, one at a zone, and one at a node nodeSpec must
 // each appear once, tagged with the correct scope + instance. Uses prefix lists
 // (the simplest spec kind — a []string with no nested validation) at every scope
 // so the test exercises the enumeration, not per-kind spec validity.
@@ -35,20 +35,20 @@ func TestListScopedSpecs_AllThreeScopes(t *testing.T) {
 		t.Fatalf("write platforms.json: %v", err)
 	}
 
-	// nodes/leaf1.json — a switch profile in zone "amer" with a node-scope
+	// nodes/leaf1.json — a switch nodeSpec in zone "amer" with a node-scope
 	// prefix list. mgmt_ip/loopback_ip/zone are the required switch fields.
 	nodesDir := filepath.Join(dir, "nodes")
 	if err := os.MkdirAll(nodesDir, 0o755); err != nil {
 		t.Fatalf("mkdir nodes: %v", err)
 	}
-	profileJSON := `{
+	nodeSpecJSON := `{
 		"mgmt_ip": "10.0.0.1",
 		"loopback_ip": "10.255.0.1",
 		"zone": "amer",
 		"prefix_lists": { "NODE_PL": ["10.2.0.0/16"] }
 	}`
-	if err := os.WriteFile(filepath.Join(nodesDir, "leaf1.json"), []byte(profileJSON), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
+	if err := os.WriteFile(filepath.Join(nodesDir, "leaf1.json"), []byte(nodeSpecJSON), 0o644); err != nil {
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 
 	n, err := NewNetwork(dir, "", nil, nil, nil)

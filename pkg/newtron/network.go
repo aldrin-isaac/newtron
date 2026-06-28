@@ -29,7 +29,7 @@ type Network struct {
 // deployments.
 //
 // secretStore (auth-design.md L0) is the operator-configured secret
-// backend. When non-nil, ${secret:KEY} references in profile and
+// backend. When non-nil, ${secret:KEY} references in nodeSpec and
 // platform values are resolved at load time. nil preserves the
 // plaintext-only behavior — references in specs become hard errors
 // at load.
@@ -42,7 +42,7 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 }
 
 // EnableAuthorization wires permission enforcement for this Network
-// (auth-design.md L3). After it returns, every spec/profile
+// (auth-design.md L3). After it returns, every spec/nodeSpec
 // mutation method's checkPermission call consults the network's
 // permissions map — denials surface as auth.PermissionError, which
 // pkg/newtron/api maps to HTTP 403.
@@ -220,7 +220,7 @@ func (net *Network) TopologyView() *TopologyView {
 
 // AddTopologyDevice adds a device entry to topology.json. Returns
 // *ConflictError when a device with this name already exists. The matching
-// profile file must already exist. Persists atomically. §7 + §15 + §27 + §46.
+// nodeSpec file must already exist. Persists atomically. §7 + §15 + §27 + §46.
 func (net *Network) AddTopologyDevice(ctx context.Context, name string, device *spec.TopologyNode) error {
 	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithDevice(name).WithResource(name)); err != nil {
 		return err
@@ -316,7 +316,7 @@ func (net *Network) GetHostProfile(ctx context.Context, name string) (*HostProfi
 	if err != nil {
 		return nil, err
 	}
-	profile := &HostProfile{
+	nodeSpec := &HostProfile{
 		MgmtIP:  p.MgmtIP,
 		SSHUser: p.SSHUser,
 		SSHPass: p.SSHPass,
@@ -326,9 +326,9 @@ func (net *Network) GetHostProfile(ctx context.Context, name string) (*HostProfi
 		if err != nil {
 			return nil, fmt.Errorf("resolving SSH port for host %q: %w", name, err)
 		}
-		profile.SSHPort = port
+		nodeSpec.SSHPort = port
 	}
-	return profile, nil
+	return nodeSpec, nil
 }
 
 // InitFromDeviceIntent creates a node whose projection is built from the device's
@@ -481,7 +481,7 @@ func (net *Network) TopologyDrift(ctx context.Context, device string) ([]DriftEn
 	return node.Drift(ctx)
 }
 
-// checkPermission is the single gate every spec/profile mutation
+// checkPermission is the single gate every spec/nodeSpec mutation
 // passes through (auth-design.md L3). Disabled state (auth == nil)
 // preserves pre-L3 behavior — every check returns nil. Enabled state
 // populates authCtx.Caller from the verified identity attached to

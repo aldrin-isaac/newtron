@@ -11,10 +11,10 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// TestNewNetwork_SecretRefInProfileResolves pins the L0 end-to-end:
-// a profile with ssh_pass="${secret:KEY}" and a store containing
+// TestNewNetwork_SecretRefInNodeSpecResolves pins the L0 end-to-end:
+// a nodeSpec with ssh_pass="${secret:KEY}" and a store containing
 // KEY=value loads cleanly; ResolveNodeSpec yields plaintext.
-func TestNewNetwork_SecretRefInProfileResolves(t *testing.T) {
+func TestNewNetwork_SecretRefInNodeSpecResolves(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
 	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
@@ -48,7 +48,7 @@ func TestNewNetwork_SecretRefInProfileResolves(t *testing.T) {
 }
 
 // TestNewNetwork_SecretRefWithoutStoreErrors pins the disabled-state
-// behavior: a profile with a reference but no store configured fails
+// behavior: a nodeSpec with a reference but no store configured fails
 // at network load (not at first SSH attempt) — the operator sees the
 // problem immediately on server startup, not under load.
 func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
@@ -65,7 +65,7 @@ func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 
 	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
-		t.Fatalf("NewNetwork: %v (the reference is only resolved on profile read; init should succeed)", err)
+		t.Fatalf("NewNetwork: %v (the reference is only resolved on nodeSpec read; init should succeed)", err)
 	}
 	_, err = n.resolveNodeSpecByName("switch1")
 	if err == nil {
@@ -76,11 +76,11 @@ func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 	}
 }
 
-// TestNewNetwork_PlaintextProfilePassesThrough pins the no-regression
-// path: a profile with plaintext ssh_pass loads with no store
+// TestNewNetwork_PlaintextNodeSpecPassesThrough pins the no-regression
+// path: a nodeSpec with plaintext ssh_pass loads with no store
 // configured (current behavior), and the plaintext flows through
 // ResolveNodeSpec unchanged.
-func TestNewNetwork_PlaintextProfilePassesThrough(t *testing.T) {
+func TestNewNetwork_PlaintextNodeSpecPassesThrough(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
 	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
@@ -207,10 +207,10 @@ func writeTopology(t *testing.T, dir string, deviceName string) {
 func writeNodeSpec(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
-		t.Fatalf("mkdir profiles: %v", err)
+		t.Fatalf("mkdir nodeSpecs: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "nodes", name+".json"), []byte(body), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
+		t.Fatalf("write nodeSpec: %v", err)
 	}
 }
 
@@ -225,7 +225,7 @@ func (n *Network) resolveNodeSpecByName(name string) (*spec.ResolvedNodeSpec, er
 	return n.resolveNodeSpec(name, p)
 }
 
-func plainSwitch1Profile() string {
+func plainSwitch1NodeSpec() string {
 	return `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
@@ -244,7 +244,7 @@ func plainSwitch1Profile() string {
 // flag, no explicit operator config required.
 //
 // This is what keeps the README quickstart's `bin/newt-server` command
-// unchanged after migrating test-topology profiles from plaintext to
+// unchanged after migrating test-topology nodeSpecs from plaintext to
 // ${secret:KEY} references: the secrets.json sits next to network.json
 // and is picked up automatically.
 //
@@ -328,12 +328,12 @@ func TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery(t *testing.T) {
 // TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent pins the
 // no-regression path: when secretStore=nil AND <specDir>/secrets.json
 // doesn't exist, the loader proceeds as today (nil store; plaintext
-// profiles work; references error at resolve time). The auto-discovery
+// nodeSpecs work; references error at resolve time). The auto-discovery
 // is strictly additive — it cannot break a setup that didn't have a
 // secrets.json.
 func TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
-	// Plaintext profile, no secrets.json.
+	// Plaintext nodeSpec, no secrets.json.
 	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
