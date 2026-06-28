@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
@@ -23,26 +24,39 @@ func TestWriteControl_StoreLifecycle(t *testing.T) {
 		t.Fatal("free network: enforceWrite should refuse (no holder), got nil")
 	}
 
-	// alice requests → granted; her writes pass, bob's don't.
-	if _, prior, err := ne.requestControl("n", "alice", false); err != nil || prior != "" {
+	// alice requests (default 30m window) → granted; her writes pass, bob's don't.
+	wc0, prior, err := ne.requestControl("n", "alice", false, 0)
+	if err != nil || prior != "" {
 		t.Fatalf("alice request: err=%v prior=%q, want grant", err, prior)
+	}
+	if got := time.Until(wc0.ExpiresAt); got < 29*time.Minute || got > 31*time.Minute {
+		t.Errorf("default window = %v, want ~30m", got)
 	}
 	if err := ne.enforceWrite("n", "alice"); err != nil {
 		t.Errorf("holder write refused: %v", err)
 	}
 	var wce *newtron.WriteControlError
-	err := ne.enforceWrite("n", "bob")
+	err = ne.enforceWrite("n", "bob")
 	if !asWriteControl(err, &wce) || wce.Holder != "alice" {
 		t.Errorf("bob write: err=%v, want WriteControlError holder=alice", err)
 	}
 
+	// alice extends with an explicit 60m window → Since preserved, window grown.
+	wc1, _, err := ne.requestControl("n", "alice", false, 60*time.Minute)
+	if err != nil || !wc1.Since.Equal(wc0.Since) {
+		t.Errorf("extend: since changed (%v→%v) or err=%v — extend should keep the acquire time", wc0.Since, wc1.Since, err)
+	}
+	if !wc1.ExpiresAt.After(wc0.ExpiresAt) {
+		t.Errorf("extend: window did not grow (%v → %v)", wc0.ExpiresAt, wc1.ExpiresAt)
+	}
+
 	// bob requests without force → 409 naming alice.
-	if _, _, err := ne.requestControl("n", "bob", false); !asWriteControl(err, &wce) || wce.Holder != "alice" {
+	if _, _, err := ne.requestControl("n", "bob", false, 0); !asWriteControl(err, &wce) || wce.Holder != "alice" {
 		t.Errorf("bob request(no force): err=%v, want held-by-alice", err)
 	}
 
 	// bob force-takes over → granted, prior=alice; now alice is locked out.
-	wc, prior, err := ne.requestControl("n", "bob", true)
+	wc, prior, err := ne.requestControl("n", "bob", true, 0)
 	if err != nil || prior != "alice" || wc.Holder != "bob" {
 		t.Fatalf("bob takeover: wc=%+v prior=%q err=%v, want holder=bob prior=alice", wc, prior, err)
 	}
@@ -50,17 +64,36 @@ func TestWriteControl_StoreLifecycle(t *testing.T) {
 		t.Errorf("displaced alice write: err=%v, want held-by-bob", err)
 	}
 
-	// relinquish by non-holder is a no-op; by holder frees it.
-	ne.relinquishControl("alice")
+	// release by non-holder is a no-op; by holder frees it.
+	ne.releaseControl("alice")
 	if _, held := ne.controlStatus(); !held {
-		t.Error("non-holder relinquish should be a no-op")
+		t.Error("non-holder release should be a no-op")
 	}
-	ne.relinquishControl("bob")
+	ne.releaseControl("bob")
 	if _, held := ne.controlStatus(); held {
-		t.Error("holder relinquish should free control")
+		t.Error("holder release should free control")
 	}
 	if err := ne.enforceWrite("n", "carol"); err == nil {
-		t.Error("after relinquish: enforceWrite should refuse again (free)")
+		t.Error("after release: enforceWrite should refuse again (free)")
+	}
+}
+
+// TestWriteControl_Expiry — an expired reservation counts as free: the holder
+// loses control and another caller acquires without force.
+func TestWriteControl_Expiry(t *testing.T) {
+	ne := &networkEntity{}
+	past := time.Now().Add(-time.Minute)
+	ne.writeCtl = &writeControl{Holder: "alice", Since: past.Add(-time.Hour), ExpiresAt: past, LastActive: past}
+
+	if _, held := ne.controlStatus(); held {
+		t.Error("expired reservation should read as free")
+	}
+	if err := ne.enforceWrite("n", "alice"); err == nil {
+		t.Error("expired holder's write should be refused (window lapsed)")
+	}
+	// bob acquires without force — the expired hold doesn't block him.
+	if _, prior, err := ne.requestControl("n", "bob", false, 0); err != nil || prior != "" {
+		t.Errorf("acquire over expired: err=%v prior=%q, want clean grant", err, prior)
 	}
 }
 
@@ -142,7 +175,23 @@ func TestWriteControl_HTTPEnforcement(t *testing.T) {
 		t.Fatalf("alice write: status=%d, want 201; body=%s", w.Code, w.Body.String())
 	}
 
-	// 5. Exemptions: reads, dry-runs, and the control endpoints don't need control.
+	// 5. The network list surfaces the holder (the cross-network UX signal).
+	w = wcDo(t, s, "GET", "/newtron/v1/networks", "bob", "")
+	var listEnv struct {
+		Data []NetworkInfo `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &listEnv)
+	var found *WriteControlInfo
+	for _, ni := range listEnv.Data {
+		if ni.ID == "default" {
+			found = ni.WriteControl
+		}
+	}
+	if found == nil || found.Holder != "alice" {
+		t.Errorf("GET /networks write_control for default = %+v, want holder=alice", found)
+	}
+
+	// 6. Exemptions: reads, dry-runs, and the control endpoints don't need control.
 	if w := wcDo(t, s, "GET", "/newtron/v1/networks/default/services", "bob", ""); w.Code != http.StatusOK {
 		t.Errorf("read by non-holder: status=%d, want 200", w.Code)
 	}
@@ -153,11 +202,11 @@ func TestWriteControl_HTTPEnforcement(t *testing.T) {
 		t.Errorf("control status read: status=%d, want 200", w.Code)
 	}
 
-	// 6. alice relinquishes → writes refused again.
-	if w := wcDo(t, s, "POST", "/newtron/v1/networks/default/control/relinquish", "alice", ``); w.Code != http.StatusOK {
-		t.Fatalf("relinquish: status=%d, want 200", w.Code)
+	// 7. alice releases → writes refused again (free → default-closed).
+	if w := wcDo(t, s, "POST", "/newtron/v1/networks/default/control/release", "alice", ``); w.Code != http.StatusOK {
+		t.Fatalf("release: status=%d, want 200", w.Code)
 	}
 	if w := wcDo(t, s, "POST", create, "alice", body); w.Code != http.StatusConflict {
-		t.Errorf("write after relinquish: status=%d, want 409 (free → default-closed)", w.Code)
+		t.Errorf("write after release: status=%d, want 409 (free → default-closed)", w.Code)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
@@ -52,6 +53,19 @@ type NetworkInfo struct {
 	HasTopology bool     `json:"has_topology"`
 	Topology    string   `json:"topology,omitempty"` // topology name derived from specDir
 	Nodes       []string `json:"nodes"`
+	// WriteControl summarizes who currently holds the write-control reservation,
+	// so a UI shows the holder for every network in the one GET /networks call.
+	// Absent (nil) when control is free or expired; full status (incl.
+	// last_active) is at GET .../control.
+	WriteControl *WriteControlInfo `json:"write_control,omitempty"`
+}
+
+// WriteControlInfo is the per-network write-control holder summary carried in
+// NetworkInfo.
+type WriteControlInfo struct {
+	Holder    string    `json:"holder"`
+	Since     time.Time `json:"since"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // ============================================================================

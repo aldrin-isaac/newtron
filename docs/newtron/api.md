@@ -49,8 +49,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/unregister` | Unregister a network |
 | POST | `/networks/{n}/reload` | Reload specs from disk |
 | GET | `/networks/{n}/control` | Write-control reservation status |
-| POST | `/networks/{n}/control/request` | Acquire / renew / take over write control |
-| POST | `/networks/{n}/control/relinquish` | Release write control |
+| POST | `/networks/{n}/control/request` | Acquire / extend / take over write control |
+| POST | `/networks/{n}/control/release` | Release write control |
 | GET | `/networks/{n}/services` | List services (also: `/ipvpns`, `/macvpns`, `/qos-policies`, `/filters`, `/platforms`, `/route-policies`, `/prefix-lists`) |
 | GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
@@ -845,9 +845,12 @@ POST /newtron/v1/networks/default/reload
 ### Write control (per-network reservation)
 
 A single caller may hold **write control** of a network at a time. It is a
-**reservation**, not a lease: there is no TTL — the hold is explicit and lasts
-until the holder relinquishes it or another caller takes it over. This prevents
-the silent lost-update (two operators editing the same spec, last-write-wins).
+**reservation**: a `request` grants a time-boxed window (**default 30 minutes**,
+settable), the holder **extends** it by requesting again, and it lapses if not
+extended — so an abandoned hold auto-recovers without the implicit background
+heartbeat of a lease. The hold otherwise changes only by an explicit `release` or
+a takeover. This prevents the silent lost update (two operators editing the same
+spec, last-write-wins).
 
 Enforcement is opt-in via the server flag **`--enforce-write-control`** (mirrors
 `--enforce-authorization`). When **on**, every *executing* mutation (any
@@ -862,36 +865,47 @@ no-op. **Exempt** from the check: reads, dry-runs, `control/*`, `reload`,
 The reservation transitions are explicit API calls, so they are **audited**
 (caller + op + timestamp, hash-chained under `--audit-log-integrity`) and
 **permissioned** via the existing framework: `control.request` gates
-acquire/relinquish, `control.takeover` is the higher bar to force-take from a live
-holder (superuser bypass applies; both no-ops unless `--enforce-authorization`).
+acquire/extend/release, `control.takeover` is the higher bar to force-take from a
+live holder. **Superusers bypass** both (a superuser can always force a takeover);
+both are no-ops unless `--enforce-authorization`.
 
 This is orthogonal to authorization: a caller may be fully authorized for an op
 yet refused because they don't hold control.
 
+The current holder of **every** network is also carried in the network list
+(`GET /networks` → each item's `write_control: {holder, since, expires_at}`, absent
+when free), so a UI shows who holds each network in a single call.
+
 #### GET /newtron/v1/networks/{netID}/control
 
-Reservation status (open read). `holder` is `""` when free.
+Reservation status (open read). `holder` is `""` when free or expired.
 
 ```json
-{ "data": { "holder": "alice", "since": "2026-06-28T14:02:09Z", "last_active": "2026-06-28T14:47:31Z" } }
+{ "data": { "holder": "alice", "since": "2026-06-28T14:02:09Z",
+            "expires_at": "2026-06-28T14:32:09Z", "last_active": "2026-06-28T14:18:31Z" } }
 ```
 
-`last_active` refreshes on every write the holder makes — it lets a would-be taker
-judge whether the holder is gone before forcing a takeover.
+`expires_at` is when the window lapses (extend before then); `last_active` (the
+holder's last write) is an additional staleness signal for a would-be taker.
 
 #### POST /newtron/v1/networks/{netID}/control/request
 
-Acquire (or renew, if already yours) write control. **Body:** `{"force": bool}`.
+Acquire, **extend** (if already yours), or take over write control.
+**Body:** `{"force": bool, "minutes": int}`. `minutes` sets the window (default
+**30** when ≤ 0 or omitted); requesting again as the holder extends to
+`now + minutes` and keeps the original `since`.
 
-- Free or already yours → **200** with the reservation.
-- Held by another, `force:false` → **409** `WriteControlError` `{network, holder, since, last_active}`.
+- Free, expired, or already yours → **200** with the reservation.
+- Held by another within its window, `force:false` → **409** `WriteControlError`
+  `{network, holder, since, expires_at, last_active}`.
 - `force:true` → **takeover**: granted to you, the prior holder is displaced
-  (returned as `prior_holder`); their next write 409s. Gated on `control.takeover`.
+  (returned as `prior_holder`); their next write 409s. Gated on `control.takeover`
+  (superusers bypass).
 
-#### POST /newtron/v1/networks/{netID}/control/relinquish
+#### POST /newtron/v1/networks/{netID}/control/release
 
-Release write control if you hold it. Idempotent (no-op when free or held by
-someone else). **200** with `{"holder": ""}`.
+Release write control if you hold it. Idempotent (no-op when free, expired, or
+held by someone else). **200** with `{"holder": ""}`.
 
 #### Write refused (any mutating endpoint, enforcement on)
 
@@ -900,11 +914,13 @@ the shape, not the message):
 
 ```json
 { "data": { "network": "default", "holder": "alice",
-            "since": "2026-06-28T14:02:09Z", "last_active": "2026-06-28T14:47:31Z" },
-  "error": "write control of network \"default\" is held by \"alice\" since … (last active …)" }
+            "since": "2026-06-28T14:02:09Z", "expires_at": "2026-06-28T14:32:09Z",
+            "last_active": "2026-06-28T14:18:31Z" },
+  "error": "write control of network \"default\" is held by \"alice\" until … (since …, last active …)" }
 ```
 
-A `holder` of `""` means enforcement is on but nobody holds control — request it first.
+A `holder` of `""` means enforcement is on but nobody holds control (free or the
+window expired) — request it first.
 
 ---
 
