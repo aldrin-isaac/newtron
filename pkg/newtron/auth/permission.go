@@ -51,6 +51,16 @@ const (
 	// (auth-design.md L4)
 	PermDeviceWrite Permission = "device.write"
 
+	// PermControlRequest / PermControlTakeover gate the per-network write-control
+	// reservation (request/relinquish/takeover). Independent of the per-op
+	// permissions: a caller may be fully authorized for an op yet blocked
+	// because they don't hold write control, and acquiring control is itself a
+	// permissioned, audited act. control.request gates acquire + relinquish;
+	// control.takeover is the higher bar to force-take from a live holder. Both
+	// are no-ops unless --enforce-authorization grants them.
+	PermControlRequest  Permission = "control.request"
+	PermControlTakeover Permission = "control.takeover"
+
 	PermQoSCreate Permission = "qos.create"
 	PermQoSModify Permission = "qos.modify"
 	PermQoSDelete Permission = "qos.delete"

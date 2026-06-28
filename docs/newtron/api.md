@@ -48,6 +48,9 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/schema/{kind}` | Field metadata for one kind (label, tooltip, type, required, enum, ref) |
 | POST | `/networks/{n}/unregister` | Unregister a network |
 | POST | `/networks/{n}/reload` | Reload specs from disk |
+| GET | `/networks/{n}/control` | Write-control reservation status |
+| POST | `/networks/{n}/control/request` | Acquire / renew / take over write control |
+| POST | `/networks/{n}/control/relinquish` | Release write control |
 | GET | `/networks/{n}/services` | List services (also: `/ipvpns`, `/macvpns`, `/qos-policies`, `/filters`, `/platforms`, `/route-policies`, `/prefix-lists`) |
 | GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
@@ -836,6 +839,72 @@ POST /newtron/v1/networks/default/reload
 - The operation is atomic from the caller's perspective: the old actor is stopped and
   the new one created while holding the server's write lock. Concurrent requests will
   queue until reload completes.
+
+---
+
+### Write control (per-network reservation)
+
+A single caller may hold **write control** of a network at a time. It is a
+**reservation**, not a lease: there is no TTL — the hold is explicit and lasts
+until the holder relinquishes it or another caller takes it over. This prevents
+the silent lost-update (two operators editing the same spec, last-write-wins).
+
+Enforcement is opt-in via the server flag **`--enforce-write-control`** (mirrors
+`--enforce-authorization`). When **on**, every *executing* mutation (any
+`POST`/`PUT`/`DELETE` that isn't a dry-run) requires the caller to hold control,
+else **409** — and it is **default-closed**: a write while nobody holds control
+is refused (`request` first). When **off** (default), the three endpoints still
+work but enforcement is inert, so existing clients that don't claim are unchanged.
+With no verified caller identity (standalone/loopback dev server) enforcement is a
+no-op. **Exempt** from the check: reads, dry-runs, `control/*`, `reload`,
+`unregister`, and `intent/projection-diff` (a non-persisting preview).
+
+The reservation transitions are explicit API calls, so they are **audited**
+(caller + op + timestamp, hash-chained under `--audit-log-integrity`) and
+**permissioned** via the existing framework: `control.request` gates
+acquire/relinquish, `control.takeover` is the higher bar to force-take from a live
+holder (superuser bypass applies; both no-ops unless `--enforce-authorization`).
+
+This is orthogonal to authorization: a caller may be fully authorized for an op
+yet refused because they don't hold control.
+
+#### GET /newtron/v1/networks/{netID}/control
+
+Reservation status (open read). `holder` is `""` when free.
+
+```json
+{ "data": { "holder": "alice", "since": "2026-06-28T14:02:09Z", "last_active": "2026-06-28T14:47:31Z" } }
+```
+
+`last_active` refreshes on every write the holder makes — it lets a would-be taker
+judge whether the holder is gone before forcing a takeover.
+
+#### POST /newtron/v1/networks/{netID}/control/request
+
+Acquire (or renew, if already yours) write control. **Body:** `{"force": bool}`.
+
+- Free or already yours → **200** with the reservation.
+- Held by another, `force:false` → **409** `WriteControlError` `{network, holder, since, last_active}`.
+- `force:true` → **takeover**: granted to you, the prior holder is displaced
+  (returned as `prior_holder`); their next write 409s. Gated on `control.takeover`.
+
+#### POST /newtron/v1/networks/{netID}/control/relinquish
+
+Release write control if you hold it. Idempotent (no-op when free or held by
+someone else). **200** with `{"holder": ""}`.
+
+#### Write refused (any mutating endpoint, enforcement on)
+
+A non-holder write returns **409** with the structured payload (clients branch on
+the shape, not the message):
+
+```json
+{ "data": { "network": "default", "holder": "alice",
+            "since": "2026-06-28T14:02:09Z", "last_active": "2026-06-28T14:47:31Z" },
+  "error": "write control of network \"default\" is held by \"alice\" since … (last active …)" }
+```
+
+A `holder` of `""` means enforcement is on but nobody holds control — request it first.
 
 ---
 

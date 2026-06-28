@@ -62,6 +62,7 @@ func main() {
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution. (auth-design.md L0)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime for the newtron engine; denials surface as HTTP 403. Off (default) preserves pre-enforcement behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made. (auth-design.md L3)")
+	enforceWriteControl := flag.Bool("enforce-write-control", false, "require a per-network write-control reservation for every executing mutation on the newtron engine: a caller must POST .../control/request before any write, else 409. Default-closed when on (a write with no holder is refused). Off (default) keeps the reservation endpoints working but enforcement inert, so existing clients that don't claim are unchanged.")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's network directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
@@ -187,6 +188,7 @@ func main() {
 		Platforms:            platforms,
 		AuditLogPath:         *auditLog,
 		EnforceAuthorization: *enforceAuthz,
+		EnforceWriteControl:  *enforceWriteControl,
 		SpecWatch:            *specWatch,
 	})
 	// Auto-discovery: every <networks-base>/<name>/topology.json
@@ -211,9 +213,9 @@ func main() {
 	// newtrun-server it's cross-process. Either way newtrun's runner
 	// stays a client of newtlab, never a co-writer.
 	newtrunSrv := newtrunapi.NewServer(newtrunapi.Config{
-		NetworksBase: *networksBase,
-		Logger:         logger,
-		NewtlabClient:  newtlabClient,
+		NetworksBase:  *networksBase,
+		Logger:        logger,
+		NewtlabClient: newtlabClient,
 	})
 	// newtlab consumes spec data via newtron's HTTP API (§27 — newtron
 	// owns spec files). In the composed binary this is an in-process
@@ -223,7 +225,7 @@ func main() {
 	newtronURL := "http://" + *listen
 	newtlabSrv := newtlabapi.NewServer(newtlabapi.Config{
 		NetworksBase: *networksBase,
-		Logger:         logger,
+		Logger:       logger,
 		NewtronClientFor: func(networkID string) newtlab.SpecClient {
 			return newtronclient.New(newtronURL, networkID)
 		},
