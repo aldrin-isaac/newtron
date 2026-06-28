@@ -315,7 +315,6 @@ func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-
 func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
@@ -337,7 +336,7 @@ func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Reques
 	if ne == nil {
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, ne.net.TopologyDeviceNames())
+	httputil.WriteJSON(w, http.StatusOK, ne.net.TopologyNodeNames())
 }
 
 // handleTopology returns the full topology spec (devices + links + metadata)
@@ -364,7 +363,7 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 // handleCreateTopologyNode adds a device entry to topology.json. Body is
-// {name, device: TopologyDevice}. 409 on duplicate name; 400 on missing
+// {name, device: TopologyNode}. 409 on duplicate name; 400 on missing
 // profile / invalid body.
 func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
@@ -408,7 +407,7 @@ func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request
 }
 
 // handleUpdateTopologyNode replaces the device entry at name with the body.
-// Full-replacement semantics — body must be a complete TopologyDevice. 404
+// Full-replacement semantics — body must be a complete TopologyNode. 404
 // when name doesn't exist. Closes the api-layer NodeActor cache so the next
 // request rebuilds from the new spec.
 func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +416,7 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 		return
 	}
 	name := r.PathValue("name")
-	var device spec.TopologyDevice
+	var device spec.TopologyNode
 	if err := decodeJSON(r, &device); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
@@ -1057,22 +1056,22 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 // Profiles
 // ============================================================================
 
-func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListNodeSpecs(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, ne.net.ListProfiles())
+	httputil.WriteJSON(w, http.StatusOK, ne.net.ListNodeSpecs())
 }
 
-// handleShowProfile returns the device profile for a named device.
-func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
+// handleShowNodeSpec returns the node spec for a named device.
+func (s *Server) handleShowNodeSpec(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ne.net.ShowProfile(name)
+	val, err := ne.net.ShowNodeSpec(name)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -1080,25 +1079,25 @@ func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateNodeSpec(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
-	var req newtron.CreateDeviceProfileRequest
+	var req newtron.CreateNodeSpecRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.CreateProfile(r.Context(), req, opts); err != nil {
+	if err := ne.net.CreateNodeSpec(r.Context(), req, opts); err != nil {
 		writeError(w, err)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
 }
 
-func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteNodeSpec(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
@@ -1112,7 +1111,7 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	force := r.URL.Query().Get("force") == "true"
-	if err := ne.net.DeleteProfile(r.Context(), req.Name, opts, force); err != nil {
+	if err := ne.net.DeleteNodeSpec(r.Context(), req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -1226,7 +1225,6 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "initialized"})
 }
-
 
 // ============================================================================
 // Update handlers (#152) — full-replacement spec mutation
@@ -1358,17 +1356,17 @@ func (s *Server) handleUpdateRoutePolicy(w http.ResponseWriter, r *http.Request)
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"name": req.Name})
 }
 
-func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUpdateNodeSpec(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
-	var req newtron.CreateDeviceProfileRequest
+	var req newtron.CreateNodeSpecRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	if err := ne.net.UpdateProfile(r.Context(), req, execOpts(r)); err != nil {
+	if err := ne.net.UpdateNodeSpec(r.Context(), req, execOpts(r)); err != nil {
 		writeError(w, err)
 		return
 	}

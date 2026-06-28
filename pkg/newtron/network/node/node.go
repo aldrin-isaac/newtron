@@ -53,8 +53,8 @@ type Node struct {
 
 	// Device identity
 	name     string
-	profile  *spec.DeviceProfile
-	resolved *spec.ResolvedProfile
+	profile  *spec.NodeSpec
+	resolved *spec.ResolvedNodeSpec
 
 	// Runtime infrastructure plumbed from Network. topology and
 	// portResolver are forwarded to sonic.Device at Connect time so
@@ -101,7 +101,7 @@ type Node struct {
 // SSH port allocation flows from the injected resolver, not from
 // the spec layer. Pass "" and nil for tests and real-hardware
 // deployments.
-func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile, topology string, pr sonic.PortResolver) *Node {
+func New(sp SpecProvider, name string, profile *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
 	return &Node{
 		SpecProvider: sp,
 		name:         name,
@@ -124,7 +124,7 @@ func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *sp
 //	iface, _ := n.GetInterface("Ethernet0")
 //	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
 //	n.Drift(ctx) // or n.Reconcile(ctx, ReconcileOpts{Mode: "full"})
-func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile, topology string, pr sonic.PortResolver) *Node {
+func NewAbstract(sp SpecProvider, name string, profile *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
 	return &Node{
 		SpecProvider: sp,
 		name:         name,
@@ -553,8 +553,8 @@ func (n *Node) IntentsByOp(op string) map[string]*sonic.Intent {
 // Tree reads the intent DB and returns the ordered intent steps.
 // Works in both modes — intents exist from topology replay (offline) or
 // device intent replay (online).
-func (n *Node) Tree() *spec.TopologyDevice {
-	dev := &spec.TopologyDevice{}
+func (n *Node) Tree() *spec.TopologyNode {
+	dev := &spec.TopologyNode{}
 	if n.configDB == nil || len(n.configDB.NewtronIntent) == 0 {
 		return dev
 	}
@@ -889,13 +889,13 @@ func (n *Node) Name() string {
 	return n.name
 }
 
-// Profile returns the device profile.
-func (n *Node) Profile() *spec.DeviceProfile {
+// Profile returns the node spec.
+func (n *Node) Profile() *spec.NodeSpec {
 	return n.profile
 }
 
 // Resolved returns the resolved configuration (after inheritance).
-func (n *Node) Resolved() *spec.ResolvedProfile {
+func (n *Node) Resolved() *spec.ResolvedNodeSpec {
 	return n.resolved
 }
 
@@ -1290,7 +1290,6 @@ func (n *Node) loadInterfaces() {
 	}
 }
 
-
 // SaveConfig persists the device's running CONFIG_DB to disk via SSH.
 func (n *Node) SaveConfig(ctx context.Context) error {
 	// Transport guard — config save writes to the device filesystem via SSH.
@@ -1433,13 +1432,13 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("ApplyFRRDefaults requires SSH connection")
 	}
 
-	// Read BGP ASN from resolved profile (set by device profile).
+	// Read BGP ASN from resolved profile (set by node spec).
 	asn := ""
 	if n.resolved != nil && n.resolved.UnderlayASN > 0 {
 		asn = fmt.Sprintf("%d", n.resolved.UnderlayASN)
 	}
 	if asn == "" {
-		return fmt.Errorf("cannot determine BGP ASN from device profile")
+		return fmt.Errorf("cannot determine BGP ASN from node spec")
 	}
 
 	cmds := fmt.Sprintf(
@@ -1459,4 +1458,3 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 
 	return nil
 }
-

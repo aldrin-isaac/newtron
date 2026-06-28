@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "1-node topology used by the 1node-vs-auth suite to drive the auth arc (L0+L1+L3+L4+L5+L6) end-to-end. Mirrors 1node-vs structure; runs in --loopback so no SONiC VM is required.",
-  "devices": {
+  "nodes": {
     "switch1": {
       "steps": [
         {

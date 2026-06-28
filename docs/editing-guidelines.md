@@ -518,7 +518,7 @@ The most common offender in this project is "CLI":
 | validation | YANG schema validation (rejects invalid entries), precondition checks (rejects invalid state), newtrun step field validation (rejects invalid YAML) | "schema validation", "precondition check", "step validation" |
 | state | STATE_DB (Redis DB 6), newtrun run state (`state.json`), device CONFIG_DB contents | "STATE_DB", "run state" or "suite state", "device state" or "CONFIG_DB state" |
 | composite | A composite operation (an operation composed of primitives — ApplyService, SetupDevice), the projection's atomic-replacement delivery mechanism (`ReplaceAll`, formerly `CompositeOverwrite`) | "composite operation" (orchestration), "full reconcile" or "topology-mode reconcile" (delivery via `ReplaceAll`) |
-| profile | Device identity (`DeviceProfile`), a QoS spec, a WRED CONFIG_DB entry | "device profile", "QoS policy", "WRED profile" |
+| profile | Device identity (`NodeSpec`), a QoS spec, a WRED CONFIG_DB entry | "node spec", "QoS policy", "WRED profile" |
 | lock | Device distributed lock (Redis SETNX in STATE_DB), newtrun suite lock (PID file) | "device lock", "suite lock" |
 | port | A network interface (Ethernet0), an SSH/TCP management port number | "network port" or "data port", "SSH port" or "management port" |
 

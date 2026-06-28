@@ -196,7 +196,7 @@ docker logs bgp | tail -50
 
 **Root Cause**: CONFIG_DB has wrong peer AS for overlay neighbor.
 
-**Fix**: Use peer's `underlay_asn` from its device profile. Both underlay and overlay use all-eBGP (see RCA-026).
+**Fix**: Use peer's `underlay_asn` from its node spec. Both underlay and overlay use all-eBGP (see RCA-026).
 
 **Example** (2node-ngdp topology):
 - switch1 runs AS 65001 (underlay_asn)

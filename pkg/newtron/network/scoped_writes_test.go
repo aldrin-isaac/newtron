@@ -183,15 +183,15 @@ func TestNodeScopedWrite_SecretSafe(t *testing.T) {
 		`{"mgmt_ip":"10.0.0.1","loopback_ip":"10.255.0.1","zone":"amer","ssh_user":"admin","ssh_pass":"${secret:leaf1_pass}"}`)
 
 	// Prime the cache with a read that resolves ssh_pass in place.
-	p, err := n.GetProfile("leaf1")
+	p, err := n.GetNodeSpec("leaf1")
 	if err != nil {
-		t.Fatalf("GetProfile: %v", err)
+		t.Fatalf("GetNodeSpec: %v", err)
 	}
 	if p.SSHPass != "REAL-PASSWORD" {
-		t.Fatalf("precondition: GetProfile should resolve ssh_pass, got %q", p.SSHPass)
+		t.Fatalf("precondition: GetNodeSpec should resolve ssh_pass, got %q", p.SSHPass)
 	}
 
-	// A node-scope write goes through MutateProfile (raw-from-disk).
+	// A node-scope write goes through MutateNodeSpec (raw-from-disk).
 	if err := n.CreateIPVPN(spec.ScopeNode, "leaf1", "VRF_BLUE", &spec.IPVPNSpec{L3VNI: 3000}); err != nil {
 		t.Fatalf("node override: %v", err)
 	}
@@ -413,13 +413,13 @@ func TestDeleteProfile_BlockedByOverride(t *testing.T) {
 		t.Fatalf("NewNetwork: %v", err)
 	}
 
-	err = n.DeleteProfile("leaf1", false)
+	err = n.DeleteNodeSpec("leaf1", false)
 	var conflict *util.ConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("delete profile holding an override: got %v, want *util.ConflictError (409)", err)
 	}
 	// force bypasses the guard (the override goes with the profile file).
-	if err := n.DeleteProfile("leaf1", true); err != nil {
+	if err := n.DeleteNodeSpec("leaf1", true); err != nil {
 		t.Fatalf("force-delete profile with overrides: %v", err)
 	}
 }

@@ -211,7 +211,7 @@ Reports whether any step in the scenario uses `{{target.X}}` or `{{param.X}}` to
 
 ```go
 var singularizeMap = map[string]string{
-    "devices":    "device",
+    "nodes":    "device",
     "interfaces": "interface",
 }
 func singularize(plural string) (string, bool)

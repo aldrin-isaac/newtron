@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "2-node vJunos-router topology: r1 ↔ r2 across two parallel links (mimics typical aggregate / ECMP test setups)",
-  "devices": {
+  "nodes": {
     "r1": {},
     "r2": {}
   },

@@ -438,7 +438,7 @@ Reload and Clear are topology-mode only.
 Read the intent DB → build intent DAG.
 
 ```go
-func (n *Node) Tree() *spec.TopologyDevice
+func (n *Node) Tree() *spec.TopologyNode
 ```
 
 No device interaction. Works in both modes — intents exist from topology

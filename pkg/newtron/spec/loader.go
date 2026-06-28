@@ -24,7 +24,7 @@ var Dir = "/etc/newtron"
 type Loader struct {
 	specDir string
 	// platforms is a read-only view of the global platforms registry,
-	// injected at construction. Used only by validateProfile to apply
+	// injected at construction. Used only by validateNodeSpec to apply
 	// the relaxed-validation path on host-type profiles. Nil is safe
 	// (every platform is treated as non-host).
 	platforms map[string]*PlatformSpec
@@ -32,7 +32,7 @@ type Loader struct {
 	mu       sync.RWMutex
 	network  *NetworkSpecFile
 	topology *TopologySpecFile // nil if topology.json doesn't exist
-	profiles map[string]*DeviceProfile
+	profiles map[string]*NodeSpec
 }
 
 // NewLoader creates a new specification loader. platforms is the
@@ -45,7 +45,7 @@ func NewLoader(specDir string, platforms map[string]*PlatformSpec) *Loader {
 	return &Loader{
 		specDir:   specDir,
 		platforms: platforms,
-		profiles:  make(map[string]*DeviceProfile),
+		profiles:  make(map[string]*NodeSpec),
 	}
 }
 
@@ -96,10 +96,10 @@ func (l *Loader) Load() error {
 	return nil
 }
 
-// LoadProfile loads a device profile, caching it for subsequent reads.
+// LoadNodeSpec loads a node spec, caching it for subsequent reads.
 // Concurrent first-time loads for the same name may each do the disk read,
 // but only one wins the cache slot; later callers see the cached value.
-func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
+func (l *Loader) LoadNodeSpec(deviceName string) (*NodeSpec, error) {
 	l.mu.RLock()
 	if profile, ok := l.profiles[deviceName]; ok {
 		l.mu.RUnlock()
@@ -107,7 +107,7 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 	}
 	l.mu.RUnlock()
 
-	profile, err := l.readProfileFromDisk(deviceName)
+	profile, err := l.readNodeSpecFromDisk(deviceName)
 	if err != nil {
 		return nil, err
 	}
@@ -124,18 +124,18 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 	return profile, nil
 }
 
-// readProfileFromDisk reads, parses, normalizes, and validates a profile from
+// readNodeSpecFromDisk reads, parses, normalizes, and validates a profile from
 // nodes/<name>.json. It does NOT consult or update the cache, acquire the lock,
 // or resolve secrets — the returned profile carries its ${secret:...} references
 // verbatim, so it is safe to mutate and persist without leaking resolved values.
-func (l *Loader) readProfileFromDisk(name string) (*DeviceProfile, error) {
+func (l *Loader) readNodeSpecFromDisk(name string) (*NodeSpec, error) {
 	path := filepath.Join(l.specDir, "nodes", name+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading profile %s: %w", name, err)
 	}
 
-	var profile DeviceProfile
+	var profile NodeSpec
 	if err := json.Unmarshal(data, &profile); err != nil {
 		return nil, fmt.Errorf("parsing profile %s: %w", name, err)
 	}
@@ -143,7 +143,7 @@ func (l *Loader) readProfileFromDisk(name string) (*DeviceProfile, error) {
 	// Normalize name keys and name-reference fields at load time.
 	normalizeOverridableSpecs(&profile.OverridableSpecs)
 
-	if err := l.validateProfile(&profile); err != nil {
+	if err := l.validateNodeSpec(&profile); err != nil {
 		return nil, fmt.Errorf("validating profile %s: %w", name, err)
 	}
 	return &profile, nil
@@ -199,7 +199,6 @@ func (l *Loader) validate() error {
 
 	return v.Build()
 }
-
 
 // mergeOverridableSpecs merges parent and child spec maps (child wins).
 func mergeOverridableSpecs(parent, child *OverridableSpecs) *OverridableSpecs {
@@ -301,7 +300,7 @@ func (l *Loader) validateQoSPolicies(v *util.ValidationBuilder) {
 		}
 
 		seenDSCP := make(map[int]string)   // DSCP value → queue name (for dup detection)
-		seenNames := make(map[string]bool)  // queue name uniqueness
+		seenNames := make(map[string]bool) // queue name uniqueness
 
 		for i, q := range policy.Queues {
 			if q.Name == "" {
@@ -348,7 +347,7 @@ func (l *Loader) isHostPlatform(platformName string) bool {
 	return platform.IsHost()
 }
 
-func (l *Loader) validateProfile(profile *DeviceProfile) error {
+func (l *Loader) validateNodeSpec(profile *NodeSpec) error {
 	v := &util.ValidationBuilder{}
 
 	// Host devices have relaxed validation — only mgmt_ip is required
@@ -391,7 +390,6 @@ func (l *Loader) GetNetwork() *NetworkSpecFile {
 	return l.network
 }
 
-
 // GetTopology returns the topology spec, or nil if no topology.json was found.
 // Reads l.topology under RLock — the pointer is reassigned by SaveTopology.
 func (l *Loader) GetTopology() *TopologySpecFile {
@@ -400,8 +398,8 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 	return l.topology
 }
 
-// ListProfiles returns the names of all profile files in the nodes directory.
-func (l *Loader) ListProfiles() []string {
+// ListNodeSpecs returns the names of all profile files in the nodes directory.
+func (l *Loader) ListNodeSpecs() []string {
 	profileDir := filepath.Join(l.specDir, "nodes")
 	entries, err := os.ReadDir(profileDir)
 	if err != nil {
@@ -420,15 +418,15 @@ func (l *Loader) ListProfiles() []string {
 	return names
 }
 
-// UpdateProfile atomically overwrites an existing profile file with the
+// UpdateNodeSpec atomically overwrites an existing profile file with the
 // given replacement. Returns an error if no profile with that name
 // exists (either in the in-memory cache or on disk). The whole check +
-// write runs under l.mu.Lock so a concurrent CreateProfile/UpdateProfile
+// write runs under l.mu.Lock so a concurrent CreateNodeSpec/UpdateNodeSpec
 // for the same name can't both succeed against the same starting state.
 //
-// Race-safe alternative to LoadProfile-then-SaveProfile composed at a
+// Race-safe alternative to LoadNodeSpec-then-SaveNodeSpec composed at a
 // higher layer.
-func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
+func (l *Loader) UpdateNodeSpec(name string, profile *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -443,7 +441,7 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 		}
 	}
 
-	// Inline what SaveProfile does (we already hold the lock).
+	// Inline what SaveNodeSpec does (we already hold the lock).
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
 	}
@@ -474,14 +472,14 @@ func (l *Loader) UpdateProfile(name string, profile *DeviceProfile) error {
 	return nil
 }
 
-// SaveProfile writes a device profile to disk atomically (temp file + rename).
-func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
-	if err := l.writeProfileFile(name, profile); err != nil {
+// SaveNodeSpec writes a node spec to disk atomically (temp file + rename).
+func (l *Loader) SaveNodeSpec(name string, profile *NodeSpec) error {
+	if err := l.writeNodeSpecFile(name, profile); err != nil {
 		return err
 	}
 
 	// Update the in-memory cache under the write lock so concurrent
-	// LoadProfile readers see the new pointer atomically.
+	// LoadNodeSpec readers see the new pointer atomically.
 	l.mu.Lock()
 	l.profiles[name] = profile
 	l.mu.Unlock()
@@ -489,10 +487,10 @@ func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
 	return nil
 }
 
-// writeProfileFile marshals profile to nodes/<name>.json atomically (temp +
+// writeNodeSpecFile marshals profile to nodes/<name>.json atomically (temp +
 // rename). It touches neither the lock nor the cache — callers handle cache
 // coherence around it.
-func (l *Loader) writeProfileFile(name string, profile *DeviceProfile) error {
+func (l *Loader) writeNodeSpecFile(name string, profile *NodeSpec) error {
 	profileDir := filepath.Join(l.specDir, "nodes")
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
@@ -529,46 +527,46 @@ func (l *Loader) writeProfileFile(name string, profile *DeviceProfile) error {
 	return nil
 }
 
-// MutateProfile atomically applies fn to a profile and persists it, serialized
+// MutateNodeSpec atomically applies fn to a profile and persists it, serialized
 // against every other profile write under the loader lock.
 //
 // It reads the profile FRESH from disk rather than from the cache, on purpose:
 // the cached pointer may have had its ${secret:...} fields resolved in place by
-// a prior read (network.loadProfile resolves secrets on the returned pointer),
+// a prior read (network.loadNodeSpec resolves secrets on the returned pointer),
 // and persisting that would write resolved secrets to disk. The on-disk form
 // keeps the references, so a round-trip through disk is secret-safe. After a
-// successful write the cache entry is invalidated, so the next LoadProfile
+// successful write the cache entry is invalidated, so the next LoadNodeSpec
 // re-reads the updated file.
 //
 // fn must not call back into the loader (it would re-enter l.mu). It receives the
 // raw profile; callers mutate profile.OverridableSpecs for scoped spec writes.
-func (l *Loader) MutateProfile(name string, fn func(*DeviceProfile) error) error {
+func (l *Loader) MutateNodeSpec(name string, fn func(*NodeSpec) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	profile, err := l.readProfileFromDisk(name)
+	profile, err := l.readNodeSpecFromDisk(name)
 	if err != nil {
 		return err
 	}
 	if err := fn(profile); err != nil {
 		return err
 	}
-	if err := l.writeProfileFile(name, profile); err != nil {
+	if err := l.writeNodeSpecFile(name, profile); err != nil {
 		return err
 	}
-	delete(l.profiles, name) // invalidate; next LoadProfile re-reads fresh
+	delete(l.profiles, name) // invalidate; next LoadNodeSpec re-reads fresh
 	return nil
 }
 
-// CreateProfile atomically creates a new profile file. Returns an error if
+// CreateNodeSpec atomically creates a new profile file. Returns an error if
 // a profile with that name already exists (either in the in-memory cache
 // or on disk). The whole check + write runs under l.mu.Lock so concurrent
-// CreateProfile calls for the same name can't both succeed.
+// CreateNodeSpec calls for the same name can't both succeed.
 //
-// Race-safe alternative to LoadProfile-then-SaveProfile composed at a
+// Race-safe alternative to LoadNodeSpec-then-SaveNodeSpec composed at a
 // higher layer — the same composition used to live in public
-// (*newtron.Network).CreateProfile, which raced.
-func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
+// (*newtron.Network).CreateNodeSpec, which raced.
+func (l *Loader) CreateNodeSpec(name string, profile *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -586,7 +584,7 @@ func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
 		return fmt.Errorf("profile '%s' already exists", name)
 	}
 
-	// Inline what SaveProfile does (we already hold the lock).
+	// Inline what SaveNodeSpec does (we already hold the lock).
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
 	}
@@ -617,8 +615,8 @@ func (l *Loader) CreateProfile(name string, profile *DeviceProfile) error {
 	return nil
 }
 
-// DeleteProfile removes a device profile file and its cache entry.
-func (l *Loader) DeleteProfile(name string) error {
+// DeleteNodeSpec removes a node spec file and its cache entry.
+func (l *Loader) DeleteNodeSpec(name string) error {
 	path := filepath.Join(l.specDir, "nodes", name+".json")
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("deleting profile %s: %w", name, err)
@@ -737,7 +735,7 @@ func (l *Loader) loadTopologySpec() (*TopologySpecFile, error) {
 func (l *Loader) validateTopology() error {
 	v := &util.ValidationBuilder{}
 
-	for deviceName := range l.topology.Devices {
+	for deviceName := range l.topology.Nodes {
 		// All device names must have profiles in profiles/
 		profilePath := filepath.Join(l.specDir, "nodes", deviceName+".json")
 		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
@@ -763,7 +761,7 @@ func (l *Loader) validateLinkEndpoint(v *util.ValidationBuilder, linkIdx int, si
 		return
 	}
 	deviceName := parts[0]
-	if _, ok := l.topology.Devices[deviceName]; !ok {
+	if _, ok := l.topology.Nodes[deviceName]; !ok {
 		v.AddErrorf("link[%d].%s: device '%s' not found in topology", linkIdx, side, deviceName)
 	}
 }

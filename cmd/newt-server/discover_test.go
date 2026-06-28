@@ -17,7 +17,7 @@ import (
 // is the discovery + registration path, not spec loading itself.
 const (
 	fixtureNetworkJSON   = `{"version":"1.0","super_users":[],"user_groups":{},"permissions":{},"zones":{}}`
-	fixtureTopologyJSON  = `{"version":"1.0","description":"test","devices":{}}`
+	fixtureTopologyJSON  = `{"version":"1.0","description":"test","nodes":{}}`
 	fixturePlatformsJSON = `{"version":"1.0","platforms":{}}`
 )
 

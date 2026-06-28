@@ -41,13 +41,13 @@ type fixMap struct {
 
 // nolint:unused — fields are referenced by the reflection extractor under test
 type fixHidden struct {
-	private string                           //nolint:unused // tests unexported filter
-	Skip    string `json:"-"`               // explicitly hidden
+	private string //nolint:unused // tests unexported filter
+	Skip    string `json:"-"` // explicitly hidden
 	Real    string `json:"real" label:"Real"`
 }
 
 type fixPointer struct {
-	OptionalFlag *bool `json:"flag,omitempty" label:"Flag"`
+	OptionalFlag *bool  `json:"flag,omitempty" label:"Flag"`
 	Required     string `json:"required"`
 }
 
@@ -549,11 +549,11 @@ func TestRegister_SyntheticIdentifierField(t *testing.T) {
 	min := 0
 	max := 7
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "FixSubrule",
-		Label:       "Sub-rule Fixture",
-		Sample:      fixSimple{},
-		Identifier:  "slot",
-		ParentRef:   "parent",
+		Kind:       "FixSubrule",
+		Label:      "Sub-rule Fixture",
+		Sample:     fixSimple{},
+		Identifier: "slot",
+		ParentRef:  "parent",
 		IdentifierField: &FieldMeta{
 			Name:      "slot",
 			Label:     "Slot",
@@ -819,8 +819,8 @@ func TestScopeFieldsInjected(t *testing.T) {
 		if si.RequiredWhen == nil || si.RequiredWhen.NotEquals != ScopeNetwork {
 			t.Errorf("%s: scope_instance RequiredWhen wrong: %+v", kind, si.RequiredWhen)
 		}
-		// Sibling-conditional ref: ZoneSpec when scope=zone, DeviceProfile when scope=node.
-		wantRef := map[any]string{ScopeZone: "ZoneSpec", ScopeNode: "DeviceProfile"}
+		// Sibling-conditional ref: ZoneSpec when scope=zone, NodeSpec when scope=node.
+		wantRef := map[any]string{ScopeZone: "ZoneSpec", ScopeNode: "NodeSpec"}
 		if len(si.RefWhen) != 2 {
 			t.Errorf("%s: scope_instance RefWhen = %+v, want 2 branches", kind, si.RefWhen)
 		}
@@ -836,7 +836,7 @@ func TestScopeFieldsInjected(t *testing.T) {
 	}
 
 	// Non-overridable kinds must NOT carry the scope surface.
-	for _, kind := range []string{"PlatformSpec", "ZoneSpec", "DeviceProfile"} {
+	for _, kind := range []string{"PlatformSpec", "ZoneSpec", "NodeSpec"} {
 		m := LookupSchema(kind)
 		if m == nil {
 			t.Fatalf("%s: no schema registered", kind)

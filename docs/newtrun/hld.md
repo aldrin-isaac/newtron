@@ -16,7 +16,7 @@ newtrun sits between two tools that each do one thing well. Understanding the bo
 
 | Tool | Responsibility | Knows About |
 |------|----------------|-------------|
-| **newtron** | Opinionated single-device automation: translate specs → CONFIG_DB; verify own writes; observe single-device routing state | Specs, device profiles, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
+| **newtron** | Opinionated single-device automation: translate specs → CONFIG_DB; verify own writes; observe single-device routing state | Specs, nodes, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
 | **newtlab** | Realize VM topologies: deploy QEMU VMs from newtron's topology.json, wire socket links across servers | topology.json, platforms.json, QEMU |
 | **newtrun** | Orchestrate sequenced multi-step work: run scenarios, manage run lifecycle, surface progress over HTTP | Scenarios, networks, run state, the substrate exposed by newtron's HTTP API |
 

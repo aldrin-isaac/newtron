@@ -62,16 +62,16 @@ func printTopologySpec(t *spec.TopologySpecFile) {
 		fmt.Printf("%s %s\n", bold("Description:"), t.Description)
 	}
 
-	if len(t.Devices) > 0 {
+	if len(t.Nodes) > 0 {
 		fmt.Printf("\n%s\n", bold("Devices"))
-		names := make([]string, 0, len(t.Devices))
-		for n := range t.Devices {
+		names := make([]string, 0, len(t.Nodes))
+		for n := range t.Nodes {
 			names = append(names, n)
 		}
 		sort.Strings(names)
 		tb := cli.NewTable("DEVICE", "STEPS", "PORTS")
 		for _, n := range names {
-			d := t.Devices[n]
+			d := t.Nodes[n]
 			tb.Row(n, fmt.Sprintf("%d", len(d.Steps)), fmt.Sprintf("%d", len(d.Ports)))
 		}
 		tb.Flush()

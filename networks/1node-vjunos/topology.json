@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "Single vJunos-router node — used by opennetconf smoke tests via --newtlab",
-  "devices": {
+  "nodes": {
     "r1": {}
   },
   "links": [],

@@ -51,12 +51,12 @@ func (tp *TopologyProvisioner) BuildAbstractNode(deviceName string) (*node.Node,
 		return nil, fmt.Errorf("device '%s' has no provisioning steps in topology.json", deviceName)
 	}
 
-	// Load and resolve device profile
-	profile, err := tp.network.loadProfile(deviceName)
+	// Load and resolve node spec
+	profile, err := tp.network.loadNodeSpec(deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("loading profile: %w", err)
 	}
-	resolved, err := tp.network.resolveProfile(deviceName, profile)
+	resolved, err := tp.network.resolveNodeSpec(deviceName, profile)
 	if err != nil {
 		return nil, fmt.Errorf("resolving profile: %w", err)
 	}
@@ -104,12 +104,12 @@ func (tp *TopologyProvisioner) BuildEmptyAbstractNode(deviceName string) (*node.
 		return nil, err
 	}
 
-	// Load and resolve device profile
-	profile, err := tp.network.loadProfile(deviceName)
+	// Load and resolve node spec
+	profile, err := tp.network.loadNodeSpec(deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("loading profile: %w", err)
 	}
-	resolved, err := tp.network.resolveProfile(deviceName, profile)
+	resolved, err := tp.network.resolveNodeSpec(deviceName, profile)
 	if err != nil {
 		return nil, fmt.Errorf("resolving profile: %w", err)
 	}
@@ -143,4 +143,3 @@ func (tp *TopologyProvisioner) SaveDeviceIntents(deviceName string, steps []spec
 	// Persist topology.json atomically via the spec loader
 	return tp.network.loader.SaveTopology(tp.network.topology)
 }
-

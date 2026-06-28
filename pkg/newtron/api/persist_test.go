@@ -44,13 +44,13 @@ func loadTopologyJSON(t *testing.T, specDir string) map[string]any {
 
 func deviceSteps(t *testing.T, topo map[string]any, device string) []any {
 	t.Helper()
-	devs, ok := topo["devices"].(map[string]any)
+	devs, ok := topo["nodes"].(map[string]any)
 	if !ok {
-		t.Fatal("topology.devices missing")
+		t.Fatal("topology.nodes missing")
 	}
 	dev, ok := devs[device].(map[string]any)
 	if !ok {
-		t.Fatalf("topology.devices.%s missing", device)
+		t.Fatalf("topology.nodes.%s missing", device)
 	}
 	steps, _ := dev["steps"].([]any)
 	return steps
@@ -200,4 +200,3 @@ func TestPersistHook_FromCtxDefaultsToNone(t *testing.T) {
 		}
 	}
 }
-

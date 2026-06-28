@@ -1,7 +1,7 @@
 // resolved_specs.go provides a per-device SpecProvider that holds the merged
 // result of hierarchical spec resolution (network → zone → node).
 //
-// Built at Node creation time in resolveProfile(). All 7 overridable spec
+// Built at Node creation time in resolveNodeSpec(). All 7 overridable spec
 // maps are merged with lower-level-wins semantics: node > zone > network.
 package network
 

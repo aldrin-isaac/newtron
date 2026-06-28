@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "2-node sonic-vs topology: switch1 + switch2 with 6 test hosts — Force10-S6000 stride-4 ports",
-  "devices": {
+  "nodes": {
     "switch1": {
       "steps": [
         {"url": "/setup-device", "params": {"fields": {"hostname": "switch1", "bgp_asn": "65001", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "source_ip": "10.0.0.1"}},

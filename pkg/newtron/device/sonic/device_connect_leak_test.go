@@ -17,7 +17,7 @@ import (
 // freshly-constructed Device that never started Connect. Each field
 // guard (`if d.x != nil`) protects the Close call.
 func TestClosePartial_NilFields(t *testing.T) {
-	d := NewDevice("switch1", &spec.ResolvedProfile{})
+	d := NewDevice("switch1", &spec.ResolvedNodeSpec{})
 	// Must not panic; all fields stay nil.
 	d.closePartial()
 	if d.client != nil || d.stateClient != nil || d.applClient != nil || d.asicClient != nil || d.tunnel != nil {
@@ -46,7 +46,7 @@ func TestClosePartial_NilsAllocatedFields(t *testing.T) {
 	addr := ln.Addr().String()
 	ln.Close()
 
-	d := NewDevice("switch1", &spec.ResolvedProfile{})
+	d := NewDevice("switch1", &spec.ResolvedNodeSpec{})
 	d.client = NewConfigDBClient(addr)
 	d.stateClient = NewStateDBClient(addr)
 	d.applClient = NewAppDBClient(addr)
@@ -81,7 +81,7 @@ func TestClosePartial_NilsAllocatedFields(t *testing.T) {
 // nothing is listening there in the CI/dev environment (true for the
 // project's lab hosts); a stray local Redis would mask the failure.
 func TestConnect_PartialFailureNilsClient(t *testing.T) {
-	d := NewDevice("switch1", &spec.ResolvedProfile{MgmtIP: "127.0.0.1"})
+	d := NewDevice("switch1", &spec.ResolvedNodeSpec{MgmtIP: "127.0.0.1"})
 
 	err := d.Connect(context.Background())
 	if err == nil {

@@ -271,7 +271,7 @@ Specs describe **what you want** — declarative, abstract, policy-driven. They 
 | VPN reference (ipvpn, macvpn) | Peer IP (from interface IP) |
 | Routing protocol (bgp, static) | ACL table name |
 | Peer AS policy ("request" or fixed) | ACL rule sequence numbers |
-| Filter-spec reference | Local AS (from device profile) |
+| Filter-spec reference | Local AS (from node spec) |
 | Route policy references | Router ID (from loopback IP) |
 
 Translation follows a three-layer pattern in the Node layer:
@@ -340,7 +340,7 @@ Services are the primary abstraction — they bundle VPN, routing, filter, and Q
 
 ### 5.1 Transport
 
-Redis on SONiC listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile.
+Redis on SONiC listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the node spec.
 
 ```
 ┌────────────────────┐          ┌────────────┐            ┌────────────────┐
@@ -569,7 +569,7 @@ The asymmetry between `networkEntity` (not an actor) and `NodeActor` (actually a
 
 ## 9. Security
 
-Redis on SONiC has no authentication and listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile. In integration tests, a standalone Redis container is used without SSH.
+Redis on SONiC has no authentication and listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the node spec. In integration tests, a standalone Redis container is used without SSH.
 
 **Authorization.** The auth subsystem in `pkg/newtron/auth/` embodies an entitlement pattern: permissions declared in `network.json`, group-based grants with literal-user fallback, L5 `where`-clause scoping (per-device, per-service, per-resource, per-field), superuser bypass. Read/view operations are not gated.
 
@@ -639,7 +639,7 @@ E2E testing uses the newtrun framework (see [newtrun HLD](../newtrun/hld.md) and
 | Term | Definition |
 |------|------------|
 | **Network** | Top-level object. Owns all specs, provides access to devices. |
-| **Node** | Device handle. Holds intent DB, projection, device profile, and optional transport connection. |
+| **Node** | Device handle. Holds intent DB, projection, node spec, and optional transport connection. |
 | **Interface** | Interface handle. Holds parent Node reference and interface name. Point of service delivery. |
 | **Platform** | Hardware type definition (HWSKU, port count, speeds). |
 

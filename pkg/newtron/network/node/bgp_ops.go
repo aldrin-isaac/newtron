@@ -78,10 +78,10 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 
 	resolved := n.Resolved()
 	if resolved.UnderlayASN == 0 {
-		return nil, fmt.Errorf("underlay_asn not set in device profile")
+		return nil, fmt.Errorf("underlay_asn not set in node spec")
 	}
 	if resolved.RouterID == "" {
-		return nil, fmt.Errorf("router_id not set in device profile")
+		return nil, fmt.Errorf("router_id not set in node spec")
 	}
 
 	asnStr := fmt.Sprintf("%d", resolved.UnderlayASN)

@@ -106,7 +106,7 @@ var zoneDeleteCmd = &cobra.Command{
 	Short: "Delete a zone",
 	Long: `Delete a zone from network.json.
 
-Returns error if any device profile references this zone.
+Returns error if any node spec references this zone.
 
 Examples:
   newtron zone delete dc2 -x`,

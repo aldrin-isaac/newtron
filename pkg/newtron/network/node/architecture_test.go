@@ -37,11 +37,11 @@ func newRawAbstractNode() *Node {
 		prefixLists:   map[string][]string{},
 		routePolicies: map[string]*spec.RoutePolicy{},
 	}
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		UnderlayASN: 65001,
 		EVPN:        &spec.EVPNConfig{},
 	}
-	resolved := &spec.ResolvedProfile{
+	resolved := &spec.ResolvedNodeSpec{
 		UnderlayASN: 65001,
 		RouterID:    "10.0.0.1",
 		LoopbackIP:  "10.0.0.1",

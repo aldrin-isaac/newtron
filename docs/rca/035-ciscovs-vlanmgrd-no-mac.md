@@ -73,7 +73,7 @@ vlanmgrd needs the bridge MAC address for correct L2 forwarding:
 
 **Note on the deprecated PatchProfiles fix:** The Feb 2026 fix also included
 `pkg/newtlab/profile.go`'s `PatchProfiles()`, which wrote a deterministic
-`GenerateMAC(name, 0)` value into each device profile JSON at deploy time. That
+`GenerateMAC(name, 0)` value into each node spec JSON at deploy time. That
 mechanism was removed in May 2026 — runtime profile mutation was a §27 violation
 (newtlab writing into spec files newtron read). Removing it did not regress this
 RCA's failure mode: the merge-based `ReplaceAll` is independently sufficient.

@@ -52,7 +52,7 @@ credentials per request.
 | **newt-server impersonation.** A rogue process on the network pretends to be `cmd/newt-server` and accepts operator traffic claiming to be the real service. | Operator-to-server | L2a (listener-side TLS — `--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) |
 | **Stale grants.** Former team member's permissions linger after they leave. | Operator-to-server | L6 (revocation) |
 | **Coverage holes.** A new mutation method ships without a `checkPermission` call and bypasses authorization silently. | Both | L4 (coverage closure test) |
-| **Secret leakage from spec.** Device profile passwords sit in plain JSON on disk and in version control. | Foundational | L0 (encryption at rest) |
+| **Secret leakage from spec.** Node spec passwords sit in plain JSON on disk and in version control. | Foundational | L0 (encryption at rest) |
 | **Authorization decisions without trace.** A "deny" happened but nobody can prove it. | Both | L1 + L3 (audit emits allow + deny) |
 
 ### 2.2 Out of Scope
@@ -190,7 +190,7 @@ criteria a security review must be able to verify:
    action, target, decision, timestamp.
 7. **Revocable.** A spec change that removes a grant takes effect within
    a bounded interval, without server restart.
-8. **Secret hygiene.** Device profile passwords are encrypted at rest
+8. **Secret hygiene.** Node spec passwords are encrypted at rest
    (L0 foundation); plaintext exists only in process memory while in
    use. Without this, an attacker who reads the spec directory has
    device-admin access regardless of any later layer's enforcement.
@@ -223,7 +223,7 @@ form unchanged, with the listed additions:
 | `network.json` `permissions` map | `action → [groups]` global | L5 extends entry value to support `{ groups, where: {...} }`; per-service scoping via `where: { service: "..." }` (replaces the retired per-service override — see #165) |
 | `network.json` `super_users` | List of usernames who bypass | Unchanged |
 | `network.json` `user_groups` | Group name → user list | Unchanged |
-| `Network.checkPermission` call sites | 26 sites in `spec_ops`/`profile_ops` | L4 expands coverage to Node ops |
+| `Network.checkPermission` call sites | 26 sites in `spec_ops`/`node_spec_ops` | L4 expands coverage to Node ops |
 
 What went away during L1–L3 (and what remains for L4–L5):
 

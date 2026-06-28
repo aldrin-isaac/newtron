@@ -26,8 +26,8 @@ already present in newtron:
   canonical top-level type: Version, Platform, Description, Devices
   map, Links slice, NewtLab config. Fully JSON-tagged. #14 exposes
   it directly; #15/#16 mutate its `Devices` map and `Links` slice.
-- **`spec.TopologyDevice`** and **`spec.TopologyLink`** — nested
-  types. #15 takes `TopologyDevice` as body; #16 takes
+- **`spec.TopologyNode`** and **`spec.TopologyLink`** — nested
+  types. #15 takes `TopologyNode` as body; #16 takes
   `TopologyLink`.
 - **`spec.Loader.SaveTopology(spec *TopologySpecFile) error`** —
   **already exists** with atomic temp-file + rename semantics
@@ -142,20 +142,20 @@ existing `GetTopology()`.
 _Landed on branch `impl/phase-5-topology-crud` (Phase 5 batch). Decisions:
 Q1 = Option C (`?force=true` cascade); Q2 = Replace semantics; Q3 =
 single-endpoint URL for delete-link (a port participates in at most one
-link); Q4 = body is the full TopologyDevice; profile-cascade symmetry
+link); Q4 = body is the full TopologyNode; profile-cascade symmetry
 applied alongside (DeleteProfile gets `?force=true` parameter that cascades
 through the matching topology device); NodeActor cache cleared on both
 delete-node and update-node._
 
 ### Principle check
 
-**§46 (load-bearing):** the typed `TopologyDevice` is canonical
+**§46 (load-bearing):** the typed `TopologyNode` is canonical
 substrate. Today, mutating it requires a YAML hand-edit + `reload`
 — the "no typed verb for an existing substrate" pattern §46
 rejects via rule 1 ("canonical first").
 
 **§7 supports:** topology nodes are network-scoped definitions; the
-existing verb pattern (`create-service`, `delete-profile`) extends
+existing verb pattern (`create-service`, `delete-node`) extends
 naturally to topology.
 
 **§16 (verb vocabulary):** `create-node`, `delete-node`,
@@ -173,7 +173,7 @@ pattern:
 // Returns ConflictError if a device with this name already exists.
 // Validates against existing validateTopology rules (profile ref).
 // Persists atomically via spec.Loader.SaveTopology.
-func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) error
+func (n *Network) AddTopologyDevice(name string, device *spec.TopologyNode) error
 
 // DeleteTopologyDevice removes a device from the topology spec.
 // Returns NotFoundError if no device with this name exists.
@@ -184,7 +184,7 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error
 
 // UpdateTopologyDevice replaces a device entry. Same validation
 // as Add; same persistence path.
-func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice) error
+func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) error
 ```
 
 Each calls `loader.SaveTopology(spec)` after mutation; failure
@@ -222,11 +222,11 @@ mux.HandleFunc("PUT /networks/{netID}/topology/nodes/{name}", s.handleUpdateTopo
 ```go
 type TopologyNodeCreateRequest struct {
     Name   string                `json:"name"`
-    Device *spec.TopologyDevice  `json:"device"`
+    Device *spec.TopologyNode  `json:"device"`
 }
 ```
 
-`Update` takes a `*spec.TopologyDevice` body directly (the name is
+`Update` takes a `*spec.TopologyNode` body directly (the name is
 in the URL path).
 
 **Tests:** round-trip create+read; duplicate-name → 409; deletion

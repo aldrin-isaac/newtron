@@ -66,62 +66,62 @@ func TestAPICompleteness(t *testing.T) {
 	coveredMethods := map[string]map[string]bool{
 		"Network": {
 			// Spec reads
-			"ListSpecInstances":   true,
-			"ListServices":        true,
-			"ShowService":         true,
-			"ListIPVPNs":          true,
-			"ShowIPVPN":           true,
-			"ListMACVPNs":         true,
-			"ShowMACVPN":          true,
-			"ListQoSPolicies":     true,
-			"ShowQoSPolicy":       true,
-			"ListFilters":         true,
-			"ShowFilter":          true,
-			"ListPlatforms":       true,
-			"ShowPlatform":        true,
-			"ListRoutePolicies":   true,
-			"ListPrefixLists":     true,
-			"ShowPrefixList":      true,
-			"ShowRoutePolicy":     true,
-			"GetAllFeatures":      true,
-			"GetFeatureDependencies": true,
-			"GetUnsupportedDueTo":   true,
+			"ListSpecInstances":       true,
+			"ListServices":            true,
+			"ShowService":             true,
+			"ListIPVPNs":              true,
+			"ShowIPVPN":               true,
+			"ListMACVPNs":             true,
+			"ShowMACVPN":              true,
+			"ListQoSPolicies":         true,
+			"ShowQoSPolicy":           true,
+			"ListFilters":             true,
+			"ShowFilter":              true,
+			"ListPlatforms":           true,
+			"ShowPlatform":            true,
+			"ListRoutePolicies":       true,
+			"ListPrefixLists":         true,
+			"ShowPrefixList":          true,
+			"ShowRoutePolicy":         true,
+			"GetAllFeatures":          true,
+			"GetFeatureDependencies":  true,
+			"GetUnsupportedDueTo":     true,
 			"PlatformSupportsFeature": true,
 			// Spec writes
-			"CreateService":  true,
-			"DeleteService":  true,
-			"CreateIPVPN":    true,
-			"DeleteIPVPN":    true,
-			"CreateMACVPN":   true,
-			"DeleteMACVPN":   true,
-			"CreateQoSPolicy": true,
-			"DeleteQoSPolicy": true,
-			"AddQoSQueue":     true,
-			"UpdateQoSQueue":  true,
-			"RemoveQoSQueue":  true,
-			"CreateFilter":    true,
-			"DeleteFilter":    true,
-			"AddFilterRule":        true,
-			"UpdateFilterRule":     true,
-			"RemoveFilterRule":     true,
-			"CreatePrefixList":     true,
-			"DeletePrefixList":     true,
+			"CreateService":         true,
+			"DeleteService":         true,
+			"CreateIPVPN":           true,
+			"DeleteIPVPN":           true,
+			"CreateMACVPN":          true,
+			"DeleteMACVPN":          true,
+			"CreateQoSPolicy":       true,
+			"DeleteQoSPolicy":       true,
+			"AddQoSQueue":           true,
+			"UpdateQoSQueue":        true,
+			"RemoveQoSQueue":        true,
+			"CreateFilter":          true,
+			"DeleteFilter":          true,
+			"AddFilterRule":         true,
+			"UpdateFilterRule":      true,
+			"RemoveFilterRule":      true,
+			"CreatePrefixList":      true,
+			"DeletePrefixList":      true,
 			"AddPrefixListEntry":    true,
 			"RemovePrefixListEntry": true,
-			"CreateRoutePolicy":    true,
-			"DeleteRoutePolicy":    true,
-			"AddRoutePolicyRule":   true,
+			"CreateRoutePolicy":     true,
+			"DeleteRoutePolicy":     true,
+			"AddRoutePolicyRule":    true,
 			"UpdateRoutePolicyRule": true,
 			"RemoveRoutePolicyRule": true,
 			// Profiles and Zones
-			"ListProfiles":  true,
-			"ShowProfile":   true,
-			"CreateProfile": true,
-			"DeleteProfile": true,
-			"ListZones":     true,
-			"ShowZone":      true,
-			"CreateZone":    true,
-			"DeleteZone":    true,
+			"ListNodeSpecs":  true,
+			"ShowNodeSpec":   true,
+			"CreateNodeSpec": true,
+			"DeleteNodeSpec": true,
+			"ListZones":      true,
+			"ShowZone":       true,
+			"CreateZone":     true,
+			"DeleteZone":     true,
 			// Spec Updates (#152) — full-replacement spec mutation
 			"UpdateService":     true,
 			"UpdateIPVPN":       true,
@@ -130,28 +130,28 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateFilter":      true,
 			"UpdatePrefixList":  true,
 			"UpdateRoutePolicy": true,
-			"UpdateProfile":     true,
+			"UpdateNodeSpec":    true,
 			"UpdateZone":        true,
 			// Platform CRUD (#173)
 
 			// Topology / Provision
-			"HasTopology":           true,
-			"GetTopology":           true, // #14: GET /networks/{netID}/topology (raw spec read; backs internal use + tests)
-			"TopologyView":          true, // #14: GET /networks/{netID}/topology — served, provenance-enriched view
-			"AddTopologyDevice":     true, // #15: POST /networks/{netID}/topology/create-node
-			"DeleteTopologyDevice":  true, // #15: DELETE /networks/{netID}/topology/nodes/{name}
-			"UpdateTopologyDevice":  true, // #15: PUT /networks/{netID}/topology/nodes/{name}
-			"AddTopologyLink":       true, // #16: POST /networks/{netID}/topology/create-link
-			"DeleteTopologyLink":    true, // #16: DELETE /networks/{netID}/topology/links/{device}/{interface}
-			"TopologyDeviceNames":   true,
-			"IsHostDevice":        true,
-			"GetHostProfile":      true,
-			"InitDevice":          true,
+			"HasTopology":          true,
+			"GetTopology":          true, // #14: GET /networks/{netID}/topology (raw spec read; backs internal use + tests)
+			"TopologyView":         true, // #14: GET /networks/{netID}/topology — served, provenance-enriched view
+			"AddTopologyDevice":    true, // #15: POST /networks/{netID}/topology/create-node
+			"DeleteTopologyDevice": true, // #15: DELETE /networks/{netID}/topology/nodes/{name}
+			"UpdateTopologyDevice": true, // #15: PUT /networks/{netID}/topology/nodes/{name}
+			"AddTopologyLink":      true, // #16: POST /networks/{netID}/topology/create-link
+			"DeleteTopologyLink":   true, // #16: DELETE /networks/{netID}/topology/links/{device}/{interface}
+			"TopologyNodeNames":    true,
+			"IsHostDevice":         true,
+			"GetHostProfile":       true,
+			"InitDevice":           true,
 			// Connection
 			"ListNodes": true,
 			// Device status (issue #75A+B)
-			"ProbeOnline":    true, // GET /networks/{netID}/nodes/{device}/status
-			"TopologyDrift":  true, // GET /networks/{netID}/nodes/{device}/intent/topology-drift
+			"ProbeOnline":   true, // GET /networks/{netID}/nodes/{device}/status
+			"TopologyDrift": true, // GET /networks/{netID}/nodes/{device}/intent/topology-drift
 			// Authorization-table inspector (issue #150)
 			"GetAuthorization": true, // GET /networks/{netID}/authorization
 		},
@@ -220,7 +220,7 @@ func TestAPICompleteness(t *testing.T) {
 			"Tree":           true,
 			"Drift":          true,
 			"Reconcile":      true,
-			},
+		},
 		"Interface": {
 			"ApplyService":         true,
 			"RemoveService":        true,
@@ -243,7 +243,7 @@ func TestAPICompleteness(t *testing.T) {
 	// excludedMethods lists methods intentionally NOT exposed via HTTP.
 	excludedMethods := map[string]map[string]string{
 		"Network": {
-			"EnableAuthorization":   "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
+			"EnableAuthorization":    "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
 			"BuildEmptyTopologyNode": "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"BuildTopologyNode":      "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"InitFromDeviceIntent":   "intent mode initialization — invoked by NodeActor.ensureActuatedIntent",
@@ -252,22 +252,22 @@ func TestAPICompleteness(t *testing.T) {
 			"CheckAuditReadGate":     "auth gate helper invoked by handleAuditEvents and handleAuditIntegrity for the engage-when-configured PermAuditRead check (#196); not a request-handled action",
 		},
 		"Node": {
-			"BindsService":         "internal helper for /service/{name}/projection — pre-check before ServiceProjection",
-			"ServiceProjection":    "internal helper used by /service/{name}/projection handler per-actor; no separate per-Node endpoint",
-			"SetDeviceMetadata":    "used internally by InitDevice; no direct HTTP endpoint",
-			"Interface":            "interface access is via URL path, not a method call",
-			"Lock":                 "server handles locking internally via connectAndExecute",
-			"Unlock":               "server handles locking internally via connectAndExecute",
-			"Close":                "server handles connection lifecycle",
-			"Commit":               "server handles commit via Execute/connectAndExecute",
-			"PendingPreview":       "exposed through WriteResult.Preview in Execute",
-			"PendingCount":         "exposed through WriteResult.ChangeCount",
-			"Ping":                 "server-internal connectivity check in NodeActor",
-			"HasActuatedIntent":    "server-internal check for node initialization state",
-			"HasUnsavedIntents":    "server-internal state tracking",
-			"ClearUnsavedIntents":  "server-internal state management",
-			"DisconnectTransport":  "server-internal lifecycle management",
-			"RebuildProjection":    "called by execute() at start of each operation",
+			"BindsService":        "internal helper for /service/{name}/projection — pre-check before ServiceProjection",
+			"ServiceProjection":   "internal helper used by /service/{name}/projection handler per-actor; no separate per-Node endpoint",
+			"SetDeviceMetadata":   "used internally by InitDevice; no direct HTTP endpoint",
+			"Interface":           "interface access is via URL path, not a method call",
+			"Lock":                "server handles locking internally via connectAndExecute",
+			"Unlock":              "server handles locking internally via connectAndExecute",
+			"Close":               "server handles connection lifecycle",
+			"Commit":              "server handles commit via Execute/connectAndExecute",
+			"PendingPreview":      "exposed through WriteResult.Preview in Execute",
+			"PendingCount":        "exposed through WriteResult.ChangeCount",
+			"Ping":                "server-internal connectivity check in NodeActor",
+			"HasActuatedIntent":   "server-internal check for node initialization state",
+			"HasUnsavedIntents":   "server-internal state tracking",
+			"ClearUnsavedIntents": "server-internal state management",
+			"DisconnectTransport": "server-internal lifecycle management",
+			"RebuildProjection":   "called by execute() at start of each operation",
 		},
 		"Interface": {},
 	}
@@ -313,8 +313,8 @@ func TestAPICompleteness(t *testing.T) {
 			"AddRoutePolicyRule":    auth.PermSpecAuthor,
 			"UpdateRoutePolicyRule": auth.PermSpecAuthor,
 			"RemoveRoutePolicyRule": auth.PermSpecAuthor,
-			"CreateProfile":         auth.PermSpecAuthor,
-			"DeleteProfile":         auth.PermSpecAuthor,
+			"CreateNodeSpec":        auth.PermSpecAuthor,
+			"DeleteNodeSpec":        auth.PermSpecAuthor,
 			"CreateZone":            auth.PermSpecAuthor,
 			"DeleteZone":            auth.PermSpecAuthor,
 			"UpdateService":         auth.PermSpecAuthor,
@@ -324,15 +324,15 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateFilter":          auth.PermSpecAuthor,
 			"UpdatePrefixList":      auth.PermSpecAuthor,
 			"UpdateRoutePolicy":     auth.PermSpecAuthor,
-			"UpdateProfile":         auth.PermSpecAuthor,
+			"UpdateNodeSpec":        auth.PermSpecAuthor,
 			"UpdateZone":            auth.PermSpecAuthor,
 
-			"AddTopologyDevice":     auth.PermSpecAuthor,
-			"DeleteTopologyDevice":  auth.PermSpecAuthor,
-			"UpdateTopologyDevice":  auth.PermSpecAuthor,
-			"AddTopologyLink":       auth.PermSpecAuthor,
-			"DeleteTopologyLink":    auth.PermSpecAuthor,
-			"InitDevice":            auth.PermDeviceWrite,
+			"AddTopologyDevice":    auth.PermSpecAuthor,
+			"DeleteTopologyDevice": auth.PermSpecAuthor,
+			"UpdateTopologyDevice": auth.PermSpecAuthor,
+			"AddTopologyLink":      auth.PermSpecAuthor,
+			"DeleteTopologyLink":   auth.PermSpecAuthor,
+			"InitDevice":           auth.PermDeviceWrite,
 		},
 		"Node": {
 			"AddBGPEVPNPeer":          auth.PermEVPNPeer,
@@ -414,14 +414,14 @@ func TestAPICompleteness(t *testing.T) {
 			"GetFeatureDependencies":  "spec read",
 			"GetUnsupportedDueTo":     "spec read",
 			"PlatformSupportsFeature": "spec read",
-			"ListProfiles":            "spec read",
-			"ShowProfile":             "spec read",
+			"ListNodeSpecs":           "spec read",
+			"ShowNodeSpec":            "spec read",
 			"ListZones":               "spec read",
 			"ShowZone":                "spec read",
 			"HasTopology":             "spec read",
 			"GetTopology":             "spec read",
 			"TopologyView":            "spec read",
-			"TopologyDeviceNames":     "spec read",
+			"TopologyNodeNames":       "spec read",
 			"IsHostDevice":            "spec read",
 			"GetHostProfile":          "spec read",
 			"ListNodes":               "spec read",
@@ -569,12 +569,12 @@ func TestHandleTopology_ReturnsSpecFile(t *testing.T) {
 	if topo["version"] == nil {
 		t.Error("topology response missing 'version'")
 	}
-	devices, ok := topo["devices"].(map[string]any)
+	devices, ok := topo["nodes"].(map[string]any)
 	if !ok {
-		t.Fatalf("topology.devices not an object: %v", topo["devices"])
+		t.Fatalf("topology.nodes not an object: %v", topo["nodes"])
 	}
 	if devices["switch1"] == nil {
-		t.Errorf("topology.devices.switch1 missing; got keys: %v", mapKeys(devices))
+		t.Errorf("topology.nodes.switch1 missing; got keys: %v", mapKeys(devices))
 	}
 }
 
@@ -604,7 +604,7 @@ func TestHandleTopology_CarriesSpecProvenance(t *testing.T) {
 					SpecKind string `json:"spec_kind"`
 					SpecName string `json:"spec_name"`
 				} `json:"steps"`
-			} `json:"devices"`
+			} `json:"nodes"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
@@ -780,7 +780,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 		DeviceOps: []sonic.DeviceOp{{
 			Seq: 0, Kind: sonic.DeviceOpsKindVerifyRead,
 			Table: "BGP_GLOBALS", Key: "default",
-			Result: sonic.DeviceOpsResultRejected,
+			Result:         sonic.DeviceOpsResultRejected,
 			DeviceResponse: "local_asn=99999 router_id=10.0.0.1",
 		}},
 	}
@@ -1054,7 +1054,7 @@ func copyTestSpecDir(t *testing.T) string {
 }
 
 // TestTopologyCRUD_AddDeleteDevice — newtron#15 (Phase 5). Round-trip a new
-// topology device entry: write a profile + a TopologyDevice spec, verify the
+// topology device entry: write a profile + a TopologyNode spec, verify the
 // add lands in topology.json, then delete and verify removal. Cleanup is
 // implicit via t.TempDir().
 func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
@@ -1072,7 +1072,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	dev := &spec.TopologyDevice{
+	dev := &spec.TopologyNode{
 		Ports: map[string]*spec.PortConfig{
 			"Ethernet0": {AdminStatus: "up", MTU: 9100},
 		},
@@ -1081,7 +1081,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
 	topo := net.GetTopology()
-	if topo.Devices["switch2"] == nil {
+	if topo.Nodes["switch2"] == nil {
 		t.Fatal("switch2 missing from topology after Add")
 	}
 
@@ -1089,7 +1089,7 @@ func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
 		t.Fatalf("DeleteTopologyDevice: %v", err)
 	}
 	topo = net.GetTopology()
-	if topo.Devices["switch2"] != nil {
+	if topo.Nodes["switch2"] != nil {
 		t.Error("switch2 still in topology after Delete")
 	}
 }
@@ -1111,7 +1111,7 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	dev := &spec.TopologyDevice{
+	dev := &spec.TopologyNode{
 		Ports: map[string]*spec.PortConfig{
 			"Ethernet0": {AdminStatus: "up"},
 		},
@@ -1143,7 +1143,7 @@ func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
 		t.Fatalf("force-delete: %v", err)
 	}
 	topo := net.GetTopology()
-	if topo.Devices["switch2"] != nil {
+	if topo.Nodes["switch2"] != nil {
 		t.Error("switch2 still in topology after force-delete")
 	}
 	if len(topo.Links) != 0 {
@@ -1167,7 +1167,7 @@ func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
+	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyNode{
 		Ports: map[string]*spec.PortConfig{
 			"Ethernet0": {AdminStatus: "up"},
 			"Ethernet4": {AdminStatus: "up"},
@@ -1211,7 +1211,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
+	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyNode{
 		Ports: map[string]*spec.PortConfig{"Ethernet0": {AdminStatus: "up"}},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
@@ -1239,7 +1239,7 @@ func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
 }
 
 // TestTopologyCRUD_UpdateNode_Replace — Q2 default: full replacement of the
-// TopologyDevice entry under the given name.
+// TopologyNode entry under the given name.
 func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 	specDir := copyTestSpecDir(t)
 	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
@@ -1247,7 +1247,7 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
 	// Replace switch1 with a different Ports map (no steps for simplicity).
-	replacement := &spec.TopologyDevice{
+	replacement := &spec.TopologyNode{
 		Ports: map[string]*spec.PortConfig{
 			"Ethernet0":  {AdminStatus: "up", MTU: 1500},
 			"Ethernet64": {AdminStatus: "down"},
@@ -1257,7 +1257,7 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 		t.Fatalf("UpdateTopologyDevice: %v", err)
 	}
 	topo := net.GetTopology()
-	got := topo.Devices["switch1"]
+	got := topo.Nodes["switch1"]
 	if got.Ports["Ethernet0"].MTU != 1500 {
 		t.Errorf("Update did not replace Ethernet0 fields; got %+v", got.Ports["Ethernet0"])
 	}
@@ -1267,7 +1267,7 @@ func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
 }
 
 // TestTopologyCRUD_DeleteProfile_CascadeSymmetry — newtron#15 follow-on:
-// DeleteProfile refuses when a topology device shares the name; force=true
+// DeleteNodeSpec refuses when a topology device shares the name; force=true
 // cascades through DeleteTopologyDevice (which itself cascades to links).
 func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	specDir := copyTestSpecDir(t)
@@ -1282,14 +1282,14 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadNetwork: %v", err)
 	}
-	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyDevice{
+	if err := net.AddTopologyDevice(context.Background(), "switch2", &spec.TopologyNode{
 		Ports: map[string]*spec.PortConfig{"Ethernet0": {AdminStatus: "up"}},
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
 
 	// Refuses without force.
-	err = net.DeleteProfile(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, false)
+	err = net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, false)
 	if err == nil {
 		t.Fatal("expected conflict on profile-delete-with-topology-device, got nil")
 	}
@@ -1299,12 +1299,12 @@ func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
 	}
 
 	// Force cascade.
-	if err := net.DeleteProfile(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
+	if err := net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
 		t.Fatalf("force-delete profile: %v", err)
 	}
 	topo := net.GetTopology()
-	if topo.Devices["switch2"] != nil {
-		t.Error("switch2 topology device still present after force-delete-profile cascade")
+	if topo.Nodes["switch2"] != nil {
+		t.Error("switch2 topology device still present after force-delete-node cascade")
 	}
 }
 

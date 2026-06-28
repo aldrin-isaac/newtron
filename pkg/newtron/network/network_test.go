@@ -61,7 +61,7 @@ func TestResolvedSpecs_MergeNodeWins(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{"svc": nodeSvc},
@@ -99,7 +99,7 @@ func TestResolvedSpecs_MergeZoneWinsOverNetwork(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{Zone: "amer"}
+	profile := &spec.NodeSpec{Zone: "amer"}
 
 	rs := n.buildResolvedSpecs(profile)
 	got, err := rs.GetFilter("f1")
@@ -136,7 +136,7 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
@@ -180,7 +180,7 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			MACVPNs: map[string]*spec.MACVPNSpec{
@@ -227,7 +227,7 @@ func TestResolvedSpecs_FindMACVPNByVNI_DynamicFallback(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{Zone: "amer"}
+	profile := &spec.NodeSpec{Zone: "amer"}
 	rs := n.buildResolvedSpecs(profile)
 
 	// Pre-existing MACVPN should be found
@@ -269,7 +269,7 @@ func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{Zone: "amer"}
+	profile := &spec.NodeSpec{Zone: "amer"}
 	rs := n.buildResolvedSpecs(profile)
 
 	// Pre-existing service should be in the merged snapshot
@@ -315,7 +315,7 @@ func TestResolvedSpecs_LiveFallback_ProfileOverrideStillWins(t *testing.T) {
 		platforms: map[string]*spec.PlatformSpec{},
 	}
 
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Zone: "amer",
 		OverridableSpecs: spec.OverridableSpecs{
 			Services: map[string]*spec.ServiceSpec{
@@ -360,7 +360,7 @@ func TestResolvedSpecs_GetPlatformDelegatesToNetwork(t *testing.T) {
 		},
 	}
 
-	profile := &spec.DeviceProfile{Zone: "amer"}
+	profile := &spec.NodeSpec{Zone: "amer"}
 	rs := n.buildResolvedSpecs(profile)
 
 	p, err := rs.GetPlatform("as7726")

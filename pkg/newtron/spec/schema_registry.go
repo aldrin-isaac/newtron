@@ -43,11 +43,11 @@ func init() {
 	// Top-level kinds — full CRUD
 	// ====================================================================
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "ServiceSpec",
-		Scoped:      true,
-		Label:       "Service",
-		Description: "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces.",
-		Sample:      ServiceSpec{},
+		Kind:            "ServiceSpec",
+		Scoped:          true,
+		Label:           "Service",
+		Description:     "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces.",
+		Sample:          ServiceSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -96,11 +96,11 @@ func init() {
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "IPVPNSpec",
-		Scoped:      true,
-		Label:       "IP-VPN",
-		Description: "A Layer-3 VPN — a VRF + L3VNI + route targets that L3 services attach to.",
-		Sample:      IPVPNSpec{},
+		Kind:            "IPVPNSpec",
+		Scoped:          true,
+		Label:           "IP-VPN",
+		Description:     "A Layer-3 VPN — a VRF + L3VNI + route targets that L3 services attach to.",
+		Sample:          IPVPNSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -122,11 +122,11 @@ func init() {
 		}},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "MACVPNSpec",
-		Scoped:      true,
-		Label:       "MAC-VPN",
-		Description: "A Layer-2 VPN — a VLAN + L2VNI + (optional) anycast gateway that L2 services attach to.",
-		Sample:      MACVPNSpec{},
+		Kind:            "MACVPNSpec",
+		Scoped:          true,
+		Label:           "MAC-VPN",
+		Description:     "A Layer-2 VPN — a VLAN + L2VNI + (optional) anycast gateway that L2 services attach to.",
+		Sample:          MACVPNSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -138,11 +138,11 @@ func init() {
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "QoSPolicy",
-		Scoped:      true,
-		Label:       "QoS Policy",
-		Description: "A declarative queue policy — strict / DWRR scheduling, DSCP mapping, optional ECN.",
-		Sample:      QoSPolicy{},
+		Kind:            "QoSPolicy",
+		Scoped:          true,
+		Label:           "QoS Policy",
+		Description:     "A declarative queue policy — strict / DWRR scheduling, DSCP mapping, optional ECN.",
+		Sample:          QoSPolicy{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -154,11 +154,11 @@ func init() {
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "FilterSpec",
-		Scoped:      true,
-		Label:       "Filter",
-		Description: "A reusable ACL — an ordered list of permit/deny rules.",
-		Sample:      FilterSpec{},
+		Kind:            "FilterSpec",
+		Scoped:          true,
+		Label:           "Filter",
+		Description:     "A reusable ACL — an ordered list of permit/deny rules.",
+		Sample:          FilterSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -170,11 +170,11 @@ func init() {
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "RoutePolicy",
-		Scoped:      true,
-		Label:       "Route Policy",
-		Description: "A reusable BGP route-policy — an ordered list of match-and-set rules.",
-		Sample:      RoutePolicy{},
+		Kind:            "RoutePolicy",
+		Scoped:          true,
+		Label:           "Route Policy",
+		Description:     "A reusable BGP route-policy — an ordered list of match-and-set rules.",
+		Sample:          RoutePolicy{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -186,25 +186,25 @@ func init() {
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "DeviceProfile",
-		Label:       "Device Profile",
-		Description: "Per-device specification — management IP, loopback IP, zone, optional EVPN peering, and per-device overrides.",
-		Sample:      DeviceProfile{},
+		Kind:            "NodeSpec",
+		Label:           "Node",
+		Description:     "Per-node specification — management IP, loopback IP, zone, optional EVPN peering, and per-node overrides.",
+		Sample:          NodeSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
-			List:   "/newtron/v1/networks/{netID}/profiles",
+			List:   "/newtron/v1/networks/{netID}/nodes",
 			Show:   "/newtron/v1/networks/{netID}/nodes/{name}",
-			Create: "/newtron/v1/networks/{netID}/create-profile",
-			Update: "/newtron/v1/networks/{netID}/update-profile",
-			Delete: "/newtron/v1/networks/{netID}/delete-profile",
+			Create: "/newtron/v1/networks/{netID}/create-node",
+			Update: "/newtron/v1/networks/{netID}/update-node",
+			Delete: "/newtron/v1/networks/{netID}/delete-node",
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "ZoneSpec",
-		Label:       "Zone",
-		Description: "A zone — a scope for spec overrides between network-global and per-device.",
-		Sample:      ZoneSpec{},
+		Kind:            "ZoneSpec",
+		Label:           "Zone",
+		Description:     "A zone — a scope for spec overrides between network-global and per-device.",
+		Sample:          ZoneSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -216,11 +216,11 @@ func init() {
 		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "PrefixListSpec",
-		Scoped:      true,
-		Label:       "Prefix List",
-		Description: "A reusable list of CIDR prefixes referenced by filter rules and route policies.",
-		Sample:      PrefixListSpec{},
+		Kind:            "PrefixListSpec",
+		Scoped:          true,
+		Label:           "Prefix List",
+		Description:     "A reusable list of CIDR prefixes referenced by filter rules and route policies.",
+		Sample:          PrefixListSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -240,10 +240,10 @@ func init() {
 	// are absent.
 	// ====================================================================
 	RegisterSchemaKind(SchemaRegistration{
-		Kind:        "PlatformSpec",
-		Label:       "Platform",
-		Description: "Hardware platform definition (HWSKU, ports, VM image, feature support). Read-only via the universal UI — authoring requires deep backend coordination.",
-		Sample:      PlatformSpec{},
+		Kind:            "PlatformSpec",
+		Label:           "Platform",
+		Description:     "Hardware platform definition (HWSKU, ports, VM image, feature support). Read-only via the universal UI — authoring requires deep backend coordination.",
+		Sample:          PlatformSpec{},
 		Identifier:      "name",
 		IdentifierField: nameIdentifierField(),
 		Paths: SchemaPaths{
@@ -399,7 +399,7 @@ func init() {
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "EVPNConfig",
 		Label:       "EVPN Overlay Peering",
-		Description: "Per-device EVPN BGP overlay peering — embedded on a device profile.",
+		Description: "Per-node EVPN BGP overlay peering — embedded on a node.",
 		Sample:      EVPNConfig{},
 	})
 }

@@ -35,7 +35,7 @@ type QoSQueue struct {
 }
 
 // OverridableSpecs holds spec maps that participate in hierarchical resolution
-// (network → zone → node). Embedded by NetworkSpecFile, ZoneSpec, and DeviceProfile.
+// (network → zone → node). Embedded by NetworkSpecFile, ZoneSpec, and NodeSpec.
 // Resolution is a union with lower-level-wins: node > zone > network.
 // The `kind:"…"` tag binds each map to its spec-kind name — the same vocabulary
 // as the `ref:"…"` tags and SchemaRegistration.Kind. It is the single
@@ -166,7 +166,7 @@ type ServiceSpec struct {
 // RoutingSpec defines routing protocol specification for a service.
 //
 // For BGP services:
-//   - Local AS is always from device profile (ResolvedProfile.UnderlayASN)
+//   - Local AS is always from node spec (ResolvedNodeSpec.UnderlayASN)
 //   - Peer AS can be fixed (number), or "request" (provided at apply time)
 //   - Peer IP is derived from interface IP for point-to-point links
 type RoutingSpec struct {
@@ -436,20 +436,20 @@ type VMCredentials struct {
 }
 
 // ============================================================================
-// Device Profile
+// Node Spec
 // ============================================================================
 
-// EVPNConfig defines EVPN overlay peering for a device profile.
+// EVPNConfig defines EVPN overlay peering for a node spec.
 type EVPNConfig struct {
 	Peers          []string `json:"peers,omitempty" label:"EVPN Peers" tooltip:"Loopback IPs of remote EVPN BGP peers (overlay sessions)"`
 	RouteReflector bool     `json:"route_reflector,omitempty" label:"Route Reflector" tooltip:"This device acts as an EVPN route reflector for its peers"`
 	ClusterID      string   `json:"cluster_id,omitempty" label:"Cluster ID" tooltip:"BGP route-reflector cluster ID (defaults to loopback IP)"`
 }
 
-// DeviceProfile contains per-device specification.
-// This is the minimal set of device-specific data; everything else
+// NodeSpec contains per-node specification.
+// This is the minimal set of node-specific data; everything else
 // is inherited from region/global or derived at runtime.
-type DeviceProfile struct {
+type NodeSpec struct {
 	// REQUIRED - must be specified
 	MgmtIP     string `json:"mgmt_ip" label:"Management IP" tooltip:"Out-of-band management IP reachable from newtron" format:"cidr"`
 	LoopbackIP string `json:"loopback_ip" label:"Loopback IP" tooltip:"Loopback IP — the device's BGP router-id and VTEP source" format:"cidr"`
@@ -484,9 +484,9 @@ type DeviceProfile struct {
 	HostGateway string `json:"host_gateway,omitempty" label:"Host Default Gateway" tooltip:"Default gateway for the virtual host"`
 }
 
-// ResolvedProfile contains fully resolved device values
+// ResolvedNodeSpec contains fully resolved device values
 // after applying inheritance (profile > region > global) and derivation.
-type ResolvedProfile struct {
+type ResolvedNodeSpec struct {
 	// From profile
 	DeviceName string
 	MgmtIP     string
@@ -509,7 +509,7 @@ type ResolvedProfile struct {
 
 	// SSH credentials for Redis tunnel. SSH port is runtime state
 	// owned by newtlab (§27) — resolved through newtron's PortResolver
-	// at Connect time; not part of ResolvedProfile.
+	// at Connect time; not part of ResolvedNodeSpec.
 	SSHUser string
 	SSHPass string
 
@@ -555,12 +555,12 @@ const (
 // Defines devices, interconnections, and interface service bindings for
 // automated provisioning.
 type TopologySpecFile struct {
-	Version     string                     `json:"version"`
-	Platform    string                     `json:"platform,omitempty"` // default platform for all devices
-	Description string                     `json:"description,omitempty"`
-	Devices     map[string]*TopologyDevice `json:"devices"`
-	Links       []*TopologyLink            `json:"links,omitempty"`
-	NewtLab     *NewtLabConfig             `json:"newtlab,omitempty"`
+	Version     string                   `json:"version"`
+	Platform    string                   `json:"platform,omitempty"` // default platform for all nodes
+	Description string                   `json:"description,omitempty"`
+	Nodes       map[string]*TopologyNode `json:"nodes"`
+	Links       []*TopologyLink          `json:"links,omitempty"`
+	NewtLab     *NewtLabConfig           `json:"newtlab,omitempty"`
 }
 
 // ServerConfig defines a server in the newtlab server pool.
@@ -582,16 +582,16 @@ type NewtLabConfig struct {
 	Servers         []*ServerConfig `json:"servers,omitempty"` // server pool for auto-placement
 }
 
-// TopologyDevice defines a device's configuration within a topology.
+// TopologyNode defines a device's configuration within a topology.
 // Switch devices have Steps (provisioning intent) and Ports (physical port config).
 // Host devices are empty entries — detection is via platform profile, not a type field.
-type TopologyDevice struct {
+type TopologyNode struct {
 	Steps []TopologyStep         `json:"steps,omitempty"`
 	Ports map[string]*PortConfig `json:"ports,omitempty"` // keyed by port name (e.g. "Ethernet0")
 }
 
 // PortConfig is the operator-configurable PORT-table config for one physical
-// port, authored under a TopologyDevice's `ports` map (keyed by port name).
+// port, authored under a TopologyNode's `ports` map (keyed by port name).
 // Its fields mirror the YANG-derived PORT constraints in
 // device/sonic/schema.go — the same set the delivery layer validates — so
 // authoring-time and delivery-time agree. Registered as a schema kind so a
@@ -648,14 +648,14 @@ type TopologyLink struct {
 
 // HasDevice returns true if the topology contains a device with the given name.
 func (t *TopologySpecFile) HasDevice(name string) bool {
-	_, ok := t.Devices[name]
+	_, ok := t.Nodes[name]
 	return ok
 }
 
 // DeviceNames returns a sorted list of device names in the topology.
 func (t *TopologySpecFile) DeviceNames() []string {
-	names := make([]string, 0, len(t.Devices))
-	for name := range t.Devices {
+	names := make([]string, 0, len(t.Nodes))
+	for name := range t.Nodes {
 		names = append(names, name)
 	}
 	sort.Strings(names)

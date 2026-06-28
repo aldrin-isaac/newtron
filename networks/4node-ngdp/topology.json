@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "4-node topology: 2 spines + 2 leaves (full mesh)",
-  "devices": {
+  "nodes": {
     "spine1": {
       "steps": [
         {"url": "/setup-device", "params": {"fields": {"hostname": "spine1", "bgp_asn": "65001", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "route_reflector": {

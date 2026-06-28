@@ -12,27 +12,27 @@ import (
 // Profiles
 // ============================================================================
 
-// ListProfiles returns the names of all device profiles.
-func (net *Network) ListProfiles() []string {
-	return net.internal.ListProfiles()
+// ListNodeSpecs returns the names of all nodes.
+func (net *Network) ListNodeSpecs() []string {
+	return net.internal.ListNodeSpecs()
 }
 
-// ShowProfile returns the canonical DeviceProfile (§46) for a single
+// ShowNodeSpec returns the canonical NodeSpec (§46) for a single
 // device. Consumers (CLI, newtrun, newtlab) read whatever subset of
 // fields they need.
-func (net *Network) ShowProfile(name string) (*spec.DeviceProfile, error) {
-	return net.internal.GetProfile(name)
+func (net *Network) ShowNodeSpec(name string) (*spec.NodeSpec, error) {
+	return net.internal.GetNodeSpec(name)
 }
 
-// CreateProfile creates a new device profile.
-func (net *Network) CreateProfile(ctx context.Context, req CreateDeviceProfileRequest, opts ExecOpts) error {
+// CreateNodeSpec creates a new node spec.
+func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecRequest, opts ExecOpts) error {
 	if req.MgmtIP == "" {
 		return &ValidationError{Field: "mgmt_ip", Message: "required"}
 	}
 	if req.Zone == "" {
 		return &ValidationError{Field: "zone", Message: "required"}
 	}
-	if _, err := net.internal.GetProfile(req.Name); err == nil {
+	if _, err := net.internal.GetNodeSpec(req.Name); err == nil {
 		return fmt.Errorf("profile '%s' already exists", req.Name)
 	}
 	if opts.Execute {
@@ -43,7 +43,7 @@ func (net *Network) CreateProfile(ctx context.Context, req CreateDeviceProfileRe
 	if !opts.Execute {
 		return nil
 	}
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		MgmtIP:      req.MgmtIP,
 		LoopbackIP:  req.LoopbackIP,
 		Zone:        req.Zone,
@@ -60,15 +60,15 @@ func (net *Network) CreateProfile(ctx context.Context, req CreateDeviceProfileRe
 			ClusterID:      req.EVPN.ClusterID,
 		}
 	}
-	return net.internal.CreateProfile(req.Name, profile)
+	return net.internal.CreateNodeSpec(req.Name, profile)
 }
 
-// DeleteProfile removes a device profile. force=true cascade-deletes any
+// DeleteNodeSpec removes a node spec. force=true cascade-deletes any
 // topology device that references this profile (which itself cascade-deletes
 // any links wired to that device). Without force, the call returns a
 // *ConflictError listing the referring topology devices.
-func (net *Network) DeleteProfile(ctx context.Context, name string, opts ExecOpts, force bool) error {
-	if _, err := net.internal.GetProfile(name); err != nil {
+func (net *Network) DeleteNodeSpec(ctx context.Context, name string, opts ExecOpts, force bool) error {
+	if _, err := net.internal.GetNodeSpec(name); err != nil {
 		return err
 	}
 	if opts.Execute {
@@ -79,7 +79,7 @@ func (net *Network) DeleteProfile(ctx context.Context, name string, opts ExecOpt
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteProfile(name, force)
+	return net.internal.DeleteNodeSpec(name, force)
 }
 
 // ============================================================================
@@ -136,16 +136,15 @@ func (net *Network) DeleteZone(ctx context.Context, name string, opts ExecOpts) 
 	return net.internal.DeleteZone(name)
 }
 
-
 // ============================================================================
 // Update — full-replacement profile/zone mutation (#152)
 // ============================================================================
 
-// UpdateProfile replaces an existing device profile. Returns
+// UpdateNodeSpec replaces an existing node spec. Returns
 // *NotFoundError → HTTP 404 when no profile with that name exists.
 // Same Field + Resource (and same `spec.author` gate) as
-// CreateProfile / DeleteProfile.
-func (net *Network) UpdateProfile(ctx context.Context, req CreateDeviceProfileRequest, opts ExecOpts) error {
+// CreateNodeSpec / DeleteNodeSpec.
+func (net *Network) UpdateNodeSpec(ctx context.Context, req CreateNodeSpecRequest, opts ExecOpts) error {
 	if req.MgmtIP == "" {
 		return &ValidationError{Field: "mgmt_ip", Message: "required"}
 	}
@@ -160,7 +159,7 @@ func (net *Network) UpdateProfile(ctx context.Context, req CreateDeviceProfileRe
 	if !opts.Execute {
 		return nil
 	}
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		MgmtIP:      req.MgmtIP,
 		LoopbackIP:  req.LoopbackIP,
 		Zone:        req.Zone,
@@ -177,7 +176,7 @@ func (net *Network) UpdateProfile(ctx context.Context, req CreateDeviceProfileRe
 			ClusterID:      req.EVPN.ClusterID,
 		}
 	}
-	return translateInternalError(net.internal.UpdateProfile(req.Name, profile))
+	return translateInternalError(net.internal.UpdateNodeSpec(req.Name, profile))
 }
 
 // UpdateZone replaces an existing zone. ZoneSpec carries only

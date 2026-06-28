@@ -13,10 +13,10 @@ import (
 
 // TestNewNetwork_SecretRefInProfileResolves pins the L0 end-to-end:
 // a profile with ssh_pass="${secret:KEY}" and a store containing
-// KEY=value loads cleanly; ResolveProfile yields plaintext.
+// KEY=value loads cleanly; ResolveNodeSpec yields plaintext.
 func TestNewNetwork_SecretRefInProfileResolves(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
-	writeProfile(t, dir, "switch1", `{
+	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -38,9 +38,9 @@ func TestNewNetwork_SecretRefInProfileResolves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	resolved, err := n.resolveProfileByName("switch1")
+	resolved, err := n.resolveNodeSpecByName("switch1")
 	if err != nil {
-		t.Fatalf("ResolveProfile: %v", err)
+		t.Fatalf("ResolveNodeSpec: %v", err)
 	}
 	if resolved.SSHPass != "the-real-password" {
 		t.Errorf("SSHPass = %q; want the-real-password", resolved.SSHPass)
@@ -53,7 +53,7 @@ func TestNewNetwork_SecretRefInProfileResolves(t *testing.T) {
 // problem immediately on server startup, not under load.
 func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
-	writeProfile(t, dir, "switch1", `{
+	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -67,9 +67,9 @@ func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v (the reference is only resolved on profile read; init should succeed)", err)
 	}
-	_, err = n.resolveProfileByName("switch1")
+	_, err = n.resolveNodeSpecByName("switch1")
 	if err == nil {
-		t.Fatal("expected ResolveProfile to fail with no store + reference; got nil")
+		t.Fatal("expected ResolveNodeSpec to fail with no store + reference; got nil")
 	}
 	if !strings.Contains(err.Error(), "secret-store") {
 		t.Errorf("err = %v; should mention --secret-store so operator knows the fix", err)
@@ -79,10 +79,10 @@ func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 // TestNewNetwork_PlaintextProfilePassesThrough pins the no-regression
 // path: a profile with plaintext ssh_pass loads with no store
 // configured (current behavior), and the plaintext flows through
-// ResolveProfile unchanged.
+// ResolveNodeSpec unchanged.
 func TestNewNetwork_PlaintextProfilePassesThrough(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
-	writeProfile(t, dir, "switch1", `{
+	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -96,9 +96,9 @@ func TestNewNetwork_PlaintextProfilePassesThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	resolved, err := n.resolveProfileByName("switch1")
+	resolved, err := n.resolveNodeSpecByName("switch1")
 	if err != nil {
-		t.Fatalf("ResolveProfile: %v", err)
+		t.Fatalf("ResolveNodeSpec: %v", err)
 	}
 	if resolved.SSHPass != "YourPaSsWoRd" {
 		t.Errorf("SSHPass = %q; want plaintext passthrough YourPaSsWoRd", resolved.SSHPass)
@@ -158,7 +158,7 @@ func TestResolvePlatformSecrets_MissingKeyErrors(t *testing.T) {
 
 // ============================================================================
 // Fixture helpers — minimal spec layout sufficient to exercise the
-// secret resolver in NewNetwork + ResolveProfile.
+// secret resolver in NewNetwork + ResolveNodeSpec.
 // ============================================================================
 
 func newL0FixtureSpecDir(t *testing.T) string {
@@ -196,7 +196,7 @@ func writeTopology(t *testing.T, dir string, deviceName string) {
 	t.Helper()
 	body := `{
 		"version": "1.0",
-		"devices": {"` + deviceName + `": {}},
+		"nodes": {"` + deviceName + `": {}},
 		"links": []
 	}`
 	if err := os.WriteFile(filepath.Join(dir, "topology.json"), []byte(body), 0o644); err != nil {
@@ -204,7 +204,7 @@ func writeTopology(t *testing.T, dir string, deviceName string) {
 	}
 }
 
-func writeProfile(t *testing.T, dir, name, body string) {
+func writeNodeSpec(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir profiles: %v", err)
@@ -214,15 +214,15 @@ func writeProfile(t *testing.T, dir, name, body string) {
 	}
 }
 
-// resolveProfileByName is a test-only convenience that loads + resolves
+// resolveNodeSpecByName is a test-only convenience that loads + resolves
 // in one call. Production code paths reach the same logic through
 // Network.ConnectDevice / NewNode internally.
-func (n *Network) resolveProfileByName(name string) (*spec.ResolvedProfile, error) {
-	p, err := n.loadProfile(name)
+func (n *Network) resolveNodeSpecByName(name string) (*spec.ResolvedNodeSpec, error) {
+	p, err := n.loadNodeSpec(name)
 	if err != nil {
 		return nil, err
 	}
-	return n.resolveProfile(name, p)
+	return n.resolveNodeSpec(name, p)
 }
 
 func plainSwitch1Profile() string {
@@ -253,7 +253,7 @@ func plainSwitch1Profile() string {
 // resolved password value end-to-end.
 func TestNewNetwork_SpecDirSecretStoreAutoDiscovery(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
-	writeProfile(t, dir, "switch1", `{
+	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -274,9 +274,9 @@ func TestNewNetwork_SpecDirSecretStoreAutoDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	resolved, err := n.resolveProfileByName("switch1")
+	resolved, err := n.resolveNodeSpecByName("switch1")
 	if err != nil {
-		t.Fatalf("ResolveProfile: %v", err)
+		t.Fatalf("ResolveNodeSpec: %v", err)
 	}
 	if resolved.SSHPass != "the-real-password" {
 		t.Errorf("SSHPass = %q; want the-real-password (auto-discovery should have resolved it)", resolved.SSHPass)
@@ -289,7 +289,7 @@ func TestNewNetwork_SpecDirSecretStoreAutoDiscovery(t *testing.T) {
 // "flag wins over env" pattern from #179 (TLS env vars).
 func TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
-	writeProfile(t, dir, "switch1", `{
+	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -316,9 +316,9 @@ func TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	resolved, err := n.resolveProfileByName("switch1")
+	resolved, err := n.resolveNodeSpecByName("switch1")
 	if err != nil {
-		t.Fatalf("ResolveProfile: %v", err)
+		t.Fatalf("ResolveNodeSpec: %v", err)
 	}
 	if resolved.SSHPass != "winner" {
 		t.Errorf("SSHPass = %q; explicit store should have won over spec-dir auto-discovery", resolved.SSHPass)
@@ -334,7 +334,7 @@ func TestNewNetwork_ExplicitStoreWinsOverSpecDirAutoDiscovery(t *testing.T) {
 func TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
 	// Plaintext profile, no secrets.json.
-	writeProfile(t, dir, "switch1", `{
+	writeNodeSpec(t, dir, "switch1", `{
 		"mgmt_ip": "127.0.0.1",
 		"loopback_ip": "10.0.0.1",
 		"zone": "amer",
@@ -348,9 +348,9 @@ func TestNewNetwork_NoAutoDiscoveryWhenSecretsJsonAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	resolved, err := n.resolveProfileByName("switch1")
+	resolved, err := n.resolveNodeSpecByName("switch1")
 	if err != nil {
-		t.Fatalf("ResolveProfile: %v", err)
+		t.Fatalf("ResolveNodeSpec: %v", err)
 	}
 	if resolved.SSHPass != "YourPaSsWoRd" {
 		t.Errorf("SSHPass = %q; plaintext should pass through unchanged", resolved.SSHPass)

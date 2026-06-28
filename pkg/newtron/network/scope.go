@@ -66,8 +66,8 @@ func (n *Network) ListScopedSpecs() ([]ScopedSpec, error) {
 	// Node profiles load independently of the network-spec lock. A profile that
 	// fails to load is a fail-closed error (a malformed node spec must not be
 	// silently dropped from the inventory) rather than a silent skip.
-	for _, name := range n.ListProfiles() {
-		profile, err := n.GetProfile(name)
+	for _, name := range n.ListNodeSpecs() {
+		profile, err := n.GetNodeSpec(name)
 		if err != nil {
 			return nil, fmt.Errorf("loading profile %q for spec inventory: %w", name, err)
 		}

@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "2-node topology with service-defined interfaces for intent-based health check validation",
-  "devices": {
+  "nodes": {
     "switch1": {
       "steps": [
         {"url": "/setup-device", "params": {"fields": {"hostname": "switch1", "bgp_asn": "65001", "type": "LeafRouter", "hwsku": "cisco-p200-32x100-vs", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "source_ip": "10.0.0.1"}},

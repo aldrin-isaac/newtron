@@ -13,9 +13,9 @@ import (
 
 func TestParseStepURL(t *testing.T) {
 	tests := []struct {
-		url      string
-		wantOp   string
-		wantIf   string
+		url    string
+		wantOp string
+		wantIf string
 	}{
 		{"/setup-device", "setup-device", ""},
 		{"/add-bgp-evpn-peer", "add-bgp-evpn-peer", ""},
@@ -134,11 +134,11 @@ func newTestAbstract() *Node {
 		prefixLists:   map[string][]string{},
 		routePolicies: map[string]*spec.RoutePolicy{},
 	}
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		UnderlayASN: 65001,
 		LoopbackIP:  "10.0.0.1",
 	}
-	resolved := &spec.ResolvedProfile{
+	resolved := &spec.ResolvedNodeSpec{
 		UnderlayASN: 65001,
 		RouterID:    "10.0.0.1",
 		LoopbackIP:  "10.0.0.1",

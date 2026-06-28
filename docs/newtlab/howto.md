@@ -236,7 +236,7 @@ ignores this section; it is newtlab-specific.
 
 ```json
 {
-  "devices": { "..." : "..." },
+  "nodes": { "..." : "..." },
   "newtlab": {
     "link_port_base": 10000,
     "console_port_base": 12000,
@@ -462,7 +462,7 @@ newtron (equivalent to running `newtlab provision` separately).
 5. Waits for SSH readiness on each node
 6. Generates and injects an Ed25519 SSH key (passwordless access)
 7. Applies platform-specific boot patches (§12)
-8. Patches device profiles with allocated ports (so newtron can connect)
+8. Patches nodes with allocated ports (so newtron can connect)
 9. Provisions virtual host namespaces if hosts are defined (§9)
 
 ---
@@ -475,7 +475,7 @@ SONiC subsystems.
 
 **Preconditions:**
 - Lab is deployed and all switches are SSH-reachable
-- Spec files contain the device profiles and network configuration
+- Spec files contain the nodes and network configuration
 
 **Command:**
 
@@ -781,7 +781,7 @@ Destroying lab 2node-ngdp...
 - Kills all QEMU processes (switch VMs and host VMs)
 - Stops all newtlink bridge worker processes
 - Cleans up remote host state (in multi-host mode)
-- Restores device profiles to pre-deploy state (removes `ssh_port`,
+- Restores nodes to pre-deploy state (removes `ssh_port`,
   `console_port`, `mac`; restores original `mgmt_ip`)
 - Deletes the overlay disks and lab state directory
   (`~/.newtlab/labs/<name>/`)
@@ -855,7 +855,7 @@ The key field is `"device_type": "host"` — this triggers VM coalescing.
 
 ```json
 {
-  "devices": {
+  "nodes": {
     "switch1": {
       "interfaces": {
         "Ethernet0": { "link": "switch2:Ethernet0", "ip": "10.1.0.0/31" },
@@ -998,7 +998,7 @@ maximum load. No manual `vm_host` configuration needed.
 ### Node Pinning
 
 To force a specific node onto a specific server, set `vm_host` in the
-device profile:
+node spec:
 
 ```json
 {
@@ -1090,7 +1090,7 @@ collisions:
 ```json
 {
   "name": "alice-spine-leaf",
-  "devices": { "..." : "..." }
+  "nodes": { "..." : "..." }
 }
 ```
 

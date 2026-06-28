@@ -180,10 +180,10 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	needsBGPEnsure := hasBGPRouting && !isOverlay && !n.BGPConfigured()
 	if needsBGPEnsure {
 		if resolved.UnderlayASN == 0 {
-			return nil, fmt.Errorf("service '%s' requires BGP but underlay_asn is not set in device profile", serviceName)
+			return nil, fmt.Errorf("service '%s' requires BGP but underlay_asn is not set in node spec", serviceName)
 		}
 		if resolved.RouterID == "" {
-			return nil, fmt.Errorf("service '%s' requires BGP but router_id (loopback_ip) is not set in device profile", serviceName)
+			return nil, fmt.Errorf("service '%s' requires BGP but router_id (loopback_ip) is not set in node spec", serviceName)
 		}
 	}
 
@@ -531,12 +531,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
 		if vrfName != "" {
-			cs.Adds(bindVrfConfig(i.name,vrfName))
+			cs.Adds(bindVrfConfig(i.name, vrfName))
 		} else {
 			cs.Adds(enableIpRoutingConfig(i.name))
 		}
 		if opts.IPAddress != "" {
-			cs.Adds(assignIpAddressConfig(i.name,opts.IPAddress))
+			cs.Adds(assignIpAddressConfig(i.name, opts.IPAddress))
 		}
 	case spec.ServiceTypeEVPNIRB:
 		if vlanID > 0 {
@@ -821,9 +821,6 @@ func collectPrefixListNames(routing *spec.RoutingSpec, sp SpecProvider) map[stri
 	return names
 }
 
-
-
-
 // diffRoutePolicyKeyCSV returns the semicolon-separated keys present in oldCSV
 // but absent from newCSV. Pure string operation — no projection access.
 // Used by RefreshService for blue-green stale cleanup (Principle 35).
@@ -900,7 +897,6 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 	}
 	return prefixes
 }
-
 
 // removeSharedACL removes an ACL, handling the shared case.
 // Uses DAG children of the acl|NAME intent to determine remaining users
@@ -1060,8 +1056,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Track which infrastructure intents to clean up after the interface
 	// intent is deleted (must happen in children-first order per I5).
-	var destroyedVRF string  // VRF whose config was destroyed (needs intent cleanup)
-	var destroyedVLAN int    // VLAN whose config was destroyed (needs intent cleanup)
+	var destroyedVRF string // VRF whose config was destroyed (needs intent cleanup)
+	var destroyedVLAN int   // VLAN whose config was destroyed (needs intent cleanup)
 
 	// (isLastServiceUser computed above)
 
@@ -1092,7 +1088,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Remove IP addresses from interface
 	for _, ipAddr := range i.IPAddresses() {
-		cs.Deletes(assignIpAddressConfig(i.name,ipAddr))
+		cs.Deletes(assignIpAddressConfig(i.name, ipAddr))
 	}
 
 	// Remove INTERFACE base entry for routed services (created by service).
