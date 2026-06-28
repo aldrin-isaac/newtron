@@ -33,12 +33,12 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/unregister", s.handleUnregisterNetwork)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/reload", s.handleReloadNetwork)
 
-	// Write-control reservation (per network). request/relinquish are
+	// Write-control reservation (per network). request/release are
 	// permissioned (control.request / control.takeover) and audited like any
 	// mutation; status is an open read.
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/control", s.handleControlStatus)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/control/request", s.handleControlRequest)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/control/relinquish", s.handleControlRelinquish)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/control/release", s.handleControlRelease)
 
 	// Auth routes (POST /newt-server/v1/auth/login, POST
 	// /newt-server/v1/auth/logout) live at the server boundary in
@@ -303,7 +303,7 @@ func writeError(w http.ResponseWriter, err error) {
 		envelope.Data = conflict
 	}
 	// Write-control refusal carries {network, holder, since, last_active} in Data
-	// so a client renders "alice holds write control since … — relinquish, take
+	// so a client renders "alice holds write control since … — release, take
 	// over, or wait" without parsing the message.
 	var wcErr *newtron.WriteControlError
 	if errors.As(err, &wcErr) {

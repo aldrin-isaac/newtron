@@ -63,7 +63,7 @@ type networkEntity struct {
 	nodeActors map[string]*NodeActor
 
 	// wcMu guards writeCtl, the per-network write-control reservation
-	// (request/relinquish/takeover). nil = free. In-memory only — a server
+	// (request/release/takeover). nil = free. In-memory only — a server
 	// restart clears it, the clean reset for any stale reservation.
 	wcMu     sync.Mutex
 	writeCtl *writeControl

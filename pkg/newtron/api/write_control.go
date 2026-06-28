@@ -11,44 +11,63 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 )
 
+// defaultControlDuration is the reservation window a request grants when no
+// duration is set. The window auto-recovers a dead holder (the reservation
+// lapses if not extended) without the implicit heartbeat of a lease — the holder
+// extends it deliberately by requesting again.
+const defaultControlDuration = 30 * time.Minute
+
 // writeControl is one network's write-control reservation: a single holder owns
-// the right to mutate the network until they relinquish it or another caller
-// takes over. Unlike a lease there is no TTL — the hold is explicit and survives
-// until an explicit API call changes it. LastActive is refreshed on every write
-// the holder makes (no heartbeat needed); it lets a would-be taker judge whether
-// the holder is gone before forcing a takeover.
+// the right to mutate the network until the reservation is released, taken over,
+// or its window expires. The window is explicit (default 30m, set or extended on
+// request) — not an implicit auto-renewing lease. LastActive (refreshed on the
+// holder's writes) is informational, for judging staleness before a takeover.
 type writeControl struct {
 	Holder     string    `json:"holder"`
 	Since      time.Time `json:"since"`
+	ExpiresAt  time.Time `json:"expires_at"`
 	LastActive time.Time `json:"last_active"`
 }
 
-// requestControl grants (or renews) the reservation to caller. Free or
-// already-held-by-caller → granted/renewed. Held by another → a
-// *WriteControlError unless force, in which case caller takes over and the
-// prior holder is returned (displaced, for the response + audit trail).
-func (ne *networkEntity) requestControl(netID, caller string, force bool) (wc writeControl, priorHolder string, err error) {
+// active reports whether the reservation is still within its window at now. An
+// expired reservation counts as free — the holder no longer has control.
+func (wc *writeControl) active(now time.Time) bool {
+	return wc != nil && now.Before(wc.ExpiresAt)
+}
+
+// requestControl acquires or extends the reservation for caller, granting a
+// window of dur (defaultControlDuration when dur <= 0). Free, expired, or
+// already-held-by-caller → granted/extended to now+dur (extending keeps the
+// original Since). Held by another within its window → a *WriteControlError
+// unless force, in which case caller takes over and the displaced prior holder
+// is returned (for the response + audit trail).
+func (ne *networkEntity) requestControl(netID, caller string, force bool, dur time.Duration) (wc writeControl, priorHolder string, err error) {
+	if dur <= 0 {
+		dur = defaultControlDuration
+	}
 	ne.wcMu.Lock()
 	defer ne.wcMu.Unlock()
 	now := time.Now()
-	if ne.writeCtl == nil || ne.writeCtl.Holder == caller {
-		if ne.writeCtl == nil {
-			ne.writeCtl = &writeControl{Holder: caller, Since: now}
+	held := ne.writeCtl.active(now)
+	if !held || ne.writeCtl.Holder == caller {
+		since := now
+		if held { // extending our own reservation — keep the original acquire time
+			since = ne.writeCtl.Since
 		}
-		ne.writeCtl.LastActive = now
+		ne.writeCtl = &writeControl{Holder: caller, Since: since, ExpiresAt: now.Add(dur), LastActive: now}
 		return *ne.writeCtl, "", nil
 	}
 	if !force {
-		return writeControl{}, "", ne.heldError(netID)
+		return writeControl{}, "", ne.heldError(netID, now)
 	}
 	priorHolder = ne.writeCtl.Holder
-	ne.writeCtl = &writeControl{Holder: caller, Since: now, LastActive: now}
+	ne.writeCtl = &writeControl{Holder: caller, Since: now, ExpiresAt: now.Add(dur), LastActive: now}
 	return *ne.writeCtl, priorHolder, nil
 }
 
-// relinquishControl frees the reservation if caller holds it. Idempotent: a
-// no-op when free or held by someone else (double-relinquish is harmless).
-func (ne *networkEntity) relinquishControl(caller string) {
+// releaseControl frees the reservation if caller holds it. Idempotent: a no-op
+// when free, expired, or held by someone else (double-release is harmless).
+func (ne *networkEntity) releaseControl(caller string) {
 	ne.wcMu.Lock()
 	defer ne.wcMu.Unlock()
 	if ne.writeCtl != nil && ne.writeCtl.Holder == caller {
@@ -56,36 +75,40 @@ func (ne *networkEntity) relinquishControl(caller string) {
 	}
 }
 
-// controlStatus returns the current reservation, or false when free.
+// controlStatus returns the current reservation, or false when free or expired.
 func (ne *networkEntity) controlStatus() (writeControl, bool) {
 	ne.wcMu.Lock()
 	defer ne.wcMu.Unlock()
-	if ne.writeCtl == nil {
+	if !ne.writeCtl.active(time.Now()) {
 		return writeControl{}, false
 	}
 	return *ne.writeCtl, true
 }
 
 // enforceWrite is the gate the middleware calls before an executing mutation:
-// nil when caller holds control (LastActive refreshed), a *WriteControlError
-// otherwise — including when nobody holds it (default-closed: a write must
-// request control first).
+// nil when caller holds an active reservation (LastActive refreshed), a
+// *WriteControlError otherwise — including when nobody holds it or it has expired
+// (default-closed: a write must request control first).
 func (ne *networkEntity) enforceWrite(netID, caller string) error {
 	ne.wcMu.Lock()
 	defer ne.wcMu.Unlock()
-	if ne.writeCtl != nil && ne.writeCtl.Holder == caller {
-		ne.writeCtl.LastActive = time.Now()
+	now := time.Now()
+	if ne.writeCtl.active(now) && ne.writeCtl.Holder == caller {
+		ne.writeCtl.LastActive = now
 		return nil
 	}
-	return ne.heldError(netID)
+	return ne.heldError(netID, now)
 }
 
-// heldError builds the *WriteControlError for the current state. Caller holds wcMu.
-func (ne *networkEntity) heldError(netID string) *newtron.WriteControlError {
+// heldError builds the *WriteControlError for the current state. An expired or
+// absent reservation reports an empty holder (free — request control first).
+// Caller holds wcMu.
+func (ne *networkEntity) heldError(netID string, now time.Time) *newtron.WriteControlError {
 	e := &newtron.WriteControlError{Network: netID}
-	if ne.writeCtl != nil {
+	if ne.writeCtl.active(now) {
 		e.Holder = ne.writeCtl.Holder
 		e.Since = ne.writeCtl.Since
+		e.ExpiresAt = ne.writeCtl.ExpiresAt
 		e.LastActive = ne.writeCtl.LastActive
 	}
 	return e
@@ -139,7 +162,7 @@ func writeControlApplies(r *http.Request) bool {
 	}
 	p := r.URL.Path
 	switch {
-	case strings.HasSuffix(p, "/control/request"), strings.HasSuffix(p, "/control/relinquish"):
+	case strings.HasSuffix(p, "/control/request"), strings.HasSuffix(p, "/control/release"):
 		return false
 	case strings.HasSuffix(p, "/reload"), strings.HasSuffix(p, "/unregister"):
 		return false
@@ -171,23 +194,31 @@ func networkIDFromPath(path string) string {
 type controlResponse struct {
 	Holder      string     `json:"holder"`                 // "" when free
 	Since       *time.Time `json:"since,omitempty"`        // nil when free
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`   // nil when free
 	LastActive  *time.Time `json:"last_active,omitempty"`  // nil when free
 	PriorHolder string     `json:"prior_holder,omitempty"` // set on a takeover
 }
 
 func controlResponseFrom(wc writeControl, prior string) controlResponse {
-	return controlResponse{Holder: wc.Holder, Since: &wc.Since, LastActive: &wc.LastActive, PriorHolder: prior}
+	return controlResponse{
+		Holder: wc.Holder, Since: &wc.Since, ExpiresAt: &wc.ExpiresAt,
+		LastActive: &wc.LastActive, PriorHolder: prior,
+	}
 }
 
-// handleControlRequest acquires (or renews / takes over) write control.
-// Body: {"force": bool}. force gates on control.takeover; plain on control.request.
+// handleControlRequest acquires, extends, or takes over write control. Body:
+// {"force": bool, "minutes": int}. minutes sets the reservation window
+// (default 30 when ≤ 0); requesting again as the holder extends it. force gates
+// on control.takeover (superusers bypass — so a superuser can always take over);
+// a plain request gates on control.request.
 func (s *Server) handleControlRequest(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
 	var req struct {
-		Force bool `json:"force"`
+		Force   bool `json:"force"`
+		Minutes int  `json:"minutes"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -206,7 +237,7 @@ func (s *Server) handleControlRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: "write control requires a verified caller identity"})
 		return
 	}
-	wc, prior, err := ne.requestControl(r.PathValue("netID"), caller, req.Force)
+	wc, prior, err := ne.requestControl(r.PathValue("netID"), caller, req.Force, time.Duration(req.Minutes)*time.Minute)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -214,8 +245,8 @@ func (s *Server) handleControlRequest(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, controlResponseFrom(wc, prior))
 }
 
-// handleControlRelinquish frees write control if the caller holds it.
-func (s *Server) handleControlRelinquish(w http.ResponseWriter, r *http.Request) {
+// handleControlRelease frees write control if the caller holds it.
+func (s *Server) handleControlRelease(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
@@ -229,7 +260,7 @@ func (s *Server) handleControlRelinquish(w http.ResponseWriter, r *http.Request)
 		writeError(w, &newtron.ValidationError{Message: "write control requires a verified caller identity"})
 		return
 	}
-	ne.relinquishControl(caller)
+	ne.releaseControl(caller)
 	httputil.WriteJSON(w, http.StatusOK, controlResponse{})
 }
 

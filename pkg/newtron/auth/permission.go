@@ -52,10 +52,10 @@ const (
 	PermDeviceWrite Permission = "device.write"
 
 	// PermControlRequest / PermControlTakeover gate the per-network write-control
-	// reservation (request/relinquish/takeover). Independent of the per-op
+	// reservation (request/release/takeover). Independent of the per-op
 	// permissions: a caller may be fully authorized for an op yet blocked
 	// because they don't hold write control, and acquiring control is itself a
-	// permissioned, audited act. control.request gates acquire + relinquish;
+	// permissioned, audited act. control.request gates acquire + release;
 	// control.takeover is the higher bar to force-take from a live holder. Both
 	// are no-ops unless --enforce-authorization grants them.
 	PermControlRequest  Permission = "control.request"
