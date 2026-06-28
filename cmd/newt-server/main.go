@@ -62,6 +62,7 @@ func main() {
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution. (auth-design.md L0)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime for the newtron engine; denials surface as HTTP 403. Off (default) preserves pre-enforcement behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made. (auth-design.md L3)")
+	superUsers := flag.String("super-users", "", "comma-separated usernames that are super-users across EVERY network and function of the newtron engine — they bypass all permission checks on all networks without being named in any network.json's super_users. Falls back to $NEWTRON_SUPER_USERS when empty. Only effective with --enforce-authorization. (auth-design.md L3)")
 	enforceWriteControl := flag.Bool("enforce-write-control", false, "require a per-network write-control reservation for every executing mutation on the newtron engine: a caller must POST .../control/request before any write, else 409. Default-closed when on (a write with no holder is refused). Off (default) keeps the reservation endpoints working but enforcement inert, so existing clients that don't claim are unchanged.")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's network directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
@@ -91,6 +92,9 @@ func main() {
 	}
 	if *tlsCA == "" {
 		*tlsCA = os.Getenv(httputil.EnvTLSCA)
+	}
+	if *superUsers == "" {
+		*superUsers = os.Getenv("NEWTRON_SUPER_USERS")
 	}
 	// LoadServerTLSConfig returns nil + nil when *tlsCert is empty
 	// (the disabled state); the resulting nil flows into
@@ -188,6 +192,7 @@ func main() {
 		Platforms:            platforms,
 		AuditLogPath:         *auditLog,
 		EnforceAuthorization: *enforceAuthz,
+		GlobalSuperUsers:     parseCommaList(*superUsers),
 		EnforceWriteControl:  *enforceWriteControl,
 		SpecWatch:            *specWatch,
 	})
@@ -320,6 +325,18 @@ func main() {
 		}
 		logger.Println("shutdown complete")
 	}
+}
+
+// parseCommaList splits a comma-separated flag value into trimmed, non-empty
+// entries (e.g. "--super-users alice, svc-admin" → ["alice","svc-admin"]).
+func parseCommaList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func warnIfNonLoopback(listen string, logger *log.Logger) error {

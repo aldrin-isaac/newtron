@@ -53,3 +53,38 @@ func (net *Network) CheckAuthReadGate(ctx context.Context, authCtx *auth.Context
 func (net *Network) CheckAuditReadGate(ctx context.Context, authCtx *auth.Context) error {
 	return net.checkPermissionIfConfigured(ctx, auth.PermAuditRead, authCtx)
 }
+
+// AddSuperUser grants username per-network super-user (bypass-all) status on this
+// network and persists network.json — so an authorized operator manages
+// super-users through the API, not by hand-editing files. Gated by the
+// meta-authorization (spec.author scoped to the super_users field via the L5
+// `where:{field}` clause): an IAM-operator role can manage super-users while a
+// service-architect (scoped `!super_users`) cannot; per-network and global
+// super-users bypass as always. Idempotent. Audited as a mutation.
+func (net *Network) AddSuperUser(ctx context.Context, username string, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor,
+			auth.NewContext().WithField("super_users").WithResource(username)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	return net.internal.AddSuperUser(username)
+}
+
+// RemoveSuperUser revokes username's per-network super-user status and persists.
+// Same meta-authorization gate as AddSuperUser. Idempotent.
+func (net *Network) RemoveSuperUser(ctx context.Context, username string, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(ctx, auth.PermSpecAuthor,
+			auth.NewContext().WithField("super_users").WithResource(username)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	return net.internal.RemoveSuperUser(username)
+}

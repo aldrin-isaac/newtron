@@ -154,6 +154,8 @@ func TestAPICompleteness(t *testing.T) {
 			"TopologyDrift": true, // GET /networks/{netID}/nodes/{device}/intent/topology-drift
 			// Authorization-table inspector (issue #150)
 			"GetAuthorization": true, // GET /networks/{netID}/authorization
+			"AddSuperUser":     true, // POST /networks/{netID}/super-users
+			"RemoveSuperUser":  true, // DELETE /networks/{netID}/super-users/{user}
 		},
 		"Node": {
 			// Lifecycle (exposed via connectAndExecute/connectAndRead)
@@ -317,6 +319,8 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateNodeSpec":        auth.PermSpecAuthor,
 			"DeleteNodeSpec":        auth.PermSpecAuthor,
 			"CreateZone":            auth.PermSpecAuthor,
+			"AddSuperUser":          auth.PermSpecAuthor, // meta-authz: spec.author scoped to super_users
+			"RemoveSuperUser":       auth.PermSpecAuthor,
 			"DeleteZone":            auth.PermSpecAuthor,
 			"UpdateService":         auth.PermSpecAuthor,
 			"UpdateIPVPN":           auth.PermSpecAuthor,

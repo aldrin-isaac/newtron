@@ -16,6 +16,7 @@ import (
 	"net/http"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 )
 
@@ -46,4 +47,46 @@ func (s *Server) handleGetAuthorization(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, ne.net.GetAuthorization())
+}
+
+// handleAddSuperUser grants a user per-network super-user status (POST
+// .../super-users {user}). Gated by the meta-authorization (spec.author scoped
+// to super_users); audited as a mutation. Lets an authorized operator manage
+// super-users via the API instead of hand-editing network.json.
+func (s *Server) handleAddSuperUser(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req struct {
+		User string `json:"user"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.User == "" {
+		writeError(w, &newtron.ValidationError{Field: "user", Message: "required"})
+		return
+	}
+	if err := ne.net.AddSuperUser(r.Context(), req.User, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "added", "user": req.User})
+}
+
+// handleRemoveSuperUser revokes a user's per-network super-user status (DELETE
+// .../super-users/{user}). Same meta-authorization gate as add.
+func (s *Server) handleRemoveSuperUser(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	user := r.PathValue("user")
+	if err := ne.net.RemoveSuperUser(r.Context(), user, execOpts(r)); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed", "user": user})
 }
