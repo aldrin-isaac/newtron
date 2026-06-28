@@ -75,7 +75,10 @@ type NetworkSpecFile struct {
 
 // ZoneSpec defines zone settings (AS number, defaults).
 type ZoneSpec struct {
-	OverridableSpecs // Embedded — zone-level overrides
+	// Embedded — zone-level overrides. `schema:"-"`: overrides are authored via
+	// the flat create-<kind>?scope=zone API, not by editing these maps, so they
+	// are storage, not authoring-schema fields. Still serialized to JSON.
+	OverridableSpecs `schema:"-"`
 }
 
 // ============================================================================
@@ -462,7 +465,10 @@ type NodeSpec struct {
 	MAC      string `json:"mac,omitempty" label:"Base MAC" tooltip:"Override the device base MAC (otherwise derived)" format:"mac"`
 	Platform string `json:"platform,omitempty" label:"Platform" tooltip:"Reference to a platforms.json entry; determines HWSKU, ports, and VM image" ref:"PlatformSpec"`
 
-	OverridableSpecs // Embedded — node-level overrides
+	// Embedded — node-level overrides. `schema:"-"`: overrides are authored via
+	// the flat create-<kind>?scope=node API, not by editing these maps, so they
+	// are storage, not authoring-schema fields. Still serialized to JSON.
+	OverridableSpecs `schema:"-"`
 
 	// OPTIONAL - SSH credentials for Redis tunnel. SSH port is runtime
 	// state owned by newtlab (§27) — not stored here; resolved through

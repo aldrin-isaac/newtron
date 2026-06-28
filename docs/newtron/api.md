@@ -608,6 +608,19 @@ create-X request body, not on the spec struct. `QoSQueue` gets a synthetic
 `queue_id` field for the same reason (the slot index is implicit in the
 `QoSPolicy.Queues` array position).
 
+**Override maps are not authoring fields.** `ZoneSpec` and `NodeSpec` store their
+scope overrides in an embedded `OverridableSpecs` (the seven `services`,
+`filters`, `ipvpns`, `macvpns`, `qos_policies`, `route_policies`, `prefix_lists`
+maps). Those maps are **excluded from `fields`** — overrides are authored through
+the flat scoped-spec API (`create-<kind>` / `delete-<kind>` with a `scope` +
+`scope_instance` selector; see [Scoped writes](#scoped-writes-network--zone-overrides)),
+not by editing the container's maps, so a schema-driven form must not render them.
+The maps still serialize as JSON (they are the override store); only the
+*authoring schema* omits them. Consequently `GET /schema/ZoneSpec` carries just
+`name` (a zone is a pure scope container), and `GET /schema/NodeSpec` carries the
+node's own fields (`mgmt_ip`, `loopback_ip`, `zone`, `platform`, `evpn`, …) with
+no override maps.
+
 **Conditional required (`required_when`)**: a structured predicate the UI
 evaluates against the form's sibling field values. When the predicate is true,
 the field is required even though the static `required` is `false`. Use it for

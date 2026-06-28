@@ -556,6 +556,15 @@ func extractFields(t reflect.Type) []FieldMeta {
 	var fields []FieldMeta
 	for i := 0; i < t.NumField(); i++ {
 		sf := t.Field(i)
+		// `schema:"-"` excludes a field from the authoring schema while leaving
+		// it on the wire (unlike `json:"-"`). Used for embedded storage authored
+		// through a different surface — the OverridableSpecs maps on ZoneSpec/
+		// NodeSpec are scope overrides authored via the flat create-<kind>?scope
+		// API, not by editing the container's maps. Checked before the anonymous
+		// flatten so it can suppress an embedded struct.
+		if sf.Tag.Get("schema") == "-" {
+			continue
+		}
 		// Anonymous (embedded) fields flatten regardless of whether the
 		// embedded TYPE is exported — encoding/json promotes their
 		// exported fields the same way. Check anonymity first.
