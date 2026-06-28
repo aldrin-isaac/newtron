@@ -75,13 +75,22 @@ func interfaceFromStepURL(url string) string {
 // ("ServiceSpec", "IPVPNSpec", …) so the 409 a client sees carries the same
 // Resource as the spec-reference and override guards for that spec.
 //
+// scope gates applicability, mirroring the internal spec-reference/override
+// guards: only a network-base delete can orphan a binding. Deleting a zone/node
+// override is free — the network floor (DESIGN_PRINCIPLES_NEWTRON §7) guarantees
+// the base still exists, so every binding still resolves through fall-through.
+// For a non-network scope this is a no-op.
+//
 // Without force it returns a *util.ConflictError (→ 409) listing every binding
 // as "device:interface". With force it cascade-removes the binding steps from
 // topology.json (§15 reference-aware reverse, mirroring DeleteNodeSpec's link
 // cascade) so the delete leaves no dangling step. Force removes only the
 // topology record; a live device keeps the applied CONFIG_DB until reconciled —
 // un-apply on the device first (remove-service) to avoid drift.
-func (net *Network) guardSpecBindings(kind, resource, name string, force bool) error {
+func (net *Network) guardSpecBindings(scope, kind, resource, name string, force bool) error {
+	if scope != "" && scope != spec.ScopeNetwork {
+		return nil
+	}
 	bindings := net.bindingsFor(kind, name)
 	if len(bindings) == 0 {
 		return nil

@@ -156,7 +156,7 @@ func (net *Network) DeleteService(ctx context.Context, sel ScopeSelector, name s
 	if !opts.Execute {
 		return nil
 	}
-	if err := net.guardSpecBindings(SpecKindService, "ServiceSpec", name, force); err != nil {
+	if err := net.guardSpecBindings(sel.Scope, SpecKindService, "ServiceSpec", name, force); err != nil {
 		return err
 	}
 	return net.internal.DeleteService(sel.Scope, sel.ScopeInstance, name)
@@ -235,7 +235,7 @@ func (net *Network) DeleteIPVPN(ctx context.Context, sel ScopeSelector, name str
 	if !opts.Execute {
 		return nil
 	}
-	if err := net.guardSpecBindings(SpecKindIPVPN, "IPVPNSpec", name, force); err != nil {
+	if err := net.guardSpecBindings(sel.Scope, SpecKindIPVPN, "IPVPNSpec", name, force); err != nil {
 		return err
 	}
 	return net.internal.DeleteIPVPN(sel.Scope, sel.ScopeInstance, name)
@@ -318,7 +318,7 @@ func (net *Network) DeleteMACVPN(ctx context.Context, sel ScopeSelector, name st
 	if !opts.Execute {
 		return nil
 	}
-	if err := net.guardSpecBindings(SpecKindMACVPN, "MACVPNSpec", name, force); err != nil {
+	if err := net.guardSpecBindings(sel.Scope, SpecKindMACVPN, "MACVPNSpec", name, force); err != nil {
 		return err
 	}
 	return net.internal.DeleteMACVPN(sel.Scope, sel.ScopeInstance, name)
@@ -393,7 +393,7 @@ func (net *Network) DeleteQoSPolicy(ctx context.Context, sel ScopeSelector, name
 	if !opts.Execute {
 		return nil
 	}
-	if err := net.guardSpecBindings(SpecKindQoS, "QoSPolicy", name, force); err != nil {
+	if err := net.guardSpecBindings(sel.Scope, SpecKindQoS, "QoSPolicy", name, force); err != nil {
 		return err
 	}
 	return net.internal.DeleteQoSPolicy(sel.Scope, sel.ScopeInstance, name)
@@ -584,7 +584,7 @@ func (net *Network) DeleteFilter(ctx context.Context, sel ScopeSelector, name st
 	if !opts.Execute {
 		return nil
 	}
-	if err := net.guardSpecBindings(SpecKindFilter, "FilterSpec", name, force); err != nil {
+	if err := net.guardSpecBindings(sel.Scope, SpecKindFilter, "FilterSpec", name, force); err != nil {
 		return err
 	}
 	return net.internal.DeleteFilter(sel.Scope, sel.ScopeInstance, name)
