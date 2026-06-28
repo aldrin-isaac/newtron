@@ -29,6 +29,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"os/user"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -63,6 +66,7 @@ func main() {
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution. (auth-design.md L0)")
 	enforceAuthz := flag.Bool("enforce-authorization", false, "enforce the network.json permissions map at runtime for the newtron engine; denials surface as HTTP 403. Off (default) preserves pre-enforcement behavior — checkPermission call sites are no-ops; identity is recorded but no decisions are made. (auth-design.md L3)")
 	superUsers := flag.String("super-users", "", "comma-separated usernames that are super-users across EVERY network and function of the newtron engine — they bypass all permission checks on all networks without being named in any network.json's super_users. Falls back to $NEWTRON_SUPER_USERS when empty. Only effective with --enforce-authorization. (auth-design.md L3)")
+	devSuperUser := flag.Bool("dev-superuser", true, "when newt-server runs from a newtron source checkout (a developer's work-in-progress repo), auto-grant the current OS user global super-user across all networks — a local-dev convenience. No effect for an installed/production binary (one not running from a repo). Set false to opt out even inside a checkout. Only effective with --enforce-authorization. (auth-design.md L3)")
 	enforceWriteControl := flag.Bool("enforce-write-control", false, "require a per-network write-control reservation for every executing mutation on the newtron engine: a caller must POST .../control/request before any write, else 409. Default-closed when on (a write with no holder is refused). Off (default) keeps the reservation endpoints working but enforcement inert, so existing clients that don't claim are unchanged.")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's network directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
 	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
@@ -181,6 +185,19 @@ func main() {
 		logger.Printf("platforms: loaded %d from %s: %v", len(platforms), *platformsBase, names)
 	}
 
+	// Global super-users: the explicit --super-users / env list, plus — when
+	// this binary is running from a newtron source checkout — the developer's
+	// own OS user, so any instance they spin up from their work-in-progress repo
+	// grants them super-user without hand-listing themselves. Never fires for an
+	// installed/production binary (not in a repo); opt out with --dev-superuser=false.
+	globalSuperUsers := parseCommaList(*superUsers)
+	if *devSuperUser {
+		if u := devRepoUser(); u != "" && !slices.Contains(globalSuperUsers, u) {
+			globalSuperUsers = append(globalSuperUsers, u)
+			logger.Printf("dev mode: running from a newtron source checkout — auto-granting OS user %q global super-user (disable with --dev-superuser=false)", u)
+		}
+	}
+
 	newtronSrv := newtronapi.NewServer(newtronapi.Config{
 		Logger:               logger,
 		IdleTimeout:          *idleTimeout,
@@ -192,7 +209,7 @@ func main() {
 		Platforms:            platforms,
 		AuditLogPath:         *auditLog,
 		EnforceAuthorization: *enforceAuthz,
-		GlobalSuperUsers:     parseCommaList(*superUsers),
+		GlobalSuperUsers:     globalSuperUsers,
 		EnforceWriteControl:  *enforceWriteControl,
 		SpecWatch:            *specWatch,
 	})
@@ -337,6 +354,64 @@ func parseCommaList(s string) []string {
 		}
 	}
 	return out
+}
+
+// newtronModulePath is the go.mod module line that identifies a directory as the
+// root of a newtron source checkout (used to detect a developer's WIP repo).
+const newtronModulePath = "github.com/aldrin-isaac/newtron"
+
+// devRepoUser returns the current OS user's name when newt-server is running from
+// a newtron source checkout — a developer's work-in-progress repo — and "" when
+// it is not (an installed/production binary) or the user can't be determined.
+// This is the signal for the dev-convenience auto-grant of global super-user.
+func devRepoUser() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if findNewtronRepoRoot(filepath.Dir(exe)) == "" {
+		return ""
+	}
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Username)
+}
+
+// findNewtronRepoRoot walks up from dir to the nearest ancestor that is a newtron
+// git checkout (has a .git entry and a go.mod declaring the newtron module),
+// returning that root or "" if none — i.e. the binary is not under the source repo.
+func findNewtronRepoRoot(dir string) string {
+	for {
+		if isNewtronRepoRoot(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// isNewtronRepoRoot reports whether dir is a newtron checkout root: it has a .git
+// entry (dir for a normal clone, file for a worktree) and a go.mod whose module
+// line is the newtron module path.
+func isNewtronRepoRoot(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module"); ok {
+			return strings.TrimSpace(rest) == newtronModulePath
+		}
+	}
+	return false
 }
 
 func warnIfNonLoopback(listen string, logger *log.Logger) error {

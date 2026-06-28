@@ -912,6 +912,17 @@ network's `super_users`). Like all enforcement, the global tier is
 only consulted under `--enforce-authorization`; with enforcement off
 it is inert.
 
+**Developer auto-grant (local dev convenience).** When `newt-server`
+detects it is running from a newtron *source checkout* — its executable
+sits under a directory with a `.git` entry and a `go.mod` declaring the
+newtron module — it adds the **current OS user** to the global
+super-user list by default, so a developer who spins up a server from
+their work-in-progress repo is super-user across every network without
+listing themselves. This never fires for an installed/production binary
+(one not running from a repo), and is opt-out via `--dev-superuser=false`.
+The auto-grant is logged at startup like any global super-user. Like the
+rest of the tier it only has effect under `--enforce-authorization`.
+
 The L5 implementation ships these dimensions in `auth.Context`:
 `Device`, `Service`, `Interface`, `Resource`, and `Field` (the
 meta-authorization dimension). Spec/profile/topology mutation
