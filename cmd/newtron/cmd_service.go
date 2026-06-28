@@ -471,8 +471,9 @@ var serviceDeleteCmd = &cobra.Command{
 
 This is a spec-level command (no device needed).
 
-Note: This does not remove the service from interfaces where it is currently
-applied. Use 'service remove' on each interface first.
+Refused when the service is still applied on any interface (a topology
+apply-service step references it). Run 'service remove' on each interface
+first; the error lists every device:interface still bound.
 
 Examples:
   newtron service delete customer-l3`,
@@ -482,7 +483,7 @@ Examples:
 
 		fmt.Printf("Deleting service: %s\n", serviceName)
 
-		if err := app.client.DeleteService(serviceName, execOpts()); err != nil {
+		if err := app.client.DeleteService(serviceName, execOpts(), false); err != nil {
 			return err
 		}
 

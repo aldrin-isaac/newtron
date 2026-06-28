@@ -289,7 +289,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.client.DeleteIPVPN(name, execOpts()); err != nil {
+		if err := app.client.DeleteIPVPN(name, execOpts(), false); err != nil {
 			return fmt.Errorf("deleting IP-VPN: %w", err)
 		}
 		fmt.Println(green("IP-VPN definition deleted from network.json."))
@@ -487,7 +487,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.client.DeleteMACVPN(name, execOpts()); err != nil {
+		if err := app.client.DeleteMACVPN(name, execOpts(), false); err != nil {
 			return fmt.Errorf("deleting MAC-VPN: %w", err)
 		}
 		fmt.Println(green("MAC-VPN definition deleted from network.json."))

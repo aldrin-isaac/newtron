@@ -177,7 +177,7 @@ Examples:
 			return nil
 		}
 
-		return app.client.DeleteFilter(filterName, execOpts())
+		return app.client.DeleteFilter(filterName, execOpts(), false)
 	},
 }
 

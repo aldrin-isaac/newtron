@@ -218,6 +218,19 @@ func execQuery(opts newtron.ExecOpts) string {
 	return "?" + strings.Join(parts, "&")
 }
 
+// withForce appends force=true to a path's query string when force is set,
+// choosing ? or & based on whether the path already carries parameters.
+// Used by the cascade-capable deletes (profile, spec bindings).
+func withForce(path string, force bool) string {
+	if !force {
+		return path
+	}
+	if strings.Contains(path, "?") {
+		return path + "&force=true"
+	}
+	return path + "?force=true"
+}
+
 // withMode appends ?mode= to a path if the client has a Mode set.
 // Handles paths that already have query parameters.
 func (c *Client) withMode(path string) string {

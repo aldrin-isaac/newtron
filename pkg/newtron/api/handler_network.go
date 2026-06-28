@@ -545,7 +545,8 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteService(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
+	force := r.URL.Query().Get("force") == "true"
+	if err := ne.net.DeleteService(r.Context(), req.ScopeSelector, req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -584,7 +585,8 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteIPVPN(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
+	force := r.URL.Query().Get("force") == "true"
+	if err := ne.net.DeleteIPVPN(r.Context(), req.ScopeSelector, req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -623,7 +625,8 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteMACVPN(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
+	force := r.URL.Query().Get("force") == "true"
+	if err := ne.net.DeleteMACVPN(r.Context(), req.ScopeSelector, req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -662,7 +665,8 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteQoSPolicy(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
+	force := r.URL.Query().Get("force") == "true"
+	if err := ne.net.DeleteQoSPolicy(r.Context(), req.ScopeSelector, req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -763,7 +767,8 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
-	if err := ne.net.DeleteFilter(r.Context(), req.ScopeSelector, req.Name, opts); err != nil {
+	force := r.URL.Query().Get("force") == "true"
+	if err := ne.net.DeleteFilter(r.Context(), req.ScopeSelector, req.Name, opts, force); err != nil {
 		writeError(w, err)
 		return
 	}
