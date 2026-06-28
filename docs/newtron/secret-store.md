@@ -18,8 +18,8 @@ Two spec fields currently carry `${secret:KEY}` references:
 
 | Spec | Field | File location |
 |---|---|---|
-| `DeviceProfile.SSHPass` | `ssh_pass` | `nodes/<device>.json` |
-| `DeviceProfile.SSHUser` | `ssh_user` | `nodes/<device>.json` |
+| `NodeSpec.SSHPass` | `ssh_pass` | `nodes/<device>.json` |
+| `NodeSpec.SSHUser` | `ssh_user` | `nodes/<device>.json` |
 | `VMCredentials.Pass` | `vm_credentials.pass` | `platforms.json` (per platform) |
 | `VMCredentials.User` | `vm_credentials.user` | `platforms.json` (per platform) |
 

@@ -92,7 +92,7 @@ type Network struct {
 	// behavior exactly.
 	secretStore secret.Store
 
-	// Loader for loading device profiles (already initialized with Load())
+	// Loader for loading nodes (already initialized with Load())
 	loader *spec.Loader
 
 	// Connected devices (created in this Network's context). Protected by
@@ -118,7 +118,7 @@ type Network struct {
 //
 // secretStore (auth-design.md L0) is the operator-configured secret
 // backend. When non-nil, ${secret:KEY} references in spec values
-// (currently DeviceProfile.SSHPass and PlatformSpec.VMCredentials)
+// (currently NodeSpec.SSHPass and PlatformSpec.VMCredentials)
 // are resolved at network load. nil triggers spec-dir auto-discovery
 // (#176): if <specDir>/secrets.json exists, it's opened as a
 // FileStore and used; otherwise resolution stays disabled — plaintext
@@ -199,20 +199,20 @@ func ResolvePlatformSecrets(platforms map[string]*spec.PlatformSpec, store secre
 	return nil
 }
 
-// resolveProfileSecrets walks a DeviceProfile's SSH credentials and
+// resolveNodeSpecSecrets walks a NodeSpec's SSH credentials and
 // resolves any ${secret:KEY} references in the SSHUser and SSHPass
 // fields. Closes the L0 coverage gap surfaced by 1node-vs-auth: pre-
 // fix, only platform credentials were resolved; profile references
 // reached SSH-tunnel construction untouched and SSH'd with the
 // literal "${secret:KEY}" as the password.
 //
-// Called by Network.loadProfile after the loader's per-profile cache
+// Called by Network.loadNodeSpec after the loader's per-profile cache
 // hit/miss path returns, so the in-memory profile cached by the
 // loader carries the resolved value; subsequent cache reads return
 // the resolved bytes without re-resolving. resolve is idempotent —
 // a value with no "${secret:" prefix returns unchanged — so
 // re-running over a cached profile is a no-op.
-func resolveProfileSecrets(profile *spec.DeviceProfile, store secret.Store) error {
+func resolveNodeSpecSecrets(profile *spec.NodeSpec, store secret.Store) error {
 	if profile == nil {
 		return nil
 	}
@@ -769,11 +769,11 @@ func (n *Network) CreateZone(name string, zone *spec.ZoneSpec) error {
 	return n.persistSpec()
 }
 
-// CreateProfile atomically creates a new device profile. Delegates to
-// spec.Loader.CreateProfile which holds Loader's RWMutex across the
+// CreateNodeSpec atomically creates a new node spec. Delegates to
+// spec.Loader.CreateNodeSpec which holds Loader's RWMutex across the
 // existence check and the file write.
-func (n *Network) CreateProfile(name string, profile *spec.DeviceProfile) error {
-	return n.loader.CreateProfile(name, profile)
+func (n *Network) CreateNodeSpec(name string, profile *spec.NodeSpec) error {
+	return n.loader.CreateNodeSpec(name, profile)
 }
 
 // ============================================================================
@@ -901,11 +901,11 @@ func (n *Network) UpdateZone(name string, zone *spec.ZoneSpec) error {
 	return n.persistSpec()
 }
 
-// UpdateProfile atomically replaces an existing device profile.
-// Delegates to spec.Loader.UpdateProfile, which holds Loader's RWMutex
+// UpdateNodeSpec atomically replaces an existing node spec.
+// Delegates to spec.Loader.UpdateNodeSpec, which holds Loader's RWMutex
 // across the existence check and the file write.
-func (n *Network) UpdateProfile(name string, profile *spec.DeviceProfile) error {
-	return n.loader.UpdateProfile(name, profile)
+func (n *Network) UpdateNodeSpec(name string, profile *spec.NodeSpec) error {
+	return n.loader.UpdateNodeSpec(name, profile)
 }
 
 // ============================================================================
@@ -1351,11 +1351,11 @@ func (n *Network) HasTopology() bool {
 }
 
 // GetTopologyDevice returns the topology definition for a named device.
-func (n *Network) GetTopologyDevice(name string) (*spec.TopologyDevice, error) {
+func (n *Network) GetTopologyDevice(name string) (*spec.TopologyNode, error) {
 	if n.topology == nil {
 		return nil, fmt.Errorf("no topology loaded")
 	}
-	dev, ok := n.topology.Devices[name]
+	dev, ok := n.topology.Nodes[name]
 	if !ok {
 		return nil, fmt.Errorf("device '%s' not found in topology", name)
 	}
@@ -1370,7 +1370,7 @@ func (n *Network) GetTopologyDevice(name string) (*spec.TopologyDevice, error) {
 // (device_type == "host"). Host devices are not SONiC switches and
 // have no CONFIG_DB, APP_DB, or ASIC_DB.
 func (n *Network) IsHostDevice(name string) bool {
-	profile, err := n.loadProfile(name)
+	profile, err := n.loadNodeSpec(name)
 	if err != nil {
 		return false
 	}
@@ -1384,38 +1384,38 @@ func (n *Network) IsHostDevice(name string) bool {
 	return platform.IsHost()
 }
 
-// GetHostProfile returns the device profile for a host device.
-func (n *Network) GetHostProfile(name string) (*spec.DeviceProfile, error) {
-	return n.loadProfile(name)
+// GetHostProfile returns the node spec for a host device.
+func (n *Network) GetHostProfile(name string) (*spec.NodeSpec, error) {
+	return n.loadNodeSpec(name)
 }
 
-// GetProfile returns the device profile for a named device.
-func (n *Network) GetProfile(name string) (*spec.DeviceProfile, error) {
-	return n.loadProfile(name)
+// GetNodeSpec returns the node spec for a named device.
+func (n *Network) GetNodeSpec(name string) (*spec.NodeSpec, error) {
+	return n.loadNodeSpec(name)
 }
 
-// ListProfiles returns the names of all profile files in the nodes directory.
-func (n *Network) ListProfiles() []string {
-	return n.loader.ListProfiles()
+// ListNodeSpecs returns the names of all profile files in the nodes directory.
+func (n *Network) ListNodeSpecs() []string {
+	return n.loader.ListNodeSpecs()
 }
 
-// SaveProfile creates or updates a device profile.
-func (n *Network) SaveProfile(name string, profile *spec.DeviceProfile) error {
-	return n.loader.SaveProfile(name, profile)
+// SaveNodeSpec creates or updates a node spec.
+func (n *Network) SaveNodeSpec(name string, profile *spec.NodeSpec) error {
+	return n.loader.SaveNodeSpec(name, profile)
 }
 
-// DeleteProfile removes a device profile. Refuses with *newtron.ConflictError
+// DeleteNodeSpec removes a node spec. Refuses with *newtron.ConflictError
 // when any topology device references the profile, unless force is true. With
 // force=true, cascade-deletes every referring topology device (which in turn
 // cascade-deletes any links wired to those devices) before removing the
 // profile. Symmetric with DeleteTopologyDevice's cascade pattern — both honor
 // §15 (operational symmetry; cascade is explicit, never implicit).
-func (n *Network) DeleteProfile(name string, force bool) error {
+func (n *Network) DeleteNodeSpec(name string, force bool) error {
 	// Refuse (409), unless forced, if the profile still holds node-scope spec
 	// overrides — deleting the profile would silently remove them (§15). force
 	// proceeds: the overrides live in the profile file and go with it.
 	if !force {
-		if p, err := n.loader.LoadProfile(name); err == nil {
+		if p, err := n.loader.LoadNodeSpec(name); err == nil {
 			if ov := containedOverrides(&p.OverridableSpecs); len(ov) > 0 {
 				return &util.ConflictError{Resource: "profile", Name: name, References: ov, Force: true}
 			}
@@ -1447,7 +1447,7 @@ func (n *Network) DeleteProfile(name string, force bool) error {
 		}
 	}
 
-	return n.loader.DeleteProfile(name)
+	return n.loader.DeleteNodeSpec(name)
 }
 
 // ListZones returns all zone names from the network spec.
@@ -1493,8 +1493,8 @@ func (n *Network) DeleteZone(name string) error {
 	// zone would silently remove them — §15). List every dependant so the
 	// operator can clear them first.
 	var refs []string
-	for _, pName := range n.loader.ListProfiles() {
-		p, err := n.loader.LoadProfile(pName)
+	for _, pName := range n.loader.ListNodeSpecs() {
+		p, err := n.loader.LoadNodeSpec(pName)
 		if err != nil {
 			return fmt.Errorf("loading profile %q while checking zone references: %w", pName, err)
 		}
@@ -1520,7 +1520,7 @@ func (n *Network) DeleteZone(name string) error {
 // Network-level specs through its parent reference.
 func (n *Network) GetNode(name string) (*node.Node, error) {
 	// Lock-ordering rule: alphabetical by key. keyNetworkSpec < keyNodes.
-	// resolveProfile + buildResolvedSpecs read n.spec.Zones and other
+	// resolveNodeSpec + buildResolvedSpecs read n.spec.Zones and other
 	// network.json maps; the cache write requires keyNodes.Lock.
 	netMu := n.locks.lock(keyNetworkSpec)
 	netMu.RLock()
@@ -1539,14 +1539,14 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostProfile() instead", name)
 	}
 
-	// Load device profile and create new Device in this Network's context
-	profile, err := n.loadProfile(name)
+	// Load node spec and create new Device in this Network's context
+	profile, err := n.loadNodeSpec(name)
 	if err != nil {
 		return nil, fmt.Errorf("loading profile for %s: %w", name, err)
 	}
 
 	// Resolve profile with inheritance
-	resolved, err := n.resolveProfile(name, profile)
+	resolved, err := n.resolveNodeSpec(name, profile)
 	if err != nil {
 		return nil, fmt.Errorf("resolving profile for %s: %w", name, err)
 	}
@@ -1570,12 +1570,12 @@ func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostProfile() instead", name)
 	}
 
-	profile, err := n.loadProfile(name)
+	profile, err := n.loadNodeSpec(name)
 	if err != nil {
 		return nil, fmt.Errorf("loading profile for %s: %w", name, err)
 	}
 
-	resolved, err := n.resolveProfile(name, profile)
+	resolved, err := n.resolveNodeSpec(name, profile)
 	if err != nil {
 		return nil, fmt.Errorf("resolving profile for %s: %w", name, err)
 	}
@@ -1641,7 +1641,7 @@ func (n *Network) ListNodes() []string {
 // *util.ConflictError when the name already exists (re-using the conflict
 // vocab for duplicate-as-conflict). Validates that the matching profile file
 // exists. Persists atomically via spec.Loader.SaveTopology.
-func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) error {
+func (n *Network) AddTopologyDevice(name string, device *spec.TopologyNode) error {
 	if name == "" {
 		return fmt.Errorf("topology device name required")
 	}
@@ -1655,9 +1655,9 @@ func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) er
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
-		topo = &spec.TopologySpecFile{Version: "1.0", Devices: map[string]*spec.TopologyDevice{}}
+		topo = &spec.TopologySpecFile{Version: "1.0", Nodes: map[string]*spec.TopologyNode{}}
 	}
-	if _, exists := topo.Devices[name]; exists {
+	if _, exists := topo.Nodes[name]; exists {
 		return &util.ConflictError{
 			Resource:   "topology-device",
 			Name:       name,
@@ -1666,17 +1666,17 @@ func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) er
 	}
 
 	// Profile file must exist — same invariant validateTopology enforces.
-	if _, err := n.loader.LoadProfile(name); err != nil {
+	if _, err := n.loader.LoadNodeSpec(name); err != nil {
 		return fmt.Errorf("profile for topology device %s: %w", name, err)
 	}
 
 	// Stage the mutation on a working copy so persistence failure leaves
 	// the in-memory state untouched.
 	working := cloneTopology(topo)
-	if working.Devices == nil {
-		working.Devices = map[string]*spec.TopologyDevice{}
+	if working.Nodes == nil {
+		working.Nodes = map[string]*spec.TopologyNode{}
 	}
-	working.Devices[name] = device
+	working.Nodes[name] = device
 
 	return n.applyTopology(working)
 }
@@ -1736,7 +1736,7 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 			return !linkReferencesDevice(l, name)
 		})
 	}
-	delete(working.Devices, name)
+	delete(working.Nodes, name)
 
 	if err := n.applyTopology(working); err != nil {
 		return err
@@ -1748,12 +1748,12 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 }
 
 // UpdateTopologyDevice replaces the device entry at name with the given
-// TopologyDevice (full-replacement semantics; no partial patch). Returns
+// TopologyNode (full-replacement semantics; no partial patch). Returns
 // NotFoundError when the name doesn't exist. Validates profile file.
 //
 // Does NOT close any api-layer NodeActor cache — handler's job (the cached
 // abstract node now reflects stale spec until the actor is reset).
-func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice) error {
+func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) error {
 	if name == "" {
 		return fmt.Errorf("topology device name required")
 	}
@@ -1776,12 +1776,12 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice)
 		return &newtronErrors{notFound: true, resource: "topology-device", id: name}
 	}
 
-	if _, err := n.loader.LoadProfile(name); err != nil {
+	if _, err := n.loader.LoadNodeSpec(name); err != nil {
 		return fmt.Errorf("profile for topology device %s: %w", name, err)
 	}
 
 	working := cloneTopology(topo)
-	working.Devices[name] = device
+	working.Nodes[name] = device
 
 	if err := n.applyTopology(working); err != nil {
 		return err
@@ -1811,7 +1811,7 @@ func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
 
 	topo := n.loader.GetTopology()
 	if topo == nil {
-		topo = &spec.TopologySpecFile{Version: "1.0", Devices: map[string]*spec.TopologyDevice{}}
+		topo = &spec.TopologySpecFile{Version: "1.0", Nodes: map[string]*spec.TopologyNode{}}
 	}
 
 	// Endpoint format: "device:interface". Validate both ends.
@@ -1820,7 +1820,7 @@ func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
 		if !ok {
 			return fmt.Errorf("invalid endpoint '%s' (expected 'device:interface')", ep)
 		}
-		d, exists := topo.Devices[dev]
+		d, exists := topo.Nodes[dev]
 		if !exists {
 			return fmt.Errorf("endpoint %s: device '%s' not in topology", ep, dev)
 		}
@@ -1911,10 +1911,10 @@ func cloneTopology(topo *spec.TopologySpecFile) *spec.TopologySpecFile {
 		Description: topo.Description,
 		NewtLab:     topo.NewtLab,
 	}
-	if topo.Devices != nil {
-		out.Devices = make(map[string]*spec.TopologyDevice, len(topo.Devices))
-		for k, v := range topo.Devices {
-			out.Devices[k] = v
+	if topo.Nodes != nil {
+		out.Nodes = make(map[string]*spec.TopologyNode, len(topo.Nodes))
+		for k, v := range topo.Nodes {
+			out.Nodes[k] = v
 		}
 	}
 	if len(topo.Links) > 0 {
@@ -1977,13 +1977,12 @@ func (e *newtronErrors) Resource() string { return e.resource }
 
 func (e *newtronErrors) ID() string { return e.id }
 
-
 // isHostDeviceLocked checks host status without acquiring the mutex (caller
 // must hold lock). The "lock" the doc-name refers to is the caller's
 // existing keyTopology or keyNetworkSpec lock; platforms still needs its
 // own RLock because keyPlatforms is independent (#173).
 func (n *Network) isHostDeviceLocked(name string) bool {
-	profile, err := n.loader.LoadProfile(name)
+	profile, err := n.loader.LoadNodeSpec(name)
 	if err != nil || profile.Platform == "" {
 		return false
 	}
@@ -1994,37 +1993,37 @@ func (n *Network) isHostDeviceLocked(name string) bool {
 	return platform.IsHost()
 }
 
-// loadProfile loads a device profile from the nodes directory and
+// loadNodeSpec loads a node spec from the nodes directory and
 // resolves any ${secret:KEY} references in its SSH credentials
 // (auth-design.md L0). The loader caches the in-memory profile, so
 // once resolution runs the cached value carries plaintext; later
 // reads return the resolved value without re-resolving. A missing
 // store + a reference in the profile is a hard error from
-// secret.Resolve — operators learn at the first GetProfile call
+// secret.Resolve — operators learn at the first GetNodeSpec call
 // rather than silently SSH'ing with "${secret:...}" as the password.
-func (n *Network) loadProfile(name string) (*spec.DeviceProfile, error) {
-	profile, err := n.loader.LoadProfile(name)
+func (n *Network) loadNodeSpec(name string) (*spec.NodeSpec, error) {
+	profile, err := n.loader.LoadNodeSpec(name)
 	if err != nil {
 		return nil, err
 	}
-	if err := resolveProfileSecrets(profile, n.secretStore); err != nil {
+	if err := resolveNodeSpecSecrets(profile, n.secretStore); err != nil {
 		return nil, fmt.Errorf("profile %q: %w", name, err)
 	}
 	return profile, nil
 }
 
-// resolveProfile applies inheritance to resolve final values.
-func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spec.ResolvedProfile, error) {
+// resolveNodeSpec applies inheritance to resolve final values.
+func (n *Network) resolveNodeSpec(name string, profile *spec.NodeSpec) (*spec.ResolvedNodeSpec, error) {
 	// Validate zone exists
 	if _, ok := n.spec.Zones[profile.Zone]; !ok {
 		return nil, fmt.Errorf("zone '%s' not found", profile.Zone)
 	}
 
-	resolved := &spec.ResolvedProfile{
+	resolved := &spec.ResolvedNodeSpec{
 		DeviceName: name,
 		MgmtIP:     profile.MgmtIP,
 		LoopbackIP: profile.LoopbackIP,
-		Zone:     profile.Zone,
+		Zone:       profile.Zone,
 		Platform:   profile.Platform,
 		MAC:        profile.MAC,
 	}
@@ -2070,8 +2069,8 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 
 // buildResolvedSpecs merges all 7 overridable spec maps with hierarchical
 // resolution: network → zone → profile (lower-level wins).
-func (n *Network) buildResolvedSpecs(profile *spec.DeviceProfile) *ResolvedSpecs {
-	zone := n.spec.Zones[profile.Zone] // already validated in resolveProfile
+func (n *Network) buildResolvedSpecs(profile *spec.NodeSpec) *ResolvedSpecs {
+	zone := n.spec.Zones[profile.Zone] // already validated in resolveNodeSpec
 
 	merged := spec.OverridableSpecs{
 		PrefixLists:   util.MergeMaps(n.spec.PrefixLists, zone.PrefixLists, profile.PrefixLists),
@@ -2088,7 +2087,7 @@ func (n *Network) buildResolvedSpecs(profile *spec.DeviceProfile) *ResolvedSpecs
 
 // deriveBGPNeighbors looks up EVPN peer loopback IPs and ASNs from their profiles.
 // Silently skips peers that aren't in the current topology (e.g., spine2 in a 2-node topo).
-func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName string) ([]string, map[string]int) {
+func (n *Network) deriveBGPNeighbors(profile *spec.NodeSpec, selfName string) ([]string, map[string]int) {
 	if profile.EVPN == nil {
 		return nil, nil
 	}
@@ -2108,7 +2107,7 @@ func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName strin
 			continue
 		}
 		// Load peer profile to get its loopback IP and ASN
-		peerProfile, err := n.loadProfile(peerName)
+		peerProfile, err := n.loadNodeSpec(peerName)
 		if err != nil {
 			util.Logger.Warnf("Could not load EVPN peer profile %s: %v", peerName, err)
 			continue

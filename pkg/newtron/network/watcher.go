@@ -40,8 +40,8 @@ type SpecWatcher struct {
 	reload   ReloadFunc
 
 	mu      sync.Mutex
-	paths   map[string]string         // absolute path → networkID
-	pending map[string]*time.Timer    // absolute path → debounce timer
+	paths   map[string]string      // absolute path → networkID
+	pending map[string]*time.Timer // absolute path → debounce timer
 
 	stopCh chan struct{}
 	doneCh chan struct{}
@@ -78,7 +78,7 @@ func NewSpecWatcher(logger *log.Logger, debounce time.Duration, reload ReloadFun
 
 // Add begins watching specDir for the given networkID. The watcher
 // monitors the directory itself plus the profiles/ subdirectory if
-// present (where DeviceProfile JSON files live; deletes there are
+// present (where NodeSpec JSON files live; deletes there are
 // part of revocation in the same way as grant edits to network.json).
 //
 // Returns an error if the watcher fails to register the path with
@@ -100,7 +100,7 @@ func (w *SpecWatcher) Add(specDir, networkID string) error {
 	profilesDir := filepath.Join(abs, "nodes")
 	if err := w.fsw.Add(profilesDir); err != nil {
 		// Profile dir is optional — log and continue. A network dir
-		// without profiles/ is valid (every device-profile JSON
+		// without profiles/ is valid (every node-spec JSON
 		// lives directly in specDir in some operator layouts).
 		w.logger.Printf("spec-watcher: skip nodes subdir %s: %v", profilesDir, err)
 	}
@@ -185,7 +185,7 @@ func (w *SpecWatcher) loop(ctx context.Context) {
 // to. Events on the watched directory itself, on the profiles/
 // subdirectory, and on files inside either all map to the same
 // reload — the operator either edited the grant table or rotated
-// a device profile, and both reasons mean "re-read the network dir".
+// a node spec, and both reasons mean "re-read the network dir".
 //
 // CHMOD-only events are ignored: editors sometimes set permissions
 // on save without changing content, and a reload over chmod-only

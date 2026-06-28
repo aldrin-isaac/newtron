@@ -19,7 +19,7 @@ Device is a **connection and lock manager** — it does not contain write, save,
 ```go
 type Device struct {
     Name     string
-    Profile  *spec.ResolvedProfile
+    Profile  *spec.ResolvedNodeSpec
     ConfigDB *ConfigDB   // In-memory snapshot, loaded on Connect
     StateDB  *StateDB    // In-memory snapshot, loaded on Connect (may be nil)
 
@@ -35,7 +35,7 @@ type Device struct {
     mu          sync.RWMutex
 }
 
-func NewDevice(name string, profile *spec.ResolvedProfile) *Device
+func NewDevice(name string, profile *spec.ResolvedNodeSpec) *Device
 ```
 
 ### 1.2 Connection Lifecycle

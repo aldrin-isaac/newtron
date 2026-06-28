@@ -60,17 +60,17 @@ func TestUpdateService_RoundTrip(t *testing.T) {
 	s := scaffoldNetwork(t, "default")
 
 	if w := post(t, s, "/newtron/v1/networks/default/create-service", map[string]any{
-		"name":        "transit",
-		"service_type":        "routed",
-		"description": "initial description",
+		"name":         "transit",
+		"service_type": "routed",
+		"description":  "initial description",
 	}); w.Code != http.StatusCreated {
 		t.Fatalf("create: status=%d body=%s", w.Code, w.Body.String())
 	}
 
 	if w := post(t, s, "/newtron/v1/networks/default/update-service", map[string]any{
-		"name":        "transit",
-		"service_type":        "routed",
-		"description": "updated description",
+		"name":         "transit",
+		"service_type": "routed",
+		"description":  "updated description",
 	}); w.Code != http.StatusOK {
 		t.Fatalf("update: status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -104,9 +104,9 @@ func TestUpdateService_NotFound(t *testing.T) {
 	s := scaffoldNetwork(t, "default")
 
 	w := post(t, s, "/newtron/v1/networks/default/update-service", map[string]any{
-		"name":        "missing-service",
-		"service_type":        "routed",
-		"description": "no prior create — should 404",
+		"name":         "missing-service",
+		"service_type": "routed",
+		"description":  "no prior create — should 404",
 	})
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404; body=%s", w.Code, w.Body.String())
@@ -177,7 +177,7 @@ func TestUpdateFilter_PreservesRules(t *testing.T) {
 // TestUpdateProfile_RoundTrip exercises the profile path
 // specifically — Profile lives in nodes/<name>.json, distinct
 // from the other spec kinds that live in network.json. The Loader
-// path (UpdateProfile in spec/loader.go) is what changes, not the
+// path (UpdateNodeSpec in spec/loader.go) is what changes, not the
 // Network spec persist path. The test creates a profile, updates
 // the mgmt_ip, and reads it back to confirm the new value landed
 // on disk and in the loader cache.
@@ -191,20 +191,20 @@ func TestUpdateProfile_RoundTrip(t *testing.T) {
 		t.Fatalf("create-zone: status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	if w := post(t, s, "/newtron/v1/networks/default/create-profile", map[string]any{
+	if w := post(t, s, "/newtron/v1/networks/default/create-node", map[string]any{
 		"name":    "switch1",
 		"mgmt_ip": "10.0.0.1",
 		"zone":    "amer",
 	}); w.Code != http.StatusCreated {
-		t.Fatalf("create-profile: status=%d body=%s", w.Code, w.Body.String())
+		t.Fatalf("create-node: status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	if w := post(t, s, "/newtron/v1/networks/default/update-profile", map[string]any{
+	if w := post(t, s, "/newtron/v1/networks/default/update-node", map[string]any{
 		"name":    "switch1",
 		"mgmt_ip": "10.0.0.99",
 		"zone":    "amer",
 	}); w.Code != http.StatusOK {
-		t.Fatalf("update-profile: status=%d body=%s", w.Code, w.Body.String())
+		t.Fatalf("update-node: status=%d body=%s", w.Code, w.Body.String())
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/nodes/switch1", nil)

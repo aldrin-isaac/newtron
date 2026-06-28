@@ -56,8 +56,8 @@ func (c *Client) GetTopology() (*spec.TopologySpecFile, error) {
 	return &result, nil
 }
 
-// TopologyDeviceNames returns the sorted device names from the topology.
-func (c *Client) TopologyDeviceNames() ([]string, error) {
+// TopologyNodeNames returns the sorted device names from the topology.
+func (c *Client) TopologyNodeNames() ([]string, error) {
 	var result []string
 	if err := c.doGet(c.networkPath()+"/topology/nodes", &result); err != nil {
 		return nil, err
@@ -91,8 +91,8 @@ func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
 // Profiles
 // ============================================================================
 
-// ListProfiles returns all device profile names.
-func (c *Client) ListProfiles() ([]string, error) {
+// ListNodeSpecs returns all node spec names.
+func (c *Client) ListNodeSpecs() ([]string, error) {
 	var result []string
 	if err := c.doGet(c.networkPath()+"/nodes", &result); err != nil {
 		return nil, err
@@ -100,30 +100,30 @@ func (c *Client) ListProfiles() ([]string, error) {
 	return result, nil
 }
 
-// ShowProfile returns the canonical *spec.DeviceProfile (§46) for a
+// ShowNodeSpec returns the canonical *spec.NodeSpec (§46) for a
 // single device.
-func (c *Client) ShowProfile(name string) (*spec.DeviceProfile, error) {
-	var result spec.DeviceProfile
+func (c *Client) ShowNodeSpec(name string) (*spec.NodeSpec, error) {
+	var result spec.NodeSpec
 	if err := c.doGet(c.networkPath()+"/nodes/"+url.PathEscape(name), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// CreateProfile creates a new device profile.
-func (c *Client) CreateProfile(req newtron.CreateDeviceProfileRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/create-profile"+execQuery(opts), req, nil)
+// CreateNodeSpec creates a new node spec.
+func (c *Client) CreateNodeSpec(req newtron.CreateNodeSpecRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/create-node"+execQuery(opts), req, nil)
 }
 
-// DeleteProfile deletes a device profile. force=true cascade-deletes any
+// DeleteNodeSpec deletes a node spec. force=true cascade-deletes any
 // topology device that references this profile (which itself cascade-deletes
 // any links wired to that device). Without force, the server returns a
 // *ConflictError listing the referring topology devices.
-func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts, force bool) error {
+func (c *Client) DeleteNodeSpec(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	path := withForce(c.networkPath()+"/delete-profile"+execQuery(opts), force)
+	path := withForce(c.networkPath()+"/delete-node"+execQuery(opts), force)
 	return c.doPost(path, body, nil)
 }
 
@@ -536,4 +536,3 @@ func (c *Client) InitDevice(device string, force bool) (string, error) {
 	}
 	return result["status"], nil
 }
-

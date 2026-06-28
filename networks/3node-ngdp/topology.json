@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "3-node topology: 1 spine + 2 leaves (eBGP fabric) + 2 Alpine virtual hosts",
-  "devices": {
+  "nodes": {
     "spine": {
       "steps": [
         {"url": "/setup-device", "params": {"fields": {"hostname": "spine", "bgp_asn": "65010", "type": "LeafRouter", "hwsku": "cisco-p200-32x100-vs", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},

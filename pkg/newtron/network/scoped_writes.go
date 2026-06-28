@@ -16,7 +16,7 @@ import (
 // OverridableSpecs, runs the per-kind closure against it under the right lock,
 // and persists — so the write methods mutate that container instead of always
 // n.spec. network/zone live in network.json (keyNetworkSpec); node lives in
-// nodes/<name>.json (persisted via loader.MutateProfile, which is secret-safe).
+// nodes/<name>.json (persisted via loader.MutateNodeSpec, which is secret-safe).
 //
 // Integrity follows the NETWORK-FLOOR invariant (DESIGN_PRINCIPLES_NEWTRON §7):
 // a resource may exist at zone/node scope only if it also exists at network
@@ -49,7 +49,7 @@ import (
 //   - network → n.spec.OverridableSpecs, under keyNetworkSpec, persist network.json
 //   - zone    → the zone's OverridableSpecs, under keyNetworkSpec, persist network.json
 //   - node    → the profile's OverridableSpecs, persisted to nodes/<name>.json via
-//     loader.MutateProfile (serialized, secret-safe). The network-spec RLock is
+//     loader.MutateNodeSpec (serialized, secret-safe). The network-spec RLock is
 //     held for the duration so the floor base that fn checks (checkOverrideBase)
 //     can't be deleted mid-write, and so lock order stays keyNetworkSpec → loader.
 //
@@ -82,7 +82,7 @@ func (n *Network) withWriteTarget(scope, instance string, fn func(specs *spec.Ov
 		mu := n.locks.lock(keyNetworkSpec)
 		mu.RLock()
 		defer mu.RUnlock()
-		return n.loader.MutateProfile(instance, func(p *spec.DeviceProfile) error {
+		return n.loader.MutateNodeSpec(instance, func(p *spec.NodeSpec) error {
 			return fn(&p.OverridableSpecs)
 		})
 	default:
@@ -122,8 +122,8 @@ func (n *Network) eachScopeContainer(fn func(scope, instance string, specs *spec
 			return err
 		}
 	}
-	for _, name := range n.ListProfiles() {
-		profile, err := n.GetProfile(name)
+	for _, name := range n.ListNodeSpecs() {
+		profile, err := n.GetNodeSpec(name)
 		if err != nil {
 			return fmt.Errorf("loading profile %q for cross-scope integrity check: %w", name, err)
 		}

@@ -50,7 +50,7 @@ func CreateEmpty(specDir, description string) error {
 	if err := writeSeed(specDir, "topology.json", &TopologySpecFile{
 		Version:     "1.0",
 		Description: description,
-		Devices:     map[string]*TopologyDevice{},
+		Nodes:       map[string]*TopologyNode{},
 		Links:       []*TopologyLink{},
 	}); err != nil {
 		return err

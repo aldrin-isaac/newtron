@@ -448,7 +448,7 @@ isn't exposed through a flag because most deployments prefer the
 default.
 
 The watcher also fires on changes to the `nodes/` subdirectory,
-catching device-profile JSON rotations as part of the same revoke
+catching node-spec JSON rotations as part of the same revoke
 flow.
 
 ## 10. Audit log integrity

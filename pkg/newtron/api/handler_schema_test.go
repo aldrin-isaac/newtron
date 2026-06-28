@@ -31,7 +31,7 @@ func TestSchemaList(t *testing.T) {
 		t.Fatalf("decode envelope: %v; body: %s", err, w.Body.String())
 	}
 	got := indexByKind(env.Data.Kinds)
-	for _, want := range []string{"ServiceSpec", "QoSPolicy", "FilterSpec", "IPVPNSpec", "DeviceProfile"} {
+	for _, want := range []string{"ServiceSpec", "QoSPolicy", "FilterSpec", "IPVPNSpec", "NodeSpec"} {
 		entry, ok := got[want]
 		if !ok {
 			t.Errorf("kind %q missing from /schema response", want)

@@ -11,7 +11,7 @@ newtlab realizes network topologies as connected QEMU virtual machines,
 wired together through **userspace socket bridges** — not kernel networking.
 It reads newtron's spec files (`topology.json`, `platforms.json`,
 `nodes/*.json`) and brings the topology to life: deploying VMs (primarily
-SONiC), wiring them across one or more servers, and patching device profiles
+SONiC), wiring them across one or more servers, and patching nodes
 so newtron can connect. No root, no Linux bridges, no veth pairs, no Docker.
 
 newtlab occupies a specific position in the three-tool model:
@@ -26,7 +26,7 @@ newtlab occupies a specific position in the three-tool model:
   deployment and newtron for device operations, but implements neither.
 
 The boundary between newtlab and newtron is **profile patching**. newtlab
-writes `ssh_port`, `console_port`, and `mgmt_ip` into device profiles;
+writes `ssh_port`, `console_port`, and `mgmt_ip` into nodes;
 newtron reads those profiles to connect. The two programs communicate through
 files — no shared libraries, no IPC, no API calls between them.
 
@@ -168,7 +168,7 @@ newtron reads, plus an optional `newtlab` section for orchestration settings:
 
 ```json
 {
-  "devices": {
+  "nodes": {
     "spine1": {
       "interfaces": {
         "Ethernet0": { "link": "leaf1:Ethernet0", "ip": "10.1.0.0/31" }
@@ -894,7 +894,7 @@ focusing on the moments where layers interact in non-obvious ways.
 newtlab resolves `2node-ngdp` to `networks/2node-ngdp/`. It loads
 `topology.json` (two switches, links between them), `platforms.json`
 (CiscoVS platform: contiguous (stride-1) port inventory, `e1000` NIC driver,
-8 GB memory), and both device profiles. Configuration resolution merges profile
+8 GB memory), and both nodes. Configuration resolution merges profile
 overrides with platform defaults; port allocation assigns SSH, console, and
 link ports by sorted device index.
 

@@ -13,7 +13,7 @@ import (
 func TestPortConfig_RoundTrip(t *testing.T) {
 	// Load: the on-disk topology.json shape — mtu is a JSON number.
 	in := []byte(`{"ports":{"Ethernet0":{"admin_status":"up","mtu":9100},"Ethernet4":{"admin_status":"down","speed":"100G"}}}`)
-	var dev TopologyDevice
+	var dev TopologyNode
 	if err := json.Unmarshal(in, &dev); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}

@@ -44,7 +44,7 @@ This writes the 'device' root intent and configures:
 This is the required first operation after 'init' — the intent DAG requires
 a 'device' root before any service operations (apply, vrf, evpn, etc.).
 
-Values not provided via flags are derived from the device profile. The
+Values not provided via flags are derived from the node spec. The
 profile already has hostname (device name), BGP ASN (underlay_asn), and
 loopback IP — so running without flags uses sensible defaults.
 

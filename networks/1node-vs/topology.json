@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "Single SONiC switch for offline config testing",
-  "devices": {
+  "nodes": {
     "switch1": {
       "steps": [
         {

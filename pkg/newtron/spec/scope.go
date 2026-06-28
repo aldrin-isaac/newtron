@@ -10,5 +10,5 @@ package spec
 const (
 	ScopeNetwork = "network" // top scope — defined in network.json
 	ScopeZone    = "zone"    // a zone's overrides — network.json zones[<name>]
-	ScopeNode    = "node"    // a device profile's overrides — nodes/<name>.json
+	ScopeNode    = "node"    // a node spec's overrides — nodes/<name>.json
 )

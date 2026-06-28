@@ -56,7 +56,7 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 // call time. ReloadNetwork replaces the whole Network and so a fresh
 // EnableAuthorization is required to re-bind the checker against the
 // new spec. In-process spec mutations after EnableAuthorization
-// (CreateService, DeleteProfile, …) are observed through the same
+// (CreateService, DeleteNodeSpec, …) are observed through the same
 // spec pointer — no re-call needed for grant changes to take effect.
 func (net *Network) EnableAuthorization() {
 	net.auth = auth.NewChecker(net.internal.Spec())
@@ -172,7 +172,7 @@ func (net *Network) HasTopology() bool {
 
 // GetTopology returns the full topology spec, or nil when no topology.json was
 // loaded for this network. §46: canonical `spec.TopologySpecFile` substrate
-// exposed directly, alongside the names-only summary in TopologyDeviceNames.
+// exposed directly, alongside the names-only summary in TopologyNodeNames.
 func (net *Network) GetTopology() *spec.TopologySpecFile {
 	return net.internal.GetTopology()
 }
@@ -194,10 +194,10 @@ func (net *Network) TopologyView() *TopologyView {
 		Description: topo.Description,
 		Links:       topo.Links,
 		NewtLab:     topo.NewtLab,
-		Devices:     make(map[string]*TopologyDeviceView, len(topo.Devices)),
+		Nodes:       make(map[string]*TopologyNodeView, len(topo.Nodes)),
 	}
-	for name, dev := range topo.Devices {
-		dv := &TopologyDeviceView{}
+	for name, dev := range topo.Nodes {
+		dv := &TopologyNodeView{}
 		if len(dev.Ports) > 0 {
 			dv.Ports = make(map[string]*PortConfig, len(dev.Ports))
 			for portName, pc := range dev.Ports {
@@ -213,7 +213,7 @@ func (net *Network) TopologyView() *TopologyView {
 				SpecName: specName,
 			})
 		}
-		view.Devices[name] = dv
+		view.Nodes[name] = dv
 	}
 	return view
 }
@@ -221,7 +221,7 @@ func (net *Network) TopologyView() *TopologyView {
 // AddTopologyDevice adds a device entry to topology.json. Returns
 // *ConflictError when a device with this name already exists. The matching
 // profile file must already exist. Persists atomically. §7 + §15 + §27 + §46.
-func (net *Network) AddTopologyDevice(ctx context.Context, name string, device *spec.TopologyDevice) error {
+func (net *Network) AddTopologyDevice(ctx context.Context, name string, device *spec.TopologyNode) error {
 	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithDevice(name).WithResource(name)); err != nil {
 		return err
 	}
@@ -240,9 +240,9 @@ func (net *Network) DeleteTopologyDevice(ctx context.Context, name string, force
 }
 
 // UpdateTopologyDevice replaces the device entry at name with the given
-// TopologyDevice (full-replacement semantics; no partial patch). Returns
+// TopologyNode (full-replacement semantics; no partial patch). Returns
 // *NotFoundError when name doesn't exist.
-func (net *Network) UpdateTopologyDevice(ctx context.Context, name string, device *spec.TopologyDevice) error {
+func (net *Network) UpdateTopologyDevice(ctx context.Context, name string, device *spec.TopologyNode) error {
 	if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("topology").WithDevice(name).WithResource(name)); err != nil {
 		return err
 	}
@@ -291,9 +291,9 @@ func translateInternalError(err error) error {
 	return err
 }
 
-// TopologyDeviceNames returns the sorted device names from the topology.
+// TopologyNodeNames returns the sorted device names from the topology.
 // Returns nil if no topology is loaded.
-func (net *Network) TopologyDeviceNames() []string {
+func (net *Network) TopologyNodeNames() []string {
 	topo := net.internal.GetTopology()
 	if topo == nil {
 		return nil

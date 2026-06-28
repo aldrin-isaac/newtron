@@ -15,7 +15,7 @@ func NewNodeForTest(name string, configDB *sonic.ConfigDB, connected, locked boo
 		connected:  connected,
 		locked:     locked,
 		interfaces: make(map[string]*Interface),
-		resolved:   &spec.ResolvedProfile{DeviceName: name},
+		resolved:   &spec.ResolvedNodeSpec{DeviceName: name},
 	}
 }
 

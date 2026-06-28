@@ -80,7 +80,7 @@ func TestResolveNICIndex_Validation(t *testing.T) {
 // ============================================================================
 
 func TestResolveNodeConfig_ProfileOverridesPlatform(t *testing.T) {
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Platform: "sonic-vs",
 		VMImage:  "/override/image.qcow2",
 		VMMemory: 8192,
@@ -90,9 +90,9 @@ func TestResolveNodeConfig_ProfileOverridesPlatform(t *testing.T) {
 		VMHost:   "server-a",
 	}
 	platform := &spec.PlatformSpec{
-		VMImage:   "/platform/image.qcow2",
-		VMMemory:  4096,
-		VMCPUs:    2,
+		VMImage:       "/platform/image.qcow2",
+		VMMemory:      4096,
+		VMCPUs:        2,
 		VMCredentials: &spec.VMCredentials{User: "admin", Pass: "admin"},
 	}
 
@@ -122,7 +122,7 @@ func TestResolveNodeConfig_ProfileOverridesPlatform(t *testing.T) {
 }
 
 func TestResolveNodeConfig_PlatformDefaults(t *testing.T) {
-	profile := &spec.DeviceProfile{Platform: "sonic-vs"}
+	profile := &spec.NodeSpec{Platform: "sonic-vs"}
 	platform := &spec.PlatformSpec{
 		VMImage:       "/platform/image.qcow2",
 		VMMemory:      4096,
@@ -163,7 +163,7 @@ func TestResolveNodeConfig_PlatformDefaults(t *testing.T) {
 }
 
 func TestResolveNodeConfig_BuiltInDefaults(t *testing.T) {
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Platform: "sonic-vs",
 		VMImage:  "/some/image.qcow2",
 	}
@@ -192,7 +192,7 @@ func TestResolveNodeConfig_BuiltInDefaults(t *testing.T) {
 }
 
 func TestResolveNodeConfig_NoImage(t *testing.T) {
-	profile := &spec.DeviceProfile{Platform: "sonic-vs"}
+	profile := &spec.NodeSpec{Platform: "sonic-vs"}
 	platform := &spec.PlatformSpec{}
 
 	_, err := ResolveNodeConfig("leaf1", profile, platform)
@@ -202,7 +202,7 @@ func TestResolveNodeConfig_NoImage(t *testing.T) {
 }
 
 func TestResolveNodeConfig_MgmtNIC(t *testing.T) {
-	profile := &spec.DeviceProfile{
+	profile := &spec.NodeSpec{
 		Platform: "sonic-vs",
 		VMImage:  "/img.qcow2",
 	}
@@ -352,8 +352,8 @@ func TestSaveAndLoadState(t *testing.T) {
 	t.Cleanup(resetHomeDir)
 
 	state := &LabState{
-		Name:    "test-lab",
-		Dir: "/tmp/specs",
+		Name: "test-lab",
+		Dir:  "/tmp/specs",
 		Nodes: map[string]*NodeState{
 			"spine1": {PID: 1234, Status: "running", SSHPort: 40000, ConsolePort: 30000},
 		},
@@ -517,7 +517,7 @@ func TestFilterHost_ClearsLocalHost(t *testing.T) {
 func TestFilterHost_KeepsUnhostNodes(t *testing.T) {
 	lab := &Lab{
 		Nodes: map[string]*NodeConfig{
-			"spine1": {Name: "spine1", Host: ""},        // no host (single-host mode)
+			"spine1": {Name: "spine1", Host: ""}, // no host (single-host mode)
 			"leaf1":  {Name: "leaf1", Host: "server-a"},
 		},
 		Links: nil,
@@ -979,4 +979,3 @@ func TestQEMUCommand_RelativePaths(t *testing.T) {
 		t.Errorf("expected relative monitor path, got args: %s", args)
 	}
 }
-

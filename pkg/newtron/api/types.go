@@ -9,7 +9,6 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-
 // ============================================================================
 // HTTP Request Types — Network
 // ============================================================================
@@ -49,7 +48,7 @@ type CreateNetworkRequest struct {
 // NetworkInfo is returned when listing or showing a registered network.
 type NetworkInfo struct {
 	ID          string   `json:"id"`
-	Dir     string   `json:"dir"`
+	Dir         string   `json:"dir"`
 	HasTopology bool     `json:"has_topology"`
 	Topology    string   `json:"topology,omitempty"` // topology name derived from specDir
 	Nodes       []string `json:"nodes"`
@@ -137,12 +136,12 @@ type ProjectionDiffRequest struct {
 }
 
 // TopologyNodeCreateRequest is the body for POST .../topology/create-node.
-// Name addresses the new entry; Device carries the typed TopologyDevice as
+// Name addresses the new entry; Device carries the typed TopologyNode as
 // stored in topology.json (profile is implicit via name; Ports + Steps may
 // be empty for a bare declaration, or pre-populated for one-shot create).
 type TopologyNodeCreateRequest struct {
-	Name   string               `json:"name"`
-	Device *spec.TopologyDevice `json:"device"`
+	Name   string             `json:"name"`
+	Device *spec.TopologyNode `json:"device"`
 }
 
 // NodeUnbindMACVPNRequest is the body for POST .../unbind-macvpn (node-level).

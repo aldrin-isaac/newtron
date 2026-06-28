@@ -21,11 +21,11 @@ import (
 
 const (
 	ServiceTypeEVPNIRB     = "evpn-irb"     // L2+L3 overlay: requires ipvpn + macvpn
-	ServiceTypeEVPNBridged = "evpn-bridged"  // L2 overlay: requires macvpn
-	ServiceTypeEVPNRouted  = "evpn-routed"   // L3 overlay: requires ipvpn
-	ServiceTypeIRB         = "irb"           // Local L2+L3: vlan + ip at apply time
-	ServiceTypeBridged     = "bridged"       // Local L2: vlan at apply time
-	ServiceTypeRouted      = "routed"        // Local L3: ip at apply time
+	ServiceTypeEVPNBridged = "evpn-bridged" // L2 overlay: requires macvpn
+	ServiceTypeEVPNRouted  = "evpn-routed"  // L3 overlay: requires ipvpn
+	ServiceTypeIRB         = "irb"          // Local L2+L3: vlan + ip at apply time
+	ServiceTypeBridged     = "bridged"      // Local L2: vlan at apply time
+	ServiceTypeRouted      = "routed"       // Local L3: ip at apply time
 )
 
 // ============================================================================
@@ -58,7 +58,7 @@ type ExecOpts struct {
 type WriteResult struct {
 	Preview      string               `json:"preview,omitempty"`
 	Changes      []sonic.ConfigChange `json:"changes,omitempty"`
-	DeviceOps     []sonic.DeviceOp `json:"device_ops,omitempty"`
+	DeviceOps    []sonic.DeviceOp     `json:"device_ops,omitempty"`
 	ChangeCount  int                  `json:"change_count"`
 	Applied      bool                 `json:"applied"`
 	Verified     bool                 `json:"verified"`
@@ -85,7 +85,7 @@ type VerificationError struct {
 	Key            string `json:"key"`
 	Field          string `json:"field"`
 	Expected       string `json:"expected"`
-	Actual         string `json:"actual"`                     // "" if missing
+	Actual         string `json:"actual"` // "" if missing
 	DeviceResponse string `json:"device_response,omitempty"`
 }
 
@@ -616,8 +616,8 @@ type RouteReflectorOpts struct {
 
 // SetupDeviceOpts holds configuration for the consolidated SetupDevice operation.
 type SetupDeviceOpts struct {
-	Fields   map[string]string  `json:"fields,omitempty"`    // device metadata fields
-	SourceIP string             `json:"source_ip,omitempty"` // VTEP source IP (empty = skip)
+	Fields   map[string]string   `json:"fields,omitempty"`    // device metadata fields
+	SourceIP string              `json:"source_ip,omitempty"` // VTEP source IP (empty = skip)
 	RR       *RouteReflectorOpts `json:"route_reflector,omitempty"`
 }
 
@@ -645,22 +645,22 @@ type ZoneDetail struct {
 // same data, so a "who has what" inspector mounted on this
 // endpoint reads byte-for-byte like the spec file.
 type AuthorizationDetail struct {
-	UserGroups  map[string][]string                  `json:"user_groups"`
-	Permissions map[string]spec.PermissionGrants     `json:"permissions"`
-	SuperUsers  []string                             `json:"super_users"`
+	UserGroups  map[string][]string              `json:"user_groups"`
+	Permissions map[string]spec.PermissionGrants `json:"permissions"`
+	SuperUsers  []string                         `json:"super_users"`
 }
 
-// CreateDeviceProfileRequest is the request for creating a device profile.
-type CreateDeviceProfileRequest struct {
-	Name        string                  `json:"name"`
-	MgmtIP      string                  `json:"mgmt_ip"`
-	LoopbackIP  string                  `json:"loopback_ip"`
-	Zone        string                  `json:"zone"`
-	Platform    string                  `json:"platform,omitempty"`
-	MAC         string                  `json:"mac,omitempty"`
-	UnderlayASN int                     `json:"underlay_asn,omitempty"`
-	SSHUser     string                  `json:"ssh_user,omitempty"`
-	SSHPass     string                  `json:"ssh_pass,omitempty"`
+// CreateNodeSpecRequest is the request for creating a node spec.
+type CreateNodeSpecRequest struct {
+	Name        string                   `json:"name"`
+	MgmtIP      string                   `json:"mgmt_ip"`
+	LoopbackIP  string                   `json:"loopback_ip"`
+	Zone        string                   `json:"zone"`
+	Platform    string                   `json:"platform,omitempty"`
+	MAC         string                   `json:"mac,omitempty"`
+	UnderlayASN int                      `json:"underlay_asn,omitempty"`
+	SSHUser     string                   `json:"ssh_user,omitempty"`
+	SSHPass     string                   `json:"ssh_pass,omitempty"`
 	EVPN        *CreateEVPNConfigRequest `json:"evpn,omitempty"`
 }
 
@@ -960,32 +960,32 @@ type AuditFilter struct {
 
 // AuditEvent represents an auditable configuration change event.
 type AuditEvent struct {
-	ID          string      `json:"id"`
-	Timestamp   string      `json:"timestamp"`
-	User        string      `json:"user"`
+	ID        string `json:"id"`
+	Timestamp string `json:"timestamp"`
+	User      string `json:"user"`
 	// VerificationSource names how User was established: a verified source
 	// (pam, session_key, service_cert_cn, unix_peer_creds), the unverified
 	// self_attested_header, or anonymous — the request carried no identity and
 	// the server accepted it in permissive mode. A reviewer reads User together
 	// with this: an empty User with "anonymous" is an expected permissive-mode
 	// record, not a missing-data defect.
-	VerificationSource string `json:"verification_source,omitempty"`
-	Device      string      `json:"device"`
-	Operation   string      `json:"operation"`
-	Service     string      `json:"service,omitempty"`
-	Interface   string      `json:"interface,omitempty"`
-	Changes     []AuditChange `json:"changes"`
+	VerificationSource string        `json:"verification_source,omitempty"`
+	Device             string        `json:"device"`
+	Operation          string        `json:"operation"`
+	Service            string        `json:"service,omitempty"`
+	Interface          string        `json:"interface,omitempty"`
+	Changes            []AuditChange `json:"changes"`
 	// RequestBody is the redacted JSON the caller submitted. Populated only by
 	// the per-event detail endpoint (GET …/audit/events/{id}); the paged list
 	// leaves it empty so the list stays lean. omitempty keeps it off list rows.
 	RequestBody json.RawMessage `json:"request_body,omitempty"`
-	Success     bool        `json:"success"`
-	Error       string      `json:"error,omitempty"`
-	ExecuteMode bool        `json:"execute_mode"`
-	DryRun      bool        `json:"dry_run"`
-	Duration    string      `json:"duration"`
-	ClientIP    string      `json:"client_ip,omitempty"`
-	SessionID   string      `json:"session_id,omitempty"`
+	Success     bool            `json:"success"`
+	Error       string          `json:"error,omitempty"`
+	ExecuteMode bool            `json:"execute_mode"`
+	DryRun      bool            `json:"dry_run"`
+	Duration    string          `json:"duration"`
+	ClientIP    string          `json:"client_ip,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
 }
 
 // AuditChange is a single CONFIG_DB change within an audit event. Fields is the
@@ -1054,9 +1054,9 @@ type AuditIntegrityResult struct {
 // UserSettings holds persistent user preferences.
 type UserSettings struct {
 	DefaultNetwork  string `json:"default_network,omitempty"`
-	Dir         string `json:"dir,omitempty"`
+	Dir             string `json:"dir,omitempty"`
 	DefaultSuite    string `json:"default_suite,omitempty"`
-	NetworksDir   string `json:"networks_dir,omitempty"`
+	NetworksDir     string `json:"networks_dir,omitempty"`
 	AuditLogPath    string `json:"audit_log_path,omitempty"`
 	AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"`
 	AuditMaxBackups int    `json:"audit_max_backups,omitempty"`
@@ -1154,10 +1154,10 @@ type ReconcileOpts struct {
 // ReconcileResult reports the outcome of delivering the projection to a device.
 type ReconcileResult struct {
 	Mode     string `json:"mode"`               // "full" or "delta"
-	Applied  int    `json:"applied"`             // total entries touched
-	Missing  int    `json:"missing,omitempty"`   // entries added (delta only)
-	Extra    int    `json:"extra,omitempty"`      // entries removed (delta only)
-	Modified int    `json:"modified,omitempty"`  // entries corrected (delta only)
+	Applied  int    `json:"applied"`            // total entries touched
+	Missing  int    `json:"missing,omitempty"`  // entries added (delta only)
+	Extra    int    `json:"extra,omitempty"`    // entries removed (delta only)
+	Modified int    `json:"modified,omitempty"` // entries corrected (delta only)
 	Message  string `json:"message,omitempty"`
 }
 
@@ -1206,22 +1206,22 @@ type TopologyStep struct {
 // Links and NewtLab pass through as the spec types — same as the prior raw
 // served shape; only steps are enriched.
 type TopologyView struct {
-	Version     string                         `json:"version"`
-	Platform    string                         `json:"platform,omitempty"`
-	Description string                         `json:"description,omitempty"`
-	Devices     map[string]*TopologyDeviceView `json:"devices"`
-	Links       []*spec.TopologyLink           `json:"links,omitempty"`
-	NewtLab     *spec.NewtLabConfig            `json:"newtlab,omitempty"`
+	Version     string                       `json:"version"`
+	Platform    string                       `json:"platform,omitempty"`
+	Description string                       `json:"description,omitempty"`
+	Nodes       map[string]*TopologyNodeView `json:"nodes"`
+	Links       []*spec.TopologyLink         `json:"links,omitempty"`
+	NewtLab     *spec.NewtLabConfig          `json:"newtlab,omitempty"`
 }
 
-// TopologyDeviceView mirrors spec.TopologyDevice with provenance-bearing steps.
-type TopologyDeviceView struct {
+// TopologyNodeView mirrors spec.TopologyNode with provenance-bearing steps.
+type TopologyNodeView struct {
 	Steps []TopologyStep         `json:"steps,omitempty"`
 	Ports map[string]*PortConfig `json:"ports,omitempty"`
 }
 
 // PortConfig is the public view of a topology device's per-port config — the
-// domain-vocabulary mirror of spec.PortConfig, so TopologyDeviceView exposes no
+// domain-vocabulary mirror of spec.PortConfig, so TopologyNodeView exposes no
 // internal spec type at the API boundary (§33). The wire shape is identical.
 type PortConfig struct {
 	AdminStatus string `json:"admin_status,omitempty"`

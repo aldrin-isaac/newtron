@@ -113,7 +113,7 @@ newtron-server ──SSH──→ SONiC device:22 ──forward──→ 127.0.0
 
 Redis inside SONiC listens only on localhost and has no authentication. In QEMU/SLiRP lab environments, only port 22 (SSH) is forwarded — Redis port 6379 is not directly accessible. The SSH tunnel solves this.
 
-When SSH credentials (`ssh_user`, `ssh_pass`) are absent from a device profile, the server connects to Redis directly at `<mgmt_ip>:6379`. This is useful for integration tests with mock Redis instances.
+When SSH credentials (`ssh_user`, `ssh_pass`) are absent from a node spec, the server connects to Redis directly at `<mgmt_ip>:6379`. This is useful for integration tests with mock Redis instances.
 
 ### 2.3 SSH Connection Caching and NodeActor Serialization
 
@@ -342,7 +342,7 @@ Optional: `ecn: true` on a queue creates a shared WRED profile with ECN marking.
 
 All 64 DSCP values are mapped: explicitly listed values go to their queue, unmapped values default to queue 0.
 
-### 3.3 Device Profiles
+### 3.3 Nodes
 
 Each device needs a profile JSON file in `nodes/`. The profile is the source of reality for device-specific data:
 
@@ -401,7 +401,7 @@ newtron profile delete switch3 -x
 Specs resolve through a three-level chain where lower levels win:
 
 ```
-Device Profile  >  Zone defaults  >  Global (network.json)
+Node Spec  >  Zone defaults  >  Global (network.json)
 ```
 
 Seven maps participate in merge: services, filters, ipvpns, macvpns, qos_policies, route_policies, prefix_lists. A device-level prefix list overrides a zone-level one of the same name, which overrides a global one.
@@ -442,7 +442,7 @@ newtron zone delete datacenter-west -x
 
 Zone-level specs can reference network-level specs (e.g., the `amer-transit` service references the network-level `transit-protect` filter).
 
-**Node-level overrides** — add specs to a device profile (`nodes/<device>.json`) for device-specific overrides:
+**Node-level overrides** — add specs to a node spec (`nodes/<device>.json`) for device-specific overrides:
 
 ```json
 {
@@ -469,7 +469,7 @@ Zone-level specs can reference network-level specs (e.g., the `amer-transit` ser
 
 All specs from all levels are visible. If the same name exists at multiple levels, the most specific level wins.
 
-**Common pitfall:** a device profile overrides a network-level service with the same name but different fields. The override replaces the entire spec — fields not repeated in the override are lost, not merged. If you want to change one field of a network-level service for a specific device, you must repeat all fields.
+**Common pitfall:** a node spec overrides a network-level service with the same name but different fields. The override replaces the entire spec — fields not repeated in the override are lost, not merged. If you want to change one field of a network-level service for a specific device, you must repeat all fields.
 
 ### 3.5 Platform Specification (`platforms.json`)
 
@@ -580,7 +580,7 @@ When present, enables automated provisioning via `intent reconcile --topology`:
 {
   "version": "1.0",
   "description": "Lab topology",
-  "devices": {
+  "nodes": {
     "leaf1": {
       "interfaces": {
         "Ethernet0": {
@@ -2195,7 +2195,7 @@ Before newtron can manage a device, it must be initialized. Initialization enabl
 
 | Requirement | Why |
 |-------------|-----|
-| Device profile exists | `newtron` must resolve SSH credentials and management IP |
+| Node spec exists | `newtron` must resolve SSH credentials and management IP |
 | Device is reachable via SSH | Init writes DEVICE_METADATA and restarts the bgp container |
 | bgp container is running | The restart command targets the bgp systemd service |
 
@@ -2265,7 +2265,7 @@ newtron leaf1 init --force
 | `frrcfgd not enabled` on `Connect()` | Device was never initialized | Run `newtron <device> init` |
 | `device has active BGP configuration` | Device has BGP neighbors; init drops sessions and replaces frr.conf | Back up `frr.conf` first, then use `--force` if config loss is acceptable |
 | Init times out waiting for frrcfgd | bgp container failed to start | SSH to device, check `docker ps`, `journalctl -u bgp` |
-| `ensuring unified config mode requires SSH connection` | Profile missing `ssh_user`/`ssh_pass` | Add SSH credentials to device profile |
+| `ensuring unified config mode requires SSH connection` | Profile missing `ssh_user`/`ssh_pass` | Add SSH credentials to node spec |
 
 ### 16.5 Config Persistence
 
@@ -2364,7 +2364,7 @@ This is the same reconcile mechanism described in [§16.1.3](#1613-reconcile), b
 
 **"redis connection failed"** — the server can't reach the device's Redis.
 
-1. Check that `ssh_user` and `ssh_pass` are set in the device profile (enables SSH tunnel)
+1. Check that `ssh_user` and `ssh_pass` are set in the node spec (enables SSH tunnel)
 2. Verify management IP: `ping <mgmt_ip>`
 3. Verify SSH: `ssh <ssh_user>@<mgmt_ip>` manually
 4. In lab: check VM health with `newtlab status`

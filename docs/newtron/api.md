@@ -52,8 +52,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
 | GET | `/networks/{n}/spec-instances` | Flat cross-scope inventory of every spec (network/zone/node), tagged with scope + scope_instance |
-| GET | `/networks/{n}/profiles` | List device profile names |
-| GET | `/networks/{n}/nodes/{name}` | Show device profile |
+| GET | `/networks/{n}/nodes` | List node spec names |
+| GET | `/networks/{n}/nodes/{name}` | Show node spec |
 | GET | `/networks/{n}/zones` | List zone names |
 | GET | `/networks/{n}/zones/{name}` | Show zone |
 | GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
@@ -64,14 +64,14 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
 | POST | `/networks/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
 | POST | `/networks/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
-| POST | `/networks/{n}/update-service` | Replace service in place — full-replacement (also: update-ipvpn, update-macvpn, update-qos-policy, update-filter, update-prefix-list, update-route-policy, update-profile, update-zone) |
-| POST | `/networks/{n}/create-profile` | Create device profile |
-| POST | `/networks/{n}/delete-profile` | Delete device profile |
+| POST | `/networks/{n}/update-service` | Replace service in place — full-replacement (also: update-ipvpn, update-macvpn, update-qos-policy, update-filter, update-prefix-list, update-route-policy, update-node, update-zone) |
+| POST | `/networks/{n}/create-node` | Create node spec |
+| POST | `/networks/{n}/delete-node` | Delete node spec |
 | POST | `/networks/{n}/create-zone` | Create zone |
 | POST | `/networks/{n}/delete-zone` | Delete zone |
 | POST | `/networks/{n}/create-platform` | Create platform definition |
 | POST | `/networks/{n}/update-platform` | Replace platform in place — full-replacement |
-| POST | `/networks/{n}/delete-platform` | Delete platform (409 if any profile references it) |
+| POST | `/networks/{n}/delete-platform` | Delete platform (409 if any node references it) |
 | POST | `/networks/{n}/add-qos-queue` | Add queue to QoS policy |
 | POST | `/networks/{n}/update-qos-queue` | Update queue in QoS policy (incl. slot rotation) |
 | POST | `/networks/{n}/remove-qos-queue` | Remove queue from QoS policy |
@@ -449,7 +449,7 @@ same `WriteResult`.
 
 These endpoints register and unregister networks. A network must be registered
 before any spec reads, device operations, or provisioning can occur. Registration
-loads the network directory (network.json, device profiles, service definitions) into
+loads the network directory (network.json, nodes, service definitions) into
 memory.
 
 ### Schema metadata endpoints
@@ -829,7 +829,7 @@ POST /newtron/v1/networks/default/reload
 ## 4. Network Spec Reads
 
 These endpoints read from the in-memory network spec -- service definitions, VPN
-specs, QoS policies, filters, platforms, device profiles, zones, and topology
+specs, QoS policies, filters, platforms, nodes, zones, and topology
 metadata. They do not connect to any device; they read what was loaded from the
 network directory at registration time.
 
@@ -852,7 +852,7 @@ one by name returns a single object (or 404 if not found):
 | Platforms | `GET /newtron/v1/networks/{netID}/platforms` | `GET .../platforms/{name}` | [`PlatformDetail`](#platformdetail) |
 | Route Policies | `GET /newtron/v1/networks/{netID}/route-policies` | `GET .../route-policies/{name}` | Route policy detail |
 | Prefix Lists | `GET /newtron/v1/networks/{netID}/prefix-lists` | `GET .../prefix-lists/{name}` | Prefix list detail |
-| Profiles | `GET /newtron/v1/networks/{netID}/nodes` | `GET .../nodes/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
+| Nodes | `GET /newtron/v1/networks/{netID}/nodes` | `GET .../nodes/{name}` | [`NodeSpec`](#nodespec) |
 | Zones | `GET /newtron/v1/networks/{netID}/zones` | `GET .../zones/{name}` | [`ZoneDetail`](#zonedetail) |
 
 All response types are defined in [S13 Types Reference](#13-types-reference).
@@ -1170,7 +1170,7 @@ _Lands newtron#14 (Cluster C — topology spec substrate, §46)._
 
 #### POST /newtron/v1/networks/{netID}/topology/create-node
 
-Adds a device entry to `topology.json`. The matching profile file
+Adds a device entry to `topology.json`. the matching node-spec file
 (`nodes/{name}.json`) must already exist; if absent, the call returns 400
 with the resolution path included.
 
@@ -1178,13 +1178,13 @@ with the resolution path included.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Topology device name; must match a profile filename. |
-| `device` | TopologyDevice | yes | Typed entry: `ports` (map of port name → `PortConfig`: `admin_status`/`mtu`/`speed`/`description` — form at `GET /schema/PortConfig`) and optional `steps[]` (intent operations to replay when the node is built). May be empty for a bare declaration; subsequent operations + `intent save --topology` populate `steps[]`. |
+| `name` | string | yes | Topology device name; must match a node-spec filename. |
+| `device` | TopologyNode | yes | Typed entry: `ports` (map of port name → `PortConfig`: `admin_status`/`mtu`/`speed`/`description` — form at `GET /schema/PortConfig`) and optional `steps[]` (intent operations to replay when the node is built). May be empty for a bare declaration; subsequent operations + `intent save --topology` populate `steps[]`. |
 
-**Response (201):** the persisted `TopologyDevice`.
+**Response (201):** the persisted `TopologyNode`.
 
 **Errors:** 409 with `*ConflictError` if a device with this name already
-exists; 400 if the profile file is missing or the body is invalid.
+exists; 400 if the node-spec file is missing or the body is invalid.
 
 #### DELETE /newtron/v1/networks/{netID}/topology/nodes/{name}
 
@@ -1212,11 +1212,11 @@ next request rebuilds from the new spec.
 
 **Path params:** `name`.
 
-**Request body:** `TopologyDevice` (the full new entry).
+**Request body:** `TopologyNode` (the full new entry).
 
-**Response (200):** the new `TopologyDevice`.
+**Response (200):** the new `TopologyNode`.
 
-**Errors:** 404 when the name doesn't exist; 400 if profile missing or body
+**Errors:** 404 when the name doesn't exist; 400 if node-spec missing or body
 invalid.
 
 #### POST /newtron/v1/networks/{netID}/topology/create-link
@@ -1311,7 +1311,7 @@ Check whether a platform supports a specific feature.
 ## 5. Network Spec Writes
 
 These endpoints create and delete spec definitions (services, VPNs, QoS policies,
-filters, device profiles, zones, prefix lists, route policies). They modify the
+filters, nodes, zones, prefix lists, route policies). They modify the
 in-memory spec and persist changes to the network directory on disk. Like spec reads,
 atomicity is provided by the engine layer: each Network method acquires its key's
 lock internally before composing or persisting the spec change.
@@ -1389,7 +1389,7 @@ overridable kind and its sub-rule kinds:
 - `scope_instance` — `type:ref`, gated by `applies_when`/`required_when`
   `{field:"scope", not_equals:"network"}`, and a **sibling-conditional**
   reference via `ref_when`: it resolves to `ZoneSpec` when `scope=zone` and
-  `DeviceProfile` when `scope=node`, so the UI offers a dropdown of the right
+  `NodeSpec` when `scope=node`, so the UI offers a dropdown of the right
   instances (zone names / node names) rather than free text.
 
   ```jsonc
@@ -1398,7 +1398,7 @@ overridable kind and its sub-rule kinds:
     "required_when": { "field": "scope", "not_equals": "network" },
     "ref_when": [
       { "when": { "field": "scope", "equals": "zone" }, "ref_kind": "ZoneSpec" },
-      { "when": { "field": "scope", "equals": "node" }, "ref_kind": "DeviceProfile" }
+      { "when": { "field": "scope", "equals": "node" }, "ref_kind": "NodeSpec" }
     ] }
   ```
 
@@ -1453,7 +1453,7 @@ them (§15):
 - `delete-zone` is refused (**409**) while a profile is assigned to the zone
   (`zone` field) or the zone still holds spec overrides; the response lists every
   dependant. Remove them first.
-- `delete-profile` is refused (**409**) while the profile holds node-scope spec
+- `delete-node` is refused (**409**) while the profile holds node-scope spec
   overrides (or, as before, while a topology device references it). `force=true`
   proceeds — the overrides live in the profile file and are removed with it.
 
@@ -1523,7 +1523,7 @@ Delete a service definition.
 
 One verb per spec kind: `update-service`, `update-ipvpn`,
 `update-macvpn`, `update-qos-policy`, `update-filter`,
-`update-prefix-list`, `update-route-policy`, `update-profile`,
+`update-prefix-list`, `update-route-policy`, `update-node`,
 `update-zone`. Each accepts the same request body shape as its
 `create-X` counterpart and replaces the entry whose `name` field
 matches an existing one in place.
@@ -1571,7 +1571,7 @@ entry` / `remove-prefix-list-entry` verbs offer the finer-grained
 alternative.
 
 The other 5 top-level update verbs (`update-service`, `update-ipvpn`,
-`update-macvpn`, `update-profile`, `update-zone`) have no
+`update-macvpn`, `update-node`, `update-zone`) have no
 sub-collection to preserve — every field carried by the request body
 becomes the new content directly.
 
@@ -2111,15 +2111,15 @@ Remove a rule from a route policy.
 {"data": {"status": "deleted"}}
 ```
 
-### Device Profiles
+### Nodes
 
-Profiles are stored as individual JSON files under `nodes/{name}.json` in the
-network directory. They define per-device settings (management IP, loopback, zone,
+A node's spec is stored as an individual JSON file under `nodes/{name}.json` in the
+network directory. It defines per-node settings (management IP, loopback, zone,
 platform, EVPN peering).
 
-#### POST /newtron/v1/networks/{netID}/create-profile
+#### POST /newtron/v1/networks/{netID}/create-node
 
-Create a new device profile.
+Create a new node spec.
 
 **Query parameters:** `dry_run`
 
@@ -2146,9 +2146,9 @@ Create a new device profile.
 
 **Status codes:** 201 created, 400 validation error, 409 already exists
 
-#### POST /newtron/v1/networks/{netID}/delete-profile
+#### POST /newtron/v1/networks/{netID}/delete-node
 
-Delete a device profile.
+Delete a node spec.
 
 **Query parameters:** `dry_run`
 
@@ -2193,7 +2193,7 @@ Create a new zone.
 
 #### POST /newtron/v1/networks/{netID}/delete-zone
 
-Delete a zone. Returns error if any device profile references this zone.
+Delete a zone. Returns error if any node spec references this zone.
 
 **Query parameters:** `dry_run`
 
@@ -2263,7 +2263,7 @@ Replace an existing platform in place — full-replacement semantics matching th
 
 #### POST /newtron/v1/networks/{netID}/delete-platform
 
-Delete a platform. Returns 409 with a `*ConflictError` listing referring profiles if any `DeviceProfile.Platform` equals this name — the operator must retarget or delete the referring profiles first. There is no `force=true` cascade (a profile's Platform field is mandatory in practice; cascading would orphan the profile).
+Delete a platform. Returns 409 with a `*ConflictError` listing referring profiles if any `NodeSpec.Platform` equals this name — the operator must retarget or delete the referring profiles first. There is no `force=true` cascade (a profile's Platform field is mandatory in practice; cascading would orphan the profile).
 
 **Query parameters:** `dry_run`
 
@@ -4397,7 +4397,7 @@ The list endpoint is keyed by platform name rather than an array because platfor
 | `breakouts` | string[] | Supported breakout modes |
 | `unsupported_features` | string[] | Features not supported on this platform |
 
-#### DeviceProfileDetail
+#### NodeSpec
 
 Returned by `GET .../profile` (array of names) and `GET .../nodes/{name}` (single).
 

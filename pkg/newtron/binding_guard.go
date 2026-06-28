@@ -35,7 +35,7 @@ func (net *Network) bindingsFor(kind, name string) []SpecBinding {
 	}
 	canonical := util.NormalizeName(name)
 	var out []SpecBinding
-	for device, dev := range topo.Devices {
+	for device, dev := range topo.Nodes {
 		if dev == nil {
 			continue
 		}
@@ -77,7 +77,7 @@ func interfaceFromStepURL(url string) string {
 //
 // Without force it returns a *util.ConflictError (→ 409) listing every binding
 // as "device:interface". With force it cascade-removes the binding steps from
-// topology.json (§15 reference-aware reverse, mirroring DeleteProfile's link
+// topology.json (§15 reference-aware reverse, mirroring DeleteNodeSpec's link
 // cascade) so the delete leaves no dangling step. Force removes only the
 // topology record; a live device keeps the applied CONFIG_DB until reconciled —
 // un-apply on the device first (remove-service) to avoid drift.
@@ -111,7 +111,7 @@ func (net *Network) removeBindings(kind, name string) error {
 		return nil
 	}
 	canonical := util.NormalizeName(name)
-	for device, dev := range topo.Devices {
+	for device, dev := range topo.Nodes {
 		if dev == nil {
 			continue
 		}

@@ -10,31 +10,31 @@ import (
 // NodeConfig holds the fully resolved VM configuration for a single device.
 // Values are resolved from profile > platform > built-in defaults.
 type NodeConfig struct {
-	Name         string
-	Platform     string
-	DeviceType   string // "switch" (default) or "host" — from platform
-	Image        string // resolved: profile > platform > error
-	Memory       int    // resolved: profile > platform > 4096
-	CPUs         int    // resolved: profile > platform > 2
-	NICDriver    string // resolved: platform > "e1000"
+	Name       string
+	Platform   string
+	DeviceType string // "switch" (default) or "host" — from platform
+	Image      string // resolved: profile > platform > error
+	Memory     int    // resolved: profile > platform > 4096
+	CPUs       int    // resolved: profile > platform > 2
+	NICDriver  string // resolved: platform > "e1000"
 	// Ports is the platform's explicit port inventory (name → NIC slot),
 	// copied from PlatformSpec.Ports. AllocateLinks resolves a topology
 	// interface name to its NIC slot by looking it up here. Empty for coalesced
 	// host VMs, which resolve via NICBase + parseLinuxEthIndex instead.
-	Ports       []spec.PortSpec
-	CPUFeatures string // resolved: platform > ""
-	SSHUser      string // resolved: profile ssh_user > "admin"
-	SSHPass      string // resolved: profile ssh_pass > platform credentials pass
-	ConsoleUser  string // resolved: platform vm_credentials user (image default user)
-	ConsolePass  string // resolved: platform vm_credentials pass (image default password)
-	BootTimeout  int    // resolved: platform > 180
-	SkipBootstrap bool  // resolved: platform vm_skip_bootstrap > false. When true, the image is
-	                    // pre-bootstrapped (mgmt IP + ssh user already configured) and the
-	                    // console-driven network bring-up is skipped entirely.
-	Host         string // from profile vm_host
-	SSHPort      int    // allocated
-	ConsolePort  int    // allocated
-	NICs         []NICConfig
+	Ports         []spec.PortSpec
+	CPUFeatures   string // resolved: platform > ""
+	SSHUser       string // resolved: profile ssh_user > "admin"
+	SSHPass       string // resolved: profile ssh_pass > platform credentials pass
+	ConsoleUser   string // resolved: platform vm_credentials user (image default user)
+	ConsolePass   string // resolved: platform vm_credentials pass (image default password)
+	BootTimeout   int    // resolved: platform > 180
+	SkipBootstrap bool   // resolved: platform vm_skip_bootstrap > false. When true, the image is
+	// pre-bootstrapped (mgmt IP + ssh user already configured) and the
+	// console-driven network bring-up is skipped entirely.
+	Host        string // from profile vm_host
+	SSHPort     int    // allocated
+	ConsolePort int    // allocated
+	NICs        []NICConfig
 }
 
 // NICConfig represents a single QEMU NIC attachment.
@@ -51,7 +51,7 @@ type NICConfig struct {
 // Returns error if no vm_image can be resolved.
 func ResolveNodeConfig(
 	name string,
-	profile *spec.DeviceProfile,
+	profile *spec.NodeSpec,
 	platform *spec.PlatformSpec,
 ) (*NodeConfig, error) {
 	nc := &NodeConfig{

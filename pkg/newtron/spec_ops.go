@@ -33,7 +33,7 @@ func validateScopeSelector(sel ScopeSelector) error {
 		return nil
 	case spec.ScopeNode:
 		if sel.ScopeInstance == "" {
-			return &ValidationError{Field: "scope_instance", Message: "required for node scope (the device/profile name)"}
+			return &ValidationError{Field: "scope_instance", Message: "required for node scope (the node name)"}
 		}
 		return nil
 	default:

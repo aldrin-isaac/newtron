@@ -59,12 +59,12 @@ type App struct {
 	noSave      bool
 	verbose     bool
 	jsonOutput  bool
-	topology    bool   // --topology flag: use topology mode (?mode=topology)
-	loopback    bool   // --loopback flag: offline config testing (?mode=loopback)
+	topology    bool // --topology flag: use topology mode (?mode=topology)
+	loopback    bool // --loopback flag: offline config testing (?mode=loopback)
 
 	// Initialized state (set in PersistentPreRunE)
 	settings *newtron.UserSettings
-	client *client.Client // HTTP client for all commands
+	client   *client.Client // HTTP client for all commands
 }
 
 var app = &App{}
@@ -293,7 +293,7 @@ func init() {
 	}
 
 	// Configuration & Meta
-	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, profileCmd, zoneCmd, versionCmd, networkCmd, topologyCmd, secretsCmd} {
+	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, nodeCmd, zoneCmd, versionCmd, networkCmd, topologyCmd, secretsCmd} {
 		cmd.GroupID = "meta"
 		rootCmd.AddCommand(cmd)
 	}

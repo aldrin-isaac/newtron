@@ -117,7 +117,7 @@ Examples:
   newtron network topology
   newtron network topology --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		names, err := app.client.TopologyDeviceNames()
+		names, err := app.client.TopologyNodeNames()
 		if err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ Examples:
 
 var networkHostCmd = &cobra.Command{
 	Use:   "host <name>",
-	Short: "Show host device profile",
+	Short: "Show host profile",
 	Long: `Show the SSH connection profile for a host device (non-SONiC VM).
 
 Host devices are virtual machines defined in the topology that are not

@@ -12,7 +12,7 @@ pkg/newtron/                          # Public API — all external consumers im
     interface.go                      # Interface wrapper
     spec_ops.go                       # Spec authoring operations
     platform_ops.go                   # Platform operations
-    profile_ops.go                    # Profile and zone operations
+    node_spec_ops.go                    # Node spec and zone operations
     audit.go                          # Audit log integration
     settings.go                       # UserSettings load/save
     settings/settings.go              # Settings file I/O
@@ -115,7 +115,7 @@ pkg/newtron/device/sonic/             # SONiC device layer — Redis clients, sc
 
 ```
 pkg/newtron/spec/                     # Spec types and file I/O
-    types.go                          # All spec types (ServiceSpec, DeviceProfile, TopologySpecFile, etc.)
+    types.go                          # All spec types (ServiceSpec, NodeSpec, TopologySpecFile, etc.)
     loader.go                         # Load/save network.json, profiles, platforms, topology
     schema_meta.go                    # FieldMeta + SchemaMeta + reflection-based tag extractor
     schema_registry.go                # init() registers every spec authoring kind for /schema endpoints
@@ -224,7 +224,7 @@ type NetworkSpecFile struct {
 
 ### 2.2 OverridableSpecs
 
-Embedded in `NetworkSpecFile`, `ZoneSpec`, and `DeviceProfile` to enable the three-level hierarchy (network → zone → node). Lower-level wins on name collision.
+Embedded in `NetworkSpecFile`, `ZoneSpec`, and `NodeSpec` to enable the three-level hierarchy (network → zone → node). Lower-level wins on name collision.
 
 ```go
 type OverridableSpecs struct {
@@ -388,12 +388,12 @@ type RoutePolicySet struct {
 }
 ```
 
-### 2.10 DeviceProfile
+### 2.10 NodeSpec
 
 Per-device configuration that combines identity (IPs, ASN, zone), connectivity (SSH), and EVPN peering into a single file. Lives in `nodes/{device}.json`.
 
 ```go
-type DeviceProfile struct {
+type NodeSpec struct {
     MgmtIP      string          `json:"mgmt_ip"`
     LoopbackIP  string          `json:"loopback_ip"`
     Zone        string          `json:"zone"`
@@ -421,10 +421,10 @@ type EVPNConfig struct {
 }
 ```
 
-At load time, the spec loader resolves profiles into `ResolvedProfile` — a flattened snapshot with derived values (router ID from loopback, VTEP source IP, BGP neighbor ASNs from peer loopback lookups).
+At load time, the spec loader resolves profiles into `ResolvedNodeSpec` — a flattened snapshot with derived values (router ID from loopback, VTEP source IP, BGP neighbor ASNs from peer loopback lookups).
 
 ```go
-type ResolvedProfile struct {
+type ResolvedNodeSpec struct {
     DeviceName      string
     MgmtIP          string
     LoopbackIP      string
@@ -480,12 +480,12 @@ type TopologySpecFile struct {
     Version     string                          `json:"version"`
     Platform    string                          `json:"platform,omitempty"` // default platform
     Description string                          `json:"description,omitempty"`
-    Devices     map[string]*TopologyDevice      `json:"devices"`
+    Devices     map[string]*TopologyNode      `json:"nodes"`
     Links       []TopologyLink                  `json:"links,omitempty"`
     NewtLab     *NewtLabConfig                  `json:"newtlab,omitempty"`
 }
 
-type TopologyDevice struct {
+type TopologyNode struct {
     Steps []TopologyStep         `json:"steps,omitempty"`
     Ports map[string]*PortConfig `json:"ports,omitempty"` // keyed by port name
 }
@@ -1150,15 +1150,15 @@ declared in the schema (`scope` enum + scope-conditional `scope_instance` ref vi
 | POST | `.../add-route-policy-rule` | `AddRoutePolicyRuleRequest` |
 | POST | `.../update-route-policy-rule` | `UpdateRoutePolicyRuleRequest` — atomic per-rule mutation; optional `new_seq` renumbers (#210) |
 | POST | `.../remove-route-policy-rule` | `{policy, seq}` |
-| POST | `.../create-profile` | `CreateDeviceProfileRequest` |
-| POST | `.../update-profile` | `CreateDeviceProfileRequest` (full-replacement; #152) |
-| POST | `.../delete-profile` | `{name, force}` — `force=true` cascades through topology devices referencing the profile (§15 cascade-refusal pattern); default refuses with 409 `ConflictError` |
+| POST | `.../create-node` | `CreateDeviceProfileRequest` |
+| POST | `.../update-node` | `CreateDeviceProfileRequest` (full-replacement; #152) |
+| POST | `.../delete-node` | `{name, force}` — `force=true` cascades through topology devices referencing the profile (§15 cascade-refusal pattern); default refuses with 409 `ConflictError` |
 | POST | `.../create-zone` | `CreateZoneRequest` |
 | POST | `.../update-zone` | `CreateZoneRequest` (full-replacement; #152) |
 | POST | `.../delete-zone` | `{name}` |
 | POST | `.../topology/create-node` | `TopologyNodeCreateRequest` — creates topology device (auto-creates matching profile by filename) |
 | DELETE | `.../topology/nodes/{name}` | `?force=true` to cascade-delete the matching profile + remove links wired to this device; default refuses if links remain (409) |
-| PUT | `.../topology/nodes/{name}` | `TopologyDevice` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
+| PUT | `.../topology/nodes/{name}` | `TopologyNode` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
 | POST | `.../topology/create-link` | `*TopologyLink` body — adds link to topology |
 | DELETE | `.../topology/links/{device}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |
 
@@ -1740,8 +1740,8 @@ All values below are derived at `ApplyService` time and stored in NEWTRON_INTENT
 | ACL table name | `{FILTER}_{DIRECTION}_{HASH}` (e.g., `PROTECT_RE_IN_A1B2C3D4`) |
 | Neighbor IP (/31) | XOR last bit of local IP |
 | Neighbor IP (/30) | XOR host bits (1→2, 2→1) |
-| Router ID | Loopback IP from device profile |
-| VTEP source IP | Loopback IP from device profile |
+| Router ID | Loopback IP from node spec |
+| VTEP source IP | Loopback IP from node spec |
 
 **Interface name normalization** (short forms used in derived names):
 

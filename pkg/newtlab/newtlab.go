@@ -29,7 +29,7 @@ import (
 type SpecClient interface {
 	GetTopology() (*spec.TopologySpecFile, error)
 	ListPlatforms() (map[string]*spec.PlatformSpec, error)
-	ShowProfile(name string) (*spec.DeviceProfile, error)
+	ShowNodeSpec(name string) (*spec.NodeSpec, error)
 	// NetworkID is the network this client is bound to. Provision forwards it
 	// to the reconcile subprocess so the CLI stays on the lab's network instead
 	// of falling back to the default (see reconcileArgs).
@@ -51,7 +51,7 @@ type Lab struct {
 	StateDir     string
 	Topology     *spec.TopologySpecFile
 	Platform     map[string]*spec.PlatformSpec
-	Profiles     map[string]*spec.DeviceProfile
+	Profiles     map[string]*spec.NodeSpec
 	Config       *VMLabConfig
 	Nodes        map[string]*NodeConfig
 	Links        []*LinkConfig
@@ -111,7 +111,7 @@ func NewLab(ctx context.Context, client SpecClient, topologyName string) (*Lab, 
 	l := &Lab{
 		Name:       topologyName,
 		StateDir:   LabDir(topologyName),
-		Profiles:   make(map[string]*spec.DeviceProfile),
+		Profiles:   make(map[string]*spec.NodeSpec),
 		Nodes:      make(map[string]*NodeConfig),
 		specClient: client,
 	}
@@ -135,9 +135,9 @@ func NewLab(ctx context.Context, client SpecClient, topologyName string) (*Lab, 
 	}
 	l.Platform = platforms
 
-	// Per-device profiles from newtron
-	for deviceName := range l.Topology.Devices {
-		profile, err := client.ShowProfile(deviceName)
+	// Per-nodes from newtron
+	for deviceName := range l.Topology.Nodes {
+		profile, err := client.ShowNodeSpec(deviceName)
 		if err != nil {
 			return nil, fmt.Errorf("newtlab: get profile %s from newtron: %w", deviceName, err)
 		}
@@ -223,7 +223,7 @@ func (l *Lab) coalesceHostVMs() {
 	type hostInfo struct {
 		name    string
 		vmHost  string
-		profile *spec.DeviceProfile
+		profile *spec.NodeSpec
 	}
 	var hosts []hostInfo
 	for name, nc := range l.Nodes {
@@ -266,23 +266,23 @@ func (l *Lab) coalesceHostVMs() {
 		templateNC := l.Nodes[groupHosts[0].name]
 
 		vmNC := &NodeConfig{
-			Name:         vmName,
-			Platform:     templateNC.Platform,
-			DeviceType:   "host-vm",
-			Image:        templateNC.Image,
-			Memory:       templateNC.Memory,
-			CPUs:         templateNC.CPUs,
-			NICDriver:    templateNC.NICDriver,
-			Ports:        templateNC.Ports,
-			CPUFeatures:  templateNC.CPUFeatures,
-			SSHUser:      templateNC.SSHUser,
-			SSHPass:      templateNC.SSHPass,
-			ConsoleUser:  templateNC.ConsoleUser,
-			ConsolePass:  templateNC.ConsolePass,
-			BootTimeout:  templateNC.BootTimeout,
-			Host:         templateNC.Host,
-			SSHPort:      templateNC.SSHPort,
-			ConsolePort:  templateNC.ConsolePort,
+			Name:        vmName,
+			Platform:    templateNC.Platform,
+			DeviceType:  "host-vm",
+			Image:       templateNC.Image,
+			Memory:      templateNC.Memory,
+			CPUs:        templateNC.CPUs,
+			NICDriver:   templateNC.NICDriver,
+			Ports:       templateNC.Ports,
+			CPUFeatures: templateNC.CPUFeatures,
+			SSHUser:     templateNC.SSHUser,
+			SSHPass:     templateNC.SSHPass,
+			ConsoleUser: templateNC.ConsoleUser,
+			ConsolePass: templateNC.ConsolePass,
+			BootTimeout: templateNC.BootTimeout,
+			Host:        templateNC.Host,
+			SSHPort:     templateNC.SSHPort,
+			ConsolePort: templateNC.ConsolePort,
 			NICs: []NICConfig{{
 				Index:     0,
 				NetdevID:  "mgmt",
@@ -634,7 +634,7 @@ func (l *Lab) findPeerInterfaceIP(hostName string) (string, string) {
 	}
 
 	// Step 2: Find the IP in the switch device's steps
-	device, ok := l.Topology.Devices[switchName]
+	device, ok := l.Topology.Nodes[switchName]
 	if !ok {
 		return "", ""
 	}
@@ -919,7 +919,7 @@ func (l *Lab) bootstrapNodes(ctx context.Context, pubKey string) error {
 }
 
 // applyNodePatches resolves and applies platform boot patches per node (parallel),
-// then patches device profiles.
+// then patches nodes.
 func (l *Lab) applyNodePatches(ctx context.Context) error {
 	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		if node.DeviceType == "host" || node.DeviceType == "host-vm" {

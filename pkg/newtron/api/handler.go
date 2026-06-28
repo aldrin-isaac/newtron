@@ -75,8 +75,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features/{name}/dependencies", s.handleGetFeatureDependencies)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features/{name}/unsupported-due-to", s.handleGetUnsupportedDueTo)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/platforms/{name}/supports/{feature}", s.handlePlatformSupportsFeature)
-	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes", s.handleListProfiles)
-	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{name}", s.handleShowProfile)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes", s.handleListNodeSpecs)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{name}", s.handleShowNodeSpec)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/zones", s.handleListZones)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/zones/{name}", s.handleShowZone)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/authorization", s.handleGetAuthorization)
@@ -112,8 +112,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/add-route-policy-rule", s.handleAddRoutePolicyRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-route-policy-rule", s.handleUpdateRoutePolicyRule)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/remove-route-policy-rule", s.handleRemoveRoutePolicyRule)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-profile", s.handleCreateProfile)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-profile", s.handleDeleteProfile)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-node", s.handleCreateNodeSpec)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-node", s.handleDeleteNodeSpec)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-zone", s.handleCreateZone)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-zone", s.handleDeleteZone)
 	// Platform CRUD wire endpoints removed: platforms are a global
@@ -128,7 +128,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-filter", s.handleUpdateFilter)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-prefix-list", s.handleUpdatePrefixList)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-route-policy", s.handleUpdateRoutePolicy)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-profile", s.handleUpdateProfile)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-node", s.handleUpdateNodeSpec)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/update-zone", s.handleUpdateZone)
 
 	// ====================================================================

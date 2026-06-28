@@ -41,7 +41,7 @@ type NotReadyError interface {
 // Device represents a SONiC switch.
 type Device struct {
 	Name     string
-	Profile  *spec.ResolvedProfile
+	Profile  *spec.ResolvedNodeSpec
 	ConfigDB *ConfigDB
 	StateDB  *StateDB
 
@@ -72,7 +72,7 @@ type Device struct {
 }
 
 // NewDevice creates a new device instance
-func NewDevice(name string, profile *spec.ResolvedProfile) *Device {
+func NewDevice(name string, profile *spec.ResolvedNodeSpec) *Device {
 	return &Device{
 		Name:    name,
 		Profile: profile,

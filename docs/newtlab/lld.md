@@ -42,7 +42,7 @@ consumed by newtlab during resolution (§3.4).
 ### 2.1 PlatformSpec — VM Fields
 
 Platform-level defaults for all devices of a given SONiC platform. Consumed
-by `ResolveNodeConfig` (§3.3) to provide defaults when device profiles don't
+by `ResolveNodeConfig` (§3.3) to provide defaults when nodes don't
 override.
 
 ```go
@@ -94,12 +94,12 @@ type VMCredentials struct {
 ```
 
 Used as `ConsoleUser`/`ConsolePass` during serial bootstrap (§7.1) and as SSH
-password fallback when the device profile doesn't specify `ssh_pass`.
+password fallback when the node spec doesn't specify `ssh_pass`.
 
-### 2.3 DeviceProfile — newtlab Fields
+### 2.3 NodeSpec — newtlab Fields
 
 Per-device overrides that take priority over platform defaults. The newtlab
-fields on DeviceProfile are **read** by newtlab during resolution. Runtime
+fields on NodeSpec are **read** by newtlab during resolution. Runtime
 connectivity values (SSH port, console port, MAC) are not written into profile
 files — spec files are newtron's data object (DESIGN_PRINCIPLES §27) and
 newtlab must not write into them. Instead, these values are exposed in `LabState`
@@ -107,7 +107,7 @@ via `GET /newtlab/v1/labs/{name}/status` (see [newtlab API](api.md)) and
 consumed by newtron via `pkg/newtlab/client/PortResolver`.
 
 ```go
-type DeviceProfile struct {
+type NodeSpec struct {
     // ... existing fields (mgmt_ip, loopback_ip, zone, evpn, etc.) ...
     OverridableSpecs // embedded — node-level spec overrides (services, filters, etc.)
     ASNumber *int    `json:"as_number,omitempty"` // override underlay ASN
@@ -142,7 +142,7 @@ The optional `newtlab` key in `topology.json` provides orchestration overrides.
 type TopologySpecFile struct {
     Version  string                     `json:"version"`
     Platform string                     `json:"platform,omitempty"`
-    Devices  map[string]*TopologyDevice `json:"devices"`
+    Devices  map[string]*TopologyNode `json:"nodes"`
     Links    []*TopologyLink            `json:"links,omitempty"`
     NewtLab  *NewtLabConfig             `json:"newtlab,omitempty"`
 }
@@ -191,7 +191,7 @@ type Lab struct {
     StateDir     string
     Topology     *spec.TopologySpecFile
     Platform     map[string]*spec.PlatformSpec
-    Profiles     map[string]*spec.DeviceProfile
+    Profiles     map[string]*spec.NodeSpec
     Config       *VMLabConfig
     Nodes        map[string]*NodeConfig
     Links        []*LinkConfig
@@ -384,7 +384,7 @@ Steps:
 2. If `topology.Links` is empty, derive links from `interface.link` fields
    via `DeriveLinksFromInterfaces()`.
 3. Call `client.ListPlatforms()` → `map[string]*spec.PlatformSpec`.
-4. Call `client.ShowProfile(deviceName)` → `*spec.DeviceProfile` for each
+4. Call `client.ShowProfile(deviceName)` → `*spec.NodeSpec` for each
    device in the topology.
 5. Resolve `VMLabConfig` from `topology.NewtLab` with defaults.
 6. For each device (sorted by name): resolve platform, call `ResolveNodeConfig()`, allocate SSH/console ports.
@@ -1262,7 +1262,7 @@ identifies the package origin.
 | This LLD section | Related document | Relationship |
 |-----------------|-----------------|--------------|
 | §2.1 `PlatformSpec` VM fields | [newtron LLD](../newtron/lld.md) §3.1 | newtlab extends PlatformSpec |
-| §2.3 `DeviceProfile` newtlab fields | [newtron LLD](../newtron/lld.md) §3.1 | newtlab reads profile fields |
+| §2.3 `NodeSpec` newtlab fields | [newtron LLD](../newtron/lld.md) §3.1 | newtlab reads profile fields |
 | §2.4 `TopologySpecFile` | [newtron LLD](../newtron/lld.md) §3.1 | newtlab reads topology |
 | §10.1 `NodeState.SSHPort` | [Device LLD](../newtron/device-lld.md) §1 | newtron reads SSH port from `LabState` via `pkg/newtlab/client/PortResolver` |
 | §4.2 Deploy, §4.3 Destroy | [newtrun LLD](../newtrun/lld.md) §6.1–§6.2 | newtrun wraps `NewLab()` + `Deploy()` / `Destroy()` |

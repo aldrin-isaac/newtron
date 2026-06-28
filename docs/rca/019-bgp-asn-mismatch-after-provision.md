@@ -61,7 +61,7 @@ The `config reload` alternative is **not safe** on SONiC VPP — it breaks VPP s
 
 ## Affected Topologies
 
-Any topology where the device profile's `underlay_asn` differs from the SONiC VPP image's factory-default ASN (65100). This includes the 2node-ngdp and 3node-ngdp topologies which use ASN 65011/65012.
+Any topology where the node spec's `underlay_asn` differs from the SONiC VPP image's factory-default ASN (65100). This includes the 2node-ngdp and 3node-ngdp topologies which use ASN 65011/65012.
 
 ## Related
 

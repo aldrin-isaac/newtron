@@ -88,7 +88,7 @@ type FieldMeta struct {
 	// When predicate matches the live form, this field is a reference to that
 	// entry's RefKind and a UI renders a dropdown of that kind's names. It lets
 	// one field point at different kinds by a sibling's value — scope_instance
-	// references ZoneSpec when scope=zone and DeviceProfile when scope=node.
+	// references ZoneSpec when scope=zone and NodeSpec when scope=node.
 	// Used on type=ref fields in place of the single static RefKind. Evaluated
 	// client-side like RequiredWhen/AppliesWhen; newtron does not evaluate it.
 	RefWhen []RefCondition `json:"ref_when,omitempty"`
@@ -540,7 +540,7 @@ func scopeFields() []FieldMeta {
 			RequiredWhen: notNetwork,
 			RefWhen: []RefCondition{
 				{When: &RequiredWhen{Field: "scope", Equals: ScopeZone}, RefKind: "ZoneSpec"},
-				{When: &RequiredWhen{Field: "scope", Equals: ScopeNode}, RefKind: "DeviceProfile"},
+				{When: &RequiredWhen{Field: "scope", Equals: ScopeNode}, RefKind: "NodeSpec"},
 			},
 		},
 	}
@@ -761,29 +761,29 @@ func humanizeName(name string) string {
 }
 
 var acronyms = map[string]string{
-	"ip":   "IP",
-	"vrf":  "VRF",
-	"asn":  "ASN",
-	"as":   "AS",
-	"bgp":  "BGP",
-	"vpn":  "VPN",
-	"acl":  "ACL",
-	"dscp": "DSCP",
-	"ecn":  "ECN",
-	"vlan": "VLAN",
-	"vni":  "VNI",
-	"mac":  "MAC",
-	"evpn": "EVPN",
-	"id":   "ID",
-	"qos":  "QoS",
-	"irb":  "IRB",
-	"sag":  "SAG",
-	"cidr": "CIDR",
-	"med":  "MED",
-	"cos":  "CoS",
-	"tc":   "TC",
-	"l2":   "L2",
-	"l3":   "L3",
+	"ip":    "IP",
+	"vrf":   "VRF",
+	"asn":   "ASN",
+	"as":    "AS",
+	"bgp":   "BGP",
+	"vpn":   "VPN",
+	"acl":   "ACL",
+	"dscp":  "DSCP",
+	"ecn":   "ECN",
+	"vlan":  "VLAN",
+	"vni":   "VNI",
+	"mac":   "MAC",
+	"evpn":  "EVPN",
+	"id":    "ID",
+	"qos":   "QoS",
+	"irb":   "IRB",
+	"sag":   "SAG",
+	"cidr":  "CIDR",
+	"med":   "MED",
+	"cos":   "CoS",
+	"tc":    "TC",
+	"l2":    "L2",
+	"l3":    "L3",
 	"l2vni": "L2VNI",
 	"l3vni": "L3VNI",
 }

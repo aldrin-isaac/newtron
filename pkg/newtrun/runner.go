@@ -20,15 +20,15 @@ type Runner struct {
 	// holds suite.yaml plus the scenario *.yaml files. The same
 	// concept the HTTP handler (handleStartRun) and ResolveSuiteDir
 	// already call "suite dir"; §13 (Same Concept = Same Name).
-	SuiteDir       string
+	SuiteDir string
 	// NetworksBase is the root under which sibling suites live
 	// (<base>/<topology>/suites/<name>/); required for run-suite step
 	// composition (issue #27) so a step in this suite can invoke a
 	// sibling suite without the parent encoding its sibling's
 	// per-topology location.
 	NetworksBase string
-	ServerURL      string         // newtron-server HTTP address
-	NetworkID      string         // network identifier for server operations
+	ServerURL    string // newtron-server HTTP address
+	NetworkID    string // network identifier for server operations
 	// NewtronClientTLS is the TLS config the runner uses when
 	// constructing its outbound newtron HTTP client at connectToServer
 	// time (auth-design.md L2a). nil keeps the client on plain HTTP —
@@ -64,15 +64,15 @@ type Runner struct {
 	// cached sessions.
 	UserSessions map[string]string
 
-	Client       *client.Client // HTTP client for all SONiC operations
-	NewtlabURL   string         // newtlab-server HTTP address (deploy/destroy/status via HTTP, not in-process)
-	NewtlabClient LabClient    // newtlab HTTP client (satisfied by *pkg/newtlab/client.Client); injected for tests
-	HostConns    map[string]*ssh.Client // host device name → SSH client
-	Progress     ProgressReporter
+	Client        *client.Client         // HTTP client for all SONiC operations
+	NewtlabURL    string                 // newtlab-server HTTP address (deploy/destroy/status via HTTP, not in-process)
+	NewtlabClient LabClient              // newtlab HTTP client (satisfied by *pkg/newtlab/client.Client); injected for tests
+	HostConns     map[string]*ssh.Client // host device name → SSH client
+	Progress      ProgressReporter
 
 	// Populated by connectToServer from the server's registered network.
 	Network string // network name (from server)
-	Dir  string // network directory (from server)
+	Dir     string // network directory (from server)
 
 	// Populated by Run from the loaded suite.yaml. resolvedIterations
 	// is the cross-product of suite-level targets after per-run
@@ -83,9 +83,9 @@ type Runner struct {
 	// per ParameterSpec.Coerce). Both views are derived from the
 	// loaded suite once at Run startup; runScenarioSteps reads them
 	// directly without re-querying the suite per scenario.
-	suite               *Suite
-	resolvedIterations  []map[string]string
-	resolvedParameters  map[string]any
+	suite              *Suite
+	resolvedIterations []map[string]string
+	resolvedParameters map[string]any
 
 	discoveredPlatform string // platform discovered from connected devices
 
@@ -255,7 +255,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
-					Network:    r.Network,
+					Network:     r.Network,
 					Platform:    sc.Platform,
 					Status:      StepStatusError,
 					DeployError: &InfraError{Op: "deploy", Err: deployErr},
@@ -283,7 +283,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
-					Network:    r.Network,
+					Network:     r.Network,
 					Platform:    sc.Platform,
 					Status:      StepStatusError,
 					DeployError: connErr,
@@ -316,7 +316,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 
 		result := &ScenarioResult{
 			Name:     sc.Name,
-			Network: r.Network,
+			Network:  r.Network,
 			Platform: platform,
 		}
 		start := time.Now()
@@ -369,7 +369,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 			if prev, ok := opts.Completed[sc.Name]; ok && prev == StepStatusPassed {
 				result := &ScenarioResult{
 					Name:       sc.Name,
-					Network:   r.Network,
+					Network:    r.Network,
 					Platform:   platform,
 					Status:     StepStatusSkipped,
 					SkipReason: "already passed (resumed)",
@@ -388,7 +388,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := checkRequires(sc, scenarioStatus); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Network:   r.Network,
+				Network:    r.Network,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -403,7 +403,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := r.checkPlatformFeatures(sc, deployedPlatform, platform); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Network:   r.Network,
+				Network:    r.Network,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -423,7 +423,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := r.checkRequiredParams(sc); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Network:   r.Network,
+				Network:    r.Network,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -537,7 +537,7 @@ func (r *Runner) connectToServer() error {
 func (r *Runner) connectDevices() error {
 	r.HostConns = make(map[string]*ssh.Client)
 
-	deviceNames, err := r.Client.TopologyDeviceNames()
+	deviceNames, err := r.Client.TopologyNodeNames()
 	if err != nil || deviceNames == nil {
 		return &InfraError{Op: "connect", Err: fmt.Errorf("no topology.json found")}
 	}
@@ -817,7 +817,7 @@ func (r *Runner) progress(fn func(ProgressReporter)) {
 
 // allDeviceNames returns sorted names of all topology devices (including hosts).
 func (r *Runner) allDeviceNames() []string {
-	names, _ := r.Client.TopologyDeviceNames()
+	names, _ := r.Client.TopologyNodeNames()
 	return names
 }
 
@@ -948,4 +948,3 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 
 	return ""
 }
-

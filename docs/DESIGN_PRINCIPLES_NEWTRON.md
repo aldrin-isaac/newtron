@@ -654,7 +654,7 @@ to succeed.
 
 Seven spec maps — Services, Filters, IPVPNs, MACVPNs, QoSPolicies,
 RoutePolicies, and PrefixLists — are defined in a three-level
-hierarchy: network → zone → node (device profile). **Lower level
+hierarchy: network → zone → node (node spec). **Lower level
 wins.** A service defined at the node level overrides the same-named
 service at the zone level, which overrides the network level.
 
@@ -683,7 +683,7 @@ hypothetical, since the API can add specs at runtime — would be
 invisible to every connected device until the server restarts.
 
 The resolution: spec lookups check the device's merged snapshot first
-(preserving override semantics — device profile wins over zone wins
+(preserving override semantics — node spec wins over zone wins
 over network). On miss, they fall through to the network-level
 definitions. The hierarchy stays intact for overrides; the network
 level stays open for additions:
@@ -787,7 +787,7 @@ spec directory — a set of JSON files describing the network, its
 devices, and its services:
 
 - Infrastructure tools write connectivity details (`ssh_port`,
-  `console_port`, `mgmt_ip`) into device profile files.
+  `console_port`, `mgmt_ip`) into node spec files.
 - newtron reads those profiles and uses them to connect.
 - Orchestrators invoke newtron's API, passing spec references by name.
 
@@ -1690,7 +1690,7 @@ answers that question without introducing an append-only journal or any
 mechanism that grows with time.
 
 The question "what should this device look like?" is always answerable
-from three persistent inputs: specs (on disk), device profile (on disk),
+from three persistent inputs: specs (on disk), node spec (on disk),
 and intent records (in CONFIG_DB). Reconstructing expected state from
 these inputs — by creating an offline Node from specs and intents,
 running the same code paths that provisioning and operations use (§1)

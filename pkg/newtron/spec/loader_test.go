@@ -150,9 +150,9 @@ func TestLoader_LoadProfile(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	profile, err := loader.LoadProfile("leaf1-ny")
+	profile, err := loader.LoadNodeSpec("leaf1-ny")
 	if err != nil {
-		t.Fatalf("LoadProfile() failed: %v", err)
+		t.Fatalf("LoadNodeSpec() failed: %v", err)
 	}
 
 	if profile.MgmtIP != "192.168.1.10" {
@@ -176,19 +176,19 @@ func TestLoader_LoadProfile_Caching(t *testing.T) {
 	}
 
 	// Load twice, should get same pointer (cached)
-	p1, _ := loader.LoadProfile("leaf1-ny")
-	p2, _ := loader.LoadProfile("leaf1-ny")
+	p1, _ := loader.LoadNodeSpec("leaf1-ny")
+	p2, _ := loader.LoadNodeSpec("leaf1-ny")
 
 	if p1 != p2 {
-		t.Error("LoadProfile should return cached profile")
+		t.Error("LoadNodeSpec should return cached profile")
 	}
 }
 
 // TestLoader_LoadProfile_ConcurrentSameKey pins the cache mutex: N goroutines
-// calling LoadProfile for the same key under the race detector must complete
+// calling LoadNodeSpec for the same key under the race detector must complete
 // without "concurrent map read and map write" panics. Pre-mutex this test
 // reliably failed under `go test -race` because the cache write in
-// LoadProfile mutated l.profiles without coordination.
+// LoadNodeSpec mutated l.profiles without coordination.
 func TestLoader_LoadProfile_ConcurrentSameKey(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
@@ -201,13 +201,13 @@ func TestLoader_LoadProfile_ConcurrentSameKey(t *testing.T) {
 	const n = 16
 	var wg sync.WaitGroup
 	wg.Add(n)
-	got := make([]*DeviceProfile, n)
+	got := make([]*NodeSpec, n)
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			p, err := loader.LoadProfile("leaf1-ny")
+			p, err := loader.LoadNodeSpec("leaf1-ny")
 			if err != nil {
-				t.Errorf("goroutine %d: LoadProfile failed: %v", i, err)
+				t.Errorf("goroutine %d: LoadNodeSpec failed: %v", i, err)
 				return
 			}
 			got[i] = p
@@ -246,7 +246,7 @@ func TestLoader_LoadProfile_ConcurrentMixedKeys(t *testing.T) {
 			wg.Add(1)
 			go func(k string) {
 				defer wg.Done()
-				if _, err := loader.LoadProfile(k); err != nil {
+				if _, err := loader.LoadNodeSpec(k); err != nil {
 					// Profile may not exist in fixture; that's fine — we
 					// only care about the absence of races, not that every
 					// key resolves.
@@ -267,9 +267,9 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	_, err := loader.LoadProfile("nonexistent")
+	_, err := loader.LoadNodeSpec("nonexistent")
 	if err == nil {
-		t.Error("LoadProfile() should fail for nonexistent profile")
+		t.Error("LoadNodeSpec() should fail for nonexistent profile")
 	}
 }
 
@@ -349,7 +349,7 @@ func TestLoader_LabOnlyTopology(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// topology.json + a node profile, but deliberately NO network.json.
-	topo := `{"version":"1.0","devices":{"r1":{}},"links":[]}`
+	topo := `{"version":"1.0","nodes":{"r1":{}},"links":[]}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "topology.json"), []byte(topo), 0644); err != nil {
 		t.Fatalf("Failed to write topology.json: %v", err)
 	}
@@ -409,9 +409,9 @@ func TestLoader_LoadProfile_InvalidJSON(t *testing.T) {
 		t.Fatalf("Failed to write bad profile: %v", err)
 	}
 
-	_, err := loader.LoadProfile("bad-profile")
+	_, err := loader.LoadNodeSpec("bad-profile")
 	if err == nil {
-		t.Error("LoadProfile() should fail with invalid JSON")
+		t.Error("LoadNodeSpec() should fail with invalid JSON")
 	}
 }
 
@@ -627,9 +627,9 @@ func TestLoader_ValidateProfileZoneReference(t *testing.T) {
 		t.Fatalf("Failed to write profile: %v", err)
 	}
 
-	_, err := loader.LoadProfile("bad-zone")
+	_, err := loader.LoadNodeSpec("bad-zone")
 	if err == nil {
-		t.Error("LoadProfile() should fail when profile references unknown zone")
+		t.Error("LoadNodeSpec() should fail when profile references unknown zone")
 	}
 }
 
@@ -689,12 +689,12 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 			// Clear cached profile
 			delete(loader.profiles, "test-profile")
 
-			_, err := loader.LoadProfile("test-profile")
+			_, err := loader.LoadNodeSpec("test-profile")
 			if tt.expectErr && err == nil {
-				t.Error("LoadProfile() should fail with validation error")
+				t.Error("LoadNodeSpec() should fail with validation error")
 			}
 			if !tt.expectErr && err != nil {
-				t.Errorf("LoadProfile() unexpected error: %v", err)
+				t.Errorf("LoadNodeSpec() unexpected error: %v", err)
 			}
 		})
 	}

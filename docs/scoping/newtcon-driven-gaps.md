@@ -49,7 +49,7 @@ substrate cluster they touch:
 | `#4` | A. Projection | Free-text preview string + entry count for hypothetical mutations | Before-`Projection` + After-`Projection` + `[]DriftEntry` |
 | `#6` | A. Projection | Per-device intent records, or spec definitions, requiring N-call stitching | Per-Node `[]DriftEntry` slice for the service |
 | `#14` | C. Topology spec | `GET /topology/nodes` returning names only (`[]string`) | Full `TopologySpecFile` (devices + links + metadata) |
-| `#15` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyDevice` directly, via typed `create-node`/`delete-node`/`update-node` |
+| `#15` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyNode` directly, via typed `create-node`/`delete-node`/`update-node` |
 | `#16` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyLink` directly, via typed `create-link`/`delete-link` |
 | `#17` | D. Device reality | N×M stitched per-table-per-key reads, no internal-consistency guarantee | Full `RawConfigDB` snapshot from `GetRawOwnedTables` |
 
@@ -67,7 +67,7 @@ with full per-issue implementation detail.
 |---------|--------|-------------------------------|-----------|
 | **A. Projection substrate** | #4, #5, #6 | `ConfigDB.ExportEntries` + `sonic.DiffConfigDB` + `SnapshotIntentDB`/`RestoreIntentDB` | [`projection-substrate.md`](projection-substrate.md) |
 | **B. ChangeSet substrate** | #11, #12, #19 | `sonic.ConfigChange` + all `WriteResult`-construction sites; #19 extends with `per_write[]` and optional SSE streaming | [`changeset-substrate.md`](changeset-substrate.md) |
-| **C. Topology spec substrate** | #14, #15, #16 | `spec.Loader.SaveTopology` + `spec.TopologySpecFile`/`TopologyDevice`/`TopologyLink` + `validateTopology` | [`topology-spec-substrate.md`](topology-spec-substrate.md) |
+| **C. Topology spec substrate** | #14, #15, #16 | `spec.Loader.SaveTopology` + `spec.TopologySpecFile`/`TopologyNode`/`TopologyLink` + `validateTopology` | [`topology-spec-substrate.md`](topology-spec-substrate.md) |
 | **D. Device-reality substrate** | #17 | `ConfigDBClient.GetRawOwnedTables` (already used internally for every drift detection) | [`device-reality-substrate.md`](device-reality-substrate.md) |
 
 The original five-issue batch (`#4`, `#5`, `#6`, `#11`, `#12`) is
