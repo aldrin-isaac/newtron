@@ -140,8 +140,11 @@ func (net *Network) CreateService(ctx context.Context, req CreateServiceRequest,
 // DeleteService removes a service definition at the given scope (network scope
 // when sel is empty). A network-scope delete is refused while the service is
 // referenced anywhere or still overridden below it; a scoped override delete is
-// always safe (consumers fall back to the network base).
-func (net *Network) DeleteService(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+// always safe (consumers fall back to the network base). It is also refused
+// while the service is still applied on any interface (an apply-service
+// topology step binds it) unless force, which cascade-removes those steps —
+// see guardSpecBindings.
+func (net *Network) DeleteService(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts, force bool) error {
 	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
@@ -152,6 +155,9 @@ func (net *Network) DeleteService(ctx context.Context, sel ScopeSelector, name s
 	}
 	if !opts.Execute {
 		return nil
+	}
+	if err := net.guardSpecBindings(SpecKindService, "ServiceSpec", name, force); err != nil {
+		return err
 	}
 	return net.internal.DeleteService(sel.Scope, sel.ScopeInstance, name)
 }
@@ -214,8 +220,10 @@ func (net *Network) CreateIPVPN(ctx context.Context, req CreateIPVPNRequest, opt
 // DeleteIPVPN removes an IP-VPN definition at the given scope (network scope
 // when sel is empty). A network-scope delete is refused while the IPVPN is
 // referenced anywhere or still overridden below it; a scoped override delete is
-// always safe (consumers fall back to the network base).
-func (net *Network) DeleteIPVPN(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+// always safe (consumers fall back to the network base). It is also refused
+// while still bound on any interface (a bind-ipvpn topology step) unless force —
+// see guardSpecBindings.
+func (net *Network) DeleteIPVPN(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts, force bool) error {
 	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
@@ -226,6 +234,9 @@ func (net *Network) DeleteIPVPN(ctx context.Context, sel ScopeSelector, name str
 	}
 	if !opts.Execute {
 		return nil
+	}
+	if err := net.guardSpecBindings(SpecKindIPVPN, "IPVPNSpec", name, force); err != nil {
+		return err
 	}
 	return net.internal.DeleteIPVPN(sel.Scope, sel.ScopeInstance, name)
 }
@@ -292,8 +303,10 @@ func (net *Network) CreateMACVPN(ctx context.Context, req CreateMACVPNRequest, o
 // DeleteMACVPN removes a MAC-VPN definition at the given scope (network scope
 // when sel is empty). A network-scope delete is refused while the MACVPN is
 // referenced anywhere or still overridden below it; a scoped override delete is
-// always safe (consumers fall back to the network base).
-func (net *Network) DeleteMACVPN(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+// always safe (consumers fall back to the network base). It is also refused
+// while still bound on any interface (a bind-macvpn topology step) unless force —
+// see guardSpecBindings.
+func (net *Network) DeleteMACVPN(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts, force bool) error {
 	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
@@ -304,6 +317,9 @@ func (net *Network) DeleteMACVPN(ctx context.Context, sel ScopeSelector, name st
 	}
 	if !opts.Execute {
 		return nil
+	}
+	if err := net.guardSpecBindings(SpecKindMACVPN, "MACVPNSpec", name, force); err != nil {
+		return err
 	}
 	return net.internal.DeleteMACVPN(sel.Scope, sel.ScopeInstance, name)
 }
@@ -357,8 +373,10 @@ func (net *Network) CreateQoSPolicy(ctx context.Context, req CreateQoSPolicyRequ
 // DeleteQoSPolicy removes a QoS policy at the given scope (network scope
 // when sel is empty). A network-scope delete is refused while the policy is
 // referenced anywhere or still overridden below it; a scoped override delete is
-// always safe (consumers fall back to the network base).
-func (net *Network) DeleteQoSPolicy(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+// always safe (consumers fall back to the network base). It is also refused
+// while still bound on any interface (a bind-qos topology step) unless force —
+// see guardSpecBindings.
+func (net *Network) DeleteQoSPolicy(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts, force bool) error {
 	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
@@ -374,6 +392,9 @@ func (net *Network) DeleteQoSPolicy(ctx context.Context, sel ScopeSelector, name
 	}
 	if !opts.Execute {
 		return nil
+	}
+	if err := net.guardSpecBindings(SpecKindQoS, "QoSPolicy", name, force); err != nil {
+		return err
 	}
 	return net.internal.DeleteQoSPolicy(sel.Scope, sel.ScopeInstance, name)
 }
@@ -543,8 +564,10 @@ func (net *Network) CreateFilter(ctx context.Context, req CreateFilterRequest, o
 // DeleteFilter removes a filter template at the given scope (network scope
 // when sel is empty). A network-scope delete is refused while the filter is
 // referenced anywhere or still overridden below it; a scoped override delete is
-// always safe (consumers fall back to the network base).
-func (net *Network) DeleteFilter(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts) error {
+// always safe (consumers fall back to the network base). It is also refused
+// while still applied on any interface (a create-acl topology step binds it)
+// unless force — see guardSpecBindings.
+func (net *Network) DeleteFilter(ctx context.Context, sel ScopeSelector, name string, opts ExecOpts, force bool) error {
 	if err := validateScopeSelector(sel); err != nil {
 		return err
 	}
@@ -560,6 +583,9 @@ func (net *Network) DeleteFilter(ctx context.Context, sel ScopeSelector, name st
 	}
 	if !opts.Execute {
 		return nil
+	}
+	if err := net.guardSpecBindings(SpecKindFilter, "FilterSpec", name, force); err != nil {
+		return err
 	}
 	return net.internal.DeleteFilter(sel.Scope, sel.ScopeInstance, name)
 }

@@ -1331,12 +1331,27 @@ per-endpoint logic:
   service naming an IP-VPN, filter, QoS policy, route-policy, or prefix-list
   that isn't defined) is rejected with **400** and lists the unresolved
   references. Create dependencies before the specs that reference them.
-- **Delete — reverse check.** A spec may not be deleted while another spec
-  references it. The delete is refused with **409** (`ConflictError`) listing
-  the referrers (e.g. *"PrefixListSpec 'BOGONS' has 2 references: ServiceSpec
-  'EDGE' (import_prefix_list), FilterSpec 'MGMT' (src_prefix_list)"*). Remove
-  the references first; **there is no force-cascade for specs** (newtron will not
-  auto-delete a consuming spec).
+- **Delete — reverse check (spec references).** A spec may not be deleted while
+  another spec references it. The delete is refused with **409** (`ConflictError`)
+  listing the referrers (e.g. *"PrefixListSpec 'BOGONS' has 2 references:
+  ServiceSpec 'EDGE' (import_prefix_list), FilterSpec 'MGMT' (src_prefix_list)"*).
+  Remove the references first; **there is no force-cascade for spec references**
+  (newtron will not auto-delete a consuming spec). `force_available` is **false**.
+
+- **Delete — active-binding check (topology steps).** A `service`, `ipvpn`,
+  `macvpn`, `qos`, or `filter` spec may not be deleted while it is still applied
+  on an interface — i.e. an `apply-service` / `bind-ipvpn` / `bind-macvpn` /
+  `bind-qos` / `create-acl` step in some device's topology references it. This is
+  a distinct dimension from the spec-reference graph above: a service applied on
+  six interfaces may be referenced by no other spec yet still be bound on the
+  wire. The delete is refused with **409** (`ConflictError`) whose `references`
+  enumerate every binding as `device:interface` (e.g.
+  *"ServiceSpec 'TRANSIT' has 2 references: switch1:Ethernet0, switch2:Ethernet0"*).
+  `force_available` is **true**: pass `?force=true` to cascade-remove the binding
+  steps from topology.json as part of the delete. Force removes only the topology
+  record — on a live device the applied CONFIG_DB persists until reconciled, so
+  un-apply on the device first (`remove-service`) to avoid drift. Both checks run
+  on every spec delete; the binding check fires first.
 
   The 409 carries the conflict's **structured shape** in the envelope `data`
   (§46), so clients branch on the payload rather than parsing the message:
@@ -1348,12 +1363,12 @@ per-endpoint logic:
     "error": "PrefixListSpec 'BOGONS' has 2 references: …" }
   ```
 
-  `force_available` is **false** for spec deletes and for existence collisions,
-  and **true** only for the deletes that actually cascade (profile,
-  topology-device) — so a UI offers a "force delete" affordance only when the
-  payload says so. The message string mirrors this: it appends
-  *"— pass force=true to cascade"* only when `force_available` is true. Every
-  `ConflictError`-bearing 409 (spec, profile, zone, topology) uses this one
+  `force_available` is **false** for spec-reference conflicts and existence
+  collisions, and **true** for the deletes that actually cascade (active spec
+  bindings, profile, topology-device) — so a UI offers a "force delete"
+  affordance only when the payload says so. The message string mirrors this: it
+  appends *"— pass force=true to cascade"* only when `force_available` is true.
+  Every `ConflictError`-bearing 409 (spec, profile, zone, topology) uses this one
   shape.
 
 #### Scoped writes (network / zone overrides)
@@ -1488,7 +1503,7 @@ POST /newtron/v1/networks/default/create-service
 
 Delete a service definition.
 
-**Query parameters:** `dry_run`
+**Query parameters:** `dry_run`, `force` (cascade-remove active `apply-service` bindings — see [Referential integrity](#referential-integrity-both-directions-all-kinds))
 
 **Request body:**
 
@@ -1502,7 +1517,7 @@ Delete a service definition.
 {"data": {"status": "deleted"}}
 ```
 
-**Status codes:** 200 success, 404 service not found
+**Status codes:** 200 success, 404 service not found, 409 still applied on interfaces (`ConflictError`; `?force=true` cascades)
 
 #### POST /newtron/v1/networks/{netID}/update-X — full-replacement spec edit (#152)
 
@@ -1620,7 +1635,7 @@ Create a new IP-VPN definition.
 
 Delete an IP-VPN definition.
 
-**Query parameters:** `dry_run`
+**Query parameters:** `dry_run`, `force` (cascade-remove active `bind-ipvpn` bindings)
 
 **Request body:**
 
@@ -1665,7 +1680,7 @@ Create a new MAC-VPN definition.
 
 Delete a MAC-VPN definition.
 
-**Query parameters:** `dry_run`
+**Query parameters:** `dry_run`, `force` (cascade-remove active `bind-macvpn` bindings)
 
 **Request body:**
 
@@ -1704,7 +1719,7 @@ Create a new (empty) QoS policy definition.
 
 Delete a QoS policy definition.
 
-**Query parameters:** `dry_run`
+**Query parameters:** `dry_run`, `force` (cascade-remove active `bind-qos` bindings)
 
 **Request body:**
 
@@ -1816,7 +1831,7 @@ Create a new (empty) filter definition.
 
 Delete a filter definition.
 
-**Query parameters:** `dry_run`
+**Query parameters:** `dry_run`, `force` (cascade-remove active `create-acl` bindings)
 
 **Request body:**
 

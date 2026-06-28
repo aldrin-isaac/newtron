@@ -883,6 +883,51 @@ func TestWriteError_ConflictEnvelope(t *testing.T) {
 	}
 }
 
+// TestDeleteService_ActiveBindingReturns409 pins the end-to-end wire contract
+// the browser UI consumes: POST /delete-service for a service still applied on
+// interfaces (apply-service topology steps) returns 409 with a structured
+// ConflictError whose references enumerate every device:interface binding and
+// whose force_available is true. This is the dimension the spec-reference guard
+// cannot see — the service is referenced nowhere in the spec graph, only bound
+// in topology steps.
+func TestDeleteService_ActiveBindingReturns409(t *testing.T) {
+	specDir := filepath.Join(repoRoot(t), "networks", "2node-vs-service")
+	s := NewServer(Config{})
+	if err := s.RegisterNetwork("svc", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/newtron/v1/networks/svc/delete-service",
+		strings.NewReader(`{"name":"transit"}`))
+	w := httptest.NewRecorder()
+	s.HTTPServer().Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	var resp httputil.APIResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, w.Body.String())
+	}
+	raw, _ := json.Marshal(resp.Data)
+	var got newtron.ConflictError
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode ConflictError from Data: %v", err)
+	}
+	if got.Resource != "ServiceSpec" || got.Name != "transit" {
+		t.Errorf("conflict = %+v, want Resource=ServiceSpec Name=transit", got)
+	}
+	if !got.Force {
+		t.Error("force_available should be true — bindings can be cascade-removed with ?force=true")
+	}
+	want := []string{"switch1:Ethernet0", "switch2:Ethernet0"}
+	if !reflect.DeepEqual(got.References, want) {
+		t.Errorf("references = %v, want %v", got.References, want)
+	}
+}
+
 // TestProjectionDiff_HypotheticalCreateVLAN — newtron#4 (Phase 4). Loads the
 // 1node-vs spec, builds switch1 in topology mode (setup-device baseline),
 // then calls Node.ProjectionDiff with a hypothetical create-vlan op. Asserts

@@ -173,7 +173,7 @@ Examples:
 			return nil
 		}
 
-		return app.client.DeleteQoSPolicy(policyName, execOpts())
+		return app.client.DeleteQoSPolicy(policyName, execOpts(), false)
 	},
 }
 

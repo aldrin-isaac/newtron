@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
@@ -124,14 +123,7 @@ func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts, force bool) e
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	path := c.networkPath() + "/delete-profile" + execQuery(opts)
-	if force {
-		if strings.Contains(path, "?") {
-			path += "&force=true"
-		} else {
-			path += "?force=true"
-		}
-	}
+	path := withForce(c.networkPath()+"/delete-profile"+execQuery(opts), force)
 	return c.doPost(path, body, nil)
 }
 
@@ -429,11 +421,11 @@ func (c *Client) CreateService(req newtron.CreateServiceRequest, opts newtron.Ex
 }
 
 // DeleteService deletes a service spec.
-func (c *Client) DeleteService(name string, opts newtron.ExecOpts) error {
+func (c *Client) DeleteService(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.doPost(c.networkPath()+"/delete-service"+execQuery(opts), body, nil)
+	return c.doPost(withForce(c.networkPath()+"/delete-service"+execQuery(opts), force), body, nil)
 }
 
 // CreateIPVPN creates a new IP-VPN spec.
@@ -442,11 +434,11 @@ func (c *Client) CreateIPVPN(req newtron.CreateIPVPNRequest, opts newtron.ExecOp
 }
 
 // DeleteIPVPN deletes an IP-VPN spec.
-func (c *Client) DeleteIPVPN(name string, opts newtron.ExecOpts) error {
+func (c *Client) DeleteIPVPN(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.doPost(c.networkPath()+"/delete-ipvpn"+execQuery(opts), body, nil)
+	return c.doPost(withForce(c.networkPath()+"/delete-ipvpn"+execQuery(opts), force), body, nil)
 }
 
 // CreateMACVPN creates a new MAC-VPN spec.
@@ -455,11 +447,11 @@ func (c *Client) CreateMACVPN(req newtron.CreateMACVPNRequest, opts newtron.Exec
 }
 
 // DeleteMACVPN deletes a MAC-VPN spec.
-func (c *Client) DeleteMACVPN(name string, opts newtron.ExecOpts) error {
+func (c *Client) DeleteMACVPN(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.doPost(c.networkPath()+"/delete-macvpn"+execQuery(opts), body, nil)
+	return c.doPost(withForce(c.networkPath()+"/delete-macvpn"+execQuery(opts), force), body, nil)
 }
 
 // CreateQoSPolicy creates a new QoS policy spec.
@@ -468,11 +460,11 @@ func (c *Client) CreateQoSPolicy(req newtron.CreateQoSPolicyRequest, opts newtro
 }
 
 // DeleteQoSPolicy deletes a QoS policy spec.
-func (c *Client) DeleteQoSPolicy(name string, opts newtron.ExecOpts) error {
+func (c *Client) DeleteQoSPolicy(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.doPost(c.networkPath()+"/delete-qos-policy"+execQuery(opts), body, nil)
+	return c.doPost(withForce(c.networkPath()+"/delete-qos-policy"+execQuery(opts), force), body, nil)
 }
 
 // AddQoSQueue adds a queue to a QoS policy.
@@ -502,11 +494,11 @@ func (c *Client) CreateFilter(req newtron.CreateFilterRequest, opts newtron.Exec
 }
 
 // DeleteFilter deletes a filter spec.
-func (c *Client) DeleteFilter(name string, opts newtron.ExecOpts) error {
+func (c *Client) DeleteFilter(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.doPost(c.networkPath()+"/delete-filter"+execQuery(opts), body, nil)
+	return c.doPost(withForce(c.networkPath()+"/delete-filter"+execQuery(opts), force), body, nil)
 }
 
 // AddFilterRule adds a rule to a filter.
