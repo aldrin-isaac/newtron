@@ -219,6 +219,65 @@ func TestExtractFields_EmbeddedFlattened(t *testing.T) {
 	}
 }
 
+// fixSchemaExcluded embeds a struct tagged `schema:"-"` — it must be suppressed
+// from the authoring schema (unlike a plain embed, which flattens).
+type fixSchemaExcluded struct {
+	fixSimple `schema:"-"`
+	Extra     string `json:"extra"`
+}
+
+func TestExtractFields_SchemaDashExcludesEmbed(t *testing.T) {
+	got := extractFields(reflect.TypeOf(fixSchemaExcluded{}))
+	if len(got) != 1 || got[0].Name != "extra" {
+		t.Errorf("schema:\"-\" embed not suppressed: got %+v, want [extra] only", got)
+	}
+}
+
+// TestSchema_OverrideMapsExcluded pins the flat-override model on the wire:
+// ZoneSpec/NodeSpec embed OverridableSpecs as the override STORE, but overrides
+// are authored via the flat create-<kind>?scope API — so the authoring schema
+// must not advertise the seven override maps as fields (they'd render as dead
+// "not authorable here" fields). The maps still serialize as JSON storage.
+func TestSchema_OverrideMapsExcluded(t *testing.T) {
+	overrideMaps := []string{"services", "filters", "ipvpns", "macvpns",
+		"qos_policies", "route_policies", "prefix_lists"}
+	has := func(m *SchemaMeta, name string) bool {
+		for i := range m.Fields {
+			if m.Fields[i].Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	for _, kind := range []string{"ZoneSpec", "NodeSpec"} {
+		m := LookupSchema(kind)
+		if m == nil {
+			t.Fatalf("%s: no schema registered", kind)
+		}
+		for _, om := range overrideMaps {
+			if has(m, om) {
+				t.Errorf("%s schema still advertises override map %q (should be authored via create-%s?scope)", kind, om, om)
+			}
+		}
+	}
+	// NodeSpec keeps its own fields, including evpn (a real nested config, not an override map).
+	nm := LookupSchema("NodeSpec")
+	for _, want := range []string{"mgmt_ip", "loopback_ip", "zone", "platform", "evpn"} {
+		if !has(nm, want) {
+			t.Errorf("NodeSpec schema dropped its own field %q", want)
+		}
+	}
+	// ZoneSpec is a pure scope container — only the injected name field remains.
+	zm := LookupSchema("ZoneSpec")
+	if len(zm.Fields) != 1 || zm.Fields[0].Name != "name" {
+		names := make([]string, len(zm.Fields))
+		for i, f := range zm.Fields {
+			names[i] = f.Name
+		}
+		t.Errorf("ZoneSpec fields = %v, want [name] only", names)
+	}
+}
+
 func TestHumanizeName(t *testing.T) {
 	cases := []struct {
 		in, want string
