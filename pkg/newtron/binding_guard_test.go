@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -76,7 +77,7 @@ func TestDeleteService_ForceCascadesBindings(t *testing.T) {
 		t.Fatalf("precondition: transit bindings=%v, want 2", got)
 	}
 
-	if err := net.guardSpecBindings(SpecKindService, "ServiceSpec", "transit", true); err != nil {
+	if err := net.guardSpecBindings(spec.ScopeNetwork, SpecKindService, "ServiceSpec", "transit", true); err != nil {
 		t.Fatalf("force cascade: %v", err)
 	}
 
@@ -98,6 +99,28 @@ func TestDeleteService_ForceCascadesBindings(t *testing.T) {
 	}
 	if got := reload.bindingsFor(SpecKindService, "local-irb"); len(got) != 2 {
 		t.Errorf("after reload: local-irb bindings=%v, want 2", got)
+	}
+}
+
+// TestGuardSpecBindings_ScopeGated — only a network-base delete can orphan a
+// binding. Deleting a zone/node override is free: the network floor (§7)
+// guarantees the base still exists, so every binding still resolves through
+// fall-through. The guard must therefore be a no-op for non-network scopes even
+// when the spec is applied — otherwise it over-blocks override deletes that the
+// internal scope-gated guards correctly allow.
+func TestGuardSpecBindings_ScopeGated(t *testing.T) {
+	net, _ := loadServiceFixture(t)
+	if got := net.bindingsFor(SpecKindService, "transit"); len(got) != 2 {
+		t.Fatalf("precondition: transit applied on 2 interfaces, got %v", got)
+	}
+	for _, scope := range []string{spec.ScopeZone, spec.ScopeNode} {
+		if err := net.guardSpecBindings(scope, SpecKindService, "ServiceSpec", "transit", false); err != nil {
+			t.Errorf("scope %q: guard over-blocked an override delete of an applied spec: %v", scope, err)
+		}
+	}
+	// Network scope still refuses — the guard is scope-gated, not disabled.
+	if err := net.guardSpecBindings(spec.ScopeNetwork, SpecKindService, "ServiceSpec", "transit", false); err == nil {
+		t.Error("network scope: guard failed to refuse deleting an applied service")
 	}
 }
 
