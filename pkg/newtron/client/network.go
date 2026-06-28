@@ -67,8 +67,8 @@ func (c *Client) TopologyNodeNames() ([]string, error) {
 
 // IsHostDevice checks if a device is a virtual host (non-SONiC).
 func (c *Client) IsHostDevice(name string) (bool, error) {
-	var result newtron.HostProfile
-	err := c.doGet(c.networkPath()+"/hosts/"+url.PathEscape(name), &result)
+	var result newtron.HostConnection
+	err := c.doGet(c.networkPath()+"/nodes/"+url.PathEscape(name)+"/host-connection", &result)
 	if err != nil {
 		if se, ok := err.(*ServerError); ok && se.StatusCode == 404 {
 			return false, nil
@@ -78,10 +78,10 @@ func (c *Client) IsHostDevice(name string) (bool, error) {
 	return true, nil
 }
 
-// GetHostProfile returns SSH connection params for a host device.
-func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
-	var result newtron.HostProfile
-	if err := c.doGet(c.networkPath()+"/hosts/"+url.PathEscape(name), &result); err != nil {
+// GetHostConnection returns SSH connection params for a host device.
+func (c *Client) GetHostConnection(name string) (*newtron.HostConnection, error) {
+	var result newtron.HostConnection
+	if err := c.doGet(c.networkPath()+"/nodes/"+url.PathEscape(name)+"/host-connection", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

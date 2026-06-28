@@ -472,19 +472,20 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"deleted": endpoint})
 }
 
-func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHostConnection(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
-	name := r.PathValue("name")
-	// Only return nodeSpecs for actual host devices, not switches.
-	// The client uses 200 vs 404 from this endpoint to classify devices.
+	name := r.PathValue("node")
+	// Host-scoped: a switch reaches its config via the SONiC Redis tunnel (a
+	// Node), not plain SSH. 404 for non-hosts — the client also uses 200 vs 404
+	// here to classify a node as host vs switch.
 	if !ne.net.IsHostDevice(name) {
-		writeError(w, &newtron.NotFoundError{Resource: "host device", Name: name})
+		writeError(w, &newtron.NotFoundError{Resource: "host node", Name: name})
 		return
 	}
-	val, err := ne.net.GetHostProfile(r.Context(), name)
+	val, err := ne.net.GetHostConnection(r.Context(), name)
 	if err != nil {
 		writeError(w, err)
 		return

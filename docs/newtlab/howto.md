@@ -875,7 +875,7 @@ The key field is `"device_type": "host"` — this triggers VM coalescing.
 Host interfaces use Linux naming (`eth0`, `eth1`). The `"type": "host"` marker
 identifies the device for coalescing.
 
-**3. Create host profiles (`nodes/host1.json`):**
+**3. Create host node specs (`nodes/host1.json`):**
 
 ```json
 {

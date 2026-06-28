@@ -1082,7 +1082,7 @@ List/show pairs for all spec types. Response types from §3.9.
 | GET | `/networks/{netID}/nodes/{name}` | `DeviceProfileDetail` |
 | GET | `/networks/{netID}/zones` | `[]ZoneDetail` |
 | GET | `/networks/{netID}/zones/{name}` | `ZoneDetail` |
-| GET | `/networks/{netID}/hosts/{name}` | `HostProfile` |
+| GET | `/networks/{netID}/nodes/{node}/host-connection` | `HostConnection` |
 | GET | `/networks/{netID}/topology` | `TopologySpecFile` (full topology — devices, links, metadata) |
 | GET | `/networks/{netID}/topology/nodes` | `[]string` (device names) |
 | GET | `/networks/{netID}/features` | Feature list |

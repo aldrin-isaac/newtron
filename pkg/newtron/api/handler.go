@@ -70,7 +70,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("PUT /newtron/v1/networks/{netID}/topology/nodes/{name}", s.handleUpdateTopologyNode)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/topology/create-link", s.handleCreateTopologyLink)
 	mux.HandleFunc("DELETE /newtron/v1/networks/{netID}/topology/links/{node}/{interface}", s.handleDeleteTopologyLink)
-	mux.HandleFunc("GET /newtron/v1/networks/{netID}/hosts/{name}", s.handleGetHostProfile)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/host-connection", s.handleHostConnection)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features", s.handleGetAllFeatures)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features/{name}/dependencies", s.handleGetFeatureDependencies)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features/{name}/unsupported-due-to", s.handleGetUnsupportedDueTo)

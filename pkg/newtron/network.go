@@ -306,29 +306,31 @@ func (net *Network) IsHostDevice(name string) bool {
 	return net.internal.IsHostDevice(name)
 }
 
-// GetHostProfile returns connection parameters for a host device.
-// SSH port is runtime state owned by newtlab (§27) — resolved at
-// request time through the configured PortResolver and included in
-// the response so callers (newtrun's host-exec path, CLI) never need
-// to know newtlab exists.
-func (net *Network) GetHostProfile(ctx context.Context, name string) (*HostProfile, error) {
-	p, err := net.internal.GetHostProfile(name)
+// GetHostConnection returns plain-SSH connection parameters for a host node —
+// a projection of the node spec's credentials joined with the runtime SSH port.
+// A host is a node whose platform is a host type (IsHostDevice); unlike a switch,
+// it has no SONiC/Redis, so callers reach it by direct SSH rather than a Node.
+// SSH port is runtime state owned by newtlab (§27) — resolved at request time
+// through the configured PortResolver and included in the response so callers
+// (newtrun's host-exec path, CLI) never need to know newtlab exists.
+func (net *Network) GetHostConnection(ctx context.Context, name string) (*HostConnection, error) {
+	ns, err := net.internal.GetNodeSpec(name)
 	if err != nil {
 		return nil, err
 	}
-	nodeSpec := &HostProfile{
-		MgmtIP:  p.MgmtIP,
-		SSHUser: p.SSHUser,
-		SSHPass: p.SSHPass,
+	conn := &HostConnection{
+		MgmtIP:  ns.MgmtIP,
+		SSHUser: ns.SSHUser,
+		SSHPass: ns.SSHPass,
 	}
 	if resolver := net.internal.PortResolver(); resolver != nil {
 		port, err := resolver.SSHPort(ctx, net.internal.TopologyName(), name)
 		if err != nil {
 			return nil, fmt.Errorf("resolving SSH port for host %q: %w", name, err)
 		}
-		nodeSpec.SSHPort = port
+		conn.SSHPort = port
 	}
-	return nodeSpec, nil
+	return conn, nil
 }
 
 // InitFromDeviceIntent creates a node whose projection is built from the device's

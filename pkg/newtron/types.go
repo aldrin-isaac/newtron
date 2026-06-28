@@ -1248,8 +1248,8 @@ func toPortConfigView(pc *spec.PortConfig) *PortConfig {
 // Host Types
 // ============================================================================
 
-// HostProfile contains SSH connection parameters for a virtual host device.
-type HostProfile struct {
+// HostConnection contains SSH connection parameters for a virtual host device.
+type HostConnection struct {
 	MgmtIP  string `json:"mgmt_ip"`
 	SSHUser string `json:"ssh_user"`
 	SSHPass string `json:"ssh_pass"`

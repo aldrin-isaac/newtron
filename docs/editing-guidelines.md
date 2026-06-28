@@ -243,7 +243,7 @@ When multiple endpoints follow the same pattern (list/show pairs, CRUD families)
 
 **Bad:** Twenty identical sections that each say "List all X" / "Show a single X" with the same path parameter table, the same status codes, the same response shape.
 
-**Good:** One paragraph explaining the list/show contract, one table mapping resource → path → response type, then expanded entries only for endpoints that break the pattern (host profile returns 404 for switches, route-policy returns `[]string` not full objects).
+**Good:** One paragraph explaining the list/show contract, one table mapping resource → path → response type, then expanded entries only for endpoints that break the pattern (host-connection returns 404 for switches, route-policy returns `[]string` not full objects).
 
 The reader who skims a 20-endpoint section learns nothing from any individual entry. The reader who scans a table sees all 20 at once and spots the pattern immediately.
 

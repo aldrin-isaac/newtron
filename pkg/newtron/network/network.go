@@ -1384,11 +1384,6 @@ func (n *Network) IsHostDevice(name string) bool {
 	return platform.IsHost()
 }
 
-// GetHostProfile returns the node spec for a host device.
-func (n *Network) GetHostProfile(name string) (*spec.NodeSpec, error) {
-	return n.loadNodeSpec(name)
-}
-
 // GetNodeSpec returns the node spec for a named device.
 func (n *Network) GetNodeSpec(name string) (*spec.NodeSpec, error) {
 	return n.loadNodeSpec(name)
@@ -1536,7 +1531,7 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 
 	// Host devices have no SONiC — cannot create a Node
 	if n.isHostDeviceLocked(name) {
-		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostProfile() instead", name)
+		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostConnection() instead", name)
 	}
 
 	// Load node spec and create new Device in this Network's context
@@ -1567,7 +1562,7 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 	// Host devices have no SONiC — cannot create a Node
 	if n.IsHostDevice(name) {
-		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostProfile() instead", name)
+		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostConnection() instead", name)
 	}
 
 	nodeSpec, err := n.loadNodeSpec(name)
