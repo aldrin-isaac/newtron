@@ -61,6 +61,12 @@ type networkEntity struct {
 	// the registry directly through this mutex.
 	nodeMu     sync.Mutex
 	nodeActors map[string]*NodeActor
+
+	// wcMu guards writeCtl, the per-network write-control reservation
+	// (request/relinquish/takeover). nil = free. In-memory only — a server
+	// restart clears it, the clean reset for any stale reservation.
+	wcMu     sync.Mutex
+	writeCtl *writeControl
 }
 
 // newNetworkEntity creates a networkEntity for a registered network.
@@ -390,7 +396,6 @@ func (na *NodeActor) connectAndRead(ctx context.Context, fn func(n *newtron.Node
 		return fn(na.node)
 	})
 }
-
 
 // connectAndExecute ensures the correct node mode and runs fn inside Execute
 // (lock → fn → commit → save → unlock). In topology offline mode, Lock/Apply/

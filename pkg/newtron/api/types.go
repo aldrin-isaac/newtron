@@ -331,6 +331,14 @@ func httpStatusFromError(err error) int {
 		return http.StatusConflict
 	}
 
+	// Write-control reservation refusal — a non-holder write, or a request when
+	// another caller holds it. 409 (consistent with the conflict family); the
+	// typed payload distinguishes it for clients.
+	var wcErr *newtron.WriteControlError
+	if errors.As(err, &wcErr) {
+		return http.StatusConflict
+	}
+
 	// auth-design.md L3: permission denials become 403. The
 	// AuthorizationError type wraps the internal auth.PermissionError
 	// so the wire response carries the typed Caller/Permission/

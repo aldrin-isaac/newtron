@@ -552,3 +552,12 @@ func (net *Network) checkPermissionIfConfigured(ctx context.Context, perm auth.P
 	}
 	return net.checkPermission(ctx, perm, authCtx)
 }
+
+// Authorize gates an action not tied to a spec/Node method — today the
+// write-control reservation (control.request / control.takeover) checked from
+// the API layer. It defers to the same configured-permission logic as every
+// spec mutation: a no-op when authorization is disabled or no grant exists for
+// the permission, an auth.PermissionError (→ 403) otherwise.
+func (net *Network) Authorize(ctx context.Context, perm auth.Permission, authCtx *auth.Context) error {
+	return net.checkPermissionIfConfigured(ctx, perm, authCtx)
+}

@@ -122,6 +122,28 @@ func (e *ValidationError) Error() string {
 // from other entities (see DESIGN_PRINCIPLES §15 — cascade is explicit).
 type ConflictError = util.ConflictError
 
+// WriteControlError is returned (→ HTTP 409) when a network's write-control
+// reservation refuses a request: a mutating write attempted by a caller who is
+// not the current holder, or a control request when another caller holds it.
+// Holder is "" when enforcement is on but nobody holds control (a write must
+// request control first). The structured fields let a client render "alice holds
+// write control since 14:02 (last active 14:47) — relinquish, take over, or wait"
+// without parsing the message.
+type WriteControlError struct {
+	Network    string    `json:"network"`
+	Holder     string    `json:"holder"`
+	Since      time.Time `json:"since"`
+	LastActive time.Time `json:"last_active"`
+}
+
+func (e *WriteControlError) Error() string {
+	if e.Holder == "" {
+		return fmt.Sprintf("network %q enforces write control but nobody holds it — request control first", e.Network)
+	}
+	return fmt.Sprintf("write control of network %q is held by %q since %s (last active %s)",
+		e.Network, e.Holder, e.Since.Format(time.RFC3339), e.LastActive.Format(time.RFC3339))
+}
+
 // VerificationFailedError indicates post-apply verification failed.
 //
 // Result carries the typed WriteResult — including DeviceOps, Verification.Errors

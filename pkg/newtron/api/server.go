@@ -84,6 +84,11 @@ type Server struct {
 	// path. false → checkPermission stays inert; pre-L3 behavior.
 	enforceAuthorization bool
 
+	// enforceWriteControl gates executing network mutations on the per-network
+	// write-control reservation. false → reservation endpoints work but
+	// enforcement is a no-op.
+	enforceWriteControl bool
+
 	// watcher is the auth-design.md L6 revocation watcher. nil when
 	// cfg.SpecWatch is false. When set, RegisterNetwork adds the
 	// network dir; UnregisterNetwork removes it; on settled spec-file
@@ -179,6 +184,15 @@ type Config struct {
 	// cmd/newt-server.
 	EnforceAuthorization bool
 
+	// EnforceWriteControl gates every executing network mutation on the
+	// per-network write-control reservation: a caller must hold control (via
+	// POST .../control/request) before any write, else 409. Default-closed when
+	// on — a write with no holder is refused. When false (default) the
+	// reservation endpoints still work but enforcement is a no-op, so existing
+	// clients/scripts that don't claim are unchanged. Composed in from
+	// --enforce-write-control on cmd/newt-server.
+	EnforceWriteControl bool
+
 	// SpecWatch enables the auth-design.md L6 revocation watcher.
 	// When true, the server installs an fsnotify-backed watcher
 	// on every RegisterNetwork's specDir; on settled file changes
@@ -222,6 +236,7 @@ func NewServer(cfg Config) *Server {
 		platforms:            cfg.Platforms,
 		auditLogPath:         cfg.AuditLogPath,
 		enforceAuthorization: cfg.EnforceAuthorization,
+		enforceWriteControl:  cfg.EnforceWriteControl,
 	}
 	if cfg.SpecWatch {
 		w, err := netpkg.NewSpecWatcher(logger, 0, func(id string) error {
