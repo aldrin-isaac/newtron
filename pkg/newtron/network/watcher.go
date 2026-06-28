@@ -77,7 +77,7 @@ func NewSpecWatcher(logger *log.Logger, debounce time.Duration, reload ReloadFun
 }
 
 // Add begins watching specDir for the given networkID. The watcher
-// monitors the directory itself plus the profiles/ subdirectory if
+// monitors the directory itself plus the nodeSpecs/ subdirectory if
 // present (where NodeSpec JSON files live; deletes there are
 // part of revocation in the same way as grant edits to network.json).
 //
@@ -97,12 +97,12 @@ func (w *SpecWatcher) Add(specDir, networkID string) error {
 	if err := w.fsw.Add(abs); err != nil {
 		return err
 	}
-	profilesDir := filepath.Join(abs, "nodes")
-	if err := w.fsw.Add(profilesDir); err != nil {
-		// Profile dir is optional — log and continue. A network dir
-		// without profiles/ is valid (every node-spec JSON
+	nodesDir := filepath.Join(abs, "nodes")
+	if err := w.fsw.Add(nodesDir); err != nil {
+		// NodeSpec dir is optional — log and continue. A network dir
+		// without nodeSpecs/ is valid (every node-spec JSON
 		// lives directly in specDir in some operator layouts).
-		w.logger.Printf("spec-watcher: skip nodes subdir %s: %v", profilesDir, err)
+		w.logger.Printf("spec-watcher: skip nodes subdir %s: %v", nodesDir, err)
 	}
 	w.paths[abs] = networkID
 	return nil
@@ -182,7 +182,7 @@ func (w *SpecWatcher) loop(ctx context.Context) {
 }
 
 // handle routes one fsnotify event to the watched path it belongs
-// to. Events on the watched directory itself, on the profiles/
+// to. Events on the watched directory itself, on the nodeSpecs/
 // subdirectory, and on files inside either all map to the same
 // reload — the operator either edited the grant table or rotated
 // a node spec, and both reasons mean "re-read the network dir".
@@ -199,7 +199,7 @@ func (w *SpecWatcher) handle(event fsnotify.Event) {
 	defer w.mu.Unlock()
 	for path, networkID := range w.paths {
 		// Event fires on the watched dir itself OR a subdirectory
-		// of it (profiles/, etc.). Match by prefix to cover both.
+		// of it (nodeSpecs/, etc.). Match by prefix to cover both.
 		if dir == path || filepath.Dir(dir) == path {
 			w.scheduleReload(path, networkID)
 			return

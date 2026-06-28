@@ -145,7 +145,7 @@ func TestWhereMatches_FieldDimension(t *testing.T) {
 		iam        bool
 	}{
 		{"services", true, false},
-		{"profiles", true, false},
+		{"nodeSpecs", true, false},
 		{"topology", true, false},
 		{"permissions", false, true},
 		{"user_groups", false, true},

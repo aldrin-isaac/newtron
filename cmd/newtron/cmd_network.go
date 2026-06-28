@@ -140,8 +140,8 @@ Examples:
 
 var networkHostCmd = &cobra.Command{
 	Use:   "host <name>",
-	Short: "Show host profile",
-	Long: `Show the SSH connection profile for a host device (non-SONiC VM).
+	Short: "Show host nodeSpec",
+	Long: `Show the SSH connection node spec for a host device (non-SONiC VM).
 
 Host devices are virtual machines defined in the topology that are not
 SONiC switches (e.g., traffic generators, test endpoints).
@@ -151,19 +151,19 @@ Examples:
   newtron network host host1 --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		profile, err := app.client.GetHostProfile(args[0])
+		nodeSpec, err := app.client.GetHostProfile(args[0])
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(profile)
+			return json.NewEncoder(os.Stdout).Encode(nodeSpec)
 		}
 
 		fmt.Printf("Host: %s\n", bold(args[0]))
-		fmt.Printf("Management IP: %s\n", profile.MgmtIP)
-		fmt.Printf("SSH User: %s\n", profile.SSHUser)
-		fmt.Printf("SSH Port: %d\n", profile.SSHPort)
+		fmt.Printf("Management IP: %s\n", nodeSpec.MgmtIP)
+		fmt.Printf("SSH User: %s\n", nodeSpec.SSHUser)
+		fmt.Printf("SSH Port: %d\n", nodeSpec.SSHPort)
 		return nil
 	},
 }

@@ -347,7 +347,6 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	return result, nil
 }
 
-
 // ============================================================================
 // Execute (one-shot pattern)
 // ============================================================================
@@ -405,7 +404,6 @@ func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.C
 
 	return result, nil
 }
-
 
 // ============================================================================
 // Device-level write ops — VLAN
@@ -792,9 +790,9 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 // Device-level read ops (no changeset, delegation only)
 // ============================================================================
 
-// DeviceInfo returns structured device info from the internal node's profile.
+// DeviceInfo returns structured device info from the internal node's nodeSpec.
 func (n *Node) DeviceInfo() (*DeviceInfo, error) {
-	p := n.internal.Profile()
+	p := n.internal.NodeSpec()
 	return &DeviceInfo{
 		Name:             n.internal.Name(),
 		MgmtIP:           p.MgmtIP,
@@ -1380,4 +1378,3 @@ func (n *Node) ShowInterfaceDetail(name string) (*InterfaceDetail, error) {
 		VLANMembers: intf.VLANMembers(),
 	}, nil
 }
-

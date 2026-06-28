@@ -88,7 +88,7 @@ func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
 }
 
 // ============================================================================
-// Profiles
+// NodeSpecs
 // ============================================================================
 
 // ListNodeSpecs returns all node spec names.
@@ -116,7 +116,7 @@ func (c *Client) CreateNodeSpec(req newtron.CreateNodeSpecRequest, opts newtron.
 }
 
 // DeleteNodeSpec deletes a node spec. force=true cascade-deletes any
-// topology device that references this profile (which itself cascade-deletes
+// topology device that references this nodeSpec (which itself cascade-deletes
 // any links wired to that device). Without force, the server returns a
 // *ConflictError listing the referring topology devices.
 func (c *Client) DeleteNodeSpec(name string, opts newtron.ExecOpts, force bool) error {

@@ -68,10 +68,10 @@ func TestExtractChanges(t *testing.T) {
 
 	// Shapes that must degrade to nil, never error.
 	for name, in := range map[string][]byte{
-		"empty":            nil,
+		"empty":              nil,
 		"spec-op-no-changes": []byte(`{"data":{"name":"transit","created":true}}`),
-		"error-envelope":   []byte(`{"error":"boom"}`),
-		"not-json":         []byte(`<html>500</html>`),
+		"error-envelope":     []byte(`{"error":"boom"}`),
+		"not-json":           []byte(`<html>500</html>`),
 	} {
 		if got := extractChanges(in); got != nil {
 			t.Errorf("%s: extractChanges = %+v; want nil", name, got)
@@ -87,7 +87,7 @@ func TestRedactRequestBody(t *testing.T) {
 	in := []byte(`{
 		"username": "alice",
 		"ssh_pass": "hunter2",
-		"profile": {"password": "nested-secret", "token": "${secret:API_TOKEN}"},
+		"nodeSpec": {"password": "nested-secret", "token": "${secret:API_TOKEN}"},
 		"peers": [{"secret": "leaf-psk"}]
 	}`)
 
@@ -103,12 +103,12 @@ func TestRedactRequestBody(t *testing.T) {
 	if got["ssh_pass"] != redactedPlaceholder {
 		t.Errorf("ssh_pass = %v; want redacted", got["ssh_pass"])
 	}
-	profile := got["profile"].(map[string]any)
-	if profile["password"] != redactedPlaceholder {
-		t.Errorf("nested password = %v; want redacted", profile["password"])
+	nodeSpec := got["nodeSpec"].(map[string]any)
+	if nodeSpec["password"] != redactedPlaceholder {
+		t.Errorf("nested password = %v; want redacted", nodeSpec["password"])
 	}
-	if profile["token"] != "${secret:API_TOKEN}" {
-		t.Errorf("token = %v; want preserved ${secret:…} reference", profile["token"])
+	if nodeSpec["token"] != "${secret:API_TOKEN}" {
+		t.Errorf("token = %v; want preserved ${secret:…} reference", nodeSpec["token"])
 	}
 	peer := got["peers"].([]any)[0].(map[string]any)
 	if peer["secret"] != redactedPlaceholder {

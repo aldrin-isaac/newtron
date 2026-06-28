@@ -9,7 +9,7 @@ import (
 )
 
 // ============================================================================
-// Profiles
+// NodeSpecs
 // ============================================================================
 
 // ListNodeSpecs returns the names of all nodes.
@@ -33,7 +33,7 @@ func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		return &ValidationError{Field: "zone", Message: "required"}
 	}
 	if _, err := net.internal.GetNodeSpec(req.Name); err == nil {
-		return fmt.Errorf("profile '%s' already exists", req.Name)
+		return fmt.Errorf("node spec '%s' already exists", req.Name)
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("nodes").WithResource(req.Name)); err != nil {
@@ -43,7 +43,7 @@ func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 	if !opts.Execute {
 		return nil
 	}
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		MgmtIP:      req.MgmtIP,
 		LoopbackIP:  req.LoopbackIP,
 		Zone:        req.Zone,
@@ -54,17 +54,17 @@ func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		SSHPass:     req.SSHPass,
 	}
 	if req.EVPN != nil {
-		profile.EVPN = &spec.EVPNConfig{
+		nodeSpec.EVPN = &spec.EVPNConfig{
 			Peers:          req.EVPN.Peers,
 			RouteReflector: req.EVPN.RouteReflector,
 			ClusterID:      req.EVPN.ClusterID,
 		}
 	}
-	return net.internal.CreateNodeSpec(req.Name, profile)
+	return net.internal.CreateNodeSpec(req.Name, nodeSpec)
 }
 
 // DeleteNodeSpec removes a node spec. force=true cascade-deletes any
-// topology device that references this profile (which itself cascade-deletes
+// topology device that references this nodeSpec (which itself cascade-deletes
 // any links wired to that device). Without force, the call returns a
 // *ConflictError listing the referring topology devices.
 func (net *Network) DeleteNodeSpec(ctx context.Context, name string, opts ExecOpts, force bool) error {
@@ -137,11 +137,11 @@ func (net *Network) DeleteZone(ctx context.Context, name string, opts ExecOpts) 
 }
 
 // ============================================================================
-// Update — full-replacement profile/zone mutation (#152)
+// Update — full-replacement nodeSpec/zone mutation (#152)
 // ============================================================================
 
 // UpdateNodeSpec replaces an existing node spec. Returns
-// *NotFoundError → HTTP 404 when no profile with that name exists.
+// *NotFoundError → HTTP 404 when no nodeSpec with that name exists.
 // Same Field + Resource (and same `spec.author` gate) as
 // CreateNodeSpec / DeleteNodeSpec.
 func (net *Network) UpdateNodeSpec(ctx context.Context, req CreateNodeSpecRequest, opts ExecOpts) error {
@@ -159,7 +159,7 @@ func (net *Network) UpdateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 	if !opts.Execute {
 		return nil
 	}
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		MgmtIP:      req.MgmtIP,
 		LoopbackIP:  req.LoopbackIP,
 		Zone:        req.Zone,
@@ -170,13 +170,13 @@ func (net *Network) UpdateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		SSHPass:     req.SSHPass,
 	}
 	if req.EVPN != nil {
-		profile.EVPN = &spec.EVPNConfig{
+		nodeSpec.EVPN = &spec.EVPNConfig{
 			Peers:          req.EVPN.Peers,
 			RouteReflector: req.EVPN.RouteReflector,
 			ClusterID:      req.EVPN.ClusterID,
 		}
 	}
-	return translateInternalError(net.internal.UpdateNodeSpec(req.Name, profile))
+	return translateInternalError(net.internal.UpdateNodeSpec(req.Name, nodeSpec))
 }
 
 // UpdateZone replaces an existing zone. ZoneSpec carries only

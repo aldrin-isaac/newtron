@@ -247,7 +247,7 @@ func parseModeSpeed(mode string) (canonical string, rateMbps int, ok bool) {
 // deriveHeadlineSpeed returns the highest-rate 1xN mode across
 // every interface's breakout_modes map. This is the "speed each
 // port runs at without a breakout split" — the headline number an
-// operator authoring a profile cares about. For a platform whose
+// operator authoring a nodeSpec cares about. For a platform whose
 // breakout_modes map advertises 1x100G + 4x25G[10G], the headline
 // is 100G; the breakouts are the splits.
 //

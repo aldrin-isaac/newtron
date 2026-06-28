@@ -15,8 +15,8 @@ import (
 
 // SetupDeviceOpts holds the configuration for SetupDevice.
 type SetupDeviceOpts struct {
-	Fields   map[string]string  // device metadata fields (hostname, bgp_asn, etc.)
-	SourceIP string             // VTEP source IP (optional; empty = skip VTEP setup)
+	Fields   map[string]string   // device metadata fields (hostname, bgp_asn, etc.)
+	SourceIP string              // VTEP source IP (optional; empty = skip VTEP setup)
 	RR       *RouteReflectorOpts // route reflector config (optional; nil = skip)
 }
 
@@ -37,7 +37,7 @@ func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) (*ChangeSe
 	// Intent record — captures the input params for reconstruction.
 	//
 	// These metadata fields (bgp_asn, hwsku, hostname, type) are
-	// profile/platform-resolved, so the round-trip-completeness rule would
+	// nodeSpec/platform-resolved, so the round-trip-completeness rule would
 	// normally say "don't freeze them — re-resolve at replay." setup-device
 	// freezes them on purpose, and this is NOT a violation to "fix":
 	//
@@ -53,9 +53,9 @@ func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) (*ChangeSe
 	//     by construction.
 	//
 	// So the freeze can't usefully drift: while a frozen value disagrees with
-	// the profile, the frozen value is the correct record of what's actuated,
+	// the nodeSpec, the frozen value is the correct record of what's actuated,
 	// and closing the gap IS the re-provision that refreshes it. Re-resolving
-	// here would buy nothing and would make replay depend on the profile
+	// here would buy nothing and would make replay depend on the nodeSpec
 	// staying resolvable (the orphan fragility §20 avoids).
 	intentParams := make(map[string]string)
 	for k, v := range opts.Fields {
@@ -158,7 +158,7 @@ func serializeRROpts(params map[string]string, rr *RouteReflectorOpts) {
 // ============================================================================
 
 // ConfigureLoopback creates the Loopback0 interface with the device's loopback IP.
-// Reads the IP from the resolved profile — no vars indirection needed.
+// Reads the IP from the resolved nodeSpec — no vars indirection needed.
 func (n *Node) ConfigureLoopback(ctx context.Context) (*ChangeSet, error) {
 	if err := n.precondition("configure-loopback", "loopback").Result(); err != nil {
 		return nil, err

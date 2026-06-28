@@ -67,7 +67,7 @@ func (n *Node) BGPNeighborExists(neighborIP string) bool {
 
 // ConfigureBGP writes the BGP_GLOBALS, BGP_GLOBALS_AF, and ROUTE_REDISTRIBUTE
 // entries needed to bring up a BGP instance. Values are read entirely from the
-// node's resolved profile — no YAML params needed.
+// node's resolved nodeSpec — no YAML params needed.
 //
 // This is a lightweight primitive that only sets up the BGP instance itself,
 // without adding any peers. Use bgp-add-peer / setup-evpn for peers.
@@ -285,7 +285,7 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 // ============================================================================
 
 // ConfigureBGPOverlay sets up the BGP EVPN control plane: l2vpn_evpn address-family,
-// EVPN peer group, and overlay BGP neighbors from the resolved profile.
+// EVPN peer group, and overlay BGP neighbors from the resolved nodeSpec.
 // Called by SetupDevice after SetupVXLAN to separate data-plane (VXLAN) from
 // control-plane (BGP EVPN) concerns.
 func (n *Node) ConfigureBGPOverlay(ctx context.Context, sourceIP string) (*ChangeSet, error) {
@@ -298,7 +298,7 @@ func (n *Node) ConfigureBGPOverlay(ctx context.Context, sourceIP string) (*Chang
 		sourceIP = resolved.VTEPSourceIP
 	}
 	if sourceIP == "" {
-		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in profile)")
+		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in the node spec)")
 	}
 
 	cs := NewChangeSet(n.name, "device.configure-bgp-overlay")
@@ -331,7 +331,7 @@ func (n *Node) ConfigureBGPOverlay(ctx context.Context, sourceIP string) (*Chang
 	// SetupDevice guards cross-execution idempotency via GetIntent("device").
 	cs.Adds(CreateEVPNPeerGroupConfig("default", resolved.LoopbackIP, isEBGP))
 
-	// Add overlay peers from profile
+	// Add overlay peers from nodeSpec
 	for _, rrIP := range resolved.BGPNeighbors {
 		if rrIP == resolved.LoopbackIP {
 			continue

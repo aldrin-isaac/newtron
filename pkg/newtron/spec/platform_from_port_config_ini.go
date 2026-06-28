@@ -211,7 +211,7 @@ func readDataRows(data []byte) [][]string {
 // converted from SONiC's Kbps wire form to the canonical PlatformSpec
 // form (e.g. `400000` → `400G`). Ties on the dominant value resolve
 // to the higher speed — picking the higher rate on a tie produces
-// the "headline" answer an operator authoring a profile cares about.
+// the "headline" answer an operator authoring a nodeSpec cares about.
 //
 // Rows whose speedCol position is beyond the row's token count
 // are skipped (the operator's port_config.ini may include a row

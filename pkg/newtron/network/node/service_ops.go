@@ -165,7 +165,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	canBridge := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
 		svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
 
-	// Resolve profile early — needed for BGP prerequisite and entry generation.
+	// Resolve nodeSpec early — needed for BGP prerequisite and entry generation.
 	resolved := n.Resolved()
 
 	// BGP prerequisite: check if BGP_GLOBALS is needed for the default VRF.

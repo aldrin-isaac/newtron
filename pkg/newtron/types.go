@@ -595,7 +595,7 @@ type FilterRuleEntry struct {
 }
 
 // ============================================================================
-// Profile and Zone Detail Types
+// NodeSpec and Zone Detail Types
 // ============================================================================
 
 // RouteReflectorPeer describes a BGP peer for route reflector configuration.
@@ -664,7 +664,7 @@ type CreateNodeSpecRequest struct {
 	EVPN        *CreateEVPNConfigRequest `json:"evpn,omitempty"`
 }
 
-// CreateEVPNConfigRequest defines EVPN peering for profile creation.
+// CreateEVPNConfigRequest defines EVPN peering for nodeSpec creation.
 type CreateEVPNConfigRequest struct {
 	Peers          []string `json:"peers,omitempty"`
 	RouteReflector bool     `json:"route_reflector,omitempty"`

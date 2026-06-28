@@ -17,7 +17,7 @@ var Dir = "/etc/newtron"
 // Loader handles loading and validating specification files.
 //
 // All post-Load() access to the mutable in-memory state — the lazy-loaded
-// profile cache, and the network / topology / platforms pointers that get
+// nodeSpec cache, and the network / topology / platforms pointers that get
 // reassigned by SaveNetwork / SaveTopology / SavePlatforms — is guarded
 // by mu. (Pre-#173, platforms was documented as read-only; the platform
 // CRUD endpoints retired that invariant.)
@@ -25,19 +25,19 @@ type Loader struct {
 	specDir string
 	// platforms is a read-only view of the global platforms registry,
 	// injected at construction. Used only by validateNodeSpec to apply
-	// the relaxed-validation path on host-type profiles. Nil is safe
+	// the relaxed-validation path on host-type nodeSpecs. Nil is safe
 	// (every platform is treated as non-host).
 	platforms map[string]*PlatformSpec
 
-	mu       sync.RWMutex
-	network  *NetworkSpecFile
-	topology *TopologySpecFile // nil if topology.json doesn't exist
-	profiles map[string]*NodeSpec
+	mu        sync.RWMutex
+	network   *NetworkSpecFile
+	topology  *TopologySpecFile // nil if topology.json doesn't exist
+	nodeSpecs map[string]*NodeSpec
 }
 
 // NewLoader creates a new specification loader. platforms is the
 // global registry that newt-server loaded from --platforms-base —
-// pass nil if no platforms are known (tests, profile-only fixtures).
+// pass nil if no platforms are known (tests, nodeSpec-only fixtures).
 func NewLoader(specDir string, platforms map[string]*PlatformSpec) *Loader {
 	if specDir == "" {
 		specDir = Dir
@@ -45,7 +45,7 @@ func NewLoader(specDir string, platforms map[string]*PlatformSpec) *Loader {
 	return &Loader{
 		specDir:   specDir,
 		platforms: platforms,
-		profiles:  make(map[string]*NodeSpec),
+		nodeSpecs: make(map[string]*NodeSpec),
 	}
 }
 
@@ -101,13 +101,13 @@ func (l *Loader) Load() error {
 // but only one wins the cache slot; later callers see the cached value.
 func (l *Loader) LoadNodeSpec(deviceName string) (*NodeSpec, error) {
 	l.mu.RLock()
-	if profile, ok := l.profiles[deviceName]; ok {
+	if nodeSpec, ok := l.nodeSpecs[deviceName]; ok {
 		l.mu.RUnlock()
-		return profile, nil
+		return nodeSpec, nil
 	}
 	l.mu.RUnlock()
 
-	profile, err := l.readNodeSpecFromDisk(deviceName)
+	nodeSpec, err := l.readNodeSpecFromDisk(deviceName)
 	if err != nil {
 		return nil, err
 	}
@@ -117,36 +117,36 @@ func (l *Loader) LoadNodeSpec(deviceName string) (*NodeSpec, error) {
 	// re-publish a new pointer that callers already hold a reference to.
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if existing, ok := l.profiles[deviceName]; ok {
+	if existing, ok := l.nodeSpecs[deviceName]; ok {
 		return existing, nil
 	}
-	l.profiles[deviceName] = profile
-	return profile, nil
+	l.nodeSpecs[deviceName] = nodeSpec
+	return nodeSpec, nil
 }
 
-// readNodeSpecFromDisk reads, parses, normalizes, and validates a profile from
+// readNodeSpecFromDisk reads, parses, normalizes, and validates a nodeSpec from
 // nodes/<name>.json. It does NOT consult or update the cache, acquire the lock,
-// or resolve secrets — the returned profile carries its ${secret:...} references
+// or resolve secrets — the returned nodeSpec carries its ${secret:...} references
 // verbatim, so it is safe to mutate and persist without leaking resolved values.
 func (l *Loader) readNodeSpecFromDisk(name string) (*NodeSpec, error) {
 	path := filepath.Join(l.specDir, "nodes", name+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading profile %s: %w", name, err)
+		return nil, fmt.Errorf("reading node spec %s: %w", name, err)
 	}
 
-	var profile NodeSpec
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return nil, fmt.Errorf("parsing profile %s: %w", name, err)
+	var nodeSpec NodeSpec
+	if err := json.Unmarshal(data, &nodeSpec); err != nil {
+		return nil, fmt.Errorf("parsing node spec %s: %w", name, err)
 	}
 
 	// Normalize name keys and name-reference fields at load time.
-	normalizeOverridableSpecs(&profile.OverridableSpecs)
+	normalizeOverridableSpecs(&nodeSpec.OverridableSpecs)
 
-	if err := l.validateNodeSpec(&profile); err != nil {
-		return nil, fmt.Errorf("validating profile %s: %w", name, err)
+	if err := l.validateNodeSpec(&nodeSpec); err != nil {
+		return nil, fmt.Errorf("validating node spec %s: %w", name, err)
 	}
-	return &profile, nil
+	return &nodeSpec, nil
 }
 
 func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
@@ -156,7 +156,7 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 		if os.IsNotExist(err) {
 			// network.json is optional — symmetric with topology.json. A
 			// directory with only a topology.json is a lab-only network:
-			// newtlab deploys the VMs from the topology, node profiles, and
+			// newtlab deploys the VMs from the topology, node nodeSpecs, and
 			// global platforms, while an external system owns device config
 			// (e.g. the vJunos topologies configured by netconf.pl). No
 			// services, VPNs, or zones are defined, so the projection starts
@@ -347,35 +347,35 @@ func (l *Loader) isHostPlatform(platformName string) bool {
 	return platform.IsHost()
 }
 
-func (l *Loader) validateNodeSpec(profile *NodeSpec) error {
+func (l *Loader) validateNodeSpec(nodeSpec *NodeSpec) error {
 	v := &util.ValidationBuilder{}
 
 	// Host devices have relaxed validation — only mgmt_ip is required
-	if l.isHostPlatform(profile.Platform) {
-		v.Add(profile.MgmtIP != "", "mgmt_ip is required")
-		if profile.MgmtIP != "" && !util.IsValidIPv4(profile.MgmtIP) {
-			v.AddErrorf("invalid management IP: %s", profile.MgmtIP)
+	if l.isHostPlatform(nodeSpec.Platform) {
+		v.Add(nodeSpec.MgmtIP != "", "mgmt_ip is required")
+		if nodeSpec.MgmtIP != "" && !util.IsValidIPv4(nodeSpec.MgmtIP) {
+			v.AddErrorf("invalid management IP: %s", nodeSpec.MgmtIP)
 		}
 		return v.Build()
 	}
 
 	// Required fields for switch devices
-	v.Add(profile.MgmtIP != "", "mgmt_ip is required")
-	v.Add(profile.LoopbackIP != "", "loopback_ip is required")
-	v.Add(profile.Zone != "", "zone is required")
+	v.Add(nodeSpec.MgmtIP != "", "mgmt_ip is required")
+	v.Add(nodeSpec.LoopbackIP != "", "loopback_ip is required")
+	v.Add(nodeSpec.Zone != "", "zone is required")
 
 	// Validate IP addresses
-	if profile.MgmtIP != "" && !util.IsValidIPv4(profile.MgmtIP) {
-		v.AddErrorf("invalid management IP: %s", profile.MgmtIP)
+	if nodeSpec.MgmtIP != "" && !util.IsValidIPv4(nodeSpec.MgmtIP) {
+		v.AddErrorf("invalid management IP: %s", nodeSpec.MgmtIP)
 	}
-	if profile.LoopbackIP != "" && !util.IsValidIPv4(profile.LoopbackIP) {
-		v.AddErrorf("invalid loopback IP: %s", profile.LoopbackIP)
+	if nodeSpec.LoopbackIP != "" && !util.IsValidIPv4(nodeSpec.LoopbackIP) {
+		v.AddErrorf("invalid loopback IP: %s", nodeSpec.LoopbackIP)
 	}
 
 	// Validate zone exists in network.json
-	if profile.Zone != "" {
-		if _, ok := l.network.Zones[profile.Zone]; !ok {
-			v.AddErrorf("unknown zone: %s", profile.Zone)
+	if nodeSpec.Zone != "" {
+		if _, ok := l.network.Zones[nodeSpec.Zone]; !ok {
+			v.AddErrorf("unknown zone: %s", nodeSpec.Zone)
 		}
 	}
 
@@ -398,10 +398,10 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 	return l.topology
 }
 
-// ListNodeSpecs returns the names of all profile files in the nodes directory.
+// ListNodeSpecs returns the names of all nodeSpec files in the nodes directory.
 func (l *Loader) ListNodeSpecs() []string {
-	profileDir := filepath.Join(l.specDir, "nodes")
-	entries, err := os.ReadDir(profileDir)
+	nodesDir := filepath.Join(l.specDir, "nodes")
+	entries, err := os.ReadDir(nodesDir)
 	if err != nil {
 		return nil
 	}
@@ -418,39 +418,39 @@ func (l *Loader) ListNodeSpecs() []string {
 	return names
 }
 
-// UpdateNodeSpec atomically overwrites an existing profile file with the
-// given replacement. Returns an error if no profile with that name
+// UpdateNodeSpec atomically overwrites an existing nodeSpec file with the
+// given replacement. Returns an error if no nodeSpec with that name
 // exists (either in the in-memory cache or on disk). The whole check +
 // write runs under l.mu.Lock so a concurrent CreateNodeSpec/UpdateNodeSpec
 // for the same name can't both succeed against the same starting state.
 //
 // Race-safe alternative to LoadNodeSpec-then-SaveNodeSpec composed at a
 // higher layer.
-func (l *Loader) UpdateNodeSpec(name string, profile *NodeSpec) error {
+func (l *Loader) UpdateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	profileDir := filepath.Join(l.specDir, "nodes")
-	path := filepath.Join(profileDir, name+".json")
+	nodesDir := filepath.Join(l.specDir, "nodes")
+	path := filepath.Join(nodesDir, name+".json")
 
-	// Existence check: cache hit, OR on-disk file present (profile may
+	// Existence check: cache hit, OR on-disk file present (nodeSpec may
 	// have been written before this Loader started and never loaded).
-	if _, cached := l.profiles[name]; !cached {
+	if _, cached := l.nodeSpecs[name]; !cached {
 		if _, err := os.Stat(path); err != nil {
-			return fmt.Errorf("profile '%s' does not exist", name)
+			return fmt.Errorf("node spec '%s' does not exist", name)
 		}
 	}
 
 	// Inline what SaveNodeSpec does (we already hold the lock).
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
+	if err := os.MkdirAll(nodesDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
 	}
-	data, err := json.MarshalIndent(profile, "", "  ")
+	data, err := json.MarshalIndent(nodeSpec, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling profile %s: %w", name, err)
+		return fmt.Errorf("marshaling node spec %s: %w", name, err)
 	}
 	data = append(data, '\n')
-	tmp, err := os.CreateTemp(profileDir, "profile-*.json.tmp")
+	tmp, err := os.CreateTemp(nodesDir, "nodespec-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
@@ -468,43 +468,43 @@ func (l *Loader) UpdateNodeSpec(name string, profile *NodeSpec) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
-	l.profiles[name] = profile
+	l.nodeSpecs[name] = nodeSpec
 	return nil
 }
 
 // SaveNodeSpec writes a node spec to disk atomically (temp file + rename).
-func (l *Loader) SaveNodeSpec(name string, profile *NodeSpec) error {
-	if err := l.writeNodeSpecFile(name, profile); err != nil {
+func (l *Loader) SaveNodeSpec(name string, nodeSpec *NodeSpec) error {
+	if err := l.writeNodeSpecFile(name, nodeSpec); err != nil {
 		return err
 	}
 
 	// Update the in-memory cache under the write lock so concurrent
 	// LoadNodeSpec readers see the new pointer atomically.
 	l.mu.Lock()
-	l.profiles[name] = profile
+	l.nodeSpecs[name] = nodeSpec
 	l.mu.Unlock()
 
 	return nil
 }
 
-// writeNodeSpecFile marshals profile to nodes/<name>.json atomically (temp +
+// writeNodeSpecFile marshals nodeSpec to nodes/<name>.json atomically (temp +
 // rename). It touches neither the lock nor the cache — callers handle cache
 // coherence around it.
-func (l *Loader) writeNodeSpecFile(name string, profile *NodeSpec) error {
-	profileDir := filepath.Join(l.specDir, "nodes")
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
+func (l *Loader) writeNodeSpecFile(name string, nodeSpec *NodeSpec) error {
+	nodesDir := filepath.Join(l.specDir, "nodes")
+	if err := os.MkdirAll(nodesDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
 	}
 
-	path := filepath.Join(profileDir, name+".json")
+	path := filepath.Join(nodesDir, name+".json")
 
-	data, err := json.MarshalIndent(profile, "", "  ")
+	data, err := json.MarshalIndent(nodeSpec, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling profile %s: %w", name, err)
+		return fmt.Errorf("marshaling node spec %s: %w", name, err)
 	}
 	data = append(data, '\n')
 
-	tmp, err := os.CreateTemp(profileDir, "profile-*.json.tmp")
+	tmp, err := os.CreateTemp(nodesDir, "nodespec-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
@@ -527,10 +527,10 @@ func (l *Loader) writeNodeSpecFile(name string, profile *NodeSpec) error {
 	return nil
 }
 
-// MutateNodeSpec atomically applies fn to a profile and persists it, serialized
-// against every other profile write under the loader lock.
+// MutateNodeSpec atomically applies fn to a nodeSpec and persists it, serialized
+// against every other nodeSpec write under the loader lock.
 //
-// It reads the profile FRESH from disk rather than from the cache, on purpose:
+// It reads the nodeSpec FRESH from disk rather than from the cache, on purpose:
 // the cached pointer may have had its ${secret:...} fields resolved in place by
 // a prior read (network.loadNodeSpec resolves secrets on the returned pointer),
 // and persisting that would write resolved secrets to disk. The on-disk form
@@ -539,61 +539,61 @@ func (l *Loader) writeNodeSpecFile(name string, profile *NodeSpec) error {
 // re-reads the updated file.
 //
 // fn must not call back into the loader (it would re-enter l.mu). It receives the
-// raw profile; callers mutate profile.OverridableSpecs for scoped spec writes.
+// raw nodeSpec; callers mutate nodeSpec.OverridableSpecs for scoped spec writes.
 func (l *Loader) MutateNodeSpec(name string, fn func(*NodeSpec) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	profile, err := l.readNodeSpecFromDisk(name)
+	nodeSpec, err := l.readNodeSpecFromDisk(name)
 	if err != nil {
 		return err
 	}
-	if err := fn(profile); err != nil {
+	if err := fn(nodeSpec); err != nil {
 		return err
 	}
-	if err := l.writeNodeSpecFile(name, profile); err != nil {
+	if err := l.writeNodeSpecFile(name, nodeSpec); err != nil {
 		return err
 	}
-	delete(l.profiles, name) // invalidate; next LoadNodeSpec re-reads fresh
+	delete(l.nodeSpecs, name) // invalidate; next LoadNodeSpec re-reads fresh
 	return nil
 }
 
-// CreateNodeSpec atomically creates a new profile file. Returns an error if
-// a profile with that name already exists (either in the in-memory cache
+// CreateNodeSpec atomically creates a new nodeSpec file. Returns an error if
+// a nodeSpec with that name already exists (either in the in-memory cache
 // or on disk). The whole check + write runs under l.mu.Lock so concurrent
 // CreateNodeSpec calls for the same name can't both succeed.
 //
 // Race-safe alternative to LoadNodeSpec-then-SaveNodeSpec composed at a
 // higher layer — the same composition used to live in public
 // (*newtron.Network).CreateNodeSpec, which raced.
-func (l *Loader) CreateNodeSpec(name string, profile *NodeSpec) error {
+func (l *Loader) CreateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	// Cache hit means it exists in memory.
-	if _, exists := l.profiles[name]; exists {
-		return fmt.Errorf("profile '%s' already exists", name)
+	if _, exists := l.nodeSpecs[name]; exists {
+		return fmt.Errorf("node spec '%s' already exists", name)
 	}
 
 	// On-disk file may exist even when the cache hasn't seen it yet —
-	// e.g. profile was written before this Loader started, then not
+	// e.g. nodeSpec was written before this Loader started, then not
 	// loaded yet. Check the filesystem too.
-	profileDir := filepath.Join(l.specDir, "nodes")
-	path := filepath.Join(profileDir, name+".json")
+	nodesDir := filepath.Join(l.specDir, "nodes")
+	path := filepath.Join(nodesDir, name+".json")
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("profile '%s' already exists", name)
+		return fmt.Errorf("node spec '%s' already exists", name)
 	}
 
 	// Inline what SaveNodeSpec does (we already hold the lock).
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
+	if err := os.MkdirAll(nodesDir, 0755); err != nil {
 		return fmt.Errorf("creating nodes directory: %w", err)
 	}
-	data, err := json.MarshalIndent(profile, "", "  ")
+	data, err := json.MarshalIndent(nodeSpec, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling profile %s: %w", name, err)
+		return fmt.Errorf("marshaling node spec %s: %w", name, err)
 	}
 	data = append(data, '\n')
-	tmp, err := os.CreateTemp(profileDir, "profile-*.json.tmp")
+	tmp, err := os.CreateTemp(nodesDir, "nodespec-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
@@ -611,7 +611,7 @@ func (l *Loader) CreateNodeSpec(name string, profile *NodeSpec) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
-	l.profiles[name] = profile
+	l.nodeSpecs[name] = nodeSpec
 	return nil
 }
 
@@ -619,10 +619,10 @@ func (l *Loader) CreateNodeSpec(name string, profile *NodeSpec) error {
 func (l *Loader) DeleteNodeSpec(name string) error {
 	path := filepath.Join(l.specDir, "nodes", name+".json")
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("deleting profile %s: %w", name, err)
+		return fmt.Errorf("deleting node spec %s: %w", name, err)
 	}
 	l.mu.Lock()
-	delete(l.profiles, name)
+	delete(l.nodeSpecs, name)
 	l.mu.Unlock()
 	return nil
 }
@@ -736,10 +736,10 @@ func (l *Loader) validateTopology() error {
 	v := &util.ValidationBuilder{}
 
 	for deviceName := range l.topology.Nodes {
-		// All device names must have profiles in profiles/
-		profilePath := filepath.Join(l.specDir, "nodes", deviceName+".json")
-		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
-			v.AddErrorf("topology device '%s' has no profile at %s", deviceName, profilePath)
+		// All device names must have nodeSpecs in nodeSpecs/
+		nodeSpecPath := filepath.Join(l.specDir, "nodes", deviceName+".json")
+		if _, err := os.Stat(nodeSpecPath); os.IsNotExist(err) {
+			v.AddErrorf("topology device '%s' has no node spec at %s", deviceName, nodeSpecPath)
 		}
 	}
 

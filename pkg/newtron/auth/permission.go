@@ -1,13 +1,13 @@
 // Package auth provides permission-based access control.
 //
 // Permission enforcement design:
-// - Write operations are checked via checkExecutePermission() when -x (execute) flag is set
-// - Read/view operations are always allowed (no permission check in dry-run/preview mode)
-// - Permissions are defined in network.json under "permissions" and "super_users"
-// - Per-service scoping is expressed via L5 `where: {service: "<pattern>"}`
-//   clauses on global grants (auth-design.md §L5). The pre-L5 mechanism
-//   that embedded a Permissions block on each ServiceSpec was retired in
-//   #165 — one auth table per network, not one per spec (DPN §27).
+//   - Write operations are checked via checkExecutePermission() when -x (execute) flag is set
+//   - Read/view operations are always allowed (no permission check in dry-run/preview mode)
+//   - Permissions are defined in network.json under "permissions" and "super_users"
+//   - Per-service scoping is expressed via L5 `where: {service: "<pattern>"}`
+//     clauses on global grants (auth-design.md §L5). The pre-L5 mechanism
+//     that embedded a Permissions block on each ServiceSpec was retired in
+//     #165 — one auth table per network, not one per spec (DPN §27).
 package auth
 
 // Permission defines an action that can be controlled
@@ -182,7 +182,7 @@ func (c *Context) WithResource(resource string) *Context {
 // WithField sets the meta-authorization dimension (auth-design.md L5
 // "Meta-Authorization: Who Can Grant Access"). The field is the
 // top-level network.json field name the mutation touches — services,
-// permissions, user_groups, super_users, profiles, topology. A where
+// permissions, user_groups, super_users, nodeSpecs, topology. A where
 // clause like {"field": "!permissions,!user_groups,!super_users"}
 // scopes spec.author to "services and topology, but not grants."
 func (c *Context) WithField(field string) *Context {

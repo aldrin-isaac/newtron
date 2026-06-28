@@ -16,7 +16,7 @@ import (
 var _ node.SpecProvider = (*ResolvedSpecs)(nil)
 
 // ResolvedSpecs holds the merged spec maps for a single device after
-// hierarchical resolution (network > zone > profile). It implements
+// hierarchical resolution (network > zone > nodeSpec). It implements
 // node.SpecProvider so it can be passed directly to node.New().
 type ResolvedSpecs struct {
 	merged  spec.OverridableSpecs

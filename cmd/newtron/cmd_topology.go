@@ -29,7 +29,7 @@ var topologyShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show the full topology spec (devices, links, metadata)",
 	Long: `Return the canonical 'spec.TopologySpecFile' substrate for the
-registered network — every device with its profile, every link with its
+registered network — every device with its nodeSpec, every link with its
 endpoints, plus newtlab/metadata fields. This is the typed form newtron uses
 internally; consumers needing only the names list should use
 'network topology' for a lighter response.

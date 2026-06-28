@@ -53,7 +53,7 @@ type Node struct {
 
 	// Device identity
 	name     string
-	profile  *spec.NodeSpec
+	nodeSpec *spec.NodeSpec
 	resolved *spec.ResolvedNodeSpec
 
 	// Runtime infrastructure plumbed from Network. topology and
@@ -95,17 +95,17 @@ type Node struct {
 	reconstructing bool
 }
 
-// New creates a new Node with the given SpecProvider and profile.
+// New creates a new Node with the given SpecProvider and nodeSpec.
 //
 // topology and pr are forwarded to sonic.Device at Connect time so
 // SSH port allocation flows from the injected resolver, not from
 // the spec layer. Pass "" and nil for tests and real-hardware
 // deployments.
-func New(sp SpecProvider, name string, profile *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
+func New(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
 	return &Node{
 		SpecProvider: sp,
 		name:         name,
-		profile:      profile,
+		nodeSpec:     nodeSpec,
 		resolved:     resolved,
 		topology:     topology,
 		portResolver: pr,
@@ -119,16 +119,16 @@ func New(sp SpecProvider, name string, profile *spec.NodeSpec, resolved *spec.Re
 //
 // Usage:
 //
-//	n := node.NewAbstract(specs, "switch1", profile, resolved, topology, resolver)
+//	n := node.NewAbstract(specs, "switch1", nodeSpec, resolved, topology, resolver)
 //	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 //	iface, _ := n.GetInterface("Ethernet0")
 //	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
 //	n.Drift(ctx) // or n.Reconcile(ctx, ReconcileOpts{Mode: "full"})
-func NewAbstract(sp SpecProvider, name string, profile *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
+func NewAbstract(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
 	return &Node{
 		SpecProvider: sp,
 		name:         name,
-		profile:      profile,
+		nodeSpec:     nodeSpec,
 		resolved:     resolved,
 		topology:     topology,
 		portResolver: pr,
@@ -889,9 +889,9 @@ func (n *Node) Name() string {
 	return n.name
 }
 
-// Profile returns the node spec.
-func (n *Node) Profile() *spec.NodeSpec {
-	return n.profile
+// NodeSpec returns the node spec.
+func (n *Node) NodeSpec() *spec.NodeSpec {
+	return n.nodeSpec
 }
 
 // Resolved returns the resolved configuration (after inheritance).
@@ -1432,7 +1432,7 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("ApplyFRRDefaults requires SSH connection")
 	}
 
-	// Read BGP ASN from resolved profile (set by node spec).
+	// Read BGP ASN from resolved nodeSpec (set by node spec).
 	asn := ""
 	if n.resolved != nil && n.resolved.UnderlayASN > 0 {
 		asn = fmt.Sprintf("%d", n.resolved.UnderlayASN)

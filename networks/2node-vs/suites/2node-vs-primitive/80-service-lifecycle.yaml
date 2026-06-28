@@ -96,7 +96,7 @@ steps:
   # Verify EVPN BGP sessions are still established. Overlay BGP config
   # (VTEP, peer group, neighbors) survives teardown-overlay — only VLANs,
   # VRFs, and MAC-VPN bindings are removed. CheckBGPSessions derives
-  # expected overlay peers from the device intent + resolved profile.
+  # expected overlay peers from the device intent + resolved node spec.
   - name: verify-evpn-bgp-sessions
     action: newtron
     devices: [switch1]

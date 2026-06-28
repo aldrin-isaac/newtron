@@ -364,7 +364,7 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateTopologyNode adds a device entry to topology.json. Body is
 // {name, device: TopologyNode}. 409 on duplicate name; 400 on missing
-// profile / invalid body.
+// nodeSpec / invalid body.
 func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
@@ -458,7 +458,7 @@ func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request
 	if ne == nil {
 		return
 	}
-	device := r.PathValue("device")
+	device := r.PathValue("node")
 	iface := r.PathValue("interface")
 	if device == "" || iface == "" {
 		writeError(w, &newtron.ValidationError{Message: "device and interface required in URL"})
@@ -478,7 +478,7 @@ func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	// Only return profiles for actual host devices, not switches.
+	// Only return nodeSpecs for actual host devices, not switches.
 	// The client uses 200 vs 404 from this endpoint to classify devices.
 	if !ne.net.IsHostDevice(name) {
 		writeError(w, &newtron.NotFoundError{Resource: "host device", Name: name})
@@ -1053,7 +1053,7 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 }
 
 // ============================================================================
-// Profiles
+// NodeSpecs
 // ============================================================================
 
 func (s *Server) handleListNodeSpecs(w http.ResponseWriter, r *http.Request) {
@@ -1214,7 +1214,7 @@ func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	// Body is optional — force defaults to false.
 	_ = decodeJSON(r, &req)
-	device := r.PathValue("device")
+	device := r.PathValue("node")
 	if err := ne.net.InitDevice(r.Context(), device, req.Force); err != nil {
 		if errors.Is(err, newtron.ErrAlreadyInitialized) {
 			httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "already_initialized"})

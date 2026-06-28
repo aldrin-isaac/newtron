@@ -77,7 +77,6 @@ func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) (*
 	return cs, nil
 }
 
-
 // UnbindMACVPN removes the L2VNI mapping for a VLAN.
 // Reads the VNI from the intent record to construct deterministic delete entries.
 func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) (*ChangeSet, error) {
@@ -128,7 +127,7 @@ func (n *Node) SetupVXLAN(ctx context.Context, sourceIP string) (*ChangeSet, err
 		sourceIP = resolved.VTEPSourceIP
 	}
 	if sourceIP == "" {
-		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in profile)")
+		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in the node spec)")
 	}
 
 	cs := NewChangeSet(n.name, "device.setup-vxlan")

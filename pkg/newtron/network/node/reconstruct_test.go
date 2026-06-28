@@ -134,7 +134,7 @@ func newTestAbstract() *Node {
 		prefixLists:   map[string][]string{},
 		routePolicies: map[string]*spec.RoutePolicy{},
 	}
-	profile := &spec.NodeSpec{
+	nodeSpec := &spec.NodeSpec{
 		UnderlayASN: 65001,
 		LoopbackIP:  "10.0.0.1",
 	}
@@ -143,7 +143,7 @@ func newTestAbstract() *Node {
 		RouterID:    "10.0.0.1",
 		LoopbackIP:  "10.0.0.1",
 	}
-	n := NewAbstract(sp, "test", profile, resolved, "", nil)
+	n := NewAbstract(sp, "test", nodeSpec, resolved, "", nil)
 	// Register some ports so interface ops can work
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "mtu": "9100"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "mtu": "9100"})

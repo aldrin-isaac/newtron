@@ -2,8 +2,8 @@ name: topology-crud-roundtrip
 description: |
   newtron#15 + #16 (Phase 5): topology node + link CRUD round-trip.
 
-  Creates profile + topology entry + link for a fictional switch2, then
-  reverses through delete-link → delete-node → delete-profile via the
+  Creates node spec + topology entry + link for a fictional switch2, then
+  reverses through delete-link → topology-node delete → delete-node (spec) via the
   cascade-refusal pattern (refuse before force=true) to confirm Q1 default
   works end-to-end. Pure spec mutation — no device interaction.
 
@@ -12,14 +12,14 @@ description: |
     1. Delete the link first (refusing-delete on the node would otherwise
        block).
     2. Delete the topology device (now unblocked).
-    3. Delete the profile.
+    3. Delete the node spec.
   Each step in order maps 1:1 with what an operator would do by hand.
 
 steps:
-  - name: create-switch2-profile
+  - name: create-switch2-node-spec
     action: newtron
     method: POST
-    url: /create-profile
+    url: /create-node
     params:
       name: switch2
       mgmt_ip: "127.0.0.1"
@@ -41,7 +41,7 @@ steps:
         ports:
           Ethernet0:
             admin_status: up
-            mtu: "9100"
+            mtu: 9100
     expect:
       jq: '.ports.Ethernet0.admin_status == "up"'
 
@@ -50,7 +50,7 @@ steps:
     method: GET
     url: /topology
     expect:
-      jq: '.devices.switch2 != null and .devices.switch2.ports.Ethernet0.mtu == "9100"'
+      jq: '.nodes.switch2 != null and .nodes.switch2.ports.Ethernet0.mtu == 9100'
 
   - name: create-link-sw1-sw2
     action: newtron
@@ -89,11 +89,11 @@ steps:
     method: GET
     url: /topology
     expect:
-      jq: '(.devices.switch2 // null) == null and (.links // [] | length) == 0'
+      jq: '(.nodes.switch2 // null) == null and (.links // [] | length) == 0'
 
-  - name: delete-switch2-profile
+  - name: delete-switch2-node-spec
     action: newtron
     method: POST
-    url: /delete-profile
+    url: /delete-node
     params:
       name: switch2

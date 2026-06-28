@@ -27,7 +27,7 @@ BGP sessions, this causes all sessions to drop and reconverge. Use --force
 to proceed on devices with existing BGP configuration.
 
 Safe to run on devices that were already initialized — detects and skips.
-No topology required — works with any device that has a profile.
+No topology required — works with any device that has a nodeSpec.
 
 Examples:
   newtron switch1 init

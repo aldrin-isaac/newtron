@@ -1143,7 +1143,6 @@ func (s *Server) handleShowLAGDetail(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-
 // ============================================================================
 // Intent operations — Projection, Tree, Drift, Reconcile, Save, Reload, Clear
 // ============================================================================
@@ -1232,7 +1231,7 @@ func (s *Server) handleTopologyDrift(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	device := r.PathValue("device")
+	device := r.PathValue("node")
 	entries, err := na.net.TopologyDrift(r.Context(), device)
 	if err != nil {
 		writeError(w, err)
@@ -1255,7 +1254,7 @@ func (s *Server) handleNodeStatus(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	device := r.PathValue("device")
+	device := r.PathValue("node")
 
 	status := NodeStatus{
 		IntentSource: IntentSourceUnloaded,
@@ -1386,7 +1385,7 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: "reload is only available in topology mode (add ?mode=topology)"})
 		return
 	}
-	device := r.PathValue("device")
+	device := r.PathValue("node")
 	val, err := nodeActor.do(r.Context(), func() (any, error) {
 		nodeActor.closeNode()
 		node, err := na.net.BuildTopologyNode(device)
@@ -1412,7 +1411,7 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: "clear is only available in topology mode (add ?mode=topology)"})
 		return
 	}
-	device := r.PathValue("device")
+	device := r.PathValue("node")
 	val, err := nodeActor.do(r.Context(), func() (any, error) {
 		nodeActor.closeNode()
 		node, err := na.net.BuildEmptyTopologyNode(device)
@@ -1428,5 +1427,3 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
-
-

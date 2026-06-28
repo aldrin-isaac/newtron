@@ -46,7 +46,7 @@ func validateScopeSelector(sel ScopeSelector) error {
 // ============================================================================
 
 // ListSpecInstances returns a flat inventory of every spec defined across all
-// scopes (network, each zone, each node profile), each tagged with the scope and
+// scopes (network, each zone, each node nodeSpec), each tagged with the scope and
 // instance it lives at. It is the read surface behind a schema-driven UI's flat
 // spec list with scope/scope_instance filters; storage and resolution stay
 // hierarchical underneath ("flat at the boundary, hierarchical underneath",

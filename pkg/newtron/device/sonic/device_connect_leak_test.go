@@ -76,7 +76,7 @@ func TestClosePartial_NilsAllocatedFields(t *testing.T) {
 // returns. Otherwise a caller that retries Connect on the same Device
 // leaks the failed-attempt client.
 //
-// The Profile uses MgmtIP "127.0.0.1" with no SSHUser/SSHPass — Connect
+// The NodeSpec uses MgmtIP "127.0.0.1" with no SSHUser/SSHPass — Connect
 // takes the direct Redis path to 127.0.0.1:6379. The test assumes
 // nothing is listening there in the CI/dev environment (true for the
 // project's lab hosts); a stray local Redis would mask the failure.
