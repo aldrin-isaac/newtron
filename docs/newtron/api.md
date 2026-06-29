@@ -4476,6 +4476,7 @@ Returned by `GET .../service` (array) and `GET .../services/{name}` (single).
 | `qos_policy` | string | QoS policy reference |
 | `ingress_filter` | string | Ingress filter reference |
 | `egress_filter` | string | Egress filter reference |
+| `routing` | object | Routing config for routed/eBGP services — returned only when set (`omitempty`). Mirrors the `routing` block accepted on `create-service`/`update-service`: `protocol`, `peer_as`, `import_policy`, `export_policy`, `import_community`, `export_community`, `import_prefix_list`, `export_prefix_list`, `redistribute`. |
 
 #### IPVPNDetail
 

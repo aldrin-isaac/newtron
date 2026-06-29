@@ -1081,7 +1081,7 @@ func (net *Network) RemoveRoutePolicyRule(ctx context.Context, sel ScopeSelector
 // ============================================================================
 
 func convertServiceDetail(name string, s *spec.ServiceSpec) *ServiceDetail {
-	return &ServiceDetail{
+	d := &ServiceDetail{
 		Name:          name,
 		Description:   s.Description,
 		ServiceType:   s.ServiceType,
@@ -1092,6 +1092,20 @@ func convertServiceDetail(name string, s *spec.ServiceSpec) *ServiceDetail {
 		IngressFilter: s.IngressFilter,
 		EgressFilter:  s.EgressFilter,
 	}
+	if s.Routing != nil {
+		d.Routing = &RoutingDetail{
+			Protocol:         s.Routing.Protocol,
+			PeerAS:           s.Routing.PeerAS,
+			ImportPolicy:     s.Routing.ImportPolicy,
+			ExportPolicy:     s.Routing.ExportPolicy,
+			ImportCommunity:  s.Routing.ImportCommunity,
+			ExportCommunity:  s.Routing.ExportCommunity,
+			ImportPrefixList: s.Routing.ImportPrefixList,
+			ExportPrefixList: s.Routing.ExportPrefixList,
+			Redistribute:     s.Routing.Redistribute,
+		}
+	}
+	return d
 }
 
 func convertIPVPNDetail(name string, s *spec.IPVPNSpec) *IPVPNDetail {
