@@ -669,6 +669,9 @@ func (n *Network) CreateService(scope, instance, name string, def *spec.ServiceS
 		if err := n.checkRefsResolve(def); err != nil {
 			return err
 		}
+		if err := def.ValidateShape(name); err != nil {
+			return err
+		}
 		if err := n.checkOverrideBase(scope, "ServiceSpec", name); err != nil {
 			return err
 		}
@@ -725,6 +728,9 @@ func (n *Network) CreateQoSPolicy(scope, instance, name string, def *spec.QoSPol
 	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
 		if _, exists := c.QoSPolicies[name]; exists {
 			return fmt.Errorf("QoS policy '%s' already exists", name)
+		}
+		if err := def.ValidateShape(name); err != nil {
+			return err
 		}
 		if err := n.checkOverrideBase(scope, "QoSPolicy", name); err != nil {
 			return err
@@ -853,6 +859,9 @@ func (n *Network) UpdateService(scope, instance, name string, def *spec.ServiceS
 		if err := n.checkRefsResolve(def); err != nil {
 			return err
 		}
+		if err := def.ValidateShape(name); err != nil {
+			return err
+		}
 		c.Services[name] = def
 		return nil
 	})
@@ -888,6 +897,9 @@ func (n *Network) UpdateQoSPolicy(scope, instance, name string, def *spec.QoSPol
 	return n.withWriteTarget(scope, instance, func(c *spec.OverridableSpecs) error {
 		if _, exists := c.QoSPolicies[name]; !exists {
 			return &newtronErrors{notFound: true, resource: "qos-policy", id: name}
+		}
+		if err := def.ValidateShape(name); err != nil {
+			return err
 		}
 		c.QoSPolicies[name] = def
 		return nil
@@ -985,7 +997,10 @@ func (n *Network) AddQoSQueueToPolicy(scope, instance, policy string, queueID in
 			return fmt.Errorf("queue %d already exists in policy '%s'", queueID, policy)
 		}
 		p.Queues[queueID] = queue
-		return nil
+		// Validate the resulting policy with the same checker the loader runs —
+		// a queue that duplicates a name (or breaks a weight/DSCP rule) is
+		// refused here, not silently persisted to fail the next load.
+		return p.ValidateShape(policy)
 	})
 }
 
@@ -1022,7 +1037,8 @@ func (n *Network) UpdateQoSQueueInPolicy(scope, instance, policy string, current
 			// In-place edit.
 			p.Queues[currentID] = newQueue
 		}
-		return nil
+		// Same post-mutation shape check as AddQoSQueueToPolicy.
+		return p.ValidateShape(policy)
 	})
 }
 

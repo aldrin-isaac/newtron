@@ -182,22 +182,38 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 	return &spec, nil
 }
 
+// validate enforces, at load time, exactly the invariants the write path
+// enforces before it persists — from the same code (spec.OverridableSpecs
+// shape validators + the declarative MissingRefs), so a write can never produce
+// a spec that fails to load (DESIGN_PRINCIPLES §15, §27).
 func (l *Loader) validate() error {
 	v := &util.ValidationBuilder{}
+	net := &l.network.OverridableSpecs
 
-	// Validate QoS policies (network-level)
-	l.validateQoSPolicies(v)
+	// Network scope: shapes (QoS structure, service-type constraints) and
+	// references, both checked against the network-level maps.
+	net.ValidateShapes(v, "")
+	addMissingRefs(v, "", net.MissingRefsIn(net))
 
-	// Validate network-level cross-references against network-level maps
-	l.validateSpecRefs(v, "", &l.network.OverridableSpecs, &l.network.OverridableSpecs)
-
-	// Validate zone-level cross-references against merged (zone + network) maps
+	// Zone overrides: shapes against the override's own specs; references
+	// against the merged (zone + network) set — the network-floor resolution.
 	for zoneName, zone := range l.network.Zones {
-		merged := mergeOverridableSpecs(&l.network.OverridableSpecs, &zone.OverridableSpecs)
-		l.validateSpecRefs(v, "zone '"+zoneName+"': ", &zone.OverridableSpecs, merged)
+		prefix := "zone '" + zoneName + "': "
+		merged := mergeOverridableSpecs(net, &zone.OverridableSpecs)
+		zone.OverridableSpecs.ValidateShapes(v, prefix)
+		addMissingRefs(v, prefix, merged.MissingRefsIn(&zone.OverridableSpecs))
 	}
 
 	return v.Build()
+}
+
+// addMissingRefs records each unresolved reference on the builder in the same
+// form the write path's checkRefsResolve uses, so load and write report
+// reference failures identically.
+func addMissingRefs(v *util.ValidationBuilder, prefix string, refs []SpecRef) {
+	for _, r := range refs {
+		v.AddErrorf("%s%s references %s '%s' which does not exist", prefix, r.Field, r.Kind, r.Name)
+	}
 }
 
 // mergeOverridableSpecs merges parent and child spec maps (child wins).
@@ -213,128 +229,6 @@ func mergeOverridableSpecs(parent, child *OverridableSpecs) *OverridableSpecs {
 	}
 }
 
-// validateSpecRefs validates cross-references within the specs being checked
-// (own) against the resolved set (resolved, which includes parent maps).
-// The prefix is prepended to error messages (e.g. "zone 'amer': ").
-func (l *Loader) validateSpecRefs(v *util.ValidationBuilder, prefix string, own, resolved *OverridableSpecs) {
-	// Validate services reference existing specs in the resolved set
-	for svcName, svc := range own.Services {
-		if svc.IngressFilter != "" {
-			if _, ok := resolved.Filters[svc.IngressFilter]; !ok {
-				v.AddErrorf("%sservice '%s' references unknown ingress filter '%s'", prefix, svcName, svc.IngressFilter)
-			}
-		}
-		if svc.EgressFilter != "" {
-			if _, ok := resolved.Filters[svc.EgressFilter]; !ok {
-				v.AddErrorf("%sservice '%s' references unknown egress filter '%s'", prefix, svcName, svc.EgressFilter)
-			}
-		}
-		if svc.QoSPolicy != "" {
-			if _, ok := resolved.QoSPolicies[svc.QoSPolicy]; !ok {
-				v.AddErrorf("%sservice '%s' references unknown QoS policy '%s'", prefix, svcName, svc.QoSPolicy)
-			}
-		}
-		if svc.IPVPN != "" {
-			if _, ok := resolved.IPVPNs[svc.IPVPN]; !ok {
-				v.AddErrorf("%sservice '%s' references unknown ipvpn '%s'", prefix, svcName, svc.IPVPN)
-			}
-		}
-		if svc.MACVPN != "" {
-			if _, ok := resolved.MACVPNs[svc.MACVPN]; !ok {
-				v.AddErrorf("%sservice '%s' references unknown macvpn '%s'", prefix, svcName, svc.MACVPN)
-			}
-		}
-		// Validate service type constraints
-		switch svc.ServiceType {
-		case ServiceTypeEVPNIRB:
-			if svc.IPVPN == "" {
-				v.AddErrorf("%sservice '%s' (evpn-irb) requires ipvpn reference", prefix, svcName)
-			}
-			if svc.MACVPN == "" {
-				v.AddErrorf("%sservice '%s' (evpn-irb) requires macvpn reference", prefix, svcName)
-			}
-		case ServiceTypeEVPNBridged:
-			if svc.MACVPN == "" {
-				v.AddErrorf("%sservice '%s' (evpn-bridged) requires macvpn reference", prefix, svcName)
-			}
-		case ServiceTypeEVPNRouted:
-			if svc.IPVPN == "" {
-				v.AddErrorf("%sservice '%s' (evpn-routed) requires ipvpn reference", prefix, svcName)
-			}
-		case ServiceTypeIRB, ServiceTypeBridged, ServiceTypeRouted:
-			// Local types: no spec-level refs required
-		default:
-			v.AddErrorf("%sservice '%s' has unknown type '%s'", prefix, svcName, svc.ServiceType)
-		}
-	}
-
-	// Validate filter rules reference existing prefix lists in the resolved set
-	for specName, filterSpec := range own.Filters {
-		for i, rule := range filterSpec.Rules {
-			if rule.SrcPrefixList != "" {
-				if _, ok := resolved.PrefixLists[rule.SrcPrefixList]; !ok {
-					v.AddErrorf("%sfilter '%s' rule %d references unknown src prefix list '%s'",
-						prefix, specName, i, rule.SrcPrefixList)
-				}
-			}
-			if rule.DstPrefixList != "" {
-				if _, ok := resolved.PrefixLists[rule.DstPrefixList]; !ok {
-					v.AddErrorf("%sfilter '%s' rule %d references unknown dst prefix list '%s'",
-						prefix, specName, i, rule.DstPrefixList)
-				}
-			}
-		}
-	}
-}
-
-// validateQoSPolicies validates all QoS policy definitions.
-func (l *Loader) validateQoSPolicies(v *util.ValidationBuilder) {
-	for name, policy := range l.network.QoSPolicies {
-		if len(policy.Queues) == 0 {
-			v.AddErrorf("QoS policy '%s' has no queues", name)
-			continue
-		}
-		if len(policy.Queues) > 8 {
-			v.AddErrorf("QoS policy '%s' has %d queues (max 8)", name, len(policy.Queues))
-			continue
-		}
-
-		seenDSCP := make(map[int]string)   // DSCP value → queue name (for dup detection)
-		seenNames := make(map[string]bool) // queue name uniqueness
-
-		for i, q := range policy.Queues {
-			if q.Name == "" {
-				v.AddErrorf("QoS policy '%s' queue[%d] has empty name", name, i)
-			} else if seenNames[q.Name] {
-				v.AddErrorf("QoS policy '%s' has duplicate queue name '%s'", name, q.Name)
-			}
-			seenNames[q.Name] = true
-
-			switch q.Type {
-			case "dwrr":
-				if q.Weight <= 0 {
-					v.AddErrorf("QoS policy '%s' queue '%s': DWRR requires weight > 0", name, q.Name)
-				}
-			case "strict":
-				if q.Weight != 0 {
-					v.AddErrorf("QoS policy '%s' queue '%s': strict queue must not have weight", name, q.Name)
-				}
-			default:
-				v.AddErrorf("QoS policy '%s' queue '%s': invalid type '%s' (must be dwrr or strict)", name, q.Name, q.Type)
-			}
-
-			for _, dscp := range q.DSCP {
-				if dscp < 0 || dscp > 63 {
-					v.AddErrorf("QoS policy '%s' queue '%s': DSCP value %d out of range (0-63)", name, q.Name, dscp)
-				} else if prev, dup := seenDSCP[dscp]; dup {
-					v.AddErrorf("QoS policy '%s': DSCP %d mapped to both '%s' and '%s'", name, dscp, prev, q.Name)
-				}
-				seenDSCP[dscp] = q.Name
-			}
-		}
-	}
-}
-
 // isHostPlatform returns true if the given platform name refers to a host device type.
 func (l *Loader) isHostPlatform(platformName string) bool {
 	if l.platforms == nil || platformName == "" {
@@ -347,39 +241,11 @@ func (l *Loader) isHostPlatform(platformName string) bool {
 	return platform.IsHost()
 }
 
+// validateNodeSpec delegates to NodeSpec.ValidateShape — the same shape check the
+// node-spec write path runs — supplying the loader's host-platform lookup and the
+// network's zones so load and write reject the same node specs.
 func (l *Loader) validateNodeSpec(nodeSpec *NodeSpec) error {
-	v := &util.ValidationBuilder{}
-
-	// Host devices have relaxed validation — only mgmt_ip is required
-	if l.isHostPlatform(nodeSpec.Platform) {
-		v.Add(nodeSpec.MgmtIP != "", "mgmt_ip is required")
-		if nodeSpec.MgmtIP != "" && !util.IsValidIPv4(nodeSpec.MgmtIP) {
-			v.AddErrorf("invalid management IP: %s", nodeSpec.MgmtIP)
-		}
-		return v.Build()
-	}
-
-	// Required fields for switch devices
-	v.Add(nodeSpec.MgmtIP != "", "mgmt_ip is required")
-	v.Add(nodeSpec.LoopbackIP != "", "loopback_ip is required")
-	v.Add(nodeSpec.Zone != "", "zone is required")
-
-	// Validate IP addresses
-	if nodeSpec.MgmtIP != "" && !util.IsValidIPv4(nodeSpec.MgmtIP) {
-		v.AddErrorf("invalid management IP: %s", nodeSpec.MgmtIP)
-	}
-	if nodeSpec.LoopbackIP != "" && !util.IsValidIPv4(nodeSpec.LoopbackIP) {
-		v.AddErrorf("invalid loopback IP: %s", nodeSpec.LoopbackIP)
-	}
-
-	// Validate zone exists in network.json
-	if nodeSpec.Zone != "" {
-		if _, ok := l.network.Zones[nodeSpec.Zone]; !ok {
-			v.AddErrorf("unknown zone: %s", nodeSpec.Zone)
-		}
-	}
-
-	return v.Build()
+	return nodeSpec.ValidateShape(l.isHostPlatform(nodeSpec.Platform), l.network.Zones)
 }
 
 // GetNetwork returns the network spec. Reads l.network under RLock — the
@@ -429,6 +295,11 @@ func (l *Loader) ListNodeSpecs() []string {
 func (l *Loader) UpdateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	// Same shape check the load path runs — symmetric with CreateNodeSpec.
+	if err := l.validateNodeSpec(nodeSpec); err != nil {
+		return err
+	}
 
 	nodesDir := filepath.Join(l.specDir, "nodes")
 	path := filepath.Join(nodesDir, name+".json")
@@ -569,6 +440,12 @@ func (l *Loader) MutateNodeSpec(name string, fn func(*NodeSpec) error) error {
 func (l *Loader) CreateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	// Same shape check the load path runs (validateNodeSpec) — a write can't
+	// persist a node spec the next load would reject (DESIGN_PRINCIPLES §15).
+	if err := l.validateNodeSpec(nodeSpec); err != nil {
+		return err
+	}
 
 	// Cache hit means it exists in memory.
 	if _, exists := l.nodeSpecs[name]; exists {
@@ -821,8 +698,8 @@ func NormalizeServiceRefs(svc *ServiceSpec) {
 	svc.EgressFilter = normalizeRef(svc.EgressFilter)
 	// svc.IPVPN references an IP-VPN by its (canonical) spec name; the
 	// on-device VRF name is derived from it (util.DeriveVRFNameForIPVPN).
-	// Validation that the referenced IPVPN exists happens in
-	// validateSpecRefs.
+	// That the referenced IPVPN exists is checked by the declarative
+	// MissingRefs (references.go), at both load and write.
 	svc.IPVPN = normalizeRef(svc.IPVPN)
 	svc.MACVPN = normalizeRef(svc.MACVPN)
 	svc.QoSPolicy = normalizeRef(svc.QoSPolicy)

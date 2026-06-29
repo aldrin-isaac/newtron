@@ -724,7 +724,10 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "zero queues",
+			// An empty policy is a valid shell: create-qos-policy authors one
+			// with no queues, then add-qos-queue populates it. Load must accept
+			// it for the write path to stay symmetric with load.
+			name: "zero queues (valid shell)",
 			networkJSON: `{
 				"version": "1.0",
 				"zones": {},
@@ -735,7 +738,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 					}
 				}
 			}`,
-			expectErr: true,
+			expectErr: false,
 		},
 		{
 			name: "too many queues (9)",
