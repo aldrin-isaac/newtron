@@ -323,6 +323,14 @@ func httpStatusFromError(err error) int {
 		return http.StatusNotFound
 	}
 
+	// A spec lookup that misses (unknown name, or no override at a requested
+	// scope) is a 404 — the internal vocab the spec/network layers return when a
+	// kind/name doesn't resolve. Without this it fell through to 500.
+	var specNotFound *spec.NotFoundError
+	if errors.As(err, &specNotFound) {
+		return http.StatusNotFound
+	}
+
 	var validation *newtron.ValidationError
 	if errors.As(err, &validation) {
 		return http.StatusBadRequest

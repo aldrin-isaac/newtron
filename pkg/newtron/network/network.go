@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"sync"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
@@ -245,21 +244,6 @@ func (n *Network) PortResolver() sonic.PortResolver {
 // These are available to Device and Interface objects through parent reference
 // ============================================================================
 
-// getSpec is a generic helper for map-based spec lookups under a read lock.
-func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	v, ok := m[name]
-	if !ok {
-		var zero V
-		// Typed so reconstruction can classify an intent that references a
-		// removed/renamed spec (an orphaned intent) — see spec.NotFoundError.
-		// The message is identical to the previous fmt.Errorf form.
-		return zero, &spec.NotFoundError{Kind: kind, Name: name}
-	}
-	return v, nil
-}
-
 // Authorization is a snapshot of the network's authorization table —
 // the user_groups, permissions, and super_users an operator authors
 // in network.json and that newtron's authorization checker consumes
@@ -319,14 +303,25 @@ func (n *Network) RemoveSuperUser(username string) error {
 	return n.persistSpec()
 }
 
-// GetService returns a service definition by name.
+// GetService returns a service definition by name (network base).
 func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Services, "service", util.NormalizeName(name))
+	return n.GetServiceAt("", "", name)
 }
 
-// GetFilter returns a filter specification by name.
+// GetServiceAt returns a service definition from a specific scope (network base,
+// or a zone/node override) with no base fallback — see scoped_reads.go.
+func (n *Network) GetServiceAt(scope, instance, name string) (*spec.ServiceSpec, error) {
+	return getSpecAt(n, scope, instance, "service", name, func(s *spec.OverridableSpecs) map[string]*spec.ServiceSpec { return s.Services })
+}
+
+// GetFilter returns a filter specification by name (network base).
 func (n *Network) GetFilter(name string) (*spec.FilterSpec, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.Filters, "filter", util.NormalizeName(name))
+	return n.GetFilterAt("", "", name)
+}
+
+// GetFilterAt returns a filter from a specific scope with no base fallback.
+func (n *Network) GetFilterAt(scope, instance, name string) (*spec.FilterSpec, error) {
+	return getSpecAt(n, scope, instance, "filter", name, func(s *spec.OverridableSpecs) map[string]*spec.FilterSpec { return s.Filters })
 }
 
 // GetPlatform returns a platform definition by name. The platforms
@@ -350,31 +345,56 @@ func (n *Network) Platforms() map[string]*spec.PlatformSpec {
 	return n.platforms
 }
 
-// GetPrefixList returns a prefix list by name.
+// GetPrefixList returns a prefix list by name (network base).
 func (n *Network) GetPrefixList(name string) ([]string, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.PrefixLists, "prefix list", util.NormalizeName(name))
+	return n.GetPrefixListAt("", "", name)
 }
 
-// GetQoSPolicy returns a QoS policy by name.
+// GetPrefixListAt returns a prefix list from a specific scope, no base fallback.
+func (n *Network) GetPrefixListAt(scope, instance, name string) ([]string, error) {
+	return getSpecAt(n, scope, instance, "prefix list", name, func(s *spec.OverridableSpecs) map[string][]string { return s.PrefixLists })
+}
+
+// GetQoSPolicy returns a QoS policy by name (network base).
 func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
+	return n.GetQoSPolicyAt("", "", name)
 }
 
-// GetIPVPN returns an IP-VPN definition by name. The name is canonicalized
-// like every other spec kind; the on-device VRF name is derived from it
-// (util.DeriveVRFNameForIPVPN).
+// GetQoSPolicyAt returns a QoS policy from a specific scope, no base fallback.
+func (n *Network) GetQoSPolicyAt(scope, instance, name string) (*spec.QoSPolicy, error) {
+	return getSpecAt(n, scope, instance, "QoS policy", name, func(s *spec.OverridableSpecs) map[string]*spec.QoSPolicy { return s.QoSPolicies })
+}
+
+// GetIPVPN returns an IP-VPN definition by name (network base). The name is
+// canonicalized like every other spec kind; the on-device VRF name is derived
+// from it (util.DeriveVRFNameForIPVPN).
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
+	return n.GetIPVPNAt("", "", name)
 }
 
-// GetMACVPN returns a MAC-VPN definition by name.
+// GetIPVPNAt returns an IP-VPN definition from a specific scope, no base fallback.
+func (n *Network) GetIPVPNAt(scope, instance, name string) (*spec.IPVPNSpec, error) {
+	return getSpecAt(n, scope, instance, "ipvpn", name, func(s *spec.OverridableSpecs) map[string]*spec.IPVPNSpec { return s.IPVPNs })
+}
+
+// GetMACVPN returns a MAC-VPN definition by name (network base).
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.MACVPNs, "macvpn", util.NormalizeName(name))
+	return n.GetMACVPNAt("", "", name)
 }
 
-// GetRoutePolicy returns a route policy by name.
+// GetMACVPNAt returns a MAC-VPN definition from a specific scope, no base fallback.
+func (n *Network) GetMACVPNAt(scope, instance, name string) (*spec.MACVPNSpec, error) {
+	return getSpecAt(n, scope, instance, "macvpn", name, func(s *spec.OverridableSpecs) map[string]*spec.MACVPNSpec { return s.MACVPNs })
+}
+
+// GetRoutePolicy returns a route policy by name (network base).
 func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
-	return getSpec(n.locks.lock(keyNetworkSpec), n.spec.RoutePolicies, "route policy", util.NormalizeName(name))
+	return n.GetRoutePolicyAt("", "", name)
+}
+
+// GetRoutePolicyAt returns a route policy from a specific scope, no base fallback.
+func (n *Network) GetRoutePolicyAt(scope, instance, name string) (*spec.RoutePolicy, error) {
+	return getSpecAt(n, scope, instance, "route policy", name, func(s *spec.OverridableSpecs) map[string]*spec.RoutePolicy { return s.RoutePolicies })
 }
 
 // FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.

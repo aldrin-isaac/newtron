@@ -52,7 +52,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/control/request` | Acquire / extend / take over write control |
 | POST | `/networks/{n}/control/release` | Release write control |
 | GET | `/networks/{n}/services` | List services (also: `/ipvpns`, `/macvpns`, `/qos-policies`, `/filters`, `/platforms`, `/route-policies`, `/prefix-lists`) |
-| GET | `/networks/{n}/services/{name}` | Show service (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
+| GET | `/networks/{n}/services/{name}` | Show service — `?scope=zone&scope_instance=…` reads an override (also: ipvpns, macvpns, qos-policies, filters, platforms, route-policies, prefix-lists) |
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
 | GET | `/networks/{n}/spec-instances` | Flat cross-scope inventory of every spec (network/zone/node), tagged with scope + scope_instance |
 | GET | `/networks/{n}/nodes` | List node spec names |
@@ -1592,6 +1592,44 @@ them (§15):
 - `delete-node` is refused (**409**) while the profile holds node-scope spec
   overrides (or, as before, while a topology device references it). `force=true`
   proceeds — the overrides live in the profile file and are removed with it.
+
+#### Scoped reads (viewing a specific override)
+
+Spec **detail** reads are scope-aware too — the read mirror of scoped writes, so
+anything writable at a scope is also readable at that scope. The `GET
+.../{kind}/{name}` show endpoints accept the same selector the write bodies
+carry, as **query parameters**:
+
+| Query param | Type | Description |
+|-------------|------|-------------|
+| `scope` | string | `network` (default), `zone`, or `node` |
+| `scope_instance` | string | the zone or node name; required when `scope` is `zone`/`node`, omitted for `network` |
+
+```
+GET /networks/{n}/prefix-lists/LOCAL_PL?scope=zone&scope_instance=amer
+  → the amer-zone override's own stored detail
+```
+
+Semantics, by design:
+
+- **No scope ⇒ network base** — existing callers are unaffected.
+- **A scoped read returns that scope's *own stored* definition** (fields +
+  sub-collections), i.e. exactly what a subsequent scoped write to the same
+  `(scope, scope_instance)` would replace. It does **not** merge with or fall back
+  to the network base — so the client edits the override it is viewing, never
+  accidentally promoting base fields into it.
+- **No override at the requested scope ⇒ 404**, not the base. Since
+  `/spec-instances` already enumerates which `(kind, name, scope, scope_instance)`
+  overrides exist, the client asks for a scoped detail only when it knows one is
+  there, and a 404 unambiguously means "no override here" rather than silently
+  showing the floor.
+- **`scope=zone|node` without `scope_instance` ⇒ 400**; an unknown
+  zone/node instance ⇒ **404**.
+
+Coverage matches scoped writes: `service`, `ipvpn`, `macvpn`, `prefix-list`,
+`filter`, `qos-policy`, `route-policy`, at `network`/`zone`/`node` scope. With
+this, per-override sub-rule authoring is a whole feature — a client can both view
+and edit a zone/node override's rules.
 
 ### Services
 

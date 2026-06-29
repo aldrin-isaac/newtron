@@ -78,11 +78,17 @@ func (net *Network) ListServices() []string {
 	return net.internal.ListServices()
 }
 
-// ShowService returns the service spec for a given name, converted to ServiceDetail.
-func (net *Network) ShowService(name string) (*ServiceDetail, error) {
-	s, err := net.internal.GetService(name)
-	if err != nil {
+// ShowService returns the service spec for a given name at the selected scope
+// (network base by default, or a zone/node override), converted to
+// ServiceDetail. A scoped read returns that scope's own stored definition with
+// no base fallback — absent at that scope ⇒ NotFoundError (404).
+func (net *Network) ShowService(sel ScopeSelector, name string) (*ServiceDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	s, err := net.internal.GetServiceAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return convertServiceDetail(name, s), nil
 }
@@ -176,11 +182,16 @@ func (net *Network) ListIPVPNs() map[string]*IPVPNDetail {
 	return result
 }
 
-// ShowIPVPN returns the IP-VPN spec for a given name, converted to IPVPNDetail.
-func (net *Network) ShowIPVPN(name string) (*IPVPNDetail, error) {
-	s, err := net.internal.GetIPVPN(name)
-	if err != nil {
+// ShowIPVPN returns the IP-VPN spec for a given name at the selected scope,
+// converted to IPVPNDetail. Scoped reads return that scope's stored definition
+// with no base fallback (absent ⇒ 404).
+func (net *Network) ShowIPVPN(sel ScopeSelector, name string) (*IPVPNDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	s, err := net.internal.GetIPVPNAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return convertIPVPNDetail(name, s), nil
 }
@@ -255,11 +266,16 @@ func (net *Network) ListMACVPNs() map[string]*MACVPNDetail {
 	return result
 }
 
-// ShowMACVPN returns the MAC-VPN spec for a given name, converted to MACVPNDetail.
-func (net *Network) ShowMACVPN(name string) (*MACVPNDetail, error) {
-	s, err := net.internal.GetMACVPN(name)
-	if err != nil {
+// ShowMACVPN returns the MAC-VPN spec for a given name at the selected scope,
+// converted to MACVPNDetail. Scoped reads return that scope's stored definition
+// with no base fallback (absent ⇒ 404).
+func (net *Network) ShowMACVPN(sel ScopeSelector, name string) (*MACVPNDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	s, err := net.internal.GetMACVPNAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return convertMACVPNDetail(name, s), nil
 }
@@ -333,11 +349,16 @@ func (net *Network) ListQoSPolicies() []string {
 	return net.internal.ListQoSPolicies()
 }
 
-// ShowQoSPolicy returns the QoS policy for a given name, converted to QoSPolicyDetail.
-func (net *Network) ShowQoSPolicy(name string) (*QoSPolicyDetail, error) {
-	p, err := net.internal.GetQoSPolicy(name)
-	if err != nil {
+// ShowQoSPolicy returns the QoS policy for a given name at the selected scope,
+// converted to QoSPolicyDetail. Scoped reads return that scope's stored
+// definition with no base fallback (absent ⇒ 404).
+func (net *Network) ShowQoSPolicy(sel ScopeSelector, name string) (*QoSPolicyDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	p, err := net.internal.GetQoSPolicyAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return convertQoSPolicyDetail(name, p), nil
 }
@@ -520,11 +541,16 @@ func (net *Network) ListFilters() []string {
 	return net.internal.ListFilters()
 }
 
-// ShowFilter returns the filter spec for a given name, converted to FilterDetail.
-func (net *Network) ShowFilter(name string) (*FilterDetail, error) {
-	f, err := net.internal.GetFilter(name)
-	if err != nil {
+// ShowFilter returns the filter spec for a given name at the selected scope,
+// converted to FilterDetail. Scoped reads return that scope's stored definition
+// with no base fallback (absent ⇒ 404).
+func (net *Network) ShowFilter(sel ScopeSelector, name string) (*FilterDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	f, err := net.internal.GetFilterAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return convertFilterDetail(name, f), nil
 }
@@ -746,11 +772,16 @@ func (net *Network) ListPrefixLists() []string {
 	return names
 }
 
-// ShowPrefixList returns the prefix list for a given name.
-func (net *Network) ShowPrefixList(name string) (*PrefixListDetail, error) {
-	prefixes, err := net.internal.GetPrefixList(name)
-	if err != nil {
+// ShowPrefixList returns the prefix list for a given name at the selected scope.
+// Scoped reads return that scope's stored definition with no base fallback
+// (absent ⇒ 404).
+func (net *Network) ShowPrefixList(sel ScopeSelector, name string) (*PrefixListDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	prefixes, err := net.internal.GetPrefixListAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return &PrefixListDetail{Name: name, Prefixes: prefixes}, nil
 }
@@ -853,11 +884,16 @@ func (net *Network) RemovePrefixListEntry(ctx context.Context, sel ScopeSelector
 	return nil
 }
 
-// ShowRoutePolicy returns the route policy for a given name.
-func (net *Network) ShowRoutePolicy(name string) (*RoutePolicyDetail, error) {
-	rp, err := net.internal.GetRoutePolicy(name)
-	if err != nil {
+// ShowRoutePolicy returns the route policy for a given name at the selected
+// scope. Scoped reads return that scope's stored definition with no base
+// fallback (absent ⇒ 404).
+func (net *Network) ShowRoutePolicy(sel ScopeSelector, name string) (*RoutePolicyDetail, error) {
+	if err := validateScopeSelector(sel); err != nil {
 		return nil, err
+	}
+	rp, err := net.internal.GetRoutePolicyAt(sel.Scope, sel.ScopeInstance, name)
+	if err != nil {
+		return nil, translateInternalError(err)
 	}
 	return convertRoutePolicyDetail(name, rp), nil
 }
