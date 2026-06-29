@@ -1345,6 +1345,33 @@ file that exists proves it was written. A process that responds proves
 it's alive. Structural proofs are binary — they are either true or
 false. Heuristics have thresholds, and thresholds have edge cases.
 
+### Symmetry is an axis, not a direction
+
+Create-and-remove is the axis that accumulates state when it breaks. newtron has
+paid for the other two as well — a write that gained a dimension or a field its
+read did not, and a write that could persist what the loader would later reject.
+
+**Every write has a matching read.** Spec writes are scope-aware: a service,
+filter, or QoS policy can be authored at network, zone, or node scope. For a
+while the *reads* were not — `GET .../{kind}/{name}` always returned the network
+base, so an operator could write a zone override and never read it back. The same
+shape recurred one field down: `create-service` accepted a `routing` block, but
+`ServiceDetail` omitted it, so a routed service's `peer_as` could be dropped and
+the read looked identical to a healthy service until apply time failed for want
+of a peer AS. Both are one defect — a write surface that grew a dimension or a
+field the read surface did not. The scope selector now rides the show endpoints,
+and every field `create-service` accepts is returned by the service read.
+
+**Every load-time check is a write-time check.** The loader validates a QoS
+policy in full — queue count, unique queue names, weight rules, DSCP ranges. An
+incremental write that checks only that the target slot is free will persist a
+policy the loader then rejects: two queues of the same name go to disk
+atomically, with a 200, and the network fails to register on the next load — a
+successful write that manufactured unloadable state. The invariant must live in
+one validator the writer and the loader both call, so write-time validation is a
+superset of load-time validation and a write can never produce what a load
+refuses.
+
 ---
 
 ## 16. Verb Vocabulary — The Name Is the Lifecycle Contract
