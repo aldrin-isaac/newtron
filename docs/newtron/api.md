@@ -648,6 +648,7 @@ The shape is structured, not a DSL string — UIs walk the JSON tree directly:
 | Shape | Fields | Meaning |
 |-------|--------|---------|
 | **Atomic** | `field` + exactly one of `equals` / `not_equals` / `in` / `not_in` | Compare the named sibling's current value against the operand |
+| **Atomic (ref lookup)** | the above + `ref_field` | `field` must be a reference (`ref_kind` set); compare the operand against `ref_field` on the *referenced* spec, not against `field`'s own value |
 | **Combinator** | exactly one of `all_of` / `any_of` (array of nested conditions) | Conjunction / disjunction of sub-conditions |
 
 Atomic and combinator shapes are mutually exclusive per node — a single
@@ -663,6 +664,14 @@ Semantics:
 - **Unfilled sibling values evaluate against the field's zero value.** A
   `service_type in [...]` predicate is `false` for an unfilled `service_type` —
   required-ness can't trigger on an unspecified state.
+- **`ref_field` looks through a reference.** When set, `field` must be a
+  reference field (it carries a `ref_kind`); the client resolves the selected
+  value in the data it already loaded for that field's dropdown and compares the
+  operand against `ref_field` on the referenced spec. Example: NodeSpec's
+  `loopback_ip` and `zone` carry `{"field":"platform","ref_field":"device_type","not_equals":"host"}`
+  — required for a switch node (the platform's `device_type` isn't `host`), not
+  for a host node. The server validates only that `field` is a reference; the
+  referenced kind owns `ref_field`, so the client resolves it (the server doesn't).
 - **Server-side enforcement.** The server does NOT evaluate `required_when` at
   request time; the existing 400-on-missing-required behaviour is the back-stop.
   `required_when` is UX so the operator sees the constraint before submitting.

@@ -199,6 +199,16 @@ func init() {
 			Update: "/newtron/v1/networks/{netID}/update-node",
 			Delete: "/newtron/v1/networks/{netID}/delete-node",
 		},
+		// Conditional-required surface — a switch node needs a loopback IP and a
+		// zone; a host node needs neither (only mgmt_ip). The discriminator is the
+		// selected platform's device_type, so the predicate looks through the
+		// `platform` reference (ref_field) at the PlatformSpec's device_type. The
+		// UI resolves it from the platforms it already loaded for the platform
+		// dropdown; NodeSpec.ValidateConstraints is the server-side back-stop.
+		RequiredWhen: map[string]*RequiredWhen{
+			"loopback_ip": {Field: "platform", RefField: "device_type", NotEquals: "host"},
+			"zone":        {Field: "platform", RefField: "device_type", NotEquals: "host"},
+		},
 	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:            "ZoneSpec",

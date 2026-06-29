@@ -455,8 +455,8 @@ type EVPNConfig struct {
 type NodeSpec struct {
 	// REQUIRED - must be specified
 	MgmtIP     string `json:"mgmt_ip" label:"Management IP" tooltip:"Out-of-band management IP reachable from newtron" format:"cidr"`
-	LoopbackIP string `json:"loopback_ip" label:"Loopback IP" tooltip:"Loopback IP — the device's BGP router-id and VTEP source" format:"cidr"`
-	Zone       string `json:"zone" label:"Zone" tooltip:"Zone name (must exist in network.json zones)" ref:"ZoneSpec"`
+	LoopbackIP string `json:"loopback_ip,omitempty" label:"Loopback IP" tooltip:"Loopback IP — the device's BGP router-id and VTEP source (required for switch nodes)" format:"cidr"`
+	Zone       string `json:"zone,omitempty" label:"Zone" tooltip:"Zone name (must exist in network.json zones; required for switch nodes)" ref:"ZoneSpec"`
 
 	// OPTIONAL - EVPN overlay peering
 	EVPN *EVPNConfig `json:"evpn,omitempty" label:"EVPN Overlay" tooltip:"EVPN BGP overlay peering — set on leafs and route reflectors"`
