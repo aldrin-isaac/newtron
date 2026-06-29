@@ -337,11 +337,11 @@ func httpStatusFromError(err error) int {
 		return http.StatusBadRequest
 	}
 
-	// Shape validation from the shared spec validators (util.ValidationBuilder) —
-	// a malformed spec rejected at the write boundary, the same check the loader
-	// runs. Invalid input, 400.
-	var shapeErr *util.ValidationError
-	if errors.As(err, &shapeErr) {
+	// Constraint validation from the shared spec validators
+	// (util.ValidationBuilder) — a malformed spec rejected at the write boundary,
+	// the same check the loader runs. Invalid input, 400.
+	var constraintErr *util.ValidationError
+	if errors.As(err, &constraintErr) {
 		return http.StatusBadRequest
 	}
 
