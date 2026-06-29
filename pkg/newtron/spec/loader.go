@@ -184,23 +184,23 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 
 // validate enforces, at load time, exactly the invariants the write path
 // enforces before it persists — from the same code (spec.OverridableSpecs
-// shape validators + the declarative MissingRefs), so a write can never produce
+// constraint validators + the declarative MissingRefs), so a write can never produce
 // a spec that fails to load (DESIGN_PRINCIPLES §15, §27).
 func (l *Loader) validate() error {
 	v := &util.ValidationBuilder{}
 	net := &l.network.OverridableSpecs
 
-	// Network scope: shapes (QoS structure, service-type constraints) and
+	// Network scope: constraints (QoS structure, service-type) and
 	// references, both checked against the network-level maps.
-	net.ValidateShapes(v, "")
+	net.ValidateConstraints(v, "")
 	addMissingRefs(v, "", net.MissingRefsIn(net))
 
-	// Zone overrides: shapes against the override's own specs; references
+	// Zone overrides: constraints against the override's own specs; references
 	// against the merged (zone + network) set — the network-floor resolution.
 	for zoneName, zone := range l.network.Zones {
 		prefix := "zone '" + zoneName + "': "
 		merged := mergeOverridableSpecs(net, &zone.OverridableSpecs)
-		zone.OverridableSpecs.ValidateShapes(v, prefix)
+		zone.OverridableSpecs.ValidateConstraints(v, prefix)
 		addMissingRefs(v, prefix, merged.MissingRefsIn(&zone.OverridableSpecs))
 	}
 
@@ -241,11 +241,11 @@ func (l *Loader) isHostPlatform(platformName string) bool {
 	return platform.IsHost()
 }
 
-// validateNodeSpec delegates to NodeSpec.ValidateShape — the same shape check the
-// node-spec write path runs — supplying the loader's host-platform lookup and the
+// validateNodeSpec delegates to NodeSpec.ValidateConstraints — the same constraint
+// check the node-spec write path runs — supplying the loader's host-platform lookup and the
 // network's zones so load and write reject the same node specs.
 func (l *Loader) validateNodeSpec(nodeSpec *NodeSpec) error {
-	return nodeSpec.ValidateShape(l.isHostPlatform(nodeSpec.Platform), l.network.Zones)
+	return nodeSpec.ValidateConstraints(l.isHostPlatform(nodeSpec.Platform), l.network.Zones)
 }
 
 // GetNetwork returns the network spec. Reads l.network under RLock — the
@@ -296,7 +296,7 @@ func (l *Loader) UpdateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Same shape check the load path runs — symmetric with CreateNodeSpec.
+	// Same constraint check the load path runs — symmetric with CreateNodeSpec.
 	if err := l.validateNodeSpec(nodeSpec); err != nil {
 		return err
 	}
@@ -441,7 +441,7 @@ func (l *Loader) CreateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Same shape check the load path runs (validateNodeSpec) — a write can't
+	// Same constraint check the load path runs (validateNodeSpec) — a write can't
 	// persist a node spec the next load would reject (DESIGN_PRINCIPLES §15).
 	if err := l.validateNodeSpec(nodeSpec); err != nil {
 		return err

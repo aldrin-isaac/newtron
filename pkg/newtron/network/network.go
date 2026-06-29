@@ -669,7 +669,7 @@ func (n *Network) CreateService(scope, instance, name string, def *spec.ServiceS
 		if err := n.checkRefsResolve(def); err != nil {
 			return err
 		}
-		if err := def.ValidateShape(name); err != nil {
+		if err := def.ValidateConstraints(name); err != nil {
 			return err
 		}
 		if err := n.checkOverrideBase(scope, "ServiceSpec", name); err != nil {
@@ -729,7 +729,7 @@ func (n *Network) CreateQoSPolicy(scope, instance, name string, def *spec.QoSPol
 		if _, exists := c.QoSPolicies[name]; exists {
 			return fmt.Errorf("QoS policy '%s' already exists", name)
 		}
-		if err := def.ValidateShape(name); err != nil {
+		if err := def.ValidateConstraints(name); err != nil {
 			return err
 		}
 		if err := n.checkOverrideBase(scope, "QoSPolicy", name); err != nil {
@@ -859,7 +859,7 @@ func (n *Network) UpdateService(scope, instance, name string, def *spec.ServiceS
 		if err := n.checkRefsResolve(def); err != nil {
 			return err
 		}
-		if err := def.ValidateShape(name); err != nil {
+		if err := def.ValidateConstraints(name); err != nil {
 			return err
 		}
 		c.Services[name] = def
@@ -898,7 +898,7 @@ func (n *Network) UpdateQoSPolicy(scope, instance, name string, def *spec.QoSPol
 		if _, exists := c.QoSPolicies[name]; !exists {
 			return &newtronErrors{notFound: true, resource: "qos-policy", id: name}
 		}
-		if err := def.ValidateShape(name); err != nil {
+		if err := def.ValidateConstraints(name); err != nil {
 			return err
 		}
 		c.QoSPolicies[name] = def
@@ -1000,7 +1000,7 @@ func (n *Network) AddQoSQueueToPolicy(scope, instance, policy string, queueID in
 		// Validate the resulting policy with the same checker the loader runs —
 		// a queue that duplicates a name (or breaks a weight/DSCP rule) is
 		// refused here, not silently persisted to fail the next load.
-		return p.ValidateShape(policy)
+		return p.ValidateConstraints(policy)
 	})
 }
 
@@ -1037,8 +1037,8 @@ func (n *Network) UpdateQoSQueueInPolicy(scope, instance, policy string, current
 			// In-place edit.
 			p.Queues[currentID] = newQueue
 		}
-		// Same post-mutation shape check as AddQoSQueueToPolicy.
-		return p.ValidateShape(policy)
+		// Same post-mutation constraint check as AddQoSQueueToPolicy.
+		return p.ValidateConstraints(policy)
 	})
 }
 

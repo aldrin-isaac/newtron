@@ -2,29 +2,31 @@ package spec
 
 import "github.com/aldrin-isaac/newtron/pkg/util"
 
-// validate.go — the single owner of spec-shape validation (DESIGN_PRINCIPLES §15,
-// "Symmetry is an axis, not a direction"; §27 single owner). Every invariant
-// here is enforced by BOTH paths that produce a spec: the loader at load time
-// and the write path before it persists. Because they call the same code, a
-// write can never persist a spec the loader would reject (persist-load
+// validate.go — the single owner of spec constraint validation (DESIGN_PRINCIPLES
+// §15, "Symmetry is an axis, not a direction"; §27 single owner). Every
+// constraint here is enforced by BOTH paths that produce a spec: the loader at
+// load time and the write path before it persists. Because they call the same
+// code, a write can never persist a spec the loader would reject (persist-load
 // symmetry). Reference resolution is validated just as symmetrically, via the
-// declarative MissingRefs (references.go); these methods cover the shape and
-// structure that `ref:` tags cannot express.
+// declarative MissingRefs (references.go); these methods cover the intrinsic
+// constraints that `ref:` tags cannot express — required fields, value ranges
+// and formats, enum membership, and internal uniqueness.
 
-// ValidateShape checks a QoS policy's structural invariants: queue count,
+// ValidateConstraints checks a QoS policy's intrinsic constraints: queue count,
 // queue-name uniqueness, per-type weight rules, and DSCP range/uniqueness. name
 // is used in diagnostics. Nil queue slots (the write path fills gaps by index)
-// are skipped. (QoS policies carry no cross-spec references, so shape is the
-// whole of their validation.)
-func (q *QoSPolicy) ValidateShape(name string) error {
+// are skipped. (QoS policies carry no cross-spec references, so this is the whole
+// of their validation.)
+func (q *QoSPolicy) ValidateConstraints(name string) error {
 	v := &util.ValidationBuilder{}
-	q.validateShape(v, name)
+	q.validateConstraints(v, name)
 	return v.Build()
 }
 
-// validateShape appends a QoS policy's structural errors to a shared builder —
-// the form the loader uses to accumulate errors across every policy in one pass.
-func (q *QoSPolicy) validateShape(v *util.ValidationBuilder, name string) {
+// validateConstraints appends a QoS policy's constraint errors to a shared
+// builder — the form the loader uses to accumulate errors across every policy in
+// one pass.
+func (q *QoSPolicy) validateConstraints(v *util.ValidationBuilder, name string) {
 	// An empty policy is a valid shell — create-qos-policy authors one with no
 	// queues, then add-qos-queue populates it. The meaningful structural checks
 	// (uniqueness, count, weights, DSCP) apply to the queues that are present.
@@ -76,17 +78,17 @@ func (q *QoSPolicy) validateShape(v *util.ValidationBuilder, name string) {
 	}
 }
 
-// ValidateShape checks a service's type-level constraints — the references its
-// service_type requires and that service_type is known. The references
+// ValidateConstraints checks a service's type-level constraints — the references
+// its service_type requires and that service_type is known. The references
 // themselves (do they resolve?) are checked separately by MissingRefs; this
 // covers which references each type mandates.
-func (s *ServiceSpec) ValidateShape(name string) error {
+func (s *ServiceSpec) ValidateConstraints(name string) error {
 	v := &util.ValidationBuilder{}
-	s.validateShape(v, "", name)
+	s.validateConstraints(v, "", name)
 	return v.Build()
 }
 
-func (s *ServiceSpec) validateShape(v *util.ValidationBuilder, prefix, name string) {
+func (s *ServiceSpec) validateConstraints(v *util.ValidationBuilder, prefix, name string) {
 	switch s.ServiceType {
 	case ServiceTypeEVPNIRB:
 		if s.IPVPN == "" {
@@ -110,11 +112,11 @@ func (s *ServiceSpec) validateShape(v *util.ValidationBuilder, prefix, name stri
 	}
 }
 
-// ValidateShape checks a node spec's required fields and value formats. isHost
-// relaxes the rules to a host device (only mgmt_ip required); knownZones is the
-// set of zones the spec's `zone` must be one of (nil skips that check for
+// ValidateConstraints checks a node spec's required fields and value formats.
+// isHost relaxes the rules to a host device (only mgmt_ip required); knownZones
+// is the set of zones the spec's `zone` must be one of (nil skips that check for
 // callers that validate zone membership elsewhere).
-func (n *NodeSpec) ValidateShape(isHost bool, knownZones map[string]*ZoneSpec) error {
+func (n *NodeSpec) ValidateConstraints(isHost bool, knownZones map[string]*ZoneSpec) error {
 	v := &util.ValidationBuilder{}
 
 	if isHost {
@@ -144,15 +146,16 @@ func (n *NodeSpec) ValidateShape(isHost bool, knownZones map[string]*ZoneSpec) e
 	return v.Build()
 }
 
-// ValidateShapes appends the shape errors of every shape-bearing spec in the set
-// to a shared builder — the QoS policies and the services. prefix labels the
-// scope in messages (e.g. "zone 'amer': "). It is the load-side aggregate of the
-// per-object Validate/ValidateShape methods the write path calls individually.
-func (o *OverridableSpecs) ValidateShapes(v *util.ValidationBuilder, prefix string) {
+// ValidateConstraints appends the constraint errors of every constraint-bearing
+// spec in the set to a shared builder — the QoS policies and the services.
+// prefix labels the scope in messages (e.g. "zone 'amer': "). It is the
+// load-side aggregate of the per-object ValidateConstraints methods the write
+// path calls individually.
+func (o *OverridableSpecs) ValidateConstraints(v *util.ValidationBuilder, prefix string) {
 	for name, policy := range o.QoSPolicies {
-		policy.validateShape(v, prefix+name)
+		policy.validateConstraints(v, prefix+name)
 	}
 	for name, svc := range o.Services {
-		svc.validateShape(v, prefix, name)
+		svc.validateConstraints(v, prefix, name)
 	}
 }
