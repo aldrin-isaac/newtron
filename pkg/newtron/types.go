@@ -542,15 +542,32 @@ type SpecInstance struct {
 
 // ServiceDetail is the API view of a service definition.
 type ServiceDetail struct {
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	ServiceType   string `json:"service_type"`
-	IPVPN         string `json:"ipvpn,omitempty"`
-	MACVPN        string `json:"macvpn,omitempty"`
-	VRFType       string `json:"vrf_type,omitempty"`
-	QoSPolicy     string `json:"qos_policy,omitempty"`
-	IngressFilter string `json:"ingress_filter,omitempty"`
-	EgressFilter  string `json:"egress_filter,omitempty"`
+	Name          string         `json:"name"`
+	Description   string         `json:"description,omitempty"`
+	ServiceType   string         `json:"service_type"`
+	IPVPN         string         `json:"ipvpn,omitempty"`
+	MACVPN        string         `json:"macvpn,omitempty"`
+	VRFType       string         `json:"vrf_type,omitempty"`
+	QoSPolicy     string         `json:"qos_policy,omitempty"`
+	IngressFilter string         `json:"ingress_filter,omitempty"`
+	EgressFilter  string         `json:"egress_filter,omitempty"`
+	Routing       *RoutingDetail `json:"routing,omitempty"`
+}
+
+// RoutingDetail is the API view of a routed service's BGP/static routing
+// configuration. It is the read mirror of CreateServiceRouting — every field
+// accepted on create-service / update-service is returned on the service read,
+// so routing config is no longer write-only (ai-instructions §24).
+type RoutingDetail struct {
+	Protocol         string `json:"protocol"`
+	PeerAS           string `json:"peer_as,omitempty"`
+	ImportPolicy     string `json:"import_policy,omitempty"`
+	ExportPolicy     string `json:"export_policy,omitempty"`
+	ImportCommunity  string `json:"import_community,omitempty"`
+	ExportCommunity  string `json:"export_community,omitempty"`
+	ImportPrefixList string `json:"import_prefix_list,omitempty"`
+	ExportPrefixList string `json:"export_prefix_list,omitempty"`
+	Redistribute     *bool  `json:"redistribute,omitempty"`
 }
 
 // IPVPNDetail is the API view of an IP-VPN definition. Name is the
