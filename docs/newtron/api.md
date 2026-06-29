@@ -1547,6 +1547,14 @@ injected at the schema layer for these kinds.
 write authors an *override* of a network-scope definition; storage stays
 hierarchical (network → zone → node, node wins), only the write surface is flat.
 
+**Writes validate what load validates.** Every create/update/sub-rule write is
+checked against the same shape invariants the loader enforces — QoS queue
+structure (unique names, ≤8 queues, per-type weights, DSCP range/uniqueness),
+service-type constraints (`evpn-irb` needs ipvpn+macvpn, etc.), node-spec
+required fields, and reference resolution. A malformed spec is refused with
+**400** at the write boundary rather than persisted to fail the next load
+(DESIGN_PRINCIPLES §15). So a 200 from a write guarantees the result reloads.
+
 These two fields are accepted by **every** write verb in this section — the
 `create-`/`update-`/`delete-` verbs for all overridable kinds **and** the
 sub-rule verbs (`add`/`update`/`remove`-`filter-rule`, `-qos-queue`,

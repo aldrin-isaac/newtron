@@ -140,6 +140,23 @@ func (o *OverridableSpecs) MissingRefs(value any) []SpecRef {
 	return missing
 }
 
+// MissingRefsIn returns every unresolved reference declared by any spec in own,
+// checked against this (resolved) set — the load-side aggregate of MissingRefs
+// over every spec. Field diagnostics name the owning spec. Empty when every
+// reference in own resolves. This is the same declarative mechanism the write
+// path uses per-spec (MissingRefs), so load and write check references with one
+// body, not two.
+func (o *OverridableSpecs) MissingRefsIn(own *OverridableSpecs) []SpecRef {
+	var missing []SpecRef
+	own.EachSpec(func(kind, name string, value any) {
+		for _, ref := range o.MissingRefs(value) {
+			ref.Field = kind + " '" + name + "' " + ref.Field
+			missing = append(missing, ref)
+		}
+	})
+	return missing
+}
+
 // FindConsumers returns every spec in the set that references the target kind +
 // (canonical) name — the reverse dependency check for delete. Empty when nothing
 // references the target.

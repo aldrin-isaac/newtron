@@ -192,17 +192,19 @@ func TestUpdateNodeSpec_RoundTrip(t *testing.T) {
 	}
 
 	if w := post(t, s, "/newtron/v1/networks/default/create-node", map[string]any{
-		"name":    "switch1",
-		"mgmt_ip": "10.0.0.1",
-		"zone":    "amer",
+		"name":        "switch1",
+		"mgmt_ip":     "10.0.0.1",
+		"loopback_ip": "10.255.0.1",
+		"zone":        "amer",
 	}); w.Code != http.StatusCreated {
 		t.Fatalf("create-node: status=%d body=%s", w.Code, w.Body.String())
 	}
 
 	if w := post(t, s, "/newtron/v1/networks/default/update-node", map[string]any{
-		"name":    "switch1",
-		"mgmt_ip": "10.0.0.99",
-		"zone":    "amer",
+		"name":        "switch1",
+		"mgmt_ip":     "10.0.0.99",
+		"loopback_ip": "10.255.0.1",
+		"zone":        "amer",
 	}); w.Code != http.StatusOK {
 		t.Fatalf("update-node: status=%d body=%s", w.Code, w.Body.String())
 	}

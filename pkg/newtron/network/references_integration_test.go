@@ -40,7 +40,9 @@ func TestSpecDependencyChecks(t *testing.T) {
 	}
 
 	// --- Forward guard: a spec that references something nonexistent is rejected ---
-	err = n.CreateService("", "", "BAD", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "GHOST"})
+	// evpn-routed needs only an ipvpn (no macvpn), isolating the reference check
+	// from the service-type shape constraints.
+	err = n.CreateService("", "", "BAD", &spec.ServiceSpec{ServiceType: "evpn-routed", IPVPN: "GHOST"})
 	var refErr *spec.ReferenceError
 	if !errors.As(err, &refErr) {
 		t.Fatalf("CreateService with a dangling ipvpn ref: got %v, want *spec.ReferenceError (400)", err)
@@ -50,7 +52,7 @@ func TestSpecDependencyChecks(t *testing.T) {
 	if err := n.CreateIPVPN("", "", "GHOST", &spec.IPVPNSpec{L3VNI: 1001}); err != nil {
 		t.Fatalf("CreateIPVPN: %v", err)
 	}
-	if err := n.CreateService("", "", "BAD", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "GHOST"}); err != nil {
+	if err := n.CreateService("", "", "BAD", &spec.ServiceSpec{ServiceType: "evpn-routed", IPVPN: "GHOST"}); err != nil {
 		t.Errorf("CreateService after creating its ipvpn dependency: %v", err)
 	}
 }

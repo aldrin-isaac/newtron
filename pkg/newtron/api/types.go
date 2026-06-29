@@ -8,6 +8,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -333,6 +334,14 @@ func httpStatusFromError(err error) int {
 
 	var validation *newtron.ValidationError
 	if errors.As(err, &validation) {
+		return http.StatusBadRequest
+	}
+
+	// Shape validation from the shared spec validators (util.ValidationBuilder) —
+	// a malformed spec rejected at the write boundary, the same check the loader
+	// runs. Invalid input, 400.
+	var shapeErr *util.ValidationError
+	if errors.As(err, &shapeErr) {
 		return http.StatusBadRequest
 	}
 

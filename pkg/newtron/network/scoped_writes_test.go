@@ -430,15 +430,18 @@ func TestDeleteNodeSpec_BlockedByOverride(t *testing.T) {
 // zone-scoped service override.)
 func TestNetworkDelete_BlockedByScopedConsumer(t *testing.T) {
 	n := loadScopedTestNetwork(t)
-	// Network bases: an IP-VPN and a service that the zone will override.
+	// Network bases: an IP-VPN, a MAC-VPN, and a service that the zone overrides.
 	if err := n.CreateIPVPN("", "", "VRF_BLUE", &spec.IPVPNSpec{L3VNI: 1001}); err != nil {
 		t.Fatalf("create network ipvpn: %v", err)
 	}
-	if err := n.CreateService(spec.ScopeNetwork, "", "OVERLAY", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "VRF_BLUE"}); err != nil {
+	if err := n.CreateMACVPN("", "", "BD_BLUE", &spec.MACVPNSpec{VlanID: 100}); err != nil {
+		t.Fatalf("create network macvpn: %v", err)
+	}
+	if err := n.CreateService(spec.ScopeNetwork, "", "OVERLAY", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "VRF_BLUE", MACVPN: "BD_BLUE"}); err != nil {
 		t.Fatalf("create network service base: %v", err)
 	}
 	// Zone override of the service still references the network IP-VPN.
-	if err := n.CreateService(spec.ScopeZone, "amer", "OVERLAY", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "VRF_BLUE"}); err != nil {
+	if err := n.CreateService(spec.ScopeZone, "amer", "OVERLAY", &spec.ServiceSpec{ServiceType: "evpn-irb", IPVPN: "VRF_BLUE", MACVPN: "BD_BLUE"}); err != nil {
 		t.Fatalf("create zone service override: %v", err)
 	}
 
