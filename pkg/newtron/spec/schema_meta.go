@@ -114,7 +114,9 @@ type RefCondition struct {
 //	Atomic.    Field names a sibling on the same SchemaMeta. Exactly
 //	           one of Equals / NotEquals / In / NotIn is set; the
 //	           predicate compares the sibling's current form value
-//	           against that operand.
+//	           against that operand. When RefField is also set, the
+//	           operand is compared against a property of the *referenced*
+//	           spec instead — see RefField.
 //
 //	Combinator. Exactly one of AllOf / AnyOf is set. The condition is
 //	           the conjunction / disjunction of the listed sub-conditions.
@@ -135,6 +137,21 @@ type RequiredWhen struct {
 	NotEquals any    `json:"not_equals,omitempty"`
 	In        []any  `json:"in,omitempty"`
 	NotIn     []any  `json:"not_in,omitempty"`
+
+	// RefField turns Field into a lookup through a reference. When set, Field
+	// must name a sibling that is itself a reference (a `ref:"Kind"` field);
+	// the operand (Equals / NotEquals / In / NotIn) is then compared against
+	// RefField on the *referenced* spec rather than against Field's own value.
+	// The client resolves it from the data it already loaded to populate
+	// Field's dropdown — newtron emits the predicate but does not evaluate it,
+	// and validates only that Field is a reference (the referenced kind owns
+	// RefField, so RefField is not deep-checked server-side).
+	//
+	// Example — a switch node requires loopback_ip + zone, a host node does
+	// not, and the distinction is the platform's device_type:
+	//
+	//	"loopback_ip": {Field: "platform", RefField: "device_type", NotEquals: "host"}
+	RefField string `json:"ref_field,omitempty"`
 
 	// Combinator shape — exactly one of AllOf / AnyOf is set.
 	AllOf []*RequiredWhen `json:"all_of,omitempty"`
@@ -331,6 +348,7 @@ func validateConditionMap(kind, label string, m map[string]*RequiredWhen, identi
 	if identifierField != nil {
 		known[identifierField.Name] = struct{}{}
 	}
+	refKnown := refWireNames(t) // fields carrying a `ref:` tag — valid RefField anchors
 	for target, cond := range m {
 		if _, ok := known[target]; !ok {
 			panic(schemaRegistrationError(kind, "%s[%q]: target field is not a wire name on %s",
@@ -339,7 +357,7 @@ func validateConditionMap(kind, label string, m map[string]*RequiredWhen, identi
 		if cond == nil {
 			panic(schemaRegistrationError(kind, "%s[%q]: nil condition", label, target))
 		}
-		if err := validateRequiredWhenCondition(cond, known); err != "" {
+		if err := validateRequiredWhenCondition(cond, known, refKnown); err != "" {
 			panic(schemaRegistrationError(kind, "%s[%q]: %s", label, target, err))
 		}
 	}
@@ -350,11 +368,11 @@ func validateConditionMap(kind, label string, m map[string]*RequiredWhen, identi
 // Walks combinators recursively against the same `known` field set —
 // nested conditions still reference siblings on the OUTER form (newtcon's
 // "scope is current form's siblings" rule).
-func validateRequiredWhenCondition(c *RequiredWhen, known map[string]struct{}) string {
+func validateRequiredWhenCondition(c *RequiredWhen, known, refKnown map[string]struct{}) string {
 	if c == nil {
 		return "nil condition"
 	}
-	atomic := c.Field != "" || c.Equals != nil || c.NotEquals != nil || c.In != nil || c.NotIn != nil
+	atomic := c.Field != "" || c.RefField != "" || c.Equals != nil || c.NotEquals != nil || c.In != nil || c.NotIn != nil
 	combinator := len(c.AllOf) > 0 || len(c.AnyOf) > 0
 	switch {
 	case !atomic && !combinator:
@@ -367,6 +385,11 @@ func validateRequiredWhenCondition(c *RequiredWhen, known map[string]struct{}) s
 		}
 		if _, ok := known[c.Field]; !ok {
 			return "atomic condition references unknown field " + c.Field
+		}
+		if c.RefField != "" {
+			if _, ok := refKnown[c.Field]; !ok {
+				return "ref_field set but field " + c.Field + " is not a reference field (no `ref:` tag)"
+			}
 		}
 		operands := 0
 		if c.Equals != nil {
@@ -398,7 +421,7 @@ func validateRequiredWhenCondition(c *RequiredWhen, known map[string]struct{}) s
 			children = c.AnyOf
 		}
 		for i, sub := range children {
-			if msg := validateRequiredWhenCondition(sub, known); msg != "" {
+			if msg := validateRequiredWhenCondition(sub, known, refKnown); msg != "" {
 				return fmt.Sprintf("child %d: %s", i, msg)
 			}
 		}
@@ -434,6 +457,39 @@ func collectWireNames(t reflect.Type, out map[string]struct{}) {
 		}
 		name, _ := parseJSONTag(jsonTag, sf.Name)
 		if name != "" {
+			out[name] = struct{}{}
+		}
+	}
+}
+
+// refWireNames collects the JSON wire names of every field carrying a `ref:`
+// tag — the fields a RequiredWhen.RefField predicate may anchor on, since only
+// a reference field tells the client which kind to resolve the lookup against.
+// Embedded structs are flattened like wireNames.
+func refWireNames(t reflect.Type) map[string]struct{} {
+	out := make(map[string]struct{})
+	collectRefWireNames(t, out)
+	return out
+}
+
+func collectRefWireNames(t reflect.Type, out map[string]struct{}) {
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+		if sf.Anonymous {
+			collectRefWireNames(sf.Type, out)
+			continue
+		}
+		if !sf.IsExported() || sf.Tag.Get("ref") == "" {
+			continue
+		}
+		jsonTag := sf.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+		if name, _ := parseJSONTag(jsonTag, sf.Name); name != "" {
 			out[name] = struct{}{}
 		}
 	}

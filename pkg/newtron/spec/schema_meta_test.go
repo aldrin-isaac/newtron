@@ -355,6 +355,57 @@ func TestRequiredWhen_AttachedToTargetField(t *testing.T) {
 	}
 }
 
+// TestRequiredWhen_RefFieldThroughReference verifies a predicate that looks
+// through a reference (Field is a `ref:` field, RefField names a property of the
+// referenced kind) is accepted and emitted intact — the node-form case where
+// loopback_ip is required when the platform's device_type isn't host.
+func TestRequiredWhen_RefFieldThroughReference(t *testing.T) {
+	swapRegistry(t)
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		// ipvpn is a `ref:"IPVPNSpec"` field, so it's a valid RefField anchor.
+		RequiredWhen: map[string]*RequiredWhen{
+			"macvpn": {Field: "ipvpn", RefField: "vrf_name", NotEquals: "host"},
+		},
+	})
+	meta := LookupSchema("FixSvc")
+	if meta == nil {
+		t.Fatal("LookupSchema(FixSvc) returned nil")
+	}
+	for _, f := range meta.Fields {
+		if f.Name != "macvpn" {
+			continue
+		}
+		rw := f.RequiredWhen
+		if rw == nil || rw.Field != "ipvpn" || rw.RefField != "vrf_name" || rw.NotEquals != "host" {
+			t.Fatalf("macvpn.required_when = %+v, want {field:ipvpn, ref_field:vrf_name, not_equals:host}", rw)
+		}
+		return
+	}
+	t.Fatal("macvpn field not found in schema")
+}
+
+// TestRequiredWhen_PanicsOnRefFieldNonReference pins that ref_field may only
+// anchor on a reference field — a property lookup needs a `ref:` to tell the
+// client which kind to resolve.
+func TestRequiredWhen_PanicsOnRefFieldNonReference(t *testing.T) {
+	swapRegistry(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic: ref_field anchored on a non-reference field")
+		}
+	}()
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:   "FixSvc",
+		Sample: fixSvc{},
+		RequiredWhen: map[string]*RequiredWhen{
+			// service_type has no `ref:` tag — can't anchor a ref_field lookup.
+			"macvpn": {Field: "service_type", RefField: "device_type", Equals: "switch"},
+		},
+	})
+}
+
 // TestRequiredWhen_PanicsOnUnknownTargetField confirms the init-time
 // validator catches a typo'd map key — the canonical case the agreement
 // with newtcon called out (`{"servce_type": ...}` instead of
