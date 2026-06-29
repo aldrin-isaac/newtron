@@ -237,6 +237,12 @@ Reverse operations must be **reference-aware** — scan for remaining consumers 
 deleting shared resources. Baseline operations (`setup-*`, `set-*`) are the sole
 exception: their collective reverse is Reconcile.
 
+Forward/reverse is one of three symmetry axes §15 covers ("Symmetry is an axis, not
+a direction"): every write also needs a matching read (a dimension or field on a
+write must reach every read/list/query — see `ai-instructions.md` §24), and every
+load-time check needs a matching write-time check (the writer rejects what the
+loader would reject, from one shared validator).
+
 ## Public API Boundary Design
 
 *See `DESIGN_PRINCIPLES_NEWTRON.md` §33 for the full principle.*

@@ -479,27 +479,19 @@ silently introduce a "better" idiom while claiming consistency with the package.
 
 ## 24. Mirror a Dimension Across Every Access Path — IMPL+REVIEW
 
-When you add a dimension, qualifier, or selector to ONE access path of a
-resource — a scope, filter, version, or tenant on a *write* — add it to EVERY
-parallel path that addresses the same resource: read, list, query, delete. A
-dimension you can write but not read (or filter on create but not on list) is a
-half-feature. The surfaces drift: the write path gains a capability the read path
-can't observe, and the gap surfaces later as "I can set it but I can't see it."
+The mechanical check for the symmetry principle in `DESIGN_PRINCIPLES.md §15`
+("Symmetry is an axis, not a direction"): when a write grows a dimension or a
+field, every parallel path that touches the same resource must grow it too.
 
-This is **lateral** symmetry, and it is distinct from the forward/reverse
-symmetry of `DESIGN_PRINCIPLES_NEWTRON.md §15` (create↔delete). That one pairs an
-action with its inverse; this one pairs a single *dimension* across the
-read/write/list verbs that share a resource. A codebase can be perfectly
-forward/reverse symmetric and still have a scope-aware write with a
-scope-blind read — exactly the asymmetry this rule exists to catch.
+**Before finishing a change that adds a dimension or field to a write:** enumerate
+the access paths to the resource — create, update, delete, show, list,
+projection/query — and confirm the addition reaches all of them, or record why a
+path is exempt. *Addressing* dimensions (which instance — scope, tenant, version)
+must reach every path that names the resource; *content* fields must reach every
+path that returns it. The same discipline covers invariants: any state the loader
+rejects, the write path must reject too, from the same validator.
 
-**Before finishing a change that adds a dimension:** enumerate the access paths to
-the resource — create, update, delete, show, list, projection/query — and confirm
-the new dimension reaches all of them, or record why a path is exempt. If the
-dimension is *addressing* (which instance), every path that names the resource
-needs it. If it is *content* (a new field), every path that returns the resource
-should surface it.
-
-**The test:** if a request can carry a field that no response can return — or a
-write can target a variant no read can fetch — you have created an asymmetry.
-Close it in the same change, not a follow-up.
+**The test (a round trip):** if a request can carry a field no response returns, a
+write can target a variant no read can fetch, or a write can persist state a load
+would reject, you have created an asymmetry. Close it in the same change, not a
+follow-up.

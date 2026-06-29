@@ -1364,6 +1364,37 @@ file that exists proves it was written. A process that responds proves
 it's alive. Structural proofs are binary — they are either true or
 false. Heuristics have thresholds, and thresholds have edge cases.
 
+### Symmetry is an axis, not a direction
+
+Create-and-remove is the symmetry that bites first, because asymmetry there
+accumulates state until the device is unknowable. But it is one axis of a
+broader law: **a resource must be reachable the same way through every path
+that touches it.** Two more axes follow from the same logic and rot in the same
+way.
+
+**Every write has a matching read.** When a write gains a dimension — a scope, a
+tenant, a version — or a field, every parallel path that addresses the same
+resource gains it too: the read, the list, the query. A field you can set but
+not get is not a feature; it is a place data goes to hide. The loss is invisible
+because the read cannot show it — the value was written, the read returns the
+resource without it, and nothing looks wrong until the value is needed and isn't
+there. A write you can aim at a variant no read can fetch is the same defect
+turned sideways: you can change a thing you cannot inspect.
+
+**Every load-time check is a write-time check.** If the loader rejects a state,
+the writer must reject it too, from the same validator. The alternative is a
+system that cheerfully persists what it cannot reload: the write succeeds,
+returns success, lands on disk — and the next load fails on the very bytes the
+write produced. Write-time validation must be a superset of load-time
+validation, and the only guarantee of that is one validator both call. Two
+validators for one invariant are two writers of one truth (§27): they drift, and
+the write path becomes a way to manufacture corruption that reports success.
+
+The test for every axis is a round trip. Forward and reverse: create it, reverse
+it — is the device clean? Read and write: write it, read it back — is the field
+there? Validation: write it, reload it — does the load succeed? A path that fails
+its round trip is a one-way door, and one-way doors are where state goes to rot.
+
 ---
 
 ## 16. Verb Vocabulary — The Name Is the Lifecycle Contract
