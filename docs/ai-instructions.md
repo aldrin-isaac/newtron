@@ -474,3 +474,32 @@ file was written by the same person who wrote the rest?"
 or pre-greenfield compatibility code per §40), say so explicitly in the commit
 message and either fix the idiom in scope or leave a tracked follow-up. Do not
 silently introduce a "better" idiom while claiming consistency with the package.
+
+---
+
+## 24. Mirror a Dimension Across Every Access Path — IMPL+REVIEW
+
+When you add a dimension, qualifier, or selector to ONE access path of a
+resource — a scope, filter, version, or tenant on a *write* — add it to EVERY
+parallel path that addresses the same resource: read, list, query, delete. A
+dimension you can write but not read (or filter on create but not on list) is a
+half-feature. The surfaces drift: the write path gains a capability the read path
+can't observe, and the gap surfaces later as "I can set it but I can't see it."
+
+This is **lateral** symmetry, and it is distinct from the forward/reverse
+symmetry of `DESIGN_PRINCIPLES_NEWTRON.md §15` (create↔delete). That one pairs an
+action with its inverse; this one pairs a single *dimension* across the
+read/write/list verbs that share a resource. A codebase can be perfectly
+forward/reverse symmetric and still have a scope-aware write with a
+scope-blind read — exactly the asymmetry this rule exists to catch.
+
+**Before finishing a change that adds a dimension:** enumerate the access paths to
+the resource — create, update, delete, show, list, projection/query — and confirm
+the new dimension reaches all of them, or record why a path is exempt. If the
+dimension is *addressing* (which instance), every path that names the resource
+needs it. If it is *content* (a new field), every path that returns the resource
+should surface it.
+
+**The test:** if a request can carry a field that no response can return — or a
+write can target a variant no read can fetch — you have created an asymmetry.
+Close it in the same change, not a follow-up.

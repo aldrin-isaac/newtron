@@ -134,12 +134,23 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, ne.net.ListServices())
 }
 
+// scopeSelectorFromQuery reads the optional scope-aware read selector from the
+// query string (?scope=zone&scope_instance=amer). Absent ⇒ network base. It is
+// the read mirror of the ScopeSelector that write requests carry in their body,
+// so reads and writes address the same spec instance the same way.
+func scopeSelectorFromQuery(r *http.Request) newtron.ScopeSelector {
+	return newtron.ScopeSelector{
+		Scope:         r.URL.Query().Get("scope"),
+		ScopeInstance: r.URL.Query().Get("scope_instance"),
+	}
+}
+
 func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
-	val, err := ne.net.ShowService(r.PathValue("name"))
+	val, err := ne.net.ShowService(scopeSelectorFromQuery(r), r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -222,7 +233,7 @@ func (s *Server) handleShowIPVPN(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	val, err := ne.net.ShowIPVPN(r.PathValue("name"))
+	val, err := ne.net.ShowIPVPN(scopeSelectorFromQuery(r), r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -243,7 +254,7 @@ func (s *Server) handleShowMACVPN(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	val, err := ne.net.ShowMACVPN(r.PathValue("name"))
+	val, err := ne.net.ShowMACVPN(scopeSelectorFromQuery(r), r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -264,7 +275,7 @@ func (s *Server) handleShowQoSPolicy(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	val, err := ne.net.ShowQoSPolicy(r.PathValue("name"))
+	val, err := ne.net.ShowQoSPolicy(scopeSelectorFromQuery(r), r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -285,7 +296,7 @@ func (s *Server) handleShowFilter(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	val, err := ne.net.ShowFilter(r.PathValue("name"))
+	val, err := ne.net.ShowFilter(scopeSelectorFromQuery(r), r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -847,7 +858,7 @@ func (s *Server) handleShowPrefixList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ne.net.ShowPrefixList(name)
+	val, err := ne.net.ShowPrefixList(scopeSelectorFromQuery(r), name)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -944,7 +955,7 @@ func (s *Server) handleShowRoutePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	val, err := ne.net.ShowRoutePolicy(name)
+	val, err := ne.net.ShowRoutePolicy(scopeSelectorFromQuery(r), name)
 	if err != nil {
 		writeError(w, err)
 		return
