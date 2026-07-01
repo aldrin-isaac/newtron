@@ -243,10 +243,14 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&app.loopback, "loopback", false, "Offline config testing mode — no device connection (?mode=loopback)")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
-	// (PersistentFlags so subcommands inherit)
+	// (PersistentFlags so subcommands inherit). nodeCmd and zoneCmd are the
+	// per-file spec-authoring nouns (nodes/<name>.json, zones/<name>.json);
+	// their create/update/delete subcommands branch on executeMode exactly like
+	// the other spec-authoring nouns, so they need -x here too.
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
 		vrfCmd, serviceCmd, qosCmd, filterCmd, prefixListCmd, routePolicyCmd, deviceCmd,
+		nodeCmd, zoneCmd,
 	} {
 		addWriteFlags(cmd)
 		addOutputFlags(cmd)
