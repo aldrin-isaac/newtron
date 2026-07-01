@@ -224,6 +224,100 @@ func TestAuditEvents_PerNetworkScope(t *testing.T) {
 	}
 }
 
+// TestAudit_FullCycle_MutationToReadEndpoint is the end-to-end guard: a real
+// mutation through the FULL middleware chain (including httputil.Timeout, which
+// re-wraps the request — the exact layering that hid the netID-from-PathValue
+// bug) must land in the network's own FileLogger and read back through the
+// per-network audit endpoint with network+device stamped. This is the test
+// whose absence let that bug reach manual E2E instead of CI.
+func TestAudit_FullCycle_MutationToReadEndpoint(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	s := NewServer(Config{Audit: true})
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(t.Context()) })
+
+	// Real mutation (topology mode → in-memory, no device needed).
+	w := httpPostJSON(t, s, "/newtron/v1/networks/default/nodes/switch1/create-vlan?mode=topology",
+		map[string]any{"id": 777})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("mutation: got %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+
+	// Read it back through the per-network audit endpoint.
+	req := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/default/audit/events", nil)
+	rw := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rw, req)
+	if rw.Code != http.StatusOK {
+		t.Fatalf("audit read: got %d, want 200; body: %s", rw.Code, rw.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Events []map[string]any `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rw.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, rw.Body.String())
+	}
+	if len(env.Data.Events) != 1 {
+		t.Fatalf("audit events: got %d, want 1 (the create-vlan mutation)", len(env.Data.Events))
+	}
+	e := env.Data.Events[0]
+	if e["network"] != "default" {
+		t.Errorf("event network = %v, want default (stamped from the URL, surviving the Timeout re-wrap)", e["network"])
+	}
+	if e["device"] != "switch1" {
+		t.Errorf("event device = %v, want switch1", e["device"])
+	}
+	if op, _ := e["operation"].(string); !strings.Contains(op, "create-vlan") {
+		t.Errorf("event operation = %v, want …/create-vlan", e["operation"])
+	}
+}
+
+// closeCountingLogger is a captureLogger that counts Close calls, so a test
+// can assert the audit logger's lifecycle (survives reload, closed on
+// unregister).
+type closeCountingLogger struct {
+	captureLogger
+	closes int
+}
+
+func (c *closeCountingLogger) Close() error { c.closes++; return nil }
+
+// TestReloadNetwork_KeepsAuditLogger pins the reload lifecycle: a spec reload
+// changes specs, not the audit ledger, so the network's audit logger is
+// carried forward (same instance, NOT closed) — closing and reopening would
+// race an in-flight mutation's already-fetched logger reference and lose the
+// event. Unregister, by contrast, DOES close it (terminal transition).
+func TestReloadNetwork_KeepsAuditLogger(t *testing.T) {
+	dir := scaffoldAuditNetwork(t)
+	s := NewServer(Config{}) // audit off → no real FileLogger opened; we inject one
+	if err := s.RegisterNetwork("default", dir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	cap := &closeCountingLogger{}
+	s.networks["default"].auditLogger = cap
+	s.networks["default"].net.SetAuditLogger(cap)
+
+	if err := s.ReloadNetwork("default"); err != nil {
+		t.Fatalf("ReloadNetwork: %v", err)
+	}
+	if cap.closes != 0 {
+		t.Errorf("audit logger closed %d times on reload; want 0 (must survive)", cap.closes)
+	}
+	if s.networks["default"].auditLogger != cap {
+		t.Error("reload replaced the audit logger; want the same instance carried forward")
+	}
+
+	if err := s.UnregisterNetwork("default"); err != nil {
+		t.Fatalf("UnregisterNetwork: %v", err)
+	}
+	if cap.closes != 1 {
+		t.Errorf("audit logger closed %d times after unregister; want exactly 1", cap.closes)
+	}
+}
+
 // TestCreateNetwork_NoHashedAuditEntry pins that network creation — a
 // server-registry lifecycle act, not a network-scoped mutation — leaves no
 // entry in the per-network hashed chain. POST /networks carries no {netID},

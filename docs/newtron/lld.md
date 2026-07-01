@@ -977,6 +977,7 @@ type AuditEvent struct {
     ID          string        `json:"id"`
     Timestamp   string        `json:"timestamp"`
     User        string        `json:"user"`
+    Network     string        `json:"network,omitempty"` // per-network scope; read path filters by it
     Device      string        `json:"device"`
     Operation   string        `json:"operation"`
     Service     string        `json:"service,omitempty"`

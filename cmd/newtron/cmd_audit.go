@@ -16,19 +16,21 @@ import (
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "View audit logs",
-	Long: `View audit logs of configuration changes.
+	Long: `View a network's audit log of configuration changes.
 
-All configuration changes are logged with:
-  - Timestamp
-  - User who made the change
-  - Device affected
-  - Operation performed
-  - Success/failure status
+Audit is per-network and server-owned: each network's mutations are
+recorded in its own log. list/show read it through the server (the
+network is selected by -N / NEWTRON_NETWORK_ID); verify checks the
+network's hash chain, or a copied log file offline.
+
+Each entry records timestamp, user, device, operation, and outcome.
 
 Examples:
-  newtron audit list --device leaf1-ny
-  newtron audit list --last 24h
-  newtron audit list --user alice`,
+  newtron -N leaf-fabric audit list --last 24h
+  newtron -N leaf-fabric audit list --user alice
+  newtron -N leaf-fabric audit list --device leaf1-ny --failures
+  newtron -N leaf-fabric audit verify        # server-side, this network's chain
+  newtron audit verify ./audit-copy.log      # offline, a copied file`,
 }
 
 var (

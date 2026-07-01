@@ -446,8 +446,11 @@ func (s *Server) ReloadNetwork(id string) error {
 		return &notRegisteredError{id}
 	}
 
-	// Stop old entity (drains all NodeActors and SSH connections)
-	entity.stop()
+	// Drain the old entity's node actors, but KEEP its audit logger open —
+	// reload changes specs, not the audit ledger. The logger is carried to the
+	// new entity so the network's hash chain is continuous and no in-flight
+	// mutation loses its event to a close/reopen race.
+	entity.stopNodes()
 
 	// Reload specs from disk
 	net, err := newtron.LoadNetwork(entity.specDir, networkName(entity.specDir), s.portResolver, s.secretStore, s.platforms)
@@ -457,11 +460,10 @@ func (s *Server) ReloadNetwork(id string) error {
 	if s.enforceAuthorization {
 		net.EnableAuthorization(id, s.globalSuperUsers...)
 	}
-	auditLogger := s.openAuditLogger(entity.specDir)
-	net.SetAuditLogger(auditLogger)
+	net.SetAuditLogger(entity.auditLogger)
 
-	// Replace with new entity
-	s.networks[id] = newNetworkEntity(net, entity.specDir, s.idleTimeout, auditLogger)
+	// Replace with new entity, carrying the same audit logger forward.
+	s.networks[id] = newNetworkEntity(net, entity.specDir, s.idleTimeout, entity.auditLogger)
 	s.logger.Printf("reloaded network '%s' from %s", id, entity.specDir)
 	return nil
 }

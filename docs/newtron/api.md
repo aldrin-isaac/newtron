@@ -4667,6 +4667,7 @@ Returned by `GET .../audit/events` (in `AuditEventPage.events`, lean) and
 | `timestamp` | RFC3339 string | When the event was recorded. |
 | `user` | string | Caller identity. Empty when the request was anonymous (see `verification_source`). |
 | `verification_source` | string (optional) | How `user` was established: `pam`, `session_key`, `service_cert_cn`, `unix_peer_creds` (verified); `self_attested_header` (unverified); or `anonymous` (no identity presented — the server accepted the request in permissive mode). An empty `user` paired with `anonymous` is an expected permissive-mode record, **not** missing data. Absent only on synthetic/pre-feature entries. |
+| `network` | string (optional) | The network the event was scoped to (the `{netID}` of the request path, or the network a decision was evaluated against). Audit is per-network; each read endpoint filters by its `{netID}`, so an event from another network never appears through this one's endpoint. Empty for events with no network context (e.g. network creation, which is logged operationally rather than in the hashed chain). |
 | `device` | string | Target device, when the operation was device-scoped. |
 | `operation` | string | HTTP method + path of the mutation. |
 | `service` | string (optional) | Service name, when the operation was service-scoped. |

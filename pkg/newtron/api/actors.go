@@ -121,16 +121,27 @@ func (ne *networkEntity) removeNodeActor(device string) {
 
 // stop shuts down all NodeActors and drops the cache. The entity itself
 // has no goroutine to wind down.
-func (ne *networkEntity) stop() {
+// stopNodes drains the node actors (in-flight requests, SSH connections)
+// without touching the audit logger. ReloadNetwork uses this so the network's
+// audit logger — and its open hash chain — survive a spec reload uninterrupted:
+// closing and reopening it would (a) do pointless work and (b) open a race where
+// an in-flight mutation's middleware, having already fetched the logger
+// reference, writes to a just-closed file and loses the event.
+func (ne *networkEntity) stopNodes() {
 	ne.nodeMu.Lock()
 	for _, nodeActor := range ne.nodeActors {
 		nodeActor.stop()
 	}
 	ne.nodeActors = make(map[string]*NodeActor)
 	ne.nodeMu.Unlock()
-	// Close the audit logger — releases the file handle. On ReloadNetwork
-	// a fresh logger reopens the same path and recovers the hash-chain
-	// head from disk, so the chain continues across the reopen.
+}
+
+// stop drains node actors AND closes the audit logger — the terminal
+// transitions (UnregisterNetwork, server shutdown) where the network's audit
+// file should be released. ReloadNetwork uses stopNodes instead and carries the
+// logger forward.
+func (ne *networkEntity) stop() {
+	ne.stopNodes()
 	if ne.auditLogger != nil {
 		_ = ne.auditLogger.Close()
 	}
