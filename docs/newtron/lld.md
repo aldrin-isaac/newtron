@@ -209,7 +209,7 @@ Specs are the declarative layer — JSON files under `/etc/newtron/` (or the con
 
 ### 2.1 NetworkSpecFile
 
-Top-level container loaded from `network.json`. Defines network-wide specs, zones, and access control.
+Top-level container loaded from `network.json`. Defines network-wide specs and access control.
 
 ```go
 type NetworkSpecFile struct {
@@ -217,10 +217,11 @@ type NetworkSpecFile struct {
     SuperUsers  []string                  `json:"super_users,omitempty"`
     UserGroups  map[string][]string       `json:"user_groups,omitempty"`
     Permissions map[string][]string       `json:"permissions,omitempty"`  // action → allowed groups
-    Zones       map[string]*ZoneSpec      `json:"zones,omitempty"`
-    OverridableSpecs                      // embedded: 7 spec maps
+    OverridableSpecs                      // embedded: 7 spec maps (network scope)
 }
 ```
+
+Zones are **not** a field here: each zone is its own file at `zones/{zone}.json`, exactly as each node is its own file at `nodes/{node}.json`. The loader owns the zone set (`loadZones` reads every `zones/*.json` at load; the zone CRUD methods keep the cache coherent), and the network reaches it through `loader.Zone(name)` / `loader.Zones()`. See [§2.2a ZoneSpec](#22a-zonespec).
 
 ### 2.2 OverridableSpecs
 
@@ -237,6 +238,18 @@ type OverridableSpecs struct {
     Services      map[string]*ServiceSpec       `json:"services,omitempty"`
 }
 ```
+
+### 2.2a ZoneSpec
+
+Per-zone overrides, one file per zone at `zones/{zone}.json` (mirroring `nodes/{node}.json`). A `ZoneSpec` is nothing but an embedded `OverridableSpecs` — a zone is a named bucket of spec overrides that sit between the network base and the node. There are no zone-authoring fields: overrides are written through the flat `create-<kind>?scope=zone` API, never by hand-editing the maps (hence the `schema:"-"` tag).
+
+```go
+type ZoneSpec struct {
+    OverridableSpecs `schema:"-"`  // embedded: zone-level spec overrides
+}
+```
+
+A zone override is subject to the **network-floor invariant** ([HLD §4.1](hld.md), DESIGN_PRINCIPLES_NEWTRON §7): a `zones/{zone}.json` entry for a spec may exist only if the same-named spec exists at network scope. Validation runs at both load (`loadZones` → `validateZoneSpec`) and write (`MutateZoneSpec`), from the one shared check (§15).
 
 ### 2.3 ServiceSpec
 
@@ -1107,9 +1120,12 @@ RPC-style POST endpoints. Each creates, updates, or deletes a spec object (or on
 carry the same two fields, so any overridable kind or sub-rule can be authored at
 network, zone, or node scope — "flat at the boundary, hierarchical underneath."
 Internal write methods take leading `(scope, instance string)` and route to the
-target container via `withWriteTarget` (network/zone → `network.json` under
-`keyNetworkSpec`; node → `nodes/<name>.json` via `loader.MutateProfile`, which
-reads raw-from-disk so secret-resolved values are never written back). The
+target container via `withWriteTarget`: network → `network.json` under
+`keyNetworkSpec`; zone → `zones/<name>.json` via `loader.MutateZoneSpec`; node →
+`nodes/<name>.json` via `loader.MutateNodeSpec`. Both `Mutate*` paths read
+raw-from-disk (so secret-resolved values are never written back) and re-validate
+against the network-floor before persisting; the zone/node writes run under
+`keyNetworkSpec.RLock` so the floor base stays stable during the check. The
 **network-floor invariant** (DESIGN_PRINCIPLES_NEWTRON §7) governs integrity: an
 override requires a network base, so forward ref checks stay network-scoped,
 override deletes are free, and network-base / container deletes are refused while

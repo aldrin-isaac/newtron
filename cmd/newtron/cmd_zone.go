@@ -75,7 +75,7 @@ var zoneShowCmd = &cobra.Command{
 var zoneCreateCmd = &cobra.Command{
 	Use:   "create <zone-name>",
 	Short: "Create a new zone",
-	Long: `Create a new zone in network.json.
+	Long: `Create a new zone (its own file at zones/<zone>.json).
 
 This is a spec-level command (no device needed).
 
@@ -104,9 +104,10 @@ Examples:
 var zoneDeleteCmd = &cobra.Command{
 	Use:   "delete <zone-name>",
 	Short: "Delete a zone",
-	Long: `Delete a zone from network.json.
+	Long: `Delete a zone (removes zones/<zone>.json).
 
-Returns error if any node spec references this zone.
+Returns error if any node spec references this zone, or if the zone
+still holds spec overrides (remove them first, bottom-up).
 
 Examples:
   newtron zone delete dc2 -x`,

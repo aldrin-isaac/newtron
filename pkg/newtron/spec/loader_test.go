@@ -19,11 +19,6 @@ func createTestSpecDir(t *testing.T) string {
 	networkJSON := `{
 		"version": "1.0",
 		"super_users": ["admin"],
-		"zones": {
-			"amer": {
-				"as_number": 65000
-			}
-		},
 		"prefix_lists": {
 			"rfc1918": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 		},
@@ -74,6 +69,16 @@ func createTestSpecDir(t *testing.T) string {
 	}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(platformsJSON), 0644); err != nil {
 		t.Fatalf("Failed to write platforms.json: %v", err)
+	}
+
+	// Create zones directory with one per-file zone "amer" (empty override
+	// bucket — zones are their own files now, mirroring nodes).
+	zonesDir := filepath.Join(tmpDir, "zones")
+	if err := os.MkdirAll(zonesDir, 0755); err != nil {
+		t.Fatalf("Failed to create zones dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(zonesDir, "amer.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("Failed to write zone amer: %v", err)
 	}
 
 	// Create nodeSpecs directory
@@ -132,8 +137,8 @@ func TestLoader_Load(t *testing.T) {
 	if network.Version != "1.0" {
 		t.Errorf("Network version = %q, want %q", network.Version, "1.0")
 	}
-	if len(network.Zones) != 1 {
-		t.Errorf("Expected 1 zone, got %d", len(network.Zones))
+	if got := loader.ListZoneSpecs(); len(got) != 1 {
+		t.Errorf("Expected 1 zone, got %d: %v", len(got), got)
 	}
 
 	// Platforms loading moved out of the per-network Loader — the
@@ -291,7 +296,6 @@ func TestLoader_ValidationErrors(t *testing.T) {
 	// Create network.json with invalid service reference
 	networkJSON := `{
 		"version": "1.0",
-		"zones": {},
 		"services": {
 			"bad-service": {
 				"description": "Bad service",
@@ -369,9 +373,9 @@ func TestLoader_LabOnlyTopology(t *testing.T) {
 	if net == nil {
 		t.Fatal("GetNetwork() returned nil; want empty NetworkSpecFile")
 	}
-	if len(net.Services) != 0 || len(net.Zones) != 0 {
+	if len(net.Services) != 0 || len(loader.ListZoneSpecs()) != 0 {
 		t.Errorf("lab-only network should have empty spec; got %d services, %d zones",
-			len(net.Services), len(net.Zones))
+			len(net.Services), len(loader.ListZoneSpecs()))
 	}
 }
 
@@ -431,7 +435,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid egress filter",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-service": {
 						"service_type": "routed",
@@ -446,7 +449,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid ipvpn reference",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-service": {
 						"service_type": "evpn-routed",
@@ -461,7 +463,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid macvpn reference",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-service": {
 						"service_type": "evpn-bridged",
@@ -476,7 +477,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "evpn-bridged service without macvpn",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-service": {
 						"service_type": "evpn-bridged"
@@ -489,7 +489,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "evpn-routed service without ipvpn",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-service": {
 						"service_type": "evpn-routed"
@@ -502,7 +501,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "evpn-irb service without macvpn",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-service": {
 						"service_type": "evpn-irb",
@@ -558,7 +556,6 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 			name: "invalid src prefix list in filter rule",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"filters": {
 					"bad-filter": {
@@ -573,7 +570,6 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 			name: "invalid dst prefix list in filter rule",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"filters": {
 					"bad-filter": {
@@ -710,7 +706,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "valid 2-queue policy",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"test": {
@@ -730,7 +725,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "zero queues (valid shell)",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"empty": {
@@ -744,7 +738,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "too many queues (9)",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"big": {
@@ -768,7 +761,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "duplicate DSCP",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"dup": {
@@ -785,7 +777,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "DSCP out of range",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -801,7 +792,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "invalid queue type",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -817,7 +807,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "dwrr without weight",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -833,7 +822,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "strict with weight",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -849,7 +837,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "duplicate queue name",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -866,7 +853,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "empty queue name",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -882,7 +868,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "service references nonexistent qos_policy",
 			networkJSON: `{
 				"version": "1.0",
-				"zones": {},
 				"services": {
 					"bad-svc": {
 						"service_type": "routed",
@@ -937,20 +922,8 @@ func TestLoader_ZoneLevelServiceRefsNetworkFilter(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	networkJSON := `{
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{
 		"version": "1.0",
-		"zones": {
-			"amer": {
-				"as_number": 65000,
-				"services": {
-					"zone-svc": {
-						"description": "Zone-level service using network filter",
-						"service_type": "routed",
-						"ingress_filter": "net-filter"
-					}
-				}
-			}
-		},
 		"filters": {
 			"net-filter": {
 				"description": "Network-level filter",
@@ -959,13 +932,36 @@ func TestLoader_ZoneLevelServiceRefsNetworkFilter(t *testing.T) {
 			}
 		},
 		"services": {}
-	}`
-	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	}`), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+	writeZone(t, tmpDir, "amer", `{
+		"services": {
+			"zone-svc": {
+				"description": "Zone-level service using network filter",
+				"service_type": "routed",
+				"ingress_filter": "net-filter"
+			}
+		}
+	}`)
 
 	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
 		t.Fatalf("Load() should pass: zone service refs network filter, got: %v", err)
+	}
+}
+
+// writeZone writes zones/<name>.json under dir (creating the zones dir), for
+// the per-file zone-validation tests below. The zone body is the raw
+// OverridableSpecs JSON — the same content that used to sit inline under a
+// network.json "zones" map.
+func writeZone(t *testing.T, dir, name, body string) {
+	t.Helper()
+	zonesDir := filepath.Join(dir, "zones")
+	if err := os.MkdirAll(zonesDir, 0755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(zonesDir, name+".json"), []byte(body), 0644); err != nil {
+		t.Fatalf("write zone %s: %v", name, err)
 	}
 }
 
@@ -977,24 +973,17 @@ func TestLoader_ZoneLevelServiceRefsMissing(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	networkJSON := `{
-		"version": "1.0",
-		"zones": {
-			"amer": {
-				"as_number": 65000,
-				"services": {
-					"zone-svc": {
-						"description": "Zone service with bad ref",
-						"service_type": "routed",
-						"ingress_filter": "nonexistent-filter"
-					}
-				}
-			}
-		},
-		"services": {}
-	}`
-	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{"version":"1.0","services":{}}`), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+	writeZone(t, tmpDir, "amer", `{
+		"services": {
+			"zone-svc": {
+				"description": "Zone service with bad ref",
+				"service_type": "routed",
+				"ingress_filter": "nonexistent-filter"
+			}
+		}
+	}`)
 
 	loader := NewLoader(tmpDir, nil)
 	err = loader.Load()
@@ -1011,27 +1000,23 @@ func TestLoader_ZoneLevelFilterRefsPrefixList(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	networkJSON := `{
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{
 		"version": "1.0",
-		"zones": {
-			"amer": {
-				"as_number": 65000,
-				"filters": {
-					"zone-filter": {
-						"description": "Zone filter using network prefix list",
-						"type": "ipv4",
-						"rules": [{"seq": 100, "src_prefix_list": "rfc1918", "action": "deny"}]
-					}
-				}
-			}
-		},
 		"prefix_lists": {
 			"rfc1918": ["10.0.0.0/8"]
 		},
 		"services": {}
-	}`
-	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	}`), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+	writeZone(t, tmpDir, "amer", `{
+		"filters": {
+			"zone-filter": {
+				"description": "Zone filter using network prefix list",
+				"type": "ipv4",
+				"rules": [{"seq": 100, "src_prefix_list": "rfc1918", "action": "deny"}]
+			}
+		}
+	}`)
 
 	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {
@@ -1047,31 +1032,24 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	networkJSON := `{
-		"version": "1.0",
-		"zones": {
-			"amer": {
-				"as_number": 65000,
-				"ipvpns": {
-					"ZONE": {
-						"l3vni": 20001,
-						"route_targets": ["65000:200"]
-					}
-				},
-				"services": {
-					"zone-l3": {
-						"description": "Zone L3 service",
-						"service_type": "evpn-routed",
-						"ipvpn": "ZONE",
-						"vrf_type": "interface"
-					}
-				}
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{"version":"1.0","services":{}}`), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+	writeZone(t, tmpDir, "amer", `{
+		"ipvpns": {
+			"ZONE": {
+				"l3vni": 20001,
+				"route_targets": ["65000:200"]
 			}
 		},
-		"services": {}
-	}`
-	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+		"services": {
+			"zone-l3": {
+				"description": "Zone L3 service",
+				"service_type": "evpn-routed",
+				"ipvpn": "ZONE",
+				"vrf_type": "interface"
+			}
+		}
+	}`)
 
 	loader := NewLoader(tmpDir, nil)
 	if err := loader.Load(); err != nil {

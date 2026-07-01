@@ -981,7 +981,7 @@ GET /newtron/v1/networks/{netID}/spec-instances
 ```
 
 newtron stores specs hierarchically -- the same kind may be defined at the
-**network** scope (network.json), at a **zone** (network.json `zones[<name>]`),
+**network** scope (network.json), at a **zone** (zones/`<name>`.json),
 and at a **node** (nodes/`<name>`.json), with node overriding zone overriding
 network. The per-kind list endpoints above return only the **network** scope.
 This endpoint returns one **flat inventory of every spec at every scope**, each
@@ -2325,7 +2325,7 @@ Create a new node spec.
 | `name` | string | yes | Profile name (becomes `nodes/{name}.json`) |
 | `mgmt_ip` | string | yes | Management IP address |
 | `loopback_ip` | string | no | Loopback IP address |
-| `zone` | string | yes | Zone name (must exist in network.json) |
+| `zone` | string | yes | Zone name (must exist as `zones/{zone}.json`) |
 | `platform` | string | no | Platform name (from platforms.json) |
 | `underlay_asn` | integer | no | BGP underlay AS number |
 | `ssh_user` | string | no | SSH username |
@@ -2364,7 +2364,8 @@ Delete a node spec.
 ### Zones
 
 Zones group devices by location or function and can carry zone-level spec
-overrides. They are stored in the `zones` map within `network.json`.
+overrides. Each zone is its own file at `zones/<name>.json` (mirroring
+`nodes/<name>.json`).
 
 #### POST /newtron/v1/networks/{netID}/create-zone
 

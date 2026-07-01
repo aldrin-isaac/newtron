@@ -18,17 +18,23 @@ func TestListScopedSpecs_AllThreeScopes(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	// network.json — a network-scope prefix list plus one zone "amer" carrying a
-	// zone-scope prefix list.
+	// network.json — a network-scope prefix list. The network base "NET_PL" is
+	// the floor for the zone override below (network-floor invariant).
 	netJSON := `{
 		"schema_version": "1.0",
-		"prefix_lists": { "NET_PL": ["10.0.0.0/8"] },
-		"zones": {
-			"amer": { "prefix_lists": { "ZONE_PL": ["10.1.0.0/16"] } }
-		}
+		"prefix_lists": { "NET_PL": ["10.0.0.0/8"] }
 	}`
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
+	}
+	// zones/amer.json — one zone "amer" carrying a zone-scope prefix list (per-file).
+	zonesDir := filepath.Join(dir, "zones")
+	if err := os.MkdirAll(zonesDir, 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(zonesDir, "amer.json"),
+		[]byte(`{ "prefix_lists": { "ZONE_PL": ["10.1.0.0/16"] } }`), 0o644); err != nil {
+		t.Fatalf("write zone amer: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
 		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {

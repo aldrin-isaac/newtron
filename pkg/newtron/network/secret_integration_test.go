@@ -178,10 +178,17 @@ func newL0FixtureSpecDir(t *testing.T) string {
 func writeNetwork(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(`{
-		"version": "1.0",
-		"zones": {"amer": {}}
+		"version": "1.0"
 	}`), 0o644); err != nil {
 		t.Fatalf("write network: %v", err)
+	}
+	// Zones are per-file now (zones/<name>.json): the "amer" zone is an empty
+	// override bucket declared by an empty file.
+	if err := os.MkdirAll(filepath.Join(dir, "zones"), 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zones", "amer.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone amer: %v", err)
 	}
 }
 

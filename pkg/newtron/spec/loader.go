@@ -33,6 +33,11 @@ type Loader struct {
 	network   *NetworkSpecFile
 	topology  *TopologySpecFile // nil if topology.json doesn't exist
 	nodeSpecs map[string]*NodeSpec
+	// zoneSpecs is the loaded set of per-file zones (zones/<name>.json),
+	// populated eagerly at Load() and kept coherent by the zone CRUD
+	// methods. Zones are the network→zone→node scope model's middle level;
+	// like nodes they live in their own files, not in network.json.
+	zoneSpecs map[string]*ZoneSpec
 }
 
 // NewLoader creates a new specification loader. platforms is the
@@ -46,6 +51,7 @@ func NewLoader(specDir string, platforms map[string]*PlatformSpec) *Loader {
 		specDir:   specDir,
 		platforms: platforms,
 		nodeSpecs: make(map[string]*NodeSpec),
+		zoneSpecs: make(map[string]*ZoneSpec),
 	}
 }
 
@@ -69,6 +75,14 @@ func (l *Loader) Load() error {
 	l.network, err = l.loadNetworkSpec()
 	if err != nil {
 		return fmt.Errorf("loading network spec: %w", err)
+	}
+
+	// Load zones eagerly from zones/<name>.json — few per network, and this
+	// keeps the load-time validation invariant (§15) for every zone and warms
+	// the resolution cache. Must run after the network base (zone overrides
+	// validate against the network-floor).
+	if err := l.loadZones(); err != nil {
+		return fmt.Errorf("loading zones: %w", err)
 	}
 
 	// Platform specs are loaded once at server startup by
@@ -129,8 +143,7 @@ func (l *Loader) LoadNodeSpec(deviceName string) (*NodeSpec, error) {
 // or resolve secrets — the returned nodeSpec carries its ${secret:...} references
 // verbatim, so it is safe to mutate and persist without leaking resolved values.
 func (l *Loader) readNodeSpecFromDisk(name string) (*NodeSpec, error) {
-	path := filepath.Join(l.specDir, "nodes", name+".json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(l.nodeSpecPath(name))
 	if err != nil {
 		return nil, fmt.Errorf("reading node spec %s: %w", name, err)
 	}
@@ -173,11 +186,10 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 		return nil, err
 	}
 
-	// Normalize all name keys and name-reference fields at load time.
+	// Normalize the network-scope name keys and name-reference fields at load
+	// time. Zones are loaded and normalized separately (loadZones) from their
+	// own files — they are no longer part of network.json.
 	normalizeOverridableSpecs(&spec.OverridableSpecs)
-	for _, zone := range spec.Zones {
-		normalizeOverridableSpecs(&zone.OverridableSpecs)
-	}
 
 	return &spec, nil
 }
@@ -191,19 +203,24 @@ func (l *Loader) validate() error {
 	net := &l.network.OverridableSpecs
 
 	// Network scope: constraints (QoS structure, service-type) and
-	// references, both checked against the network-level maps.
+	// references, both checked against the network-level maps. Zone overrides
+	// are validated per-file in loadZones/readZoneSpecFromDisk (against the
+	// network-floor) — the same checks, moved to where zones now live.
 	net.ValidateConstraints(v, "")
 	addMissingRefs(v, "", net.MissingRefsIn(net))
 
-	// Zone overrides: constraints against the override's own specs; references
-	// against the merged (zone + network) set — the network-floor resolution.
-	for zoneName, zone := range l.network.Zones {
-		prefix := "zone '" + zoneName + "': "
-		merged := mergeOverridableSpecs(net, &zone.OverridableSpecs)
-		zone.OverridableSpecs.ValidateConstraints(v, prefix)
-		addMissingRefs(v, prefix, merged.MissingRefsIn(&zone.OverridableSpecs))
-	}
+	return v.Build()
+}
 
+// validateZoneSpec runs, at load time, exactly the checks a ?scope=zone write
+// runs before it persists (§15): the override's own constraints, plus its
+// references resolved against the merged network-floor (zone over network).
+func (l *Loader) validateZoneSpec(zoneName string, zone *ZoneSpec) error {
+	v := &util.ValidationBuilder{}
+	prefix := "zone '" + zoneName + "': "
+	merged := mergeOverridableSpecs(&l.network.OverridableSpecs, &zone.OverridableSpecs)
+	zone.OverridableSpecs.ValidateConstraints(v, prefix)
+	addMissingRefs(v, prefix, merged.MissingRefsIn(&zone.OverridableSpecs))
 	return v.Build()
 }
 
@@ -245,7 +262,7 @@ func (l *Loader) isHostPlatform(platformName string) bool {
 // check the node-spec write path runs — supplying the loader's host-platform lookup and the
 // network's zones so load and write reject the same node specs.
 func (l *Loader) validateNodeSpec(nodeSpec *NodeSpec) error {
-	return nodeSpec.ValidateConstraints(l.isHostPlatform(nodeSpec.Platform), l.network.Zones)
+	return nodeSpec.ValidateConstraints(l.isHostPlatform(nodeSpec.Platform), l.zoneSpecs)
 }
 
 // GetNetwork returns the network spec. Reads l.network under RLock — the
@@ -301,43 +318,16 @@ func (l *Loader) UpdateNodeSpec(name string, nodeSpec *NodeSpec) error {
 		return err
 	}
 
-	nodesDir := filepath.Join(l.specDir, "nodes")
-	path := filepath.Join(nodesDir, name+".json")
-
 	// Existence check: cache hit, OR on-disk file present (nodeSpec may
 	// have been written before this Loader started and never loaded).
 	if _, cached := l.nodeSpecs[name]; !cached {
-		if _, err := os.Stat(path); err != nil {
+		if _, err := os.Stat(l.nodeSpecPath(name)); err != nil {
 			return fmt.Errorf("node spec '%s' does not exist", name)
 		}
 	}
 
-	// Inline what SaveNodeSpec does (we already hold the lock).
-	if err := os.MkdirAll(nodesDir, 0755); err != nil {
-		return fmt.Errorf("creating nodes directory: %w", err)
-	}
-	data, err := json.MarshalIndent(nodeSpec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling node spec %s: %w", name, err)
-	}
-	data = append(data, '\n')
-	tmp, err := os.CreateTemp(nodesDir, "nodespec-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("renaming temp file: %w", err)
+	if err := l.writeNodeSpecFile(name, nodeSpec); err != nil {
+		return err
 	}
 	l.nodeSpecs[name] = nodeSpec
 	return nil
@@ -358,29 +348,28 @@ func (l *Loader) SaveNodeSpec(name string, nodeSpec *NodeSpec) error {
 	return nil
 }
 
-// writeNodeSpecFile marshals nodeSpec to nodes/<name>.json atomically (temp +
-// rename). It touches neither the lock nor the cache — callers handle cache
-// coherence around it.
-func (l *Loader) writeNodeSpecFile(name string, nodeSpec *NodeSpec) error {
-	nodesDir := filepath.Join(l.specDir, "nodes")
-	if err := os.MkdirAll(nodesDir, 0755); err != nil {
-		return fmt.Errorf("creating nodes directory: %w", err)
+// writeJSONAtomic marshals v (indented, trailing newline) to destPath via a
+// temp file in the same directory + rename, so a reader never sees a partial
+// file. It creates destPath's directory if missing and touches neither the
+// loader lock nor any cache — callers own coherence. The single atomic-write
+// mechanism behind every per-file spec write (nodes, zones) and the
+// single-file network/topology writes (§7 — one instance of the pattern).
+func writeJSONAtomic(destPath string, v any) error {
+	dir := filepath.Dir(destPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", dir, err)
 	}
-
-	path := filepath.Join(nodesDir, name+".json")
-
-	data, err := json.MarshalIndent(nodeSpec, "", "  ")
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling node spec %s: %w", name, err)
+		return fmt.Errorf("marshaling %s: %w", filepath.Base(destPath), err)
 	}
 	data = append(data, '\n')
 
-	tmp, err := os.CreateTemp(nodesDir, "nodespec-*.json.tmp")
+	tmp, err := os.CreateTemp(dir, "spec-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
@@ -390,12 +379,28 @@ func (l *Loader) writeNodeSpecFile(name string, nodeSpec *NodeSpec) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("closing temp file: %w", err)
 	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(tmpPath, destPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("renaming temp file: %w", err)
 	}
 	return nil
+}
+
+// nodeSpecPath / zoneSpecPath are the single owners of each per-file spec's
+// on-disk location (DPN §28) — the writer, reader, and existence checks all
+// derive the path from here.
+func (l *Loader) nodeSpecPath(name string) string {
+	return filepath.Join(l.specDir, "nodes", name+".json")
+}
+
+func (l *Loader) zoneSpecPath(name string) string {
+	return filepath.Join(l.specDir, "zones", name+".json")
+}
+
+// writeNodeSpecFile marshals nodeSpec to nodes/<name>.json atomically. It
+// touches neither the lock nor the cache — callers handle cache coherence.
+func (l *Loader) writeNodeSpecFile(name string, nodeSpec *NodeSpec) error {
+	return writeJSONAtomic(l.nodeSpecPath(name), nodeSpec)
 }
 
 // MutateNodeSpec atomically applies fn to a nodeSpec and persists it, serialized
@@ -455,38 +460,12 @@ func (l *Loader) CreateNodeSpec(name string, nodeSpec *NodeSpec) error {
 	// On-disk file may exist even when the cache hasn't seen it yet —
 	// e.g. nodeSpec was written before this Loader started, then not
 	// loaded yet. Check the filesystem too.
-	nodesDir := filepath.Join(l.specDir, "nodes")
-	path := filepath.Join(nodesDir, name+".json")
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Stat(l.nodeSpecPath(name)); err == nil {
 		return fmt.Errorf("node spec '%s' already exists", name)
 	}
 
-	// Inline what SaveNodeSpec does (we already hold the lock).
-	if err := os.MkdirAll(nodesDir, 0755); err != nil {
-		return fmt.Errorf("creating nodes directory: %w", err)
-	}
-	data, err := json.MarshalIndent(nodeSpec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling node spec %s: %w", name, err)
-	}
-	data = append(data, '\n')
-	tmp, err := os.CreateTemp(nodesDir, "nodespec-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("renaming temp file: %w", err)
+	if err := l.writeNodeSpecFile(name, nodeSpec); err != nil {
+		return err
 	}
 	l.nodeSpecs[name] = nodeSpec
 	return nil
@@ -494,8 +473,7 @@ func (l *Loader) CreateNodeSpec(name string, nodeSpec *NodeSpec) error {
 
 // DeleteNodeSpec removes a node spec file and its cache entry.
 func (l *Loader) DeleteNodeSpec(name string) error {
-	path := filepath.Join(l.specDir, "nodes", name+".json")
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(l.nodeSpecPath(name)); err != nil {
 		return fmt.Errorf("deleting node spec %s: %w", name, err)
 	}
 	l.mu.Lock()
@@ -504,89 +482,190 @@ func (l *Loader) DeleteNodeSpec(name string) error {
 	return nil
 }
 
+// ============================================================================
+// Per-file zones (zones/<name>.json) — the network→zone→node scope model's
+// middle level, mirroring the node machinery above.
+// ============================================================================
+
+// loadZones eagerly reads and validates every zones/<name>.json into the
+// cache. Called by Load() after the network base — zone overrides validate
+// against the network-floor, so l.network must exist first.
+func (l *Loader) loadZones() error {
+	for _, name := range l.ListZoneSpecs() {
+		zone, err := l.readZoneSpecFromDisk(name)
+		if err != nil {
+			return err
+		}
+		l.zoneSpecs[name] = zone
+	}
+	return nil
+}
+
+// readZoneSpecFromDisk reads, parses, normalizes, and validates a zone from
+// zones/<name>.json against the network-floor. It touches neither the lock nor
+// the cache — callers own coherence.
+func (l *Loader) readZoneSpecFromDisk(name string) (*ZoneSpec, error) {
+	data, err := os.ReadFile(l.zoneSpecPath(name))
+	if err != nil {
+		return nil, fmt.Errorf("reading zone spec %s: %w", name, err)
+	}
+	var zone ZoneSpec
+	if err := json.Unmarshal(data, &zone); err != nil {
+		return nil, fmt.Errorf("parsing zone spec %s: %w", name, err)
+	}
+	normalizeOverridableSpecs(&zone.OverridableSpecs)
+	if err := l.validateZoneSpec(name, &zone); err != nil {
+		return nil, err
+	}
+	return &zone, nil
+}
+
+// ListZoneSpecs returns the names of all zone files in the zones directory.
+func (l *Loader) ListZoneSpecs() []string {
+	entries, err := os.ReadDir(filepath.Join(l.specDir, "zones"))
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if n := entry.Name(); strings.HasSuffix(n, ".json") {
+			names = append(names, strings.TrimSuffix(n, ".json"))
+		}
+	}
+	return names
+}
+
+// Zone returns the cached zone by name (populated eagerly at Load, kept
+// coherent by the zone CRUD methods).
+func (l *Loader) Zone(name string) (*ZoneSpec, bool) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	z, ok := l.zoneSpecs[name]
+	return z, ok
+}
+
+// Zones returns a snapshot copy of the loaded zone set — safe to range without
+// holding the lock.
+func (l *Loader) Zones() map[string]*ZoneSpec {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	out := make(map[string]*ZoneSpec, len(l.zoneSpecs))
+	for k, v := range l.zoneSpecs {
+		out[k] = v
+	}
+	return out
+}
+
+// writeZoneSpecFile marshals zone to zones/<name>.json atomically. It touches
+// neither the lock nor the cache — callers handle coherence.
+func (l *Loader) writeZoneSpecFile(name string, zone *ZoneSpec) error {
+	return writeJSONAtomic(l.zoneSpecPath(name), zone)
+}
+
+// CreateZoneSpec atomically creates a new zone file, rejecting a name already
+// present in cache or on disk. Validated (§15) before persist.
+func (l *Loader) CreateZoneSpec(name string, zone *ZoneSpec) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.validateZoneSpec(name, zone); err != nil {
+		return err
+	}
+	if _, exists := l.zoneSpecs[name]; exists {
+		return fmt.Errorf("zone '%s' already exists", name)
+	}
+	if _, err := os.Stat(l.zoneSpecPath(name)); err == nil {
+		return fmt.Errorf("zone '%s' already exists", name)
+	}
+	if err := l.writeZoneSpecFile(name, zone); err != nil {
+		return err
+	}
+	l.zoneSpecs[name] = zone
+	return nil
+}
+
+// UpdateZoneSpec atomically overwrites an existing zone file. Errors if no
+// zone with that name exists. Validated (§15) before persist.
+func (l *Loader) UpdateZoneSpec(name string, zone *ZoneSpec) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.validateZoneSpec(name, zone); err != nil {
+		return err
+	}
+	if _, cached := l.zoneSpecs[name]; !cached {
+		if _, err := os.Stat(l.zoneSpecPath(name)); err != nil {
+			return fmt.Errorf("zone '%s' does not exist", name)
+		}
+	}
+	if err := l.writeZoneSpecFile(name, zone); err != nil {
+		return err
+	}
+	l.zoneSpecs[name] = zone
+	return nil
+}
+
+// MutateZoneSpec atomically applies fn to a zone and persists it, serialized
+// under the loader lock — the ?scope=zone write path, symmetric with
+// MutateNodeSpec. Reads FRESH from disk (the on-disk form keeps ${secret:...}
+// references verbatim, so a round-trip is secret-safe), re-validates the
+// result against the network-floor (§15), then re-caches. fn must not re-enter
+// the loader.
+func (l *Loader) MutateZoneSpec(name string, fn func(*ZoneSpec) error) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	zone, err := l.readZoneSpecFromDisk(name)
+	if err != nil {
+		return err
+	}
+	if err := fn(zone); err != nil {
+		return err
+	}
+	if err := l.validateZoneSpec(name, zone); err != nil {
+		return err
+	}
+	if err := l.writeZoneSpecFile(name, zone); err != nil {
+		return err
+	}
+	l.zoneSpecs[name] = zone
+	return nil
+}
+
+// DeleteZoneSpec removes a zone file and its cache entry.
+func (l *Loader) DeleteZoneSpec(name string) error {
+	if err := os.Remove(l.zoneSpecPath(name)); err != nil {
+		return fmt.Errorf("deleting zone spec %s: %w", name, err)
+	}
+	l.mu.Lock()
+	delete(l.zoneSpecs, name)
+	l.mu.Unlock()
+	return nil
+}
+
 // SaveNetwork writes the network spec to disk atomically (temp file + rename).
 func (l *Loader) SaveNetwork(spec *NetworkSpecFile) error {
-	path := filepath.Join(l.specDir, "network.json")
-
-	data, err := json.MarshalIndent(spec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling network spec: %w", err)
+	if err := writeJSONAtomic(filepath.Join(l.specDir, "network.json"), spec); err != nil {
+		return err
 	}
-	data = append(data, '\n')
-
-	// Write to temp file in the same directory (ensures same filesystem for atomic rename)
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "network-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("renaming temp file: %w", err)
-	}
-
 	// Reassign the in-memory pointer under the write lock so concurrent
 	// GetNetwork readers see the new pointer atomically.
 	l.mu.Lock()
 	l.network = spec
 	l.mu.Unlock()
-
 	return nil
 }
 
 // SaveTopology writes the topology spec to disk atomically (temp file + rename).
 func (l *Loader) SaveTopology(spec *TopologySpecFile) error {
-	path := filepath.Join(l.specDir, "topology.json")
-
-	data, err := json.MarshalIndent(spec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling topology spec: %w", err)
+	if err := writeJSONAtomic(filepath.Join(l.specDir, "topology.json"), spec); err != nil {
+		return err
 	}
-	data = append(data, '\n')
-
-	// Write to temp file in the same directory (ensures same filesystem for atomic rename)
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "topology-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing temp file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("renaming temp file: %w", err)
-	}
-
 	// Reassign the in-memory pointer under the write lock so concurrent
 	// GetTopology readers see the new pointer atomically.
 	l.mu.Lock()
 	l.topology = spec
 	l.mu.Unlock()
-
 	return nil
 }
 

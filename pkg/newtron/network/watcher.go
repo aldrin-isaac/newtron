@@ -78,9 +78,10 @@ func NewSpecWatcher(logger *log.Logger, debounce time.Duration, reload ReloadFun
 }
 
 // Add begins watching specDir for the given networkID. The watcher
-// monitors the directory itself plus the nodeSpecs/ subdirectory if
-// present (where NodeSpec JSON files live; deletes there are
-// part of revocation in the same way as grant edits to network.json).
+// monitors the directory itself plus the per-file spec subdirectories
+// (nodes/ and zones/) if present — where the per-node and per-zone JSON
+// files live. Edits there (a rotated node spec, a zone override) mean
+// "re-read the network dir" the same way a grant edit to network.json does.
 //
 // Returns an error if the watcher fails to register the path with
 // the kernel (typically because the directory doesn't exist or the
@@ -98,12 +99,15 @@ func (w *SpecWatcher) Add(specDir, networkID string) error {
 	if err := w.fsw.Add(abs); err != nil {
 		return err
 	}
-	nodesDir := filepath.Join(abs, "nodes")
-	if err := w.fsw.Add(nodesDir); err != nil {
-		// NodeSpec dir is optional — log and continue. A network dir
-		// without nodeSpecs/ is valid (every node-spec JSON
-		// lives directly in specDir in some operator layouts).
-		w.logger.Printf("spec-watcher: skip nodes subdir %s: %v", nodesDir, err)
+	// Watch the per-file spec subdirs (nodes/, zones/) too, so a per-file edit
+	// triggers a reload — inotify is non-recursive, so the parent watch alone
+	// wouldn't see them. Each is optional: a network dir may not have created
+	// the subdir yet; log and continue.
+	for _, sub := range []string{"nodes", "zones"} {
+		dir := filepath.Join(abs, sub)
+		if err := w.fsw.Add(dir); err != nil {
+			w.logger.Printf("spec-watcher: skip %s subdir %s: %v", sub, dir, err)
+		}
 	}
 	w.paths[abs] = networkID
 	return nil
@@ -122,6 +126,7 @@ func (w *SpecWatcher) Remove(specDir string) error {
 	}
 	_ = w.fsw.Remove(abs)
 	_ = w.fsw.Remove(filepath.Join(abs, "nodes"))
+	_ = w.fsw.Remove(filepath.Join(abs, "zones"))
 	delete(w.paths, abs)
 	if timer, ok := w.pending[abs]; ok {
 		timer.Stop()
@@ -183,10 +188,11 @@ func (w *SpecWatcher) loop(ctx context.Context) {
 }
 
 // handle routes one fsnotify event to the watched path it belongs
-// to. Events on the watched directory itself, on the nodeSpecs/
-// subdirectory, and on files inside either all map to the same
-// reload — the operator either edited the grant table or rotated
-// a node spec, and both reasons mean "re-read the network dir".
+// to. Events on the watched directory itself, on a per-file spec
+// subdirectory (nodes/, zones/), and on files inside either all map
+// to the same reload — the operator edited the grant table, rotated
+// a node spec, or changed a zone override, and every one of those
+// means "re-read the network dir".
 //
 // CHMOD-only events are ignored: editors sometimes set permissions
 // on save without changing content, and a reload over chmod-only
@@ -211,7 +217,7 @@ func (w *SpecWatcher) handle(event fsnotify.Event) {
 			return
 		}
 		// Event fires on the watched dir itself OR a subdirectory
-		// of it (nodeSpecs/, etc.). Match by prefix to cover both.
+		// of it (nodes/, zones/). Match by prefix to cover both.
 		if dir == path || filepath.Dir(dir) == path {
 			w.scheduleReload(path, networkID)
 			return

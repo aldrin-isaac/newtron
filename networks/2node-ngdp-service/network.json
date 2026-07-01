@@ -1,7 +1,6 @@
 {
   "version": "1.0",
   "description": "Service definitions for 2node-ngdp-service topology",
-  "zones": { "amer": {} },
   "services": {
     "TRANSIT":      { "description": "Inter-switch underlay link", "service_type": "routed", "routing": {"protocol": "bgp", "peer_as": "request"} },
     "LOCAL_IRB":    { "description": "Local VLAN with SVI gateway", "service_type": "irb", "macvpn": "IRB_VLAN100" },

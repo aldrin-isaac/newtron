@@ -42,12 +42,12 @@ func scaffoldWithPermissions(t *testing.T) string {
     "filter.create": ["spec-team"],
     "filter.delete": ["spec-team"]
   },
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, dir, "amer")
 	return dir
 }
 
@@ -373,12 +373,12 @@ func authzServerWithTopology(t *testing.T) *Server {
     "service.remove":    ["device-team"],
     "interface.modify": ["device-team"],
     "qos.modify":        ["device-team"]
-  },
-  "zones": {"amer": {}}
+  }
 }`
 	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, specDir, "amer")
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
 		EnforceAuthorization: true,
@@ -488,12 +488,12 @@ func scaffoldWithGrants(t *testing.T, permissionsJSON string) string {
     "iam": ["dave"]
   },
   "permissions": ` + permissionsJSON + `,
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, dir, "amer")
 	return dir
 }
 
@@ -749,12 +749,12 @@ func TestRemoveBGPPeer_ResourceRecoveredFromIntent(t *testing.T) {
     ],
     "device.write": ["scoped-team"]
   },
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, specDir, "amer")
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
 		EnforceAuthorization: true,
@@ -826,12 +826,12 @@ func TestUnbindQoS_ResourceRecoveredFromIntent(t *testing.T) {
       ]
     }
   },
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, specDir, "amer")
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
 		EnforceAuthorization: true,
@@ -876,7 +876,6 @@ func authzServerForServiceGating(t *testing.T, globalPermissionsJSON string) *Se
     "service-team": ["bob"]
   },
   "permissions": ` + globalPermissionsJSON + `,
-  "zones": {"amer": {}},
   "services": {
     "TRANSIT": {
       "description": "Transit peering interface",
@@ -888,6 +887,7 @@ func authzServerForServiceGating(t *testing.T, globalPermissionsJSON string) *Se
 	if err := os.WriteFile(filepath.Join(specDir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, specDir, "amer")
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
 		EnforceAuthorization: true,

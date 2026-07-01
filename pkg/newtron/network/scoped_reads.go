@@ -38,10 +38,7 @@ func (n *Network) withReadTarget(scope, instance string, fn func(specs *spec.Ove
 		defer mu.RUnlock()
 		return fn(&n.spec.OverridableSpecs)
 	case spec.ScopeZone:
-		mu := n.locks.lock(keyNetworkSpec)
-		mu.RLock()
-		defer mu.RUnlock()
-		z, ok := n.spec.Zones[instance]
+		z, ok := n.loader.Zone(instance)
 		if !ok {
 			return &newtronErrors{notFound: true, resource: "zone", id: instance}
 		}

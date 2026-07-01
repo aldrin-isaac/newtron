@@ -62,9 +62,6 @@
       { "groups": ["service-team"], "where": { "device": "switch1" } }
     ]
   },
-  "zones": {
-    "amer": {}
-  },
   "services": {
     "TRANSIT_1": {
       "description": "Transit peering service — used by the L5 resource-scope scenario",

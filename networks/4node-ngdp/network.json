@@ -3,8 +3,5 @@
   "description": "4-node ngdp underlay: 2 spines + 2 leaves, full mesh, all Force10-S6000_vpp",
   "super_users": null,
   "user_groups": null,
-  "permissions": null,
-  "zones": {
-    "amer": {}
-  }
+  "permissions": null
 }

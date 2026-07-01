@@ -3,9 +3,6 @@
   "super_users": null,
   "user_groups": null,
   "permissions": null,
-  "zones": {
-    "amer": {}
-  },
   "ipvpns": {
     "IRB": {
       "description": "L3 VRF for EVPN IRB routing",

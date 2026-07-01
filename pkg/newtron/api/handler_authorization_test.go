@@ -162,12 +162,12 @@ func TestGetAuthorization_WireForm_ShorthandVsTyped(t *testing.T) {
       {"groups": ["edge-admins"], "where": {"device": "switch1"}}
     ]
   },
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, dir, "amer")
 
 	w := authzServeGet(t, dir, "/newtron/v1/networks/default/authorization")
 
@@ -254,12 +254,12 @@ func TestGetAuthorization_EngageWhenConfigured_GateEngagesAndDenies(t *testing.T
   "permissions": {
     "auth.read": ["iam-team"]
   },
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, dir, "amer")
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
 		EnforceAuthorization: true,
