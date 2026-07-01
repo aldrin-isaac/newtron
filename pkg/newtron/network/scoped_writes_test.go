@@ -23,8 +23,16 @@ func loadScopedTestNetwork(t *testing.T) *Network {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
-		[]byte(`{"schema_version":"1.0","zones":{"amer":{}}}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"1.0"}`), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
+	}
+	// Zones are per-file now (zones/<name>.json): the "amer" zone is an empty
+	// override bucket declared by an empty file.
+	if err := os.MkdirAll(filepath.Join(dir, "zones"), 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zones", "amer.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone amer: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
 		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
@@ -35,6 +43,18 @@ func loadScopedTestNetwork(t *testing.T) *Network {
 		t.Fatalf("NewNetwork: %v", err)
 	}
 	return n
+}
+
+// zoneOf returns the loaded zone by name (from the loader's per-file store),
+// failing the test if absent. After a ?scope=zone write (MutateZoneSpec), the
+// loader cache holds the updated zone, so this reflects the write.
+func zoneOf(t *testing.T, n *Network, name string) *spec.ZoneSpec {
+	t.Helper()
+	z, ok := n.loader.Zone(name)
+	if !ok {
+		t.Fatalf("zone %q not loaded", name)
+	}
+	return z
 }
 
 // TestScopedWrite_FloorInvariant_OverrideRequiresBase pins the network-floor
@@ -60,7 +80,7 @@ func TestScopedWrite_FloorInvariant_OverrideRequiresBase(t *testing.T) {
 	}
 
 	// The override landed in the zone container, not the network one.
-	z := n.spec.Zones["amer"]
+	z := zoneOf(t, n, "amer")
 	if got := z.Services["TRANSIT"]; got == nil || got.ServiceType != "bridged" {
 		t.Errorf("zone override = %+v, want service_type=bridged", got)
 	}
@@ -88,7 +108,7 @@ func TestScopedWrite_PerZoneIPVPNOverride(t *testing.T) {
 	if got := n.spec.IPVPNs["VRF_BLUE"]; got == nil || got.L3VNI != 1000 {
 		t.Errorf("network base L3VNI = %v, want 1000", got)
 	}
-	if got := n.spec.Zones["amer"].IPVPNs["VRF_BLUE"]; got == nil || got.L3VNI != 2000 {
+	if got := zoneOf(t, n, "amer").IPVPNs["VRF_BLUE"]; got == nil || got.L3VNI != 2000 {
 		t.Errorf("zone override L3VNI = %v, want 2000", got)
 	}
 
@@ -120,12 +140,18 @@ func buildNodeScopeNetwork(t *testing.T, secretStore secret.Store, nodeSpecJSON 
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
-		[]byte(`{"schema_version":"1.0","zones":{"amer":{}},"ipvpns":{"VRF_BLUE":{"l3vni":1000,"route_targets":["1:1"]}}}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"1.0","ipvpns":{"VRF_BLUE":{"l3vni":1000,"route_targets":["1:1"]}}}`), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
 		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
 		t.Fatalf("write platforms.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "zones"), 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zones", "amer.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone amer: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir nodes: %v", err)
@@ -229,7 +255,7 @@ func TestScopedSubRule_FilterRuleAtZone(t *testing.T) {
 		t.Fatalf("add rule to zone filter override: %v", err)
 	}
 
-	zf := n.spec.Zones["amer"].Filters["MGMT"]
+	zf := zoneOf(t, n, "amer").Filters["MGMT"]
 	if len(zf.Rules) != 1 || zf.Rules[0].Sequence != 10 {
 		t.Errorf("zone filter rules = %+v, want one rule seq=10", zf.Rules)
 	}
@@ -253,7 +279,7 @@ func TestScopedSubRule_PrefixEntryAtZone(t *testing.T) {
 		t.Fatalf("add prefix to zone override: %v", err)
 	}
 
-	if zpl := n.spec.Zones["amer"].PrefixLists["BOGONS"]; len(zpl) != 2 {
+	if zpl := zoneOf(t, n, "amer").PrefixLists["BOGONS"]; len(zpl) != 2 {
 		t.Errorf("zone prefix-list = %v, want 2 entries", zpl)
 	}
 	if npl := n.spec.PrefixLists["BOGONS"]; len(npl) != 1 {
@@ -291,7 +317,7 @@ func TestScopedDelete_OverrideIsFree(t *testing.T) {
 	if err := n.DeleteService(spec.ScopeZone, "amer", "TRANSIT"); err != nil {
 		t.Fatalf("delete zone override: %v", err)
 	}
-	if _, ok := n.spec.Zones["amer"].Services["TRANSIT"]; ok {
+	if _, ok := zoneOf(t, n, "amer").Services["TRANSIT"]; ok {
 		t.Error("zone override still present after delete")
 	}
 	if _, ok := n.spec.Services["TRANSIT"]; !ok {
@@ -360,12 +386,18 @@ func TestDeleteZone_BlockedByOverride(t *testing.T) {
 func TestDeleteZone_BlockedByNodeSpecReference(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
-		[]byte(`{"schema_version":"1.0","zones":{"amer":{}}}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"1.0"}`), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
 		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
 		t.Fatalf("write platforms.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "zones"), 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zones", "amer.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone amer: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir nodes: %v", err)
@@ -393,12 +425,18 @@ func TestDeleteZone_BlockedByNodeSpecReference(t *testing.T) {
 func TestDeleteNodeSpec_BlockedByOverride(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"),
-		[]byte(`{"schema_version":"1.0","zones":{"amer":{}},"prefix_lists":{"BOGONS":["10.0.0.0/8"]}}`), 0o644); err != nil {
+		[]byte(`{"schema_version":"1.0","prefix_lists":{"BOGONS":["10.0.0.0/8"]}}`), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "platforms.json"),
 		[]byte(`{"schema_version":"1.0","platforms":{}}`), 0o644); err != nil {
 		t.Fatalf("write platforms.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "zones"), 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zones", "amer.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone amer: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "nodes"), 0o755); err != nil {
 		t.Fatalf("mkdir nodes: %v", err)

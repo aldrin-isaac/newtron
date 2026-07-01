@@ -808,21 +808,12 @@ func (n *Network) CreateRoutePolicy(scope, instance, name string, def *spec.Rout
 	})
 }
 
-// CreateZone atomically creates a new zone. Returns an error if a zone
-// with the given name already exists.
+// CreateZone atomically creates a new zone in its own zones/<name>.json.
+// Returns an error if a zone with the given name already exists. Delegates to
+// spec.Loader.CreateZoneSpec, which holds the loader lock across the existence
+// check and the file write (mirrors CreateNodeSpec).
 func (n *Network) CreateZone(name string, zone *spec.ZoneSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := n.spec.Zones[name]; exists {
-		return fmt.Errorf("zone '%s' already exists", name)
-	}
-	if n.spec.Zones == nil {
-		n.spec.Zones = make(map[string]*spec.ZoneSpec)
-	}
-	n.spec.Zones[name] = zone
-	return n.persistSpec()
+	return n.loader.CreateZoneSpec(name, zone)
 }
 
 // CreateNodeSpec atomically creates a new node spec. Delegates to
@@ -950,17 +941,10 @@ func (n *Network) UpdateRoutePolicy(scope, instance, name string, def *spec.Rout
 	})
 }
 
-// UpdateZone atomically replaces an existing zone.
+// UpdateZone atomically replaces an existing zone's zones/<name>.json.
+// Delegates to spec.Loader.UpdateZoneSpec (mirrors UpdateNodeSpec).
 func (n *Network) UpdateZone(name string, zone *spec.ZoneSpec) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := n.spec.Zones[name]; !exists {
-		return &newtronErrors{notFound: true, resource: "zone", id: name}
-	}
-	n.spec.Zones[name] = zone
-	return n.persistSpec()
+	return n.loader.UpdateZoneSpec(name, zone)
 }
 
 // UpdateNodeSpec atomically replaces an existing node spec.
@@ -1385,16 +1369,10 @@ func (n *Network) PrefixListsSnapshot() map[string][]string {
 	return out
 }
 
-// ZonesSnapshot returns a shallow copy of the Zones map under read lock.
+// ZonesSnapshot returns a shallow copy of the loaded zone set (zones are
+// loader-owned, one file each).
 func (n *Network) ZonesSnapshot() map[string]*spec.ZoneSpec {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make(map[string]*spec.ZoneSpec, len(n.spec.Zones))
-	for k, v := range n.spec.Zones {
-		out[k] = v
-	}
-	return out
+	return n.loader.Zones()
 }
 
 // Spec returns the raw network spec (for advanced access).
@@ -1511,40 +1489,24 @@ func (n *Network) DeleteNodeSpec(name string, force bool) error {
 	return n.loader.DeleteNodeSpec(name)
 }
 
-// ListZones returns all zone names from the network spec.
+// ListZones returns all zone names (one zones/<name>.json each).
 func (n *Network) ListZones() []string {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	names := make([]string, 0, len(n.spec.Zones))
-	for name := range n.spec.Zones {
-		names = append(names, name)
-	}
-	return names
+	return n.loader.ListZoneSpecs()
 }
 
 // GetZone returns a zone spec by name.
 func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	z, ok := n.spec.Zones[name]
+	z, ok := n.loader.Zone(name)
 	if !ok {
 		return nil, fmt.Errorf("zone '%s' not found", name)
 	}
 	return z, nil
 }
 
-// DeleteZone removes a zone from network.json.
-// Returns error if any nodeSpec references it.
+// DeleteZone removes a zone's zones/<name>.json.
+// Returns error if any nodeSpec references it, or it still holds overrides.
 func (n *Network) DeleteZone(name string) error {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.Lock()
-	defer mu.Unlock()
-
-	z, ok := n.spec.Zones[name]
+	z, ok := n.loader.Zone(name)
 	if !ok {
 		return nil // idempotent: already absent
 	}
@@ -1568,8 +1530,7 @@ func (n *Network) DeleteZone(name string) error {
 		return &util.ConflictError{Resource: "zone", Name: name, References: refs}
 	}
 
-	delete(n.spec.Zones, name)
-	return n.persistSpec()
+	return n.loader.DeleteZoneSpec(name)
 }
 
 // ============================================================================
@@ -1581,8 +1542,10 @@ func (n *Network) DeleteZone(name string) error {
 // Network-level specs through its parent reference.
 func (n *Network) GetNode(name string) (*node.Node, error) {
 	// Lock-ordering rule: alphabetical by key. keyNetworkSpec < keyNodes.
-	// resolveNodeSpec + buildResolvedSpecs read n.spec.Zones and other
-	// network.json maps; the cache write requires keyNodes.Lock.
+	// resolveNodeSpec + buildResolvedSpecs read the network.json spec maps
+	// (n.spec, under keyNetworkSpec) and the loader-owned zones (n.loader.Zone,
+	// under the loader's own lock — order keyNetworkSpec → loader, matching the
+	// write path); the cache write requires keyNodes.Lock.
 	netMu := n.locks.lock(keyNetworkSpec)
 	netMu.RLock()
 	defer netMu.RUnlock()
@@ -2076,7 +2039,7 @@ func (n *Network) loadNodeSpec(name string) (*spec.NodeSpec, error) {
 // resolveNodeSpec applies inheritance to resolve final values.
 func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.ResolvedNodeSpec, error) {
 	// Validate zone exists
-	if _, ok := n.spec.Zones[nodeSpec.Zone]; !ok {
+	if _, ok := n.loader.Zone(nodeSpec.Zone); !ok {
 		return nil, fmt.Errorf("zone '%s' not found", nodeSpec.Zone)
 	}
 
@@ -2131,7 +2094,13 @@ func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.R
 // buildResolvedSpecs merges all 7 overridable spec maps with hierarchical
 // resolution: network → zone → nodeSpec (lower-level wins).
 func (n *Network) buildResolvedSpecs(nodeSpec *spec.NodeSpec) *ResolvedSpecs {
-	zone := n.spec.Zones[nodeSpec.Zone] // already validated in resolveNodeSpec
+	// The node's zone (already validated to exist in resolveNodeSpec). A node
+	// with no zone (Zone=="", e.g. a host) contributes no zone-scope overrides —
+	// merge against an empty zone rather than deref a nil pointer.
+	zone, ok := n.loader.Zone(nodeSpec.Zone)
+	if !ok {
+		zone = &spec.ZoneSpec{}
+	}
 
 	merged := spec.OverridableSpecs{
 		PrefixLists:   util.MergeMaps(n.spec.PrefixLists, zone.PrefixLists, nodeSpec.PrefixLists),

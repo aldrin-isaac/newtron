@@ -68,9 +68,14 @@ type NetworkSpecFile struct {
 	// accepted on the wire and produces one PermissionGrant with an
 	// empty Where (matches every Context).
 	Permissions map[string]PermissionGrants `json:"permissions"`
-	Zones       map[string]*ZoneSpec        `json:"zones"`
 
 	OverridableSpecs // Embedded — all 7 overridable spec maps
+
+	// Zones are NOT stored here — each lives in its own zones/<name>.json,
+	// loaded and owned by spec.Loader (mirroring nodes/<name>.json). Access
+	// them through the Loader (Zone/Zones/CreateZoneSpec/…), never a field on
+	// this type. Kept out of network.json so a ?scope=zone write localizes to
+	// its zone file instead of churning the whole network.json (DPN §7/§28).
 }
 
 // ZoneSpec defines zone settings (AS number, defaults).

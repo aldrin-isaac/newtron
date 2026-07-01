@@ -444,9 +444,10 @@ Each network directory contains:
 | File | Read By | Contents |
 |------|---------|----------|
 | `topology.json` | newtlab + newtron | Devices, interfaces, links, newtlab settings |
-| `network.json` | newtron | Services, filters, VPNs, zones |
+| `network.json` | newtron | Network-scope services, filters, VPNs |
 | `platforms.json` | newtlab + newtron | Platform definitions: VM settings consumed by newtlab; HWSKU, dataplane capability, and port count consumed by newtron's spec loader. |
 | `nodes/*.json` | newtlab + newtron | Per-device settings, EVPN config |
+| `zones/*.json` | newtron | Per-zone spec overrides (one file per zone) |
 
 ### 6.3 Custom networks
 

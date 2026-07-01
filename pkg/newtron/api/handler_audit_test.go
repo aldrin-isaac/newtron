@@ -673,12 +673,12 @@ func TestAuditEvents_EngageWhenConfigured_GateDenies(t *testing.T) {
   "super_users": ["root"],
   "user_groups": {"iam-team": ["iam-ian"]},
   "permissions": {"audit.read": ["iam-team"]},
-  "zones": {"amer": {}},
   "services": {}
 }`
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
+	writeZoneFile(t, dir, "amer")
 	seedAuditLog(t, dir, []audit.Event{{User: "alice", Operation: "op", Success: true}})
 
 	s := NewServer(Config{

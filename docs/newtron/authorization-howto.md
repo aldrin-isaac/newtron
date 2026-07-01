@@ -115,7 +115,7 @@ spec (DPN §27).
 
 | Family | What it gates |
 |---|---|
-| `spec.author` | Service/IPVPN/MACVPN/profile/zone/topology mutations on `network.json` and `topology.json` |
+| `spec.author` | Service/IPVPN/MACVPN/profile/zone/topology mutations on `network.json`, `zones/*.json`, `nodes/*.json`, and `topology.json` |
 | `qos.create` / `qos.modify` / `qos.delete` | QoS policy spec + per-interface QoS apply |
 | `filter.create` / `filter.delete` | Filter (ACL spec) authoring |
 | `vlan.create` / `vlan.modify` / `vlan.delete` | Per-device VLAN + IRB configuration |

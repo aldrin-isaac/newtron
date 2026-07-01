@@ -58,7 +58,7 @@ func (n *Network) ListScopedSpecs() ([]ScopedSpec, error) {
 		defer mu.RUnlock()
 
 		n.spec.EachSpec(collect(spec.ScopeNetwork, ""))
-		for name, z := range n.spec.Zones {
+		for name, z := range n.loader.Zones() {
 			z.EachSpec(collect(spec.ScopeZone, name))
 		}
 	}()

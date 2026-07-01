@@ -63,6 +63,50 @@ func TestSpecWatcher_FileChangeTriggersReload(t *testing.T) {
 	}
 }
 
+// TestSpecWatcher_ZoneFileChangeTriggersReload pins that a write under the
+// per-file zones/ subdirectory triggers a reload — the watch target added when
+// zones moved to zones/<name>.json. inotify is non-recursive, so the parent
+// watch alone would miss it; Add must register zones/ explicitly. The subdir
+// must exist before Add (an absent subdir is skipped, logged, and not watched).
+func TestSpecWatcher_ZoneFileChangeTriggersReload(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(`{"version":"1.0"}`), 0o644); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	zonesDir := filepath.Join(dir, "zones")
+	if err := os.MkdirAll(zonesDir, 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+
+	got := make(chan string, 4)
+	w, err := NewSpecWatcher(quietLogger(), 50*time.Millisecond, func(id string) error {
+		got <- id
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("NewSpecWatcher: %v", err)
+	}
+	defer w.Stop()
+	if err := w.Add(dir, "default"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	w.Start(context.Background())
+
+	// Author a zone override file under the watched zones/ subdir.
+	if err := os.WriteFile(filepath.Join(zonesDir, "amer.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone: %v", err)
+	}
+
+	select {
+	case id := <-got:
+		if id != "default" {
+			t.Errorf("reload fired for id=%q, want default", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reload did not fire within 2s of a zones/ file write")
+	}
+}
+
 // TestSpecWatcher_IgnoresAuditSubtree pins that writes into the network's
 // own audit/ folder never trigger a reload. Audit is runtime output the
 // server writes into the network folder (audit.Path); a reload on every

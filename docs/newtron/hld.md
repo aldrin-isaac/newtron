@@ -289,39 +289,39 @@ Resolution is **union with lower-level-wins**: if the same spec name exists at m
 Overrides are authored through the same write API as network specs — `scope`/`scope_instance` on the create/update/delete verbs (absent ⇒ network) — under the **network-floor invariant**: a spec may exist at zone/node scope only if it also exists at network, so resolution is total (every device's fallback bottoms out at the network base; nothing dangles). See [Design Principles §7](../DESIGN_PRINCIPLES_NEWTRON.md).
 
 ```
-┌──────────────────────────┐
-│                          │
-│         Network          │
-│      (network.json)      │
-│                          │
-└──────────────────────────┘
+┌─────────────────────┐
+│                     │
+│       Network       │
+│   (network.json)    │
+│                     │
+└─────────────────────┘
   │
   │ overrides
   ▼
-┌──────────────────────────┐
-│                          │
-│           Zone           │
-│      (zones.{name})      │
-│                          │
-└──────────────────────────┘
+┌─────────────────────┐
+│                     │
+│        Zone         │
+│ (zones/{name}.json) │
+│                     │
+└─────────────────────┘
   │
   │ overrides
   ▼
-┌──────────────────────────┐
-│                          │
-│          Node            │
-│ (nodes/{node}.json) │
-│                          │
-└──────────────────────────┘
+┌─────────────────────┐
+│                     │
+│        Node         │
+│ (nodes/{name}.json) │
+│                     │
+└─────────────────────┘
   │
   │ resolves to
   ▼
-┌──────────────────────────┐
-│                          │
-│     ResolvedSpecs        │
-│        (runtime)         │
-│                          │
-└──────────────────────────┘
+┌─────────────────────┐
+│                     │
+│    ResolvedSpecs    │
+│      (runtime)      │
+│                     │
+└─────────────────────┘
 ```
 
 At runtime, `buildResolvedSpecs()` merges all three levels into a `ResolvedSpecs` snapshot per node. This snapshot implements the `SpecProvider` interface used by all node operations — lookups fall through from node to zone to network until a match is found.

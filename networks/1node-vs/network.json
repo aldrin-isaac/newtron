@@ -3,9 +3,6 @@
   "super_users": null,
   "user_groups": null,
   "permissions": null,
-  "zones": {
-    "amer": {}
-  },
   "services": {
     "TRANSIT": {
       "description": "Transit peering interface",

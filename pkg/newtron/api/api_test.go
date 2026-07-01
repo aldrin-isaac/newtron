@@ -21,6 +21,21 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// writeZoneFile writes zones/<name>.json = {} under dir, declaring an empty
+// per-file zone. A fixture that places a node in a zone needs the zone to exist
+// as a file (zones are per-file now, mirroring nodes); the node's zone
+// reference validates against it at load.
+func writeZoneFile(t *testing.T, dir, name string) {
+	t.Helper()
+	zonesDir := filepath.Join(dir, "zones")
+	if err := os.MkdirAll(zonesDir, 0o755); err != nil {
+		t.Fatalf("mkdir zones: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(zonesDir, name+".json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write zone %s: %v", name, err)
+	}
+}
+
 // repoRoot walks up from this test file to the newtron repo root so tests
 // can locate the newtrun topology network dirs without depending on cwd.
 func repoRoot(t *testing.T) string {
@@ -1022,30 +1037,36 @@ func copyTestSpecDir(t *testing.T) string {
 	t.Helper()
 	src := filepath.Join(repoRoot(t), "networks", "1node-vs")
 	dst := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dst, "nodes"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		t.Fatalf("readdir src: %v", err)
 	}
+	// Copy the per-file spec subdirs the loader reads (nodes/, zones/), one
+	// level deep. Other subdirs (audit/ runtime output, suites/ scenarios) are
+	// not spec inputs and are skipped.
+	for _, sub := range []string{"nodes", "zones"} {
+		files, err := os.ReadDir(filepath.Join(src, sub))
+		if err != nil {
+			continue // subdir may not exist for this network
+		}
+		if err := os.MkdirAll(filepath.Join(dst, sub), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", sub, err)
+		}
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(src, sub, f.Name()))
+			if err != nil {
+				t.Fatalf("read %s/%s: %v", sub, f.Name(), err)
+			}
+			if err := os.WriteFile(filepath.Join(dst, sub, f.Name()), data, 0o644); err != nil {
+				t.Fatalf("write %s/%s: %v", sub, f.Name(), err)
+			}
+		}
+	}
 	for _, e := range entries {
 		if e.IsDir() {
-			if e.Name() == "nodes" {
-				profs, err := os.ReadDir(filepath.Join(src, "nodes"))
-				if err != nil {
-					t.Fatalf("readdir nodes: %v", err)
-				}
-				for _, p := range profs {
-					data, err := os.ReadFile(filepath.Join(src, "nodes", p.Name()))
-					if err != nil {
-						t.Fatalf("read node %s: %v", p.Name(), err)
-					}
-					if err := os.WriteFile(filepath.Join(dst, "nodes", p.Name()), data, 0o644); err != nil {
-						t.Fatalf("write node %s: %v", p.Name(), err)
-					}
-				}
-			}
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(src, e.Name()))

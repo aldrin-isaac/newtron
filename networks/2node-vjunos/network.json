@@ -3,8 +3,5 @@
   "description": "2-node vJunos-router lab: r1 ↔ r2 over two ge-0/0/N links. newtlab deploys the VMs; netconf.pl owns device config.",
   "super_users": null,
   "user_groups": null,
-  "permissions": null,
-  "zones": {
-    "lab": {}
-  }
+  "permissions": null
 }

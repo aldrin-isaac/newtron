@@ -419,28 +419,32 @@ newtron zone create datacenter-west -x
 newtron zone delete datacenter-west -x
 ```
 
-**Zone-level overrides** — add specs under a zone in `network.json` to scope them to devices in that zone:
+**Zone-level overrides** — each zone is its own file, `zones/<zone>.json`, exactly as each node is `nodes/<device>.json`. The file is a flat bucket of override maps (an `OverridableSpecs`), scoped to every device in that zone. So `zones/amer.json`:
 
 ```json
 {
-  "zones": {
-    "amer": {
-      "services": {
-        "amer-transit": {
-          "description": "AMER-specific transit service",
-          "service_type": "routed",
-          "ingress_filter": "transit-protect"
-        }
-      },
-      "prefix_lists": {
-        "amer-internal": ["10.10.0.0/16", "10.20.0.0/16"]
-      }
+  "services": {
+    "amer-transit": {
+      "description": "AMER-specific transit service",
+      "service_type": "routed",
+      "ingress_filter": "transit-protect"
     }
+  },
+  "prefix_lists": {
+    "amer-internal": ["10.10.0.0/16", "10.20.0.0/16"]
   }
 }
 ```
 
-Zone-level specs can reference network-level specs (e.g., the `amer-transit` service references the network-level `transit-protect` filter).
+Author overrides through the scoped-write API rather than by hand-editing the file — the same `create-<kind>` endpoints, with `scope`/`scope_instance` in the request body (absent ⇒ network base):
+
+```bash
+curl -X POST .../networks/<net>/create-service \
+  -d '{"scope":"zone","scope_instance":"amer","name":"amer-transit",
+       "service_type":"routed","ingress_filter":"transit-protect"}'
+```
+
+A zone override is subject to the **network-floor invariant**: `amer-transit` may exist at zone scope only if a network-scope `amer-transit` already does (an override rests on a base). Zone-level specs still reference network-level specs freely (e.g., the `amer-transit` service references the network-level `transit-protect` filter).
 
 **Node-level overrides** — add specs to a node spec (`nodes/<device>.json`) for device-specific overrides:
 

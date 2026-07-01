@@ -67,17 +67,22 @@ func (n *Network) withWriteTarget(scope, instance string, fn func(specs *spec.Ov
 		}
 		return n.persistSpec()
 	case spec.ScopeZone:
+		// Localize the write to zones/<instance>.json (mirrors the node case).
+		// keyNetworkSpec.RLock guards the network base MutateZoneSpec reads for
+		// the network-floor re-validation; MutateZoneSpec serializes the
+		// zone-file write under the loader lock.
 		mu := n.locks.lock(keyNetworkSpec)
-		mu.Lock()
-		defer mu.Unlock()
-		z, ok := n.spec.Zones[instance]
-		if !ok {
+		mu.RLock()
+		defer mu.RUnlock()
+		// A write to an unknown zone is a clean not-found (404), symmetric with
+		// the read path (withReadTarget's ScopeZone case) — not the raw
+		// file-open error MutateZoneSpec would surface for a missing zone file.
+		if _, ok := n.loader.Zone(instance); !ok {
 			return &newtronErrors{notFound: true, resource: "zone", id: instance}
 		}
-		if err := fn(&z.OverridableSpecs); err != nil {
-			return err
-		}
-		return n.persistSpec()
+		return n.loader.MutateZoneSpec(instance, func(z *spec.ZoneSpec) error {
+			return fn(&z.OverridableSpecs)
+		})
 	case spec.ScopeNode:
 		mu := n.locks.lock(keyNetworkSpec)
 		mu.RLock()
@@ -109,15 +114,16 @@ func (n *Network) checkOverrideBase(scope, kind, name string) error {
 
 // eachScopeContainer invokes fn for every scope's OverridableSpecs container —
 // network, each zone, each node nodeSpec — with the scope token and instance
-// name. The single cross-scope walk the reverse-integrity guards build on.
-// Caller holds keyNetworkSpec (n.spec and zones are read directly; nodeSpecs load
-// via the loader's own lock). A nodeSpec that fails to load is a fail-closed
-// error, never a silent skip.
+// name. The single cross-scope walk the reverse-integrity guards build on; the
+// two callers are read-only (FindConsumers / HasSpec), so ranging the loader's
+// zone snapshot is safe. Caller holds keyNetworkSpec for the network base;
+// zones and nodeSpecs load via the loader's own lock. A load failure is a
+// fail-closed error, never a silent skip.
 func (n *Network) eachScopeContainer(fn func(scope, instance string, specs *spec.OverridableSpecs) error) error {
 	if err := fn(spec.ScopeNetwork, "", &n.spec.OverridableSpecs); err != nil {
 		return err
 	}
-	for name, z := range n.spec.Zones {
+	for name, z := range n.loader.Zones() {
 		if err := fn(spec.ScopeZone, name, &z.OverridableSpecs); err != nil {
 			return err
 		}

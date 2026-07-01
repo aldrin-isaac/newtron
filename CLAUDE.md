@@ -156,7 +156,7 @@ service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 
 **Cross-engine data objects:**
 
-- **Specs** (network.json, topology.json, platforms.json, nodes/*.json) — newtron is the owner; consumers reach the data through `/newtron/v1/networks/...`. Opening the JSON files from another engine is the §27 violation.
+- **Specs** (network.json, topology.json, platforms.json, nodes/*.json, zones/*.json) — newtron is the owner; consumers reach the data through `/newtron/v1/networks/...`. Opening the JSON files from another engine is the §27 violation.
 - **Lab runtime state** (LabState, NodeState, LinkState) — newtlab is the owner; consumers reach the data through `/newtlab/v1/labs/...`. Reading `~/.newtlab/labs/<name>/state.json` from another engine is the §27 violation.
 - **Test run state** — newtrun is the owner; consumers call `/newtrun/v1/runs/...`.
 

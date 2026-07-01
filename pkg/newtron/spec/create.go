@@ -15,9 +15,9 @@ import (
 var ErrAlreadyExists = errors.New("network specs already exist")
 
 // CreateEmpty lays out an empty network at specDir: the directory
-// itself (mkdir -p), an empty nodes/ subdirectory, and three
-// zero-valued spec files — topology.json, platforms.json,
-// network.json — that newtron's Loader requires.
+// itself (mkdir -p), empty nodes/ and zones/ subdirectories (the
+// per-file spec homes), and the zero-valued spec files —
+// topology.json and network.json — that newtron's Loader requires.
 //
 // Returns ErrAlreadyExists if any of the three spec files already
 // exists. The check is intentionally narrow: a pre-existing empty
@@ -42,9 +42,13 @@ func CreateEmpty(specDir, description string) error {
 		}
 	}
 
-	nodesDir := filepath.Join(specDir, "nodes")
-	if err := os.MkdirAll(nodesDir, 0o755); err != nil {
-		return fmt.Errorf("create nodes dir: %w", err)
+	// Scaffold the per-file spec directories: nodes/ and zones/ (both empty —
+	// nodes and zones are added later via their CRUD paths, each to its own
+	// file).
+	for _, sub := range []string{"nodes", "zones"} {
+		if err := os.MkdirAll(filepath.Join(specDir, sub), 0o755); err != nil {
+			return fmt.Errorf("create %s dir: %w", sub, err)
+		}
 	}
 
 	if err := writeSeed(specDir, "topology.json", &TopologySpecFile{
@@ -57,7 +61,6 @@ func CreateEmpty(specDir, description string) error {
 	}
 	if err := writeSeed(specDir, "network.json", &NetworkSpecFile{
 		Version: "1.0",
-		Zones:   map[string]*ZoneSpec{},
 	}); err != nil {
 		return err
 	}
