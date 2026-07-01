@@ -1,0 +1,23 @@
+name: cross-engine-health-read
+description: |
+  Same cross-engine path as 00, via a native newtron op rather than a raw
+  SSH command. GET /health runs through connectAndRead — it opens the
+  device connection (forcing the newtron->newtlab SSH-port resolution
+  under PAM) and reads STATE_DB. The assertion checks only that
+  oper_checks were produced, i.e. the connection succeeded and health ran
+  — NOT that every check passes. Individual check verdicts are a device
+  concern (a lone switch1 has no BGP peer, so some checks warn/fail);
+  this suite's signal is the cross-engine connection, not device health.
+requires: [cross-engine-ssh-reachable]
+as: ron
+
+steps:
+  - name: health-read-crosses-to-newtlab
+    action: newtron
+    method: GET
+    url: /nodes/switch1/health
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.oper_checks | length > 0'
