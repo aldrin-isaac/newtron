@@ -33,13 +33,23 @@ controls).
 
 ### 2.1 In Scope
 
-The three engines run in one process (`cmd/newt-server`); inter-
-engine calls are in-process Go function calls and never traverse a
-network boundary. The remaining threat surface is the
-operator-to-server channel: a human operator's CLI or browser
-talking to `cmd/newt-server`. L2a (listener-side TLS) and L2b
-(PAM) protect that channel; L2c (session keys) caches the PAM
-result so the operator's CLI doesn't have to re-present
+The three engines run in one process (`cmd/newt-server`), but they
+reach each other over HTTP loopback through the same listener and
+mux — not in-process Go calls — so each engine stays a pure client
+of the others (§27: newtron owns specs, newtlab owns lab state).
+Those internal calls (newtron→newtlab and newtrun→newtlab port
+resolution; newtlab→newtron spec reads) pass through the same L2b
+gate as external traffic, so under PAM they must authenticate too.
+`cmd/newt-server` mints one **process-lifetime service key** (L2c)
+for an internal `newt-server` identity — a global super-user, since
+the server's own infrastructure calls must never be blocked by a
+network's user-facing authorization (L3) — and hands it to every
+internal client via `httputil.BearerTransport`. Without it, a device
+operation would 401 on the internal port-resolution call. The
+remaining external threat surface is the operator-to-server channel:
+a human operator's CLI or browser talking to `cmd/newt-server`. L2a
+(listener-side TLS) and L2b (PAM) protect that channel; L2c (session
+keys) caches the PAM result so the operator's CLI doesn't re-present
 credentials per request.
 
 | Threat | Surface | Layer that addresses it |

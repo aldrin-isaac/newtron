@@ -148,3 +148,37 @@ func PAMMiddleware(auth Authenticator) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// BearerTransport wraps base so every outbound request whose Authorization
+// header is not already set carries `Authorization: Bearer <key>` — the
+// client-side counterpart to PAMMiddleware/sessionkey. CLIs use it to carry a
+// login session key; newt-server uses it to give its internal cross-engine
+// clients a service credential. An empty key returns base unchanged (the no-op
+// / not-logged-in path); a nil base falls back to http.DefaultTransport. Apply
+// after a TLS transport so the Bearer wraps it.
+func BearerTransport(base http.RoundTripper, key string) http.RoundTripper {
+	if key == "" {
+		return base
+	}
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &bearerRoundTripper{base: base, key: key}
+}
+
+// bearerRoundTripper is the RoundTripper BearerTransport returns. It respects a
+// caller-set Authorization header (login/logout carry their own credentials and
+// must not be clobbered). Static — no refresh, no login wire-call.
+type bearerRoundTripper struct {
+	base http.RoundTripper
+	key  string
+}
+
+func (b *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("Authorization") != "" {
+		return b.base.RoundTrip(req)
+	}
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set("Authorization", "Bearer "+b.key)
+	return b.base.RoundTrip(cloned)
+}

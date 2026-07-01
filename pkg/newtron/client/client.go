@@ -99,40 +99,8 @@ func WithTLS(tlsCfg *tls.Config) Option {
 // passes "" when LoadSession returned nil.
 func WithBearer(key string) Option {
 	return func(c *Client) {
-		if key == "" {
-			return
-		}
-		base := c.httpClient.Transport
-		if base == nil {
-			base = http.DefaultTransport
-		}
-		c.httpClient.Transport = &bearerRoundTripper{
-			base: base,
-			key:  key,
-		}
+		c.httpClient.Transport = httputil.BearerTransport(c.httpClient.Transport, key)
 	}
-}
-
-// bearerRoundTripper attaches Authorization: Bearer <key> to every
-// outbound request whose Authorization header is not already set
-// (login + logout carry their own credentials and must not be
-// clobbered). Static — no refresh, no login wire-call.
-type bearerRoundTripper struct {
-	base http.RoundTripper
-	key  string
-}
-
-func (b *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Respect a caller-set Authorization header so the auth
-	// endpoints (Basic on /auth/login, Bearer on /auth/logout —
-	// the latter often using a different, soon-to-be-revoked key)
-	// pass through with their own credentials.
-	if req.Header.Get("Authorization") != "" {
-		return b.base.RoundTrip(req)
-	}
-	cloned := req.Clone(req.Context())
-	cloned.Header.Set("Authorization", "Bearer "+b.key)
-	return b.base.RoundTrip(cloned)
 }
 
 // NetworkID returns the network identifier used for API paths.

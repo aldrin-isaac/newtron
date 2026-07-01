@@ -5,6 +5,32 @@ import (
 	"time"
 )
 
+// TestStore_MintService pins the internal service token: it resolves to its
+// identity like any key, but outlasts the store's user-session TTL — the
+// server's cross-engine credential must not lapse mid-run. Uses a short store
+// TTL and a clock advanced well past it to prove the service key survives.
+func TestStore_MintService(t *testing.T) {
+	s := NewStore(time.Hour)
+	defer s.Stop()
+
+	key, err := s.MintService("newt-server")
+	if err != nil {
+		t.Fatalf("MintService: %v", err)
+	}
+	user, ok := s.Lookup(key)
+	if !ok || user != "newt-server" {
+		t.Fatalf("Lookup(service key) = (%q, %v), want (newt-server, true)", user, ok)
+	}
+
+	// Advance the clock a year — well past the 1h user-session TTL a normal
+	// Mint gets. The service key must still resolve.
+	base := time.Now()
+	s.now = func() time.Time { return base.Add(365 * 24 * time.Hour) }
+	if user, ok := s.Lookup(key); !ok || user != "newt-server" {
+		t.Errorf("service key expired after a year: Lookup = (%q, %v), want it still valid", user, ok)
+	}
+}
+
 // TestStore_MintLookupRevoke pins the happy path: a minted
 // key is found by Lookup, a revoked key isn't (auth-design.md L2c).
 func TestStore_MintLookupRevoke(t *testing.T) {
