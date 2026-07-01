@@ -25,6 +25,13 @@ description: |
   so the positive scenarios passing means "authorized + service token
   worked," not "auth was off."
 
+  Two PAM identities drive it, both nologin OS accounts by design: ron (a
+  global super-user, positive scenarios) and mallory (ungranted, the
+  negative scenario). nologin decouples "can authenticate to newtron" from
+  "can get a host shell" — a test credential must not widen to interactive
+  access. README.md "Identities" explains the rationale and gives the
+  useradd recipe.
+
   Requires newt-server running with --enforce-authorization
   --auth-pam-service and a deployed 1node-vs lab. See README.md.
 network: 1node-vs
