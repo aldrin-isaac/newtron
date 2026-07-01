@@ -26,6 +26,7 @@ func QueryAuditLog(path string, filter AuditFilter) ([]AuditEvent, error) {
 	defer logger.Close()
 
 	events, err := logger.Query(audit.Filter{
+		Network:     filter.Network,
 		Device:      filter.Device,
 		User:        filter.User,
 		Operation:   filter.Operation,
@@ -63,6 +64,7 @@ func toAuditEvent(e *audit.Event, withBody bool) AuditEvent {
 		Timestamp:          e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
 		User:               e.User,
 		VerificationSource: string(e.VerificationSource),
+		Network:            e.Network,
 		Device:             e.Device,
 		Operation:   e.Operation,
 		Service:     e.Service,

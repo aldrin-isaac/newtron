@@ -1,12 +1,20 @@
 // handler_audit.go — HTTP handlers for the audit-log inspector
 // surface (issue #196 / auth-design.md L1+L6).
 //
-// Two endpoints, both read-only, both gated by PermAuditRead under
+// Three endpoints, all read-only, all gated by PermAuditRead under
 // the engage-when-configured pattern (CheckAuditReadGate; see
 // authorization_ops.go):
 //
-//   GET /newtron/v1/networks/{netID}/audit/events?...   — paged, filtered
-//   GET /newtron/v1/networks/{netID}/audit/integrity    — hash-chain status
+//   GET /newtron/v1/networks/{netID}/audit/events?...        — paged, filtered
+//   GET /newtron/v1/networks/{netID}/audit/events/{eventID}  — single event
+//   GET /newtron/v1/networks/{netID}/audit/integrity         — hash-chain status
+//
+// Per-network scoping: the events and detail endpoints filter by the
+// path's {netID} (Event.Network), so a caller authorized to read one
+// network's audit sees only that network's events — the read scope
+// matches the per-network authorization gate. The integrity endpoint
+// still walks the whole (pre-partition) chain; per-network chains
+// arrive when storage is partitioned per network.
 //
 // The audit log path is operator-configured at startup
 // (cmd/newt-server --audit-log <path>) and reaches this handler
@@ -100,6 +108,16 @@ func (s *Server) handleAuditEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// Scope by network: an event whose Network differs from this path's
+	// {netID} belongs to another network. Return the same NotFoundError
+	// FindAuditEvent uses for a missing id — no existence leak across the
+	// per-network read boundary. (Events with an empty Network — e.g. a
+	// pre-scope global-log entry — belong to no network and are not served
+	// through any network's endpoint.)
+	if event.Network != r.PathValue("netID") {
+		writeError(w, &newtron.NotFoundError{Resource: "audit event", Name: r.PathValue("eventID")})
+		return
+	}
 	httputil.WriteJSON(w, http.StatusOK, event)
 }
 
@@ -154,6 +172,10 @@ func (s *Server) handleAuditIntegrity(w http.ResponseWriter, r *http.Request) {
 func parseAuditFilter(r *http.Request) (newtron.AuditFilter, error) {
 	q := r.URL.Query()
 	f := newtron.AuditFilter{
+		// Network is forced from the request path, never a client query
+		// param — the per-network read boundary must not be widenable by a
+		// caller supplying (or omitting) a network in the query string.
+		Network:   r.PathValue("netID"),
 		Device:    q.Get("device"),
 		User:      q.Get("user"),
 		Operation: q.Get("operation"),

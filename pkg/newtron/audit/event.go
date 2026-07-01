@@ -80,6 +80,14 @@ type Event struct {
 	Timestamp          time.Time          `json:"timestamp"`
 	User               string             `json:"user"`
 	VerificationSource VerificationSource `json:"verification_source,omitempty"`
+	// Network is the network the event was scoped to — the {netID} of
+	// the request path, or the network id an authorization decision was
+	// evaluated against. It is the scope dimension the per-network audit
+	// read path filters on, so an operator authorized to read one
+	// network's audit sees only that network's events. Empty for events
+	// with no network context (e.g. network creation, a server-registry
+	// lifecycle act rather than a network-scoped mutation).
+	Network            string             `json:"network,omitempty"`
 	Device             string             `json:"device"`
 	Operation          string             `json:"operation"`
 	Service            string             `json:"service,omitempty"`
@@ -114,6 +122,9 @@ type Event struct {
 
 // Filter defines criteria for querying audit events
 type Filter struct {
+	// Network scopes results to one network's events (matched against
+	// Event.Network). Empty matches every network.
+	Network     string
 	Device      string
 	User        string
 	Operation   string

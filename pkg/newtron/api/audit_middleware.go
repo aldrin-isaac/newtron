@@ -136,6 +136,7 @@ func emitMutationEvent(r *http.Request, status int, start time.Time, reqBody, re
 		Timestamp:          time.Now(),
 		User:               username,
 		VerificationSource: source,
+		Network:            r.PathValue("netID"),
 		Device:             r.PathValue("node"),
 		Operation:          r.Method + " " + r.URL.Path,
 		Interface:          r.PathValue("interface"),

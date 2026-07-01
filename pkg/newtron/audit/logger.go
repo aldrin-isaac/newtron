@@ -231,6 +231,9 @@ func (l *FileLogger) Close() error {
 }
 
 func (l *FileLogger) matchesFilter(event *Event, filter Filter) bool {
+	if filter.Network != "" && event.Network != filter.Network {
+		return false
+	}
 	if filter.Device != "" && event.Device != filter.Device {
 		return false
 	}
