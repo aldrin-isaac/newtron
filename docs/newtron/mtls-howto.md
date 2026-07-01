@@ -63,7 +63,7 @@ Reviewers tell mTLS-authenticated callers apart from PAM-authenticated ones by t
 
    bin/newt-server \
      --listen 0.0.0.0:18443 \
-     --audit-log /var/log/newt-server-audit.jsonl \
+     --audit \
      --enforce-authorization \
      --networks-base /etc/newt-server/networks
    ```
@@ -92,10 +92,13 @@ Reviewers tell mTLS-authenticated callers apart from PAM-authenticated ones by t
         $NEWTRON_SERVER/newtron/v1/networks
    ```
 
-6. **Verify the audit log:**
+6. **Verify the audit log:** audit is per-network — each network's log
+   lives in its own folder under `--networks-base`. Grep the network the
+   call touched (or use `bin/newtron -N <network> audit list --json`):
 
    ```sh
-   grep '"verification_source":"service_cert_cn"' /var/log/newt-server-audit.jsonl
+   grep '"verification_source":"service_cert_cn"' \
+     /etc/newt-server/networks/<network>/audit/audit.log
    ```
 
    Every authenticated request appears with `user: "alice"` (from the cert CN).

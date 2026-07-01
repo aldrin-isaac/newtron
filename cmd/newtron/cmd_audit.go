@@ -66,18 +66,19 @@ var auditListCmd = &cobra.Command{
 			filter.StartTime = time.Now().Add(-duration)
 		}
 
-		// The audit subcommand skips PersistentPreRunE (no network
-		// registration needed), so app.settings is nil here. Load
-		// settings explicitly to find the audit log path.
-		settings, err := newtron.LoadSettings()
-		if err != nil {
-			return fmt.Errorf("loading settings: %w", err)
+		// Audit is per-network and server-owned (the log lives in the
+		// network's folder). Read through the server's per-network endpoint,
+		// which applies the audit.read gate. The audit subcommand skips
+		// PersistentPreRunE, so build the client here; the network comes from
+		// -N / NEWTRON_NETWORK_ID.
+		if err := app.initClient(); err != nil {
+			return err
 		}
-		auditPath := settings.GetAuditLogPath("")
-		events, err := newtron.QueryAuditLog(auditPath, filter)
+		page, err := app.client.AuditEvents(filter)
 		if err != nil {
 			return fmt.Errorf("querying audit log: %w", err)
 		}
+		events := page.Events
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(events)
@@ -126,13 +127,13 @@ change-set the operation produced. 'audit list' shows the envelope; this
 shows the content.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// The audit subcommand skips PersistentPreRunE, so resolve the
-		// log path from settings explicitly (same as list/verify).
-		settings, err := newtron.LoadSettings()
-		if err != nil {
-			return fmt.Errorf("loading settings: %w", err)
+		// Read one event through the server's per-network detail endpoint
+		// (the network comes from -N / NEWTRON_NETWORK_ID). The audit
+		// subcommand skips PersistentPreRunE, so build the client here.
+		if err := app.initClient(); err != nil {
+			return err
 		}
-		event, err := newtron.FindAuditEvent(settings.GetAuditLogPath(""), args[0])
+		event, err := app.client.AuditEvent(args[0])
 		if err != nil {
 			return fmt.Errorf("finding audit event: %w", err)
 		}
@@ -144,9 +145,11 @@ shows the content.`,
 	},
 }
 
-// auditVerifyCmd verifies the hash chain on an audit log file
-// (auth-design.md L6). The operator runs it periodically (cron or
-// after a suspected intrusion) to detect entries that were inserted,
+// auditVerifyCmd verifies a per-network audit hash chain (auth-design.md
+// L6). With no argument it verifies the -N network's chain via the server's
+// integrity endpoint; with a path it verifies a copied log offline —
+// independent of the server that wrote it. The operator runs it periodically
+// (cron or after a suspected intrusion) to detect entries that were inserted,
 // removed, reordered, or modified after the fact.
 //
 // Exit codes:
@@ -160,39 +163,52 @@ var auditVerifyCmd = &cobra.Command{
 and confirm each entry's PrevHash matches the running chain head and
 each entry's ID reproduces SHA256(prev_hash || canonical_json).
 
-Exit 0 = chain clean. Exit 1 = tamper detected; line number printed
-to stderr. Exit 2 = I/O or argument error.
+Exit 0 = chain clean. Exit 1 = tamper detected; the breakpoint is
+printed to stderr. Exit 2 = I/O or argument error.
 
-If no path is provided, the configured audit log path is used.`,
+With no argument, verifies the -N network's chain via the server's
+integrity endpoint (audit is per-network, server-owned). Pass a file
+path to verify a copied log offline — independent of the server that
+wrote it, the trustworthy check after a suspected intrusion.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// The audit subcommand skips PersistentPreRunE (no network
-		// registration needed), so app.settings is nil here.
-		// Resolve path explicitly: explicit arg wins, else fall back
-		// to the operator's settings file via LoadUserSettings.
-		var path string
-		switch {
-		case len(args) == 1:
-			path = args[0]
-		default:
-			settings, err := newtron.LoadSettings()
+		// Explicit path → offline verification of a local file, no server.
+		// This is the forensic path: verify a log without trusting the
+		// process that produced it.
+		if len(args) == 1 {
+			result, err := audit.Verify(args[0])
 			if err != nil {
-				return fmt.Errorf("no log path provided and loading settings failed: %w", err)
+				return fmt.Errorf("verifying %s: %w", args[0], err)
 			}
-			path = settings.GetAuditLogPath("")
+			if result.BrokenAt > 0 {
+				fmt.Fprintf(os.Stderr, "audit chain broken at line %d: %s\n", result.BrokenAt, result.Reason)
+				os.Exit(1)
+			}
+			if app.jsonOutput {
+				return json.NewEncoder(os.Stdout).Encode(result)
+			}
+			fmt.Printf("verified %d entries; chain head = %s\n", result.Entries, result.Head)
+			return nil
 		}
-		result, err := audit.Verify(path)
+
+		// No path → verify this network's chain via the server (the network
+		// comes from -N / NEWTRON_NETWORK_ID). The audit subcommand skips
+		// PersistentPreRunE, so build the client here.
+		if err := app.initClient(); err != nil {
+			return err
+		}
+		res, err := app.client.AuditIntegrity()
 		if err != nil {
-			return fmt.Errorf("verifying %s: %w", path, err)
+			return fmt.Errorf("verifying audit integrity: %w", err)
 		}
-		if result.BrokenAt > 0 {
-			fmt.Fprintf(os.Stderr, "audit chain broken at line %d: %s\n", result.BrokenAt, result.Reason)
+		if res.BreakAt > 0 {
+			fmt.Fprintf(os.Stderr, "audit chain broken at entry %d: %s\n", res.BreakAt, res.BreakReason)
 			os.Exit(1)
 		}
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return json.NewEncoder(os.Stdout).Encode(res)
 		}
-		fmt.Printf("verified %d entries; chain head = %s\n", result.Entries, result.Head)
+		fmt.Printf("verified %d entries; chain head = %s\n", res.EntryCount, res.ChainHeadHash)
 		return nil
 	},
 }
@@ -206,4 +222,9 @@ func init() {
 	auditListCmd.Flags().StringVar(&auditOrder, "order", "desc", "Event order: desc (newest first, default) or asc (oldest first)")
 
 	auditCmd.AddCommand(auditListCmd, auditShowCmd, auditVerifyCmd)
+
+	// --json on list/show/verify. Must run after AddCommand so
+	// addOutputFlags sees the subcommands and registers --json as a
+	// persistent flag the subcommands inherit.
+	addOutputFlags(auditCmd)
 }

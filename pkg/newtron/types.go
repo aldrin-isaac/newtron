@@ -7,7 +7,6 @@ package newtron
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
@@ -1099,25 +1098,16 @@ type AuditIntegrityResult struct {
 
 // UserSettings holds persistent user preferences.
 type UserSettings struct {
-	DefaultNetwork  string `json:"default_network,omitempty"`
-	Dir             string `json:"dir,omitempty"`
-	DefaultSuite    string `json:"default_suite,omitempty"`
-	NetworksDir     string `json:"networks_dir,omitempty"`
-	AuditLogPath    string `json:"audit_log_path,omitempty"`
-	AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"`
-	AuditMaxBackups int    `json:"audit_max_backups,omitempty"`
-	ServerURL       string `json:"server_url,omitempty"`
-	NetworkID       string `json:"network_id,omitempty"`
+	DefaultNetwork string `json:"default_network,omitempty"`
+	Dir            string `json:"dir,omitempty"`
+	DefaultSuite   string `json:"default_suite,omitempty"`
+	NetworksDir    string `json:"networks_dir,omitempty"`
+	ServerURL      string `json:"server_url,omitempty"`
+	NetworkID      string `json:"network_id,omitempty"`
 }
 
 // DefaultDir is the default specification directory.
 const DefaultDir = "/etc/newtron"
-
-// DefaultAuditMaxSizeMB is the default maximum audit log size in megabytes.
-const DefaultAuditMaxSizeMB = 10
-
-// DefaultAuditMaxBackups is the default maximum number of rotated audit log files.
-const DefaultAuditMaxBackups = 10
 
 // GetDir returns the network directory with a fallback default.
 func (us *UserSettings) GetDir() string {
@@ -1125,45 +1115,6 @@ func (us *UserSettings) GetDir() string {
 		return us.Dir
 	}
 	return DefaultDir
-}
-
-// GetAuditLogPath returns the audit log path with a fallback default.
-// The default is the user's per-account directory (~/.newtron/audit.log)
-// so out-of-the-box operation does not require root or pre-created
-// /var/log paths. Operators who want a shared/system log can set
-// audit_log_path explicitly via `newtron settings set audit_log_path
-// /var/log/newtron/audit.log`.
-func (us *UserSettings) GetAuditLogPath(specDir string) string {
-	if us.AuditLogPath != "" {
-		return us.AuditLogPath
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return home + "/.newtron/audit.log"
-	}
-	return "/var/log/newtron/audit.log"
-}
-
-// IsAuditLogPathExplicit reports whether the user set audit_log_path
-// (vs. relying on the default). Callers use this to decide whether
-// failure to initialize the logger should warn or stay silent.
-func (us *UserSettings) IsAuditLogPathExplicit() bool {
-	return us.AuditLogPath != ""
-}
-
-// GetAuditMaxSizeMB returns the audit max size in MB with a default of 10.
-func (us *UserSettings) GetAuditMaxSizeMB() int {
-	if us.AuditMaxSizeMB > 0 {
-		return us.AuditMaxSizeMB
-	}
-	return DefaultAuditMaxSizeMB
-}
-
-// GetAuditMaxBackups returns the audit max backups with a default of 10.
-func (us *UserSettings) GetAuditMaxBackups() int {
-	if us.AuditMaxBackups > 0 {
-		return us.AuditMaxBackups
-	}
-	return DefaultAuditMaxBackups
 }
 
 // DefaultServerURL is the default newtron-server address.

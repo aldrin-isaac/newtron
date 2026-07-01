@@ -25,29 +25,12 @@ type Settings struct {
 	// NetworksDir is the base directory for newtrun topologies
 	NetworksDir string `json:"networks_dir,omitempty"`
 
-	// AuditLogPath overrides the default audit log path
-	AuditLogPath string `json:"audit_log_path,omitempty"`
-
-	// AuditMaxSizeMB is the max audit log size in MB before rotation (default: 10)
-	AuditMaxSizeMB int `json:"audit_max_size_mb,omitempty"`
-
-	// AuditMaxBackups is the max number of rotated audit log files (default: 10)
-	AuditMaxBackups int `json:"audit_max_backups,omitempty"`
-
 	// ServerURL is the newtron-server HTTP address
 	ServerURL string `json:"server_url,omitempty"`
 
 	// NetworkID identifies which registered network to operate on
 	NetworkID string `json:"network_id,omitempty"`
 }
-
-const (
-	// DefaultAuditMaxSizeMB is the default maximum audit log size in megabytes.
-	DefaultAuditMaxSizeMB = 10
-
-	// DefaultAuditMaxBackups is the default maximum number of rotated audit log files.
-	DefaultAuditMaxBackups = 10
-)
 
 // DefaultSettingsPath returns the default path for the settings file
 func DefaultSettingsPath() string {
@@ -110,43 +93,5 @@ func (s *Settings) GetDir() string {
 		return s.Dir
 	}
 	return DefaultDir
-}
-
-// GetAuditLogPath returns the audit log path with a fallback default.
-// The default is the user's per-account directory (~/.newtron/audit.log)
-// so out-of-the-box operation does not require root or pre-created
-// /var/log paths. Operators who want a shared/system log can set
-// audit_log_path explicitly via `newtron settings set audit_log_path
-// /var/log/newtron/audit.log`.
-func (s *Settings) GetAuditLogPath(specDir string) string {
-	if s.AuditLogPath != "" {
-		return s.AuditLogPath
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return home + "/.newtron/audit.log"
-	}
-	return "/var/log/newtron/audit.log"
-}
-
-// IsAuditLogPathExplicit reports whether the user set audit_log_path
-// (vs. relying on the default).
-func (s *Settings) IsAuditLogPathExplicit() bool {
-	return s.AuditLogPath != ""
-}
-
-// GetAuditMaxSizeMB returns the audit max size in MB with a default of 10.
-func (s *Settings) GetAuditMaxSizeMB() int {
-	if s.AuditMaxSizeMB > 0 {
-		return s.AuditMaxSizeMB
-	}
-	return DefaultAuditMaxSizeMB
-}
-
-// GetAuditMaxBackups returns the audit max backups with a default of 10.
-func (s *Settings) GetAuditMaxBackups() int {
-	if s.AuditMaxBackups > 0 {
-		return s.AuditMaxBackups
-	}
-	return DefaultAuditMaxBackups
 }
 

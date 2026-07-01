@@ -115,8 +115,10 @@ Deployments adopt layers at their own pace. Specifically:
 
 - **L0 encryption-at-rest:** `--secret-store=PATH` enables; absent
   means secrets stay plaintext (current behavior).
-- **L1 audit log:** `--audit-log=PATH` enables a file logger; absent
-  means events route to a no-op logger and nothing is written.
+- **L1 audit log:** `--audit` enables per-network file loggers — each
+  registered network's mutations are recorded in its own folder
+  (`<networks-base>/<network>/audit/audit.log`); absent means no logger
+  and nothing is written.
 - **L1 Unix socket listener:** `--unix-socket=PATH` enables the
   listener alongside the TCP one; absent means TCP only.
 - **L1 caller header:** `--audit-caller-header=NAME` configures the
@@ -154,7 +156,7 @@ Deployments adopt layers at their own pace. Specifically:
   shorthand keeps working (it's syntactic sugar for the richer
   form); operators opt into per-resource grants by writing them.
 - **L6 revocation + log integrity:** `--spec-watch=true` enables
-  the file watcher; `--audit-log-integrity=true` enables the hash
+  the file watcher; `--audit-integrity=true` enables the hash
   chain. Default `false`.
 
 Two properties this contract guarantees:
@@ -329,7 +331,8 @@ file-system level (hash chain is L6).
 TCP fallback (clearly labeled self-attested). Audit-emit calls at
 every existing `checkPermission` site and at every Node-level mutation
 entry point. `pkg/newtron/audit/` integration to receive the events.
-Server config gains `audit_log_path` and `audit_caller_header` fields.
+Server config gains `Audit` (per-network audit enable) and
+`AuditCallerHeader` fields.
 
 **Independent value.** Catches insider misuse after the fact even
 before authentication is wired up. Operators using the Unix socket path
@@ -1089,7 +1092,7 @@ integrity enabled.
 (`SpecWatcher`, fsnotify-backed, 1s debounce). Hash chain in
 `pkg/newtron/audit/` (`Event.PrevHash`, `Event.ID = SHA256(prev_hash
 || canonical_json)`, `Verify` walks the file and reports the first
-broken position). `--spec-watch` and `--audit-log-integrity` flags
+broken position). `--spec-watch` and `--audit-integrity` flags
 on `cmd/newt-server`. CLI verifier:
 `bin/newtron audit verify <path>`. Both halves default off per
 §2.4. New HOWTO sections on the daily revoke flow and the
@@ -1133,11 +1136,15 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   Unix peer creds when `--unix-socket` is set); standalone
   newtron-server has no PAM or session-key middleware (those live
   at `cmd/newt-server`'s outer boundary). Behavior is toggled by
-  `--audit-log`, `--audit-caller-header`, and `--unix-socket` flags
+  `--audit`, `--audit-caller-header`, and `--unix-socket` flags
   per §2.4; default values (all empty) preserve the pre-L1 behavior.
-  With `--audit-log` set, every POST/PUT/DELETE produces one Event
+  With `--audit` set, every POST/PUT/DELETE produces one Event
   with caller, method+URL as Operation, success/error from response
-  status, and a duration. **L3 adds per-`checkPermission` decision
+  status, and a duration, written to the target network's own log
+  (`audit.Path`; the middleware routes by the request's `{netID}`).
+  A request with no `{netID}` — network creation — writes no hashed
+  entry; it is a server-registry lifecycle act, logged operationally
+  with the caller instead. **L3 adds per-`checkPermission` decision
   events** via `audit.LogDecision` from inside
   `Network.checkPermission`; the Event's Operation is
   `authcheck:<permission>` so reviewers can filter for authorization
@@ -1184,7 +1191,7 @@ engages `Network.EnableAuthorization` at every `RegisterNetwork`
 and `ReloadNetwork`. Per-decision audit events
 (`Operation: "authcheck:<permission>"`) join the L1 request-level
 events in the audit log when both `--enforce-authorization` and
-`--audit-log` are set. Denials surface as HTTP 403 with the typed
+`--audit` are set. Denials surface as HTTP 403 with the typed
 `AuthorizationError` payload on the response `Data` field
 (`caller`, `permission`, `resource`). Test:
 `TestAuthorizationActuallyEnforces` in
@@ -1263,22 +1270,27 @@ new grant table. Removing alice from a group in `network.json`
 then takes effect within the debounce window without any explicit
 `/reload` call.
 
-Audit log integrity half: `--audit-log-integrity=true` switches the
-FileLogger to a hash-chained mode. Each emitted event is populated
-with `PrevHash` (the previous entry's `ID`) and `ID` (computed as
+Audit log integrity half: `--audit-integrity=true` switches each
+network's FileLogger to a hash-chained mode — **one chain per
+network** (audit is per-network; each network's log lives in its own
+folder). Each emitted event is populated with `PrevHash` (the
+previous entry's `ID`) and `ID` (computed as
 `SHA256(prev_hash || canonical_json_of_event_with_zero_id)`).
 Tampering with any past entry breaks the chain at that point and
-every subsequent link. Operators run `bin/newtron audit verify
-<path>` periodically (cron or post-incident); exit code 1 + line
-number on stderr signals tampering, exit 0 verifies clean. The
-chain head is recovered from the file's last well-formed entry on
-startup, so the chain continues across server restarts. Pre-L6
+every subsequent link. Operators run `bin/newtron audit verify`
+(the `-N` network's chain, checked via the server) or
+`bin/newtron audit verify <path>` (a copied log, verified offline —
+the trustworthy check after a suspected intrusion) periodically
+(cron or post-incident); exit code 1 + line number on stderr signals
+tampering, exit 0 verifies clean. Each chain's head is recovered
+from that file's last well-formed entry on startup, so a network's
+chain continues across server restarts. Pre-L6
 entries (with empty `ID`) are skipped during verification so a log
 that pre-dates the upgrade still parses.
 
 Both halves default off per §2.4. With `--spec-watch=false` the
 operator continues to POST `/reload`; with
-`--audit-log-integrity=false` the FileLogger writes entries with
+`--audit-integrity=false` the FileLogger writes entries with
 empty `ID` exactly as before L6. Tests:
 `pkg/newtron/network/watcher_test.go` (3 tests),
 `pkg/newtron/audit/integrity_test.go` (5 tests).
