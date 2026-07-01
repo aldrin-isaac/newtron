@@ -982,6 +982,11 @@ type IntentTreeNode struct {
 
 // AuditFilter defines criteria for querying audit events.
 type AuditFilter struct {
+	// Network scopes results to one network's events. The per-network
+	// read handlers set it from the request path's {netID} so a caller
+	// authorized for one network cannot read another's audit through it.
+	// Empty matches every network (the CLI explicit-path forensic case).
+	Network     string
 	Device      string
 	User        string
 	Operation   string
@@ -1010,6 +1015,7 @@ type AuditEvent struct {
 	// with this: an empty User with "anonymous" is an expected permissive-mode
 	// record, not a missing-data defect.
 	VerificationSource string        `json:"verification_source,omitempty"`
+	Network            string        `json:"network,omitempty"`
 	Device             string        `json:"device"`
 	Operation          string        `json:"operation"`
 	Service            string        `json:"service,omitempty"`

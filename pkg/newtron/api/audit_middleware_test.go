@@ -87,6 +87,37 @@ func TestAuditMiddleware_EmitsOnMutationRequests(t *testing.T) {
 	}
 }
 
+// TestAuditMiddleware_StampsNetworkFromPath pins that the middleware stamps
+// Event.Network from the request path's {netID}. Routed through a real
+// ServeMux carrying the {netID}/{node} pattern (not a bare handler) so
+// r.PathValue is populated — which also confirms the production wiring:
+// auditMiddleware is outer to the mux, and its post-call emit still sees the
+// path values the mux set on the shared request. The Device assertion is the
+// canary: if PathValue weren't populated, Network AND Device would both be
+// empty, exposing a test artifact rather than a real emit.
+func TestAuditMiddleware_StampsNetworkFromPath(t *testing.T) {
+	cap := withCaptureLogger(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/create-vlan",
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	handler := auditMiddleware(mux)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/newtron/v1/networks/prod-east/nodes/switch1/create-vlan", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(cap.events) != 1 {
+		t.Fatalf("got %d events; want 1", len(cap.events))
+	}
+	if got := cap.events[0].Network; got != "prod-east" {
+		t.Errorf("Network = %q, want prod-east (stamped from {netID})", got)
+	}
+	if got := cap.events[0].Device; got != "switch1" {
+		t.Errorf("Device = %q, want switch1 (canary: PathValue populated in middleware)", got)
+	}
+}
+
 // TestAuditMiddleware_SkipsReads pins that GET requests do not
 // produce audit events — L1 scope is mutation forensics, not
 // query telemetry.

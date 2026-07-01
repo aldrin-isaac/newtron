@@ -51,6 +51,13 @@ func scaffoldAuditNetwork(t *testing.T) string {
 
 // writeAuditLog writes integrity-chained events into a fresh log
 // file in t.TempDir and returns the path. The chain is clean.
+//
+// Events with no Network default to "default" — the network every
+// audit-endpoint test here registers and serves. The per-network read
+// path filters by the request's {netID}, so an unstamped event (as the
+// middleware would never produce) would be invisible; defaulting it
+// makes the seed reflect "these are default's events." A test probing
+// cross-network scoping sets Network explicitly and is left untouched.
 func writeAuditLog(t *testing.T, events []audit.Event) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -61,6 +68,9 @@ func writeAuditLog(t *testing.T, events []audit.Event) string {
 	}
 	defer logger.Close()
 	for i := range events {
+		if events[i].Network == "" {
+			events[i].Network = "default"
+		}
 		if err := logger.Log(&events[i]); err != nil {
 			t.Fatalf("Log[%d]: %v", i, err)
 		}
@@ -132,6 +142,76 @@ func TestAuditEvents_ReturnsPage(t *testing.T) {
 		if _, ok := got[key]; !ok {
 			t.Errorf("event missing key %q in response: %v", key, got)
 		}
+	}
+}
+
+// TestAuditEvents_PerNetworkScope is the PR-1 leak regression. Two networks
+// share one audit log (the pre-partition global file); each network's endpoint
+// must return ONLY its own events — the list AND the single-event-by-id detail.
+// Before Event.Network + the path-forced filter, network A's per-network,
+// per-network-gated endpoint returned every network's events: a caller
+// authorized for A could read B's mutations. This is the test whose absence let
+// that leak exist.
+func TestAuditEvents_PerNetworkScope(t *testing.T) {
+	logPath := writeAuditLog(t, []audit.Event{
+		{Network: "net-a", User: "alice", Operation: "POST /op-a", Success: true},
+		{Network: "net-b", User: "bob", Operation: "POST /op-b", Success: true},
+	})
+	s := NewServer(Config{AuditLogPath: logPath})
+	if err := s.RegisterNetwork("net-a", scaffoldAuditNetwork(t)); err != nil {
+		t.Fatalf("RegisterNetwork net-a: %v", err)
+	}
+	if err := s.RegisterNetwork("net-b", scaffoldAuditNetwork(t)); err != nil {
+		t.Fatalf("RegisterNetwork net-b: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	serve := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, req)
+		return w
+	}
+	decodeEvents := func(w *httptest.ResponseRecorder) []map[string]any {
+		t.Helper()
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		var env struct {
+			Data struct {
+				Events []map[string]any `json:"events"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("decode: %v; body: %s", err, w.Body.String())
+		}
+		return env.Data.Events
+	}
+
+	// net-a's endpoint returns only alice's event, never bob's.
+	aEvents := decodeEvents(serve("/newtron/v1/networks/net-a/audit/events"))
+	if len(aEvents) != 1 || aEvents[0]["user"] != "alice" {
+		t.Fatalf("net-a events: got %v, want exactly [alice]", aEvents)
+	}
+
+	// net-b's endpoint returns only bob's event, and yields its id.
+	bEvents := decodeEvents(serve("/newtron/v1/networks/net-b/audit/events"))
+	if len(bEvents) != 1 || bEvents[0]["user"] != "bob" {
+		t.Fatalf("net-b events: got %v, want exactly [bob]", bEvents)
+	}
+	bID, _ := bEvents[0]["id"].(string)
+	if bID == "" {
+		t.Fatal("net-b event has no id (integrity chain should populate it)")
+	}
+
+	// The single-event detail path is scoped too: net-b's event fetched
+	// through net-a's endpoint is 404 (no existence leak), but net-b can
+	// fetch its own.
+	if w := serve("/newtron/v1/networks/net-a/audit/events/" + bID); w.Code != http.StatusNotFound {
+		t.Errorf("cross-network detail fetch: got %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+	if w := serve("/newtron/v1/networks/net-b/audit/events/" + bID); w.Code != http.StatusOK {
+		t.Errorf("own-network detail fetch: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 }
 

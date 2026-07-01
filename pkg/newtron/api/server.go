@@ -339,7 +339,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 		return fmt.Errorf("loading network from %s: %w", specDir, err)
 	}
 	if s.enforceAuthorization {
-		net.EnableAuthorization(s.globalSuperUsers...)
+		net.EnableAuthorization(id, s.globalSuperUsers...)
 	}
 
 	s.mu.Lock()
@@ -398,7 +398,7 @@ func (s *Server) ReloadNetwork(id string) error {
 		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
 	}
 	if s.enforceAuthorization {
-		net.EnableAuthorization(s.globalSuperUsers...)
+		net.EnableAuthorization(id, s.globalSuperUsers...)
 	}
 
 	// Replace with new entity

@@ -27,6 +27,11 @@ type Decision struct {
 	Permission string
 	Caller     string
 	Source     VerificationSource
+	// Network is the network the permission was evaluated against —
+	// stamped onto the emitted event so the per-network audit read path
+	// scopes authorization decisions to their network, matching
+	// request-level events (Event.Network).
+	Network    string
 	Device     string
 	Service    string
 	Interface  string
@@ -57,6 +62,7 @@ func LogDecision(d Decision) {
 		Timestamp:          time.Now().UTC(),
 		User:               d.Caller,
 		VerificationSource: d.Source,
+		Network:            d.Network,
 		Device:             d.Device,
 		Operation:          DecisionOperationPrefix + d.Permission,
 		Service:            d.Service,

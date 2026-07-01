@@ -323,6 +323,15 @@ func TestAuthorization_DecisionAuditEmitted(t *testing.T) {
 	if !allow.Success {
 		t.Errorf("alice decision Success=false, want true (allow)")
 	}
+	// Decision events carry the network they were evaluated against
+	// (EnableAuthorization stamps net.auditNetworkID → Decision.Network →
+	// Event.Network), so the per-network audit read path scopes them.
+	if deny.Network != "default" {
+		t.Errorf("deny decision Network=%q, want %q", deny.Network, "default")
+	}
+	if allow.Network != "default" {
+		t.Errorf("allow decision Network=%q, want %q", allow.Network, "default")
+	}
 }
 
 // authzServerWithTopology constructs an enforcement-on server backed

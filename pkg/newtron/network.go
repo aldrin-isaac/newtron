@@ -19,6 +19,12 @@ import (
 type Network struct {
 	internal *netpkg.Network
 	auth     *auth.Checker
+	// auditNetworkID is the registry id this network is served under
+	// (the {netID} in request paths). Stamped onto authorization
+	// decision events so the per-network audit read path scopes them
+	// correctly. Set by EnableAuthorization — decision events only fire
+	// under enforcement, which is exactly when that runs.
+	auditNetworkID string
 }
 
 // LoadNetwork loads all spec files from specDir and returns a Network ready for use.
@@ -62,8 +68,12 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 // globalSuperUsers are super-users across every network (server-level), layered
 // above this network's own super_users list — a global super-user bypasses
 // every permission check here without being named in network.json.
-func (net *Network) EnableAuthorization(globalSuperUsers ...string) {
+//
+// networkID is the registry id this network is served under; it is stamped onto
+// authorization decision events (audit) so they scope to the right network.
+func (net *Network) EnableAuthorization(networkID string, globalSuperUsers ...string) {
 	net.auth = auth.NewChecker(net.internal.Spec(), globalSuperUsers...)
+	net.auditNetworkID = networkID
 }
 
 // InitDevice prepares a device for newtron management. This is a one-time
@@ -509,6 +519,7 @@ func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, a
 		Permission: string(perm),
 		Caller:     authCtx.Caller,
 		Source:     source,
+		Network:    net.auditNetworkID,
 		Device:     authCtx.Device,
 		Service:    authCtx.Service,
 		Interface:  authCtx.Interface,
