@@ -25,6 +25,11 @@ type Network struct {
 	// correctly. Set by EnableAuthorization — decision events only fire
 	// under enforcement, which is exactly when that runs.
 	auditNetworkID string
+	// auditLogger is this network's audit logger — the same per-network
+	// instance the api Server opens (audit lives in the network's own
+	// folder). checkPermission emits decision events to it. nil when
+	// audit is disabled, so LogDecision no-ops.
+	auditLogger audit.Logger
 }
 
 // LoadNetwork loads all spec files from specDir and returns a Network ready for use.
@@ -74,6 +79,17 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 func (net *Network) EnableAuthorization(networkID string, globalSuperUsers ...string) {
 	net.auth = auth.NewChecker(net.internal.Spec(), globalSuperUsers...)
 	net.auditNetworkID = networkID
+}
+
+// SetAuditLogger hands this network the audit logger its decision events
+// are written to — the same per-network instance the api Server opens for
+// the network's folder, so mutation events (via the middleware) and
+// decision events (via checkPermission) share one writer. nil disables
+// decision-event recording. The api Server calls this on RegisterNetwork
+// / ReloadNetwork; a fresh Network from LoadNetwork has no logger until it
+// does.
+func (net *Network) SetAuditLogger(logger audit.Logger) {
+	net.auditLogger = logger
 }
 
 // InitDevice prepares a device for newtron management. This is a one-time
@@ -515,7 +531,7 @@ func (net *Network) checkPermission(ctx context.Context, perm auth.Permission, a
 		source = caller.Source
 	}
 	err := net.auth.Check(perm, authCtx)
-	audit.LogDecision(audit.Decision{
+	audit.LogDecision(net.auditLogger, audit.Decision{
 		Permission: string(perm),
 		Caller:     authCtx.Caller,
 		Source:     source,

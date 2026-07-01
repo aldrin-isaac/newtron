@@ -6,13 +6,13 @@ description: |
   dozen events; this final scenario closes the chain by checking
   them.
 
-  Requires --audit-log AND --audit-log-integrity on the server;
+  Requires --audit AND --audit-integrity on the server;
   without integrity, every entry has empty ID and the verifier
   short-circuits clean without actually proving anything. The
   README documents the deployment shape.
 
   Audit log path is hard-coded to /tmp/1node-vs-auth-audit.jsonl.
-  The operator's --audit-log flag must match.
+  The operator's --audit flag must be set.
 
 requires: [L5-resource-scoping-alice, L5-resource-scoping-bob]
 

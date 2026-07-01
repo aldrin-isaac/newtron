@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -56,6 +57,14 @@ type networkEntity struct {
 	specDir     string
 	idleTimeout time.Duration
 
+	// auditLogger is this network's audit logger (a *audit.FileLogger
+	// writing to audit.Path(specDir)), or nil when audit is disabled.
+	// Owned here for lifecycle — stop() closes it. The same instance is
+	// handed to net (net.SetAuditLogger) for decision events and read by
+	// the mutation middleware via Server.auditLoggerFor: one writer per
+	// network file.
+	auditLogger audit.Logger
+
 	// nodeMu guards the nodeActors map. Not a spec lock — protects the
 	// API layer's own runtime cache. handleServiceProjection snapshots
 	// the registry directly through this mutex.
@@ -70,11 +79,14 @@ type networkEntity struct {
 }
 
 // newNetworkEntity creates a networkEntity for a registered network.
-func newNetworkEntity(net *newtron.Network, specDir string, idleTimeout time.Duration) *networkEntity {
+// auditLogger is the network's audit logger (nil when audit is disabled);
+// the entity owns its lifecycle and closes it in stop().
+func newNetworkEntity(net *newtron.Network, specDir string, idleTimeout time.Duration, auditLogger audit.Logger) *networkEntity {
 	return &networkEntity{
 		net:         net,
 		specDir:     specDir,
 		idleTimeout: idleTimeout,
+		auditLogger: auditLogger,
 		nodeActors:  make(map[string]*NodeActor),
 	}
 }
@@ -116,6 +128,12 @@ func (ne *networkEntity) stop() {
 	}
 	ne.nodeActors = make(map[string]*NodeActor)
 	ne.nodeMu.Unlock()
+	// Close the audit logger — releases the file handle. On ReloadNetwork
+	// a fresh logger reopens the same path and recovers the hash-chain
+	// head from disk, so the chain continues across the reopen.
+	if ne.auditLogger != nil {
+		_ = ne.auditLogger.Close()
+	}
 }
 
 // ============================================================================

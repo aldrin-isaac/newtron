@@ -13,6 +13,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
@@ -73,11 +74,14 @@ type Server struct {
 	// that don't reference platforms).
 	platforms map[string]*spec.PlatformSpec
 
-	// auditLogPath is the file path the audit logger writes to
-	// (auth-design.md L1). Used by the GET /audit/events and
-	// GET /audit/integrity handlers (#196). Empty disables those
-	// endpoints — they return 404 because there's no log to query.
-	auditLogPath string
+	// audit enables per-network audit logging (auth-design.md L1). When
+	// true, each registered network gets a FileLogger writing to its own
+	// folder (audit.Path(specDir)); the middleware routes mutation events
+	// there and the GET /audit/* handlers read it. When false, emission
+	// is off and those endpoints return 404. auditIntegrity adds the L6
+	// hash chain (per network — one chain per file).
+	audit          bool
+	auditIntegrity bool
 
 	// enforceAuthorization (auth-design.md L3) drives
 	// EnableAuthorization on every RegisterNetwork / ReloadNetwork
@@ -214,14 +218,18 @@ type Config struct {
 	// /reload to make a spec change observable.
 	SpecWatch bool
 
-	// AuditLogPath is the file path the audit logger writes to
-	// (auth-design.md L1). When non-empty, the GET /audit/events and
-	// GET /audit/integrity handlers can read it; when empty, those
-	// handlers return 404 because there's no audit log to query.
-	// Composed in by cmd/newt-server from --audit-log; the operator's
-	// startup writes both into audit.SetDefaultLogger AND into this
-	// config field so the read handlers know where to look.
-	AuditLogPath string
+	// Audit enables per-network audit logging (auth-design.md L1).
+	// Composed in by cmd/newt-server from --audit. When true, every
+	// registered network gets a FileLogger in its own folder
+	// (audit.Path(specDir)); mutation and decision events route there,
+	// and the GET /audit/* handlers read it. When false, emission is off
+	// and those endpoints return 404.
+	Audit bool
+
+	// AuditIntegrity engages the L6 hash chain on each per-network audit
+	// log (one chain per network file). From cmd/newt-server's
+	// --audit-integrity; only meaningful with Audit.
+	AuditIntegrity bool
 }
 
 // NewServer creates a new API server with the given Config. Zero-
@@ -245,7 +253,8 @@ func NewServer(cfg Config) *Server {
 		auditCallerHeader:    cfg.AuditCallerHeader,
 		secretStore:          cfg.SecretStore,
 		platforms:            cfg.Platforms,
-		auditLogPath:         cfg.AuditLogPath,
+		audit:                cfg.Audit,
+		auditIntegrity:       cfg.AuditIntegrity,
 		enforceAuthorization: cfg.EnforceAuthorization,
 		globalSuperUsers:     cfg.GlobalSuperUsers,
 		enforceWriteControl:  cfg.EnforceWriteControl,
@@ -333,6 +342,47 @@ func (s *Server) CreateNetwork(id, description string) error {
 // it's already registered, returns nil. Used by auto-discovery at
 // startup (cmd/newt-server/discover.go) and by tests that fixture
 // arbitrary dirs.
+// openAuditLogger opens a network's audit logger at audit.Path(specDir)
+// when audit is enabled, else returns a nil Logger. A failure to open (an
+// unwritable spec dir, say) is logged and treated as "no audit for this
+// network" rather than failing registration — one network's audit problem
+// must not take down the server or block its peers.
+func (s *Server) openAuditLogger(specDir string) audit.Logger {
+	if !s.audit {
+		return nil
+	}
+	path := audit.Path(specDir)
+	var (
+		l   *audit.FileLogger
+		err error
+	)
+	if s.auditIntegrity {
+		l, err = audit.NewFileLoggerWithIntegrity(path, audit.RotationConfig{})
+	} else {
+		l, err = audit.NewFileLogger(path, audit.RotationConfig{})
+	}
+	if err != nil {
+		s.logger.Printf("audit: cannot open log at %s: %v (auditing disabled for this network)", path, err)
+		return nil
+	}
+	return l
+}
+
+// auditLoggerFor returns the audit logger for a request's network, or nil
+// when audit is off, the network isn't registered, or the request carried
+// no {netID} (e.g. POST /networks — a server-registry lifecycle act, not a
+// network-scoped mutation). The mutation middleware calls this per request;
+// a nil result is a silent no-op.
+func (s *Server) auditLoggerFor(netID string) audit.Logger {
+	if netID == "" {
+		return nil
+	}
+	if ne := s.getNetwork(netID); ne != nil {
+		return ne.auditLogger
+	}
+	return nil
+}
+
 func (s *Server) RegisterNetwork(id, specDir string) error {
 	net, err := newtron.LoadNetwork(specDir, networkName(specDir), s.portResolver, s.secretStore, s.platforms)
 	if err != nil {
@@ -341,13 +391,20 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	if s.enforceAuthorization {
 		net.EnableAuthorization(id, s.globalSuperUsers...)
 	}
+	auditLogger := s.openAuditLogger(specDir)
+	net.SetAuditLogger(auditLogger)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.networks[id]; exists {
+		// Idempotent no-op — close the logger we just opened so its file
+		// handle doesn't leak (the already-registered entity owns the live one).
+		if auditLogger != nil {
+			_ = auditLogger.Close()
+		}
 		return nil
 	}
-	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout)
+	s.networks[id] = newNetworkEntity(net, specDir, s.idleTimeout, auditLogger)
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
 	if s.watcher != nil {
 		if err := s.watcher.Add(specDir, id); err != nil {
@@ -400,9 +457,11 @@ func (s *Server) ReloadNetwork(id string) error {
 	if s.enforceAuthorization {
 		net.EnableAuthorization(id, s.globalSuperUsers...)
 	}
+	auditLogger := s.openAuditLogger(entity.specDir)
+	net.SetAuditLogger(auditLogger)
 
 	// Replace with new entity
-	s.networks[id] = newNetworkEntity(net, entity.specDir, s.idleTimeout)
+	s.networks[id] = newNetworkEntity(net, entity.specDir, s.idleTimeout, auditLogger)
 	s.logger.Printf("reloaded network '%s' from %s", id, entity.specDir)
 	return nil
 }

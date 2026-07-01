@@ -11,9 +11,22 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
+
+// auditCallerDesc renders the verified caller of r as "user (source)" for
+// operational log lines, or "anonymous" when no identity was resolved.
+// Used for server-level lifecycle events (network creation) that are logged
+// operationally rather than written to the per-network audit chain.
+func auditCallerDesc(r *http.Request) string {
+	caller := audit.CallerFromContext(r.Context())
+	if caller == nil || caller.Username == "" {
+		return "anonymous"
+	}
+	return fmt.Sprintf("%s (%s)", caller.Username, caller.Source)
+}
 
 // idPattern is the canonical network ID validator. Letters, digits,
 // underscore, hyphen; 1–64 characters. No path separators, no dots, no
@@ -59,6 +72,11 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// Network creation is a server-registry lifecycle act, not a
+	// network-scoped mutation, so it is not written to the per-network
+	// hashed audit chain — but "who created this network" stays
+	// answerable via one identity-stamped operational line.
+	s.logger.Printf("network %q created by %s", req.ID, auditCallerDesc(r))
 	info := s.getNetworkInfo(req.ID)
 	if info == nil {
 		// Create succeeded but the entity vanished between Unlock

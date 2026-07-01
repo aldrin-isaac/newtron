@@ -89,7 +89,7 @@ the OS account — the account only carries the PAM credential.
 # 1. newt-server under enforcement (both aldrin and ron are super-users):
 PATH="$PWD/bin:$PATH" bin/newt-server \
   --enforce-authorization --auth-pam-service newtron-test \
-  --audit-log /tmp/newt-audit.log --audit-log-integrity \
+  --audit --audit-integrity \
   --super-users aldrin,ron --dev-superuser=false --spec-watch &
 
 # 2. Deploy the lab (registers newtron network id "1node-vs"):

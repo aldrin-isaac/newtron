@@ -246,6 +246,7 @@ func TestAPICompleteness(t *testing.T) {
 	excludedMethods := map[string]map[string]string{
 		"Network": {
 			"EnableAuthorization":    "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
+			"SetAuditLogger":         "server-internal initialization — api.Server hands each network its per-network audit logger on RegisterNetwork/ReloadNetwork (auth-design.md L1); not a request-handled action",
 			"Authorize":              "server-internal permission gate — invoked by api.Server for the write-control reservation handlers (control.request/control.takeover); not itself a request-handled action",
 			"BuildEmptyTopologyNode": "intent save/reload helpers — invoked via intent/save and intent/reload handlers",
 			"BuildTopologyNode":      "intent save/reload helpers — invoked via intent/save and intent/reload handlers",

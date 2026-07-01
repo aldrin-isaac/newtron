@@ -22,3 +22,6 @@ Thumbs.db
 
 # Private content (managed in separate repo)
 /docs/book/
+
+# Per-network audit logs are runtime output, not committed spec (audit.Path)
+networks/*/audit/

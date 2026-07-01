@@ -284,11 +284,12 @@ func (c *testAuditCollector) Close() error { return nil }
 // without it, denials would be silent and successes invisible.
 func TestAuthorization_DecisionAuditEmitted(t *testing.T) {
 	collector := &testAuditCollector{}
-	audit.SetDefaultLogger(collector)
-	t.Cleanup(func() { audit.SetDefaultLogger(nil) })
-
 	specDir := scaffoldWithPermissions(t)
 	s := newAuthzServer(t, specDir)
+	// Audit storage is per-network — no global default logger. Inject the
+	// collector as this network's audit logger so decision events
+	// (checkPermission → net.auditLogger) are captured.
+	s.networks["default"].net.SetAuditLogger(collector)
 
 	// One deny (mallory) and one allow (alice) so we can assert both shapes.
 	_ = postAs(t, s, "mallory", "/newtron/v1/networks/default/create-service",

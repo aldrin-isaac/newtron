@@ -216,16 +216,10 @@ Examples:
 			return fmt.Errorf("registering network with server: %w", err)
 		}
 
-		// Initialize audit logger (path and rotation from settings).
-		// Failure on the default path (e.g., $HOME not writable in CI)
-		// is silent — only warn when the operator set an explicit path
-		// and it didn't work.
-		auditPath := app.settings.GetAuditLogPath(app.dir)
-		if err := newtron.InitAuditLogger(auditPath, app.settings.GetAuditMaxSizeMB(), app.settings.GetAuditMaxBackups()); err != nil {
-			if app.settings.IsAuditLogPathExplicit() {
-				util.Logger.Warnf("Could not initialize audit logging at %s: %v", auditPath, err)
-			}
-		}
+		// Auditing is entirely server-side: the newt-server audit
+		// middleware records every mutation the CLI drives over HTTP,
+		// per network, in the network's own folder. The CLI emits no
+		// audit events of its own, so it configures no logger here.
 
 		return nil
 	},

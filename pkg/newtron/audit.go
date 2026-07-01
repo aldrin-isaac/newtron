@@ -4,19 +4,6 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
-// InitAuditLogger creates and sets the default audit logger.
-func InitAuditLogger(path string, maxSizeMB, maxBackups int) error {
-	logger, err := audit.NewFileLogger(path, audit.RotationConfig{
-		MaxSize:    int64(maxSizeMB) * 1024 * 1024,
-		MaxBackups: maxBackups,
-	})
-	if err != nil {
-		return err
-	}
-	audit.SetDefaultLogger(logger)
-	return nil
-}
-
 // QueryAuditLog queries audit events from a log file, converting to API types.
 func QueryAuditLog(path string, filter AuditFilter) ([]AuditEvent, error) {
 	logger, err := audit.NewFileLogger(path, audit.RotationConfig{})

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -340,34 +339,8 @@ func (l *FileLogger) cleanupOldFiles() {
 	}
 }
 
-// loggerHolder wraps a Logger so atomic.Value always stores the same concrete type.
-type loggerHolder struct {
-	logger Logger
-}
-
-var defaultLogger atomic.Value
-
-// SetDefaultLogger sets the default audit logger
-func SetDefaultLogger(logger Logger) {
-	defaultLogger.Store(loggerHolder{logger: logger})
-}
-
-func getDefaultLogger() Logger {
-	v := defaultLogger.Load()
-	if v == nil {
-		return nil
-	}
-	return v.(loggerHolder).logger
-}
-
-// Log writes event to the default logger. Silent no-op when no
-// default logger is configured (auth-design.md L1 disabled state).
-// This is the load-bearing emission path used by the api package's
-// audit middleware and by Network.checkPermission decision logging.
-func Log(event *Event) error {
-	l := getDefaultLogger()
-	if l == nil {
-		return nil
-	}
-	return l.Log(event)
-}
+// Emission is per-network: cmd/newt-server opens one FileLogger per
+// registered network (audit lives in the network's own folder — see
+// Path) and routes each event to that network's logger. There is no
+// process-global default logger; the api Server owns the per-network
+// registry and hands each Network its logger for decision events.

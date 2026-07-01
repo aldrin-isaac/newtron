@@ -16,11 +16,10 @@
 // still walks the whole (pre-partition) chain; per-network chains
 // arrive when storage is partitioned per network.
 //
-// The audit log path is operator-configured at startup
-// (cmd/newt-server --audit-log <path>) and reaches this handler
-// via api.Config.AuditLogPath → Server.auditLogPath. Empty path
-// returns 404 — there is no audit log to inspect, so the endpoint
-// has nothing to report.
+// Audit is per-network (cmd/newt-server --audit): each handler resolves the
+// network's own log via audit.Path(ne.specDir). With --audit unset
+// (Server.audit == false) all three return 404 — there is no audit log to
+// inspect, so the endpoint has nothing to report.
 package api
 
 import (
@@ -30,6 +29,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 )
 
@@ -50,10 +50,10 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	if s.auditLogPath == "" {
+	if !s.audit {
 		writeError(w, &newtron.NotFoundError{
 			Resource: "audit log",
-			Name:     "(unconfigured)",
+			Name:     "(disabled)",
 		})
 		return
 	}
@@ -67,7 +67,7 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &newtron.ValidationError{Message: err.Error()})
 		return
 	}
-	page, err := newtron.QueryAuditEvents(s.auditLogPath, filter)
+	page, err := newtron.QueryAuditEvents(audit.Path(ne.specDir), filter)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -91,10 +91,10 @@ func (s *Server) handleAuditEvent(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	if s.auditLogPath == "" {
+	if !s.audit {
 		writeError(w, &newtron.NotFoundError{
 			Resource: "audit log",
-			Name:     "(unconfigured)",
+			Name:     "(disabled)",
 		})
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) handleAuditEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	event, err := newtron.FindAuditEvent(s.auditLogPath, r.PathValue("eventID"))
+	event, err := newtron.FindAuditEvent(audit.Path(ne.specDir), r.PathValue("eventID"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -134,10 +134,10 @@ func (s *Server) handleAuditIntegrity(w http.ResponseWriter, r *http.Request) {
 	if ne == nil {
 		return
 	}
-	if s.auditLogPath == "" {
+	if !s.audit {
 		writeError(w, &newtron.NotFoundError{
 			Resource: "audit log",
-			Name:     "(unconfigured)",
+			Name:     "(disabled)",
 		})
 		return
 	}
@@ -146,7 +146,7 @@ func (s *Server) handleAuditIntegrity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	result, err := newtron.VerifyAuditIntegrity(s.auditLogPath)
+	result, err := newtron.VerifyAuditIntegrity(audit.Path(ne.specDir))
 	if err != nil {
 		writeError(w, err)
 		return
