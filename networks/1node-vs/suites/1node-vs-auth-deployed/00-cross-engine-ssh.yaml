@@ -1,0 +1,22 @@
+name: cross-engine-ssh-reachable
+description: |
+  The #335 guard, in its purest form. As ron (a global super-user, so
+  authorization is not what's under test), run an ACTUATED ssh-command on
+  switch1. Reaching the device requires newtron to resolve its SSH port
+  from newtlab — an HTTP loopback call through the PAM-gated listener,
+  authenticated by newt-server's internal service token. `echo ok` can
+  only round-trip if that internal call authenticated; a regressed
+  service token surfaces here as a 401 on the internal newtlab lookup.
+as: ron
+
+steps:
+  - name: ssh-echo-through-resolved-port
+    action: newtron
+    method: POST
+    url: /nodes/switch1/ssh-command
+    params: {command: "echo ok"}
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.output | contains("ok")'

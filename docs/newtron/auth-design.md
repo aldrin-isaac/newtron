@@ -352,14 +352,21 @@ CA. Identity = cert CN. The cert-CN extraction infrastructure mounts at
 the outer middleware so it composes with PAM and Unix peer creds
 uniformly.
 
-The three engines run in one process (`cmd/newt-server`); inter-
-engine calls are in-process Go function calls — no network
-boundary between engines to protect. An earlier separate-process
-deployment shape (each engine in its own server binary, talking
-to siblings over TCP) was retired when the engines were composed;
-the standalone engine binaries today are loopback dev tools, not
-a production deployment shape. L2a in the current architecture
-protects the operator-to-server boundary, not inter-engine.
+The three engines run in one process (`cmd/newt-server`), but
+inter-engine calls are HTTP loopback through the shared listener,
+not in-process Go function calls (§2.1) — composition put them in
+one binary without collapsing the calls into direct function
+calls. That loopback stays on `127.0.0.1` and carries no separate
+TLS surface, so L2a protects the operator-to-server boundary, not
+inter-engine traffic. It is not, however, an *auth*-free boundary:
+the loopback traverses the same L2b gate as external traffic, which
+is why newt-server authenticates its own cross-engine calls with an
+internal service identity under PAM (§2.1, L3). An earlier
+separate-process deployment shape (each engine in its own server
+binary, talking to siblings over TCP) was retired when the engines
+were composed; the transport stayed HTTP, only the process count
+changed. The standalone engine binaries today are loopback dev
+tools, not a production deployment shape.
 
 **Audit criterion met when this layer lands.** "Can a non-CA-trusted
 client open a connection to `cmd/newt-server`?" → no. A reviewer
@@ -525,7 +532,7 @@ operator's Bearer; `pkg/newtrun/api/runs.go` extracts the key via
 `Runner.OperatorBearer`; the runner's outbound newtron client
 attaches `Authorization: Bearer <key>` on every call via
 `pkg/newtron/client.WithBearer`. The composed `newt-server`
-outer middleware verifies the same key again on the in-process
+outer middleware verifies the same key again on the HTTP
 loopback, attaches the same username to the request context, and
 the newtron engine's `callerMiddleware` tags `audit.Caller`
 identically. The operator's identity is the runner's identity;
@@ -707,9 +714,13 @@ accounts map to `super_users` so they can do anything they're
 called upon to do; human users map to specific permission grants.
 This is a spec convention, not a code distinction — the Checker
 treats both identically. The three engines run in one process under
-`cmd/newt-server` and call each other in-process, so service-account
-identities are not used for inter-engine authentication — they exist
-for external automation that talks to `cmd/newt-server` as a service.
+`cmd/newt-server` but call each other over HTTP loopback (§2.1), so
+under PAM those inter-engine calls DO authenticate — with the
+internal `newt-server` service identity newt-server mints for its
+own infrastructure calls (§2.1, L3). Human-facing service accounts
+are a distinct thing: they exist for external automation that talks
+to `cmd/newt-server` as a service, and map to permission grants like
+any user.
 
 **Audit criterion met when this layer lands.** "Are the permission
 grants in `network.json` enforced at runtime?" → yes, for the
@@ -1153,8 +1164,8 @@ the cert-CN extraction infrastructure, the audit verification
 source, and the listener-side flags
 (`--tls-cert`/`--tls-key`/`--tls-ca` on `cmd/newt-server`) are
 all wired. Deployments that prefer reverse-proxy termination
-continue to do so; in-process inter-engine calls in the composed
-binary have no separate TLS surface. L2b
+continue to do so; the HTTP-loopback inter-engine calls in the
+composed binary stay on `127.0.0.1` and have no separate TLS surface. L2b
 user-to-service PAM is shipped — `--auth-pam-service=NAME` flag on
 `cmd/newt-server` (the only binary with PAM); the standalone
 engine binaries are loopback dev tools with no authentication. The

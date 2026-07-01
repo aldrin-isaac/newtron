@@ -1,0 +1,25 @@
+name: enforcement-live-ungranted-denied
+description: |
+  Proves the positive scenarios are non-vacuous. mallory authenticates
+  through PAM (the dev newtron-test service is pam_permit, so any account
+  logs in) but holds no grant and is not a super-user. Under
+  --enforce-authorization she is denied on an actuated device write —
+  create-vlan gates on device-write unconditionally (checkPermission, not
+  the engage-when-configured fallback), so the gate fires even though
+  1node-vs carries no grant table.
+
+  If enforcement were off (or the gate vacuous), this write would succeed
+  and the scenario would fail. Its passing is what makes ron's success in
+  00/10 mean "authorized + service token worked" rather than "auth was
+  never on." The write is denied before any device transport, so nothing
+  is mutated on switch1.
+requires: [cross-engine-ssh-reachable]
+as: mallory
+
+steps:
+  - name: mallory-actuated-write-denied
+    action: newtron
+    method: POST
+    url: /nodes/switch1/create-vlan
+    params: {id: 4000}
+    expect_failure: true

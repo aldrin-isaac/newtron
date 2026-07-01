@@ -1,0 +1,31 @@
+name: 1node-vs-auth-deployed
+description: |
+  Auth-enforced regression guard for the newtron->newtlab cross-engine
+  path (#335), run ACTUATED against a deployed device.
+
+  Why this suite exists: 1node-vs-auth (the loopback auth suite) proves
+  every L0-L6 gate, but every one of its scenarios uses ?mode=topology
+  precisely so the permission gate fires BEFORE any device transport —
+  so it never opens a device connection and never makes the internal
+  newtron->newtlab call. That call (SSH-port resolution) is HTTP loopback
+  through the same PAM-gated listener; #335 gave newt-server an internal
+  service token so its own cross-engine calls authenticate. Nothing in
+  the loopback suites can regress-guard it, because loopback never
+  crosses the boundary.
+
+  This suite does. Its scenarios run without ?mode=topology, against a
+  deployed 1node-vs lab, so newtron must resolve switch1's SSH port from
+  newtlab over HTTP under enforcement. If the service token (#335)
+  regresses, the internal call 401s and the positive scenarios fail with
+  "newtlab ... (401): authentication required" — the exact symptom #335
+  fixed.
+
+  Non-vacuous by construction: the negative scenario proves enforcement
+  is actually ON (an ungranted user is denied on the same deployed path),
+  so the positive scenarios passing means "authorized + service token
+  worked," not "auth was off."
+
+  Requires newt-server running with --enforce-authorization
+  --auth-pam-service and a deployed 1node-vs lab. See README.md.
+network: 1node-vs
+platform: sonic-vs

@@ -64,7 +64,7 @@ The runner (newtrun engine) extracts the inbound Bearer from the
 `/newtrun/v1/runs` request's Authorization header and attaches it on
 every outbound newtron call (auth-design.md §L2c "Identity
 forwarding through engines"). The operator's identity flows through
-the in-process loopback unchanged. Per-scenario `as: <user>` in a
+the HTTP loopback unchanged. Per-scenario `as: <user>` in a
 scenario overrides this default for every call that scenario makes.
 
 ## Configuration
@@ -131,5 +131,5 @@ re-implementing the auth chain — they just run without one.
 
 - Three engines, one repo, one machine: the composition is small.
 - One URL for every client (newtcon, operator scripts, external integrations) — no service-to-port map on the consumer side.
-- One auth boundary — the operator's identity is verified once at the outer middleware and flows through every in-process inter-engine call unchanged.
+- One auth boundary — the operator's identity is verified once at the outer middleware. Inter-engine calls are HTTP loopback through that same listener (not in-process), so they re-enter the auth chain: an operator-driven call forwards the operator's Bearer, while newt-server's own infrastructure calls (e.g. newtron→newtlab port resolution) authenticate with an internal service identity minted at startup.
 - Scaling cost is deferred until scaling is a requirement.
