@@ -874,7 +874,7 @@ no-op. **Exempt** from the check: reads, dry-runs, `control/*`, `reload`,
 `unregister`, and `intent/projection-diff` (a non-persisting preview).
 
 The reservation transitions are explicit API calls, so they are **audited**
-(caller + op + timestamp, hash-chained under `--audit-log-integrity`) and
+(caller + op + timestamp, hash-chained under `--audit-integrity`) and
 **permissioned** via the existing framework: `control.request` gates
 acquire/extend/release, `control.takeover` is the higher bar to force-take from a
 live holder. **Superusers bypass** both (a superuser can always force a takeover);
@@ -1159,13 +1159,17 @@ here — they are configured at the process and audited at startup. See
 
 ### Audit log
 
-Three read endpoints over the audit log file the operator configured
-via `--audit-log` on `cmd/newt-server`. All are gated by
-`audit.read` under the same engage-when-configured pattern as
-`auth.read` — no entry in the grant table means ungated; the first
-entry engages the gate. `audit.read` is filed under newtron#196.
+Three read endpoints over the network's audit log. Audit is
+**per-network**: with `--audit` on `cmd/newt-server`, each network's
+mutations are recorded in its own folder
+(`<networks-base>/{netID}/audit/audit.log`), and each endpoint reads the
+`{netID}` in its path — so a caller authorized for one network sees only
+that network's events. All are gated by `audit.read` under the same
+engage-when-configured pattern as `auth.read` — no entry in the grant
+table means ungated; the first entry engages the gate. `audit.read` is
+filed under newtron#196.
 
-When `--audit-log` is unset on `cmd/newt-server`, all three endpoints
+When `--audit` is unset on `cmd/newt-server`, all three endpoints
 return 404 — there is no audit log to inspect.
 
 **Envelope vs. content.** An audit event records both *that* something
@@ -1230,7 +1234,7 @@ below); `changes` is present when the operation produced a device
 change.
 
 **Errors:** 404 when `{netID}` is not registered or when
-`--audit-log` is unset on the server; 400 on a malformed filter
+`--audit` is unset on the server; 400 on a malformed filter
 parameter; 403 when the `audit.read` gate is engaged and the
 caller has no matching grant.
 
@@ -1251,7 +1255,7 @@ typical log sizes, and a detail fetch is one-per-click, not a polling loop.
 **Response (200):** a single `AuditEvent` (§13 Types Reference) carrying
 `changes` and the redacted `request_body`.
 
-**Errors:** 404 when `{netID}` is not registered, when `--audit-log` is
+**Errors:** 404 when `{netID}` is not registered, when `--audit` is
 unset, or when no event carries the given `id`; 403 when the `audit.read`
 gate is engaged and the caller has no matching grant.
 
@@ -1275,7 +1279,7 @@ is O(n) in entry count).
 | `verified_at` | RFC3339 timestamp | Server-side timestamp of this verification. Callers can cache the result client-side keyed on this value. |
 
 **Errors:** 404 when `{netID}` is not registered or when
-`--audit-log` is unset; 403 when the `audit.read` gate is engaged
+`--audit` is unset; 403 when the `audit.read` gate is engaged
 and the caller has no matching grant.
 
 A clean chain has `break_at == 0` and `break_reason == ""`. Any

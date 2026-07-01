@@ -134,8 +134,9 @@ HTTP/1.1 401 Unauthorized
 authentication failed
 ```
 
-With `--audit-log` configured (auth-design.md L1), each
-authenticated request shows up in the JSON-lines audit log with:
+With `--audit` configured (auth-design.md L1), each
+authenticated request shows up in that network's JSON-lines audit
+log (audit is per-network) with:
 
 ```json
 {

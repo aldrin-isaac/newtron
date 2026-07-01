@@ -962,14 +962,15 @@ type DeviceProfileDetail struct {
 
 ```go
 type UserSettings struct {
-    DefaultNetwork  string `json:"default_network,omitempty"`
-    Dir             string `json:"dir,omitempty"`
-    ServerURL       string `json:"server_url,omitempty"`
-    NetworkID       string `json:"network_id,omitempty"`
-    AuditLogPath    string `json:"audit_log_path,omitempty"`
-    AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"`
-    AuditMaxBackups int    `json:"audit_max_backups,omitempty"`
+    DefaultNetwork string `json:"default_network,omitempty"`
+    Dir            string `json:"dir,omitempty"`
+    ServerURL      string `json:"server_url,omitempty"`
+    NetworkID      string `json:"network_id,omitempty"`
     // ... other fields
+    // (No audit settings: audit is per-network and server-side —
+    //  enabled by --audit on cmd/newt-server, stored in each network's
+    //  own folder. The CLI reads it via the server's per-network
+    //  endpoints, so it needs no client-side audit path/rotation.)
 }
 
 type AuditEvent struct {

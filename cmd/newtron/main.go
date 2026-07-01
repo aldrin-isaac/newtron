@@ -140,23 +140,6 @@ Examples:
 			return fmt.Errorf("--no-save requires --execute (-x)")
 		}
 
-		// Load user settings
-		var err error
-		app.settings, err = newtron.LoadSettings()
-		if err != nil {
-			util.Logger.Warnf("Could not load settings: %v", err)
-			app.settings = &newtron.UserSettings{}
-		}
-
-		// Apply defaults from settings
-		if app.rootDir == "" {
-			app.rootDir = app.settings.GetDir()
-		}
-
-		// Spec files live at the network root after the layout collapse;
-		// app.dir is the same string as rootDir.
-		app.dir = app.rootDir
-
 		// Set log level: quiet by default, verbose on -v
 		if app.verbose {
 			util.SetLogLevel("debug")
@@ -164,48 +147,10 @@ Examples:
 			util.SetLogLevel("warn")
 		}
 
-		// Resolve server URL: flag > env > settings > default
-		if app.serverURL == "" {
-			app.serverURL = os.Getenv("NEWTRON_SERVER")
+		// Build the HTTP client (settings, server/network, session, TLS).
+		if err := app.initClient(); err != nil {
+			return err
 		}
-		if app.serverURL == "" {
-			app.serverURL = app.settings.GetServerURL()
-		}
-
-		// Resolve network ID: flag > env > settings > default
-		if app.networkID == "" {
-			app.networkID = os.Getenv("NEWTRON_NETWORK_ID")
-		}
-		if app.networkID == "" {
-			app.networkID = app.settings.GetNetworkID()
-		}
-
-		// Create HTTP client. When a valid session is cached at
-		// ~/.newtron/sessions/<user>@<host>.json (mode 0600), attach its key as
-		// Authorization: Bearer on every outbound newtron call. An
-		// expired or missing cache is silently ignored — the CLI
-		// proceeds without auth and the server's response (401 or
-		// 403) tells the operator whether the call needed identity.
-		// A malformed cache (bad JSON, bad permissions) is a hard
-		// error so the operator knows to chmod or re-login rather
-		// than silently running with a degraded credential surface.
-		var bearerKey string
-		if rec, err := client.LoadCLISession(os.Getenv("NEWTRON_USER"), app.serverURL); err != nil {
-			return fmt.Errorf("loading cached session: %w", err)
-		} else if rec != nil {
-			bearerKey = rec.Key
-		}
-		// auth-design.md L2a: NEWTRON_TLS_CERT/KEY/CA in the
-		// operator's env configure the client's TLS posture
-		// automatically. Unset → plain HTTP (pre-L2a default);
-		// set → trust the server cert against $NEWTRON_TLS_CA and
-		// (if cert+key also set) present them for mTLS. Same env
-		// drives cmd/newt-server when running locally.
-		tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
-		if err != nil {
-			return fmt.Errorf("loading client TLS config from env: %w", err)
-		}
-		app.client = client.New(app.serverURL, app.networkID, client.WithBearer(bearerKey), client.WithTLS(tlsCfg))
 		if app.loopback {
 			app.client.Mode = api.ModeLoopback
 			app.executeMode = true // loopback is always execute — no device to protect
@@ -223,6 +168,66 @@ Examples:
 
 		return nil
 	},
+}
+
+// initClient resolves settings, server URL, network ID, cached session, and
+// TLS (flag > env > settings), then constructs app.client. It neither
+// registers the network (CreateNetwork) nor sets the write mode — mutating
+// commands do that in PersistentPreRunE; read-only paths (the audit
+// subcommands, which skip PersistentPreRunE) call this alone so they reach
+// the server without a registration side effect.
+func (app *App) initClient() error {
+	var err error
+	app.settings, err = newtron.LoadSettings()
+	if err != nil {
+		util.Logger.Warnf("Could not load settings: %v", err)
+		app.settings = &newtron.UserSettings{}
+	}
+	if app.rootDir == "" {
+		app.rootDir = app.settings.GetDir()
+	}
+	// Spec files live at the network root after the layout collapse;
+	// app.dir is the same string as rootDir.
+	app.dir = app.rootDir
+
+	// Resolve server URL and network ID: flag > env > settings > default.
+	if app.serverURL == "" {
+		app.serverURL = os.Getenv("NEWTRON_SERVER")
+	}
+	if app.serverURL == "" {
+		app.serverURL = app.settings.GetServerURL()
+	}
+	if app.networkID == "" {
+		app.networkID = os.Getenv("NEWTRON_NETWORK_ID")
+	}
+	if app.networkID == "" {
+		app.networkID = app.settings.GetNetworkID()
+	}
+
+	// When a valid session is cached at ~/.newtron/sessions/<user>@<host>.json
+	// (mode 0600), attach its key as Authorization: Bearer on every outbound
+	// call. An expired or missing cache is silently ignored — the CLI proceeds
+	// without auth and the server's 401/403 tells the operator whether the call
+	// needed identity. A malformed cache (bad JSON, bad permissions) is a hard
+	// error so the operator knows to chmod or re-login rather than silently
+	// running with a degraded credential surface.
+	var bearerKey string
+	if rec, err := client.LoadCLISession(os.Getenv("NEWTRON_USER"), app.serverURL); err != nil {
+		return fmt.Errorf("loading cached session: %w", err)
+	} else if rec != nil {
+		bearerKey = rec.Key
+	}
+	// auth-design.md L2a: NEWTRON_TLS_CERT/KEY/CA in the operator's env
+	// configure the client's TLS posture automatically. Unset → plain HTTP
+	// (pre-L2a default); set → trust the server cert against $NEWTRON_TLS_CA
+	// and (if cert+key also set) present them for mTLS. Same env drives
+	// cmd/newt-server when running locally.
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		return fmt.Errorf("loading client TLS config from env: %w", err)
+	}
+	app.client = client.New(app.serverURL, app.networkID, client.WithBearer(bearerKey), client.WithTLS(tlsCfg))
+	return nil
 }
 
 func init() {
@@ -388,10 +393,12 @@ func printVerification(v *newtron.VerificationResult) {
 
 // isSettingsOrHelp checks whether cmd (or any ancestor) is a settings, help,
 // version, secrets, or audit command — none of which need a network
-// registered with the server. The secrets subcommand (auth-design.md L0)
-// operates directly on the operator's secret store file; the audit
-// subcommand (L1 list + L6 verify) reads the JSON-lines audit log file
-// directly. Neither reaches newtron-server.
+// registered with the server (CreateNetwork). The secrets subcommand
+// (auth-design.md L0) operates on the operator's secret store file. The
+// audit subcommand reads the network's server-owned log via the per-network
+// endpoints (list/show, and verify with no argument) — it builds its own
+// client (initClient) but must not register a network just to read; `audit
+// verify <path>` verifies a local file entirely offline.
 func isSettingsOrHelp(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {

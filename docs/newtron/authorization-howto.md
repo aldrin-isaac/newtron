@@ -137,7 +137,7 @@ On `newtron-server` or `newt-server`:
 
 ```sh
 bin/newt-server \
-  --audit-log /var/log/newtron-audit.jsonl \
+  --audit \
   --audit-caller-header X-Newtron-Caller \
   --enforce-authorization
 ```
@@ -189,7 +189,7 @@ curl -X POST http://127.0.0.1:18080/newtron/v1/networks/default/create-service \
 
 ## 5. Decision events in the audit log
 
-With both `--audit-log` and `--enforce-authorization` set, every
+With both `--audit` and `--enforce-authorization` set, every
 permission check writes one JSON-line event:
 
 ```json
@@ -215,10 +215,11 @@ zero-valued fields — `device`, `changes`, `execute_mode`, `dry_run`,
 `duration` — are shared shape with request-level audit events;
 decision events leave them at their zero values.)
 
-To filter for just decisions:
+To filter for just decisions (audit is per-network — read the
+network's log, or use `bin/newtron -N <network> audit list --json`):
 
 ```sh
-grep '"authcheck:' /var/log/newtron-audit.jsonl
+grep '"authcheck:' <networks-base>/<network>/audit/audit.log
 ```
 
 A denial entry has `"success": false` and an `error` field with
@@ -453,9 +454,11 @@ flow.
 
 ## 10. Audit log integrity
 
-With `--audit-log` set, every mutation and every authorization
-decision appends to a JSON-lines file. With `--audit-log-integrity`
-ALSO set, each entry carries a hash chain:
+With `--audit` set, every mutation and every authorization
+decision appends to the target network's JSON-lines log (audit is
+per-network — each network's log lives in its own folder). With
+`--audit-integrity` ALSO set, each entry carries a hash chain (one
+chain per network):
 
 - `Event.PrevHash` — the previous entry's `ID`
 - `Event.ID` — `SHA256(prev_hash || canonical_json_of_event_with_zero_id)`
@@ -464,14 +467,15 @@ Tampering with any past entry — modifying a field, deleting an
 entry, reordering — breaks the chain at the tampered position and
 every subsequent link.
 
-**Verify periodically:**
+**Verify periodically** (per-network — no argument verifies the `-N`
+network's chain via the server; a path verifies a copied log offline):
 
 ```sh
-bin/newtron audit verify /var/log/newtron-audit.jsonl
+bin/newtron -N <network> audit verify
 # verified 18342 entries; chain head = 7c0a2bf9d3e1c5a8...
 
-# After a tamper:
-bin/newtron audit verify /var/log/newtron-audit.jsonl
+# After a tamper (verifying a copied-out file offline):
+bin/newtron audit verify ./audit-copy.log
 # audit chain broken at line 1428: id hash mismatch (entry content modified)
 # (exits 1)
 ```
@@ -498,7 +502,7 @@ continues across server restarts. A multi-lifecycle log verifies as
 one chain end to end.
 
 **Pre-integrity entries.** A log that pre-dates the
-`--audit-log-integrity` upgrade carries empty `ID` and `PrevHash`
+`--audit-integrity` upgrade carries empty `ID` and `PrevHash`
 fields. The verifier skips those entries and resumes the chain
 expectation once it sees a non-empty `ID`. Operators can switch on
 integrity mid-stream without invalidating the historical log.
@@ -553,11 +557,11 @@ for the full endpoint reference.
 | Every call returns 403 even for super_users | `network.json` has `null` super_users + an empty `permissions` map; nothing matches. | Author at least one grant or a non-empty super_users list. |
 | Same caller works on one engine, gets 403 on another | The engines have different `network.json` files; the spec is per-engine, not global. | Ensure both engines load the same spec dir (or share a registered network ID). |
 | A new service's grants don't take effect | The authorization enforcer binds the Checker to the live spec at `EnableAuthorization` time. In-process spec mutations are observed through the same pointer, so this should not happen — but `Reload` is the safe path if grants don't engage. | `POST /newtron/v1/networks/<id>/reload`. |
-| Decision audit entries are missing | `--audit-log` not set. | Add `--audit-log=/path/to/file.jsonl`. |
+| Decision audit entries are missing | `--audit` not set. | Add `--audit`. |
 | 403 with empty `Caller` in the response data | No identity surface configured: no Unix socket, no mTLS, no PAM, no `--audit-caller-header`. | Engage at least one identity source per the audit log / mTLS / PAM HOWTOs. |
 | `network.json` edits aren't auto-reloaded | `--spec-watch` not set; the operator must `POST /reload`. | Add `--spec-watch=true`, or POST `/newtron/v1/networks/<id>/reload` explicitly. |
-| `audit verify` reports a broken chain | Either a real tamper, or pre-integrity entries before `--audit-log-integrity` was engaged. | Inspect the entry at the reported line. Pre-integrity entries have empty `id`; they're skipped by the verifier. A non-empty `id` whose hash doesn't reproduce means the entry was modified on disk. |
-| `--audit-log-integrity` does nothing | `--audit-log` is empty. Integrity has nothing to hash without a log target. | Add `--audit-log=/path/to/file.jsonl`. The server logs a warning at startup when only one of the two is set. |
+| `audit verify` reports a broken chain | Either a real tamper, or pre-integrity entries before `--audit-integrity` was engaged. | Inspect the entry at the reported line. Pre-integrity entries have empty `id`; they're skipped by the verifier. A non-empty `id` whose hash doesn't reproduce means the entry was modified on disk. |
+| `--audit-integrity` does nothing | `--audit` is empty. Integrity has nothing to hash without a log target. | Add `--audit`. The server logs a warning at startup when only one of the two is set. |
 
 ## Related
 

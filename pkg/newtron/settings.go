@@ -15,9 +15,6 @@ func LoadSettings() (*UserSettings, error) {
 		Dir:         s.Dir,
 		DefaultSuite:    s.DefaultSuite,
 		NetworksDir:   s.NetworksDir,
-		AuditLogPath:    s.AuditLogPath,
-		AuditMaxSizeMB:  s.AuditMaxSizeMB,
-		AuditMaxBackups: s.AuditMaxBackups,
 		ServerURL:       s.ServerURL,
 		NetworkID:       s.NetworkID,
 	}, nil
@@ -30,9 +27,6 @@ func SaveSettings(us *UserSettings) error {
 		Dir:         us.Dir,
 		DefaultSuite:    us.DefaultSuite,
 		NetworksDir:   us.NetworksDir,
-		AuditLogPath:    us.AuditLogPath,
-		AuditMaxSizeMB:  us.AuditMaxSizeMB,
-		AuditMaxBackups: us.AuditMaxBackups,
 		ServerURL:       us.ServerURL,
 		NetworkID:       us.NetworkID,
 	}
