@@ -210,8 +210,14 @@ func main() {
 	// own OS user, so any instance they spin up from their work-in-progress repo
 	// grants them super-user without hand-listing themselves. Never fires for an
 	// installed/production binary (not in a repo); opt out with --dev-superuser=false.
+	//
+	// The auto-grant is gated on --enforce-authorization: super-users only matter
+	// when authorization is enforced (the list is inert otherwise — see
+	// server.go, where GlobalSuperUsers is wired in only under enforcement). Gating
+	// here keeps the zero-auth getting-started path from logging a super-user grant
+	// that has no effect.
 	globalSuperUsers := parseCommaList(*superUsers)
-	if *devSuperUser {
+	if *devSuperUser && *enforceAuthz {
 		if u := devRepoUser(); u != "" && !slices.Contains(globalSuperUsers, u) {
 			globalSuperUsers = append(globalSuperUsers, u)
 			logger.Printf("dev mode: running from a newtron source checkout — auto-granting OS user %q global super-user (disable with --dev-superuser=false)", u)
