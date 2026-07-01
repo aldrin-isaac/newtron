@@ -77,6 +77,17 @@ func WithTLS(tlsCfg *tls.Config) Option {
 	}
 }
 
+// WithBearer attaches Authorization: Bearer <key> to every request, so the
+// caller authenticates through a PAM-gated listener without a Basic prompt.
+// newt-server uses it to give its internal newtron→newtlab port-resolver client
+// a service credential. Empty key is a no-op. Composes with WithTLS (both wrap
+// the transport); apply WithTLS first so the Bearer wraps the TLS transport.
+func WithBearer(key string) Option {
+	return func(c *Client) {
+		c.httpClient.Transport = httputil.BearerTransport(c.httpClient.Transport, key)
+	}
+}
+
 // LabStatus returns the canonical LabState for a deployed lab.
 // Calls GET /newtlab/v1/labs/{name}/status.
 func (c *Client) LabStatus(ctx context.Context, lab string) (*newtlab.LabState, error) {

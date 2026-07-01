@@ -121,6 +121,31 @@ func (s *Store) Mint(username string) (key string, expiresAt time.Time, err erro
 	return key, expiresAt, nil
 }
 
+// serviceKeyLifetime is the absolute lifetime of a MintService key — long
+// enough to outlast any realistic process run. The key lives only in memory and
+// dies with the process, so a far-future expiry is effectively process-lifetime
+// without adding a separate "never expires" branch to Lookup/sweep.
+const serviceKeyLifetime = 100 * 365 * 24 * time.Hour
+
+// MintService mints a key for an internal service identity — the credential
+// newt-server uses to authenticate its OWN cross-engine calls (newtron↔newtlab
+// port/spec lookups) through the same PAM-gated listener that external clients
+// use. Unlike Mint (a user session that expires at the store TTL), a service key
+// lasts the process's lifetime: internal infrastructure must not have its
+// credential lapse mid-run. The key is held in memory and never persisted or
+// handed to an external client.
+func (s *Store) MintService(username string) (key string, err error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	key = base64.RawURLEncoding.EncodeToString(buf[:])
+	s.mu.Lock()
+	s.entries[key] = keyEntry{Username: username, ExpiresAt: s.now().Add(serviceKeyLifetime)}
+	s.mu.Unlock()
+	return key, nil
+}
+
 // Lookup also enforces the TTL — an entry past ExpiresAt returns
 // false even when the sweeper hasn't reaped it yet, so a slow
 // sweeper cannot enable expired keys. Read-locked; the sweeper

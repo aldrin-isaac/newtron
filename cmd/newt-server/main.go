@@ -113,6 +113,37 @@ func main() {
 		logger.Fatalf("--tls-cert/--tls-key/--tls-ca: %v", err)
 	}
 
+	// auth-design.md L2b/L2c: build the PAM authenticator and session-key store
+	// up front — before the engine servers — because the engines reach each
+	// other through this same PAM-gated listener (the newtron→newtlab and
+	// newtrun→newtlab port resolvers, and newtlab→newtron spec reads are all
+	// loopback HTTP). Under PAM those internal calls carry no user credential, so
+	// PAMMiddleware would 401 them. We mint one process-lifetime service key for
+	// the internal "newt-server" identity and hand it to every internal client;
+	// the identity is a global super-user so the server's own infrastructure
+	// calls are never blocked by a network's user-facing authorization. Without
+	// PAM there is no gate: the key is empty (a no-op on the clients).
+	var pamAuth httputil.Authenticator
+	if *authPAMService != "" {
+		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
+	}
+	var sessionKeys *sessionkey.Store
+	if pamAuth != nil && *sessionKeyTTL >= 0 {
+		ttl := *sessionKeyTTL
+		if ttl == 0 {
+			ttl = sessionkey.DefaultTTL
+		}
+		sessionKeys = sessionkey.NewStore(ttl)
+	}
+	const internalServiceUser = "newt-server"
+	serviceKey := ""
+	if sessionKeys != nil {
+		serviceKey, err = sessionKeys.MintService(internalServiceUser)
+		if err != nil {
+			logger.Fatalf("minting internal service key: %v", err)
+		}
+	}
+
 	// Construct the three engine servers. Each owns its own state
 	// (network actors, run registry, deploy registry, brokers); we
 	// don't share state across engines — they communicate only via
@@ -122,7 +153,7 @@ func main() {
 	// share one process; the URL is the in-process loopback). The
 	// composition happens here in cmd — newtron's api package never
 	// sees newtlab; newtlab's client never sees newtron.
-	newtlabClient := newtlabclient.New("http://" + *listen)
+	newtlabClient := newtlabclient.New("http://"+*listen, newtlabclient.WithBearer(serviceKey))
 	newtronPortResolver := newtlabclient.NewPortResolver(newtlabClient)
 
 	// auth-design.md L1: install the audit logger when --audit-log
@@ -156,17 +187,6 @@ func main() {
 		store = fs
 	}
 
-	// auth-design.md L2b: construct the PAM authenticator when a
-	// service name is configured. Empty disables — TCP requests
-	// pass through the newtron engine's PAMMiddleware unchanged.
-	// auth-design.md L2c: with --auth-pam-service set, the
-	// /auth/login and /auth/logout routes auto-engage; the TTL
-	// flag tunes session-key lifetime.
-	var pamAuth httputil.Authenticator
-	if *authPAMService != "" {
-		pamAuth = &pamauth.PAMAuthenticator{ServiceName: *authPAMService}
-	}
-
 	platforms, err := spec.LoadPlatformsFromDir(*platformsBase)
 	if err != nil {
 		logger.Fatalf("loading platforms from %s: %v", *platformsBase, err)
@@ -196,6 +216,13 @@ func main() {
 			globalSuperUsers = append(globalSuperUsers, u)
 			logger.Printf("dev mode: running from a newtron source checkout — auto-granting OS user %q global super-user (disable with --dev-superuser=false)", u)
 		}
+	}
+	// The internal service identity (its key minted above) is a global
+	// super-user: the server's own cross-engine infrastructure calls must never
+	// be blocked by a network's user-facing authorization. Only meaningful under
+	// PAM (serviceKey is empty otherwise).
+	if serviceKey != "" && !slices.Contains(globalSuperUsers, internalServiceUser) {
+		globalSuperUsers = append(globalSuperUsers, internalServiceUser)
 	}
 
 	newtronSrv := newtronapi.NewServer(newtronapi.Config{
@@ -249,7 +276,7 @@ func main() {
 		NetworksBase: *networksBase,
 		Logger:       logger,
 		NewtronClientFor: func(networkID string) newtlab.SpecClient {
-			return newtronclient.New(newtronURL, networkID)
+			return newtronclient.New(newtronURL, networkID, newtronclient.WithBearer(serviceKey))
 		},
 		// In the composed newt-server, newtlab-server routes are
 		// mounted on the same listener as newtron — so the
@@ -258,19 +285,6 @@ func main() {
 		OrchestratorURL: newtronURL,
 	})
 
-	// auth-design.md L2c: build the server-wide session-key store
-	// when L2b (PAM) is also configured. Without an authenticator
-	// there is no credential to derive a session key from, and
-	// /auth/login refuses to mount. SessionKeyTTL < 0 lets an
-	// operator suppress L2c even when PAM is on.
-	var sessionKeys *sessionkey.Store
-	if pamAuth != nil && *sessionKeyTTL >= 0 {
-		ttl := *sessionKeyTTL
-		if ttl == 0 {
-			ttl = sessionkey.DefaultTTL
-		}
-		sessionKeys = sessionkey.NewStore(ttl)
-	}
 
 	// Compose the route tree. Each engine's Handler() already returns
 	// a fully-wired mux + middleware chain serving its own /<name>/v1/
