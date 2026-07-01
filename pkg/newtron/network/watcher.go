@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -198,6 +199,17 @@ func (w *SpecWatcher) handle(event fsnotify.Event) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for path, networkID := range w.paths {
+		// The network's own audit/ subtree is runtime output the server
+		// writes into the network folder — not a spec change. Ignore it so
+		// a logged mutation (or the audit/ dir's creation) never triggers a
+		// reload. Checked before the reload match: the audit dir's creation
+		// (event.Name == <path>/audit) would otherwise satisfy dir == path,
+		// and a file within it (dir == <path>/audit) would satisfy
+		// filepath.Dir(dir) == path.
+		auditDir := filepath.Join(path, audit.AuditDirName)
+		if event.Name == auditDir || dir == auditDir {
+			return
+		}
 		// Event fires on the watched dir itself OR a subdirectory
 		// of it (nodeSpecs/, etc.). Match by prefix to cover both.
 		if dir == path || filepath.Dir(dir) == path {

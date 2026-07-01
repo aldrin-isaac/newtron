@@ -258,7 +258,7 @@ func (s *Server) buildMux() http.Handler {
 	// callerMiddleware (so the caller identity is in context).
 	handler = s.withWriteControl(handler)
 	handler = httputil.Timeout(5 * time.Minute)(handler)
-	handler = auditMiddleware(handler)
+	handler = auditMiddleware(s.auditLoggerFor, handler)
 	handler = callerMiddleware(s.auditCallerHeader)(handler)
 	handler = httputil.RequestID(handler)
 	handler = httputil.Logger(s.logger)(handler)

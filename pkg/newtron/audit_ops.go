@@ -1,10 +1,11 @@
 // audit_ops.go — public API surface for reading the audit log and
 // its hash-chain integrity status (issue #196).
 //
-// The audit log itself is operator-configured at server startup
-// (`--audit-log <path>`) and written by the audit middleware in
-// pkg/newtron/api/. This file exposes two read-side operations
-// the HTTP handlers call:
+// The audit log is per-network: with `--audit` set, cmd/newt-server opens
+// one logger per registered network in the network's own folder
+// (audit.Path(specDir)); the audit middleware writes there. These functions
+// take the resolved per-network path. This file exposes two read-side
+// operations the HTTP handlers call:
 //
 //   - QueryAuditEvents — paged, filtered read of audit events
 //   - VerifyAuditIntegrity — L6 hash-chain verification
@@ -38,9 +39,9 @@ import (
 // file does not exist — this is the "no audit log configured"
 // case at the CLI / HTTP boundary; not an error worth surfacing.
 //
-// path is operator-supplied at server startup (--audit-log on
-// cmd/newt-server). Empty path returns an empty page so the
-// no-audit-log deployment doesn't 500 on a read.
+// path is the network's resolved audit-log location (audit.Path(specDir);
+// per-network under --audit). Empty path returns an empty page so a
+// no-audit deployment doesn't 500 on a read.
 func QueryAuditEvents(path string, filter AuditFilter) (AuditEventPage, error) {
 	if path == "" {
 		return AuditEventPage{Events: []AuditEvent{}, Total: 0}, nil

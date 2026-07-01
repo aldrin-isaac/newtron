@@ -47,15 +47,13 @@ type Decision struct {
 // against which L5 context dimensions" without inferring from the
 // request-level event alone.
 //
-// Like Log, LogDecision is a silent no-op when no default logger is
-// configured (auth-design.md L1 disabled state preserved). A
-// permission decision is still made; it just doesn't get recorded.
-//
-// The Event ID field stays empty, matching the L1 request-level
-// events emitted by auditMiddleware — populating IDs is L1
-// hardening, not L3 scope.
-func LogDecision(d Decision) {
-	if getDefaultLogger() == nil {
+// logger is the emitting network's audit logger (the api Server hands
+// each Network its own; audit lives in the network's folder). A nil
+// logger is a silent no-op — auth is on but audit is off, or the
+// network has no logger — the decision is still made, just not
+// recorded.
+func LogDecision(logger Logger, d Decision) {
+	if logger == nil {
 		return
 	}
 	event := &Event{
@@ -74,5 +72,5 @@ func LogDecision(d Decision) {
 	if d.Error != nil {
 		event.Error = d.Error.Error()
 	}
-	_ = Log(event)
+	_ = logger.Log(event)
 }

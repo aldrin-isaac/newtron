@@ -156,7 +156,7 @@ shows the content.`,
 var auditVerifyCmd = &cobra.Command{
 	Use:   "verify [path]",
 	Short: "Verify the hash chain on an audit log",
-	Long: `Walk a JSON-lines audit log written with --audit-log-integrity
+	Long: `Walk a JSON-lines audit log written with --audit-integrity
 and confirm each entry's PrevHash matches the running chain head and
 each entry's ID reproduces SHA256(prev_hash || canonical_json).
 

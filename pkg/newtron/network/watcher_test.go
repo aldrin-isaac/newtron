@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
 // quietLogger returns a logger that swallows output. Tests don't want
@@ -58,6 +60,64 @@ func TestSpecWatcher_FileChangeTriggersReload(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("reload did not fire within 2s of file write")
+	}
+}
+
+// TestSpecWatcher_IgnoresAuditSubtree pins that writes into the network's
+// own audit/ folder never trigger a reload. Audit is runtime output the
+// server writes into the network folder (audit.Path); a reload on every
+// logged mutation would be a storm. Creating the audit/ dir and appending
+// to its log must stay silent — then a real network.json write proves the
+// watcher is still alive (the zero-reload isn't a dead watcher).
+func TestSpecWatcher_IgnoresAuditSubtree(t *testing.T) {
+	dir := t.TempDir()
+	netFile := filepath.Join(dir, "network.json")
+	if err := os.WriteFile(netFile, []byte(`{"version":"1.0"}`), 0o644); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	var calls atomic.Int32
+	got := make(chan string, 4)
+	w, err := NewSpecWatcher(quietLogger(), 50*time.Millisecond, func(id string) error {
+		calls.Add(1)
+		got <- id
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("NewSpecWatcher: %v", err)
+	}
+	defer w.Stop()
+	if err := w.Add(dir, "default"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	w.Start(context.Background())
+
+	// Create audit/ (a Create event on the watched dir) and append to its
+	// log (inside the unwatched subdir) — the writer's real activity.
+	if err := os.MkdirAll(filepath.Join(dir, audit.AuditDirName), 0o755); err != nil {
+		t.Fatalf("mkdir audit: %v", err)
+	}
+	logFile := audit.Path(dir)
+	for i := range 5 {
+		if err := os.WriteFile(logFile, []byte(`{"event":`+strconv.Itoa(i)+"}\n"), 0o644); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	// Well past the debounce — any audit-triggered reload would have fired.
+	time.Sleep(300 * time.Millisecond)
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("audit writes triggered %d reload(s); want 0", n)
+	}
+
+	// Liveness control: a real spec change still reloads.
+	if err := os.WriteFile(netFile, []byte(`{"version":"1.0","super_users":["root"]}`), 0o644); err != nil {
+		t.Fatalf("rewrite network.json: %v", err)
+	}
+	select {
+	case <-got:
+		// good — watcher is alive and reloaded on the real change.
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not reload on a real network.json change (dead watcher?)")
 	}
 }
 

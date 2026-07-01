@@ -73,10 +73,10 @@ sudo sh networks/1node-vs-auth/suites/1node-vs-auth/create-test-users.sh
 #    PATH must include ./bin so the L6 newtron-cli step (which exec's
 #    `newtron audit verify ...`) finds the binary.
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
-    --audit-log /tmp/1node-vs-auth-audit.jsonl \
+    --audit \
     --auth-pam-service newtron-test \
     --enforce-authorization \
-    --audit-log-integrity \
+    --audit-integrity \
     --spec-watch &
 
 # 3. cache one session per user
@@ -205,10 +205,10 @@ each account and pass it to `login-all.sh` via
 
 ```sh
 PATH="$(pwd)/bin:$PATH" bin/newt-server \
-    --audit-log /tmp/1node-vs-auth-audit.jsonl \
+    --audit \
     --auth-pam-service newtron-test \
     --enforce-authorization \
-    --audit-log-integrity \
+    --audit-integrity \
     --spec-watch &
 ```
 
@@ -284,8 +284,8 @@ All scenarios pass on first run. If any fail:
 - L0 failing → check that `networks/1node-vs-auth/secrets.json`
   exists at mode 0600 with the `switch1_ssh_pass` key. If you're using
   `--secret-store=PATH` to override, verify that path instead.
-- L6 failing with "verified 0 entries" → `--audit-log-integrity` was
-  not set, or `--audit-log` path doesn't match
+- L6 failing with "verified 0 entries" → `--audit-integrity` was
+  not set, or `--audit` was not set
   `/tmp/1node-vs-auth-audit.jsonl`.
 
 ## Manual verifications for the deferred items

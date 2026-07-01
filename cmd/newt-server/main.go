@@ -44,7 +44,6 @@ import (
 	newtlabapi "github.com/aldrin-isaac/newtron/pkg/newtlab/api"
 	newtlabclient "github.com/aldrin-isaac/newtron/pkg/newtlab/client"
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
-	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
@@ -60,7 +59,7 @@ func main() {
 	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout for newtron (default 5m, negative to disable caching)")
 	networksBase := flag.String("networks-base", "networks", "directory containing per-network subdirectories. Each network owns its own spec files (network.json, topology.json, nodes/<name>.json) plus suites (<base>/<name>/suites/<suite>/). At boot, every <base>/<name>/topology.json triggers an auto-registration of <name> as a network; newtlab deploys read specs from the same tree; newtrun resolves suite names by scanning across networks.")
 	platformsBase := flag.String("platforms-base", "platforms", "directory containing one file per platform (<filename basename>.json). Loaded once at startup; every network reads from the same registry. Platforms describe hardware/image-level identities (HWSKU, port count, VM image, dataplane) — shared across networks by definition. Filename basename must equal the file's name field.")
-	auditLog := flag.String("audit-log", "", "file path for the mutation audit log; empty disables audit emission entirely (default). (auth-design.md L1)")
+	auditEnable := flag.Bool("audit", false, "enable per-network mutation audit logging for the newtron engine. When set, each network's mutations are recorded in its own folder (<networks-base>/<network>/audit/audit.log) — no path to configure. Off (default) disables audit emission entirely. (auth-design.md L1)")
 	auditCallerHeader := flag.String("audit-caller-header", "", "HTTP header read by caller-extraction middleware on TCP listeners (typical: X-Newtron-Caller); empty disables self-attested header identity (Unix socket peer creds still work if --unix-socket is set). (auth-design.md L1)")
 	unixSocket := flag.String("unix-socket", "", "Unix-domain socket path for a verified-identity listener alongside TCP; empty disables (TCP only). (auth-design.md L1)")
 	secretStore := flag.String("secret-store", "", "file path for the operator-managed secret store (JSON map, mode 0600). When set, ${secret:KEY} references in spec values are resolved at network load. Empty disables resolution. (auth-design.md L0)")
@@ -69,7 +68,7 @@ func main() {
 	devSuperUser := flag.Bool("dev-superuser", true, "when newt-server runs from a newtron source checkout (a developer's work-in-progress repo), auto-grant the current OS user global super-user across all networks — a local-dev convenience. No effect for an installed/production binary (one not running from a repo). Set false to opt out even inside a checkout. Only effective with --enforce-authorization. (auth-design.md L3)")
 	enforceWriteControl := flag.Bool("enforce-write-control", false, "require a per-network write-control reservation for every executing mutation on the newtron engine: a caller must POST .../control/request before any write, else 409. Default-closed when on (a write with no holder is refused). Off (default) keeps the reservation endpoints working but enforcement inert, so existing clients that don't claim are unchanged.")
 	specWatch := flag.Bool("spec-watch", false, "watch every registered network's network directory for file changes on the newtron engine; on settled change (1s debounce) automatically reload the network so revoked grants take effect without an explicit /reload call. Off (default) preserves pre-watcher behavior. (auth-design.md L6)")
-	auditIntegrity := flag.Bool("audit-log-integrity", false, "populate each audit-log entry with a hash chain so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit-log to be set. (auth-design.md L6)")
+	auditIntegrity := flag.Bool("audit-integrity", false, "populate each per-network audit log with a hash chain (one chain per network) so tampering with any past entry is detectable via `bin/newtron audit verify`. Off (default) leaves IDs empty. Requires --audit to be set. (auth-design.md L6)")
 	authPAMService := flag.String("auth-pam-service", "", "PAM service name under /etc/pam.d/ that authenticates TCP user requests to the newtron engine via HTTP Basic. Empty disables PAM authentication — TCP requests are not user-authenticated; Unix socket peer creds still work where configured. (auth-design.md L2b)")
 	sessionKeyTTL := flag.Duration("session-key-ttl", sessionkey.DefaultTTL, "absolute lifetime of session keys minted at POST /newt-server/v1/auth/login. Engaged only when --auth-pam-service is also set (no PAM credential, no session key). Negative disables L2c entirely — /auth/login returns 404 and Bearer tokens are not recognized. (auth-design.md L2c)")
 	tlsCert := flag.String("tls-cert", "", "server certificate (PEM) for the TCP listener. When set together with --tls-key, the TCP listener serves HTTPS instead of HTTP. Falls back to $NEWTRON_TLS_CERT when the flag is empty. Empty (no flag + no env) disables listener-side TLS (operators terminate TLS at a reverse proxy in front of newt-server, or rely on the Unix socket where configured). (auth-design.md L2a)")
@@ -156,24 +155,14 @@ func main() {
 	newtlabClient := newtlabclient.New("http://"+*listen, newtlabclient.WithBearer(serviceKey))
 	newtronPortResolver := newtlabclient.NewPortResolver(newtlabClient)
 
-	// auth-design.md L1: install the audit logger when --audit-log
-	// is set. The audit middleware in pkg/newtron/api/ reads via
-	// audit.Log; an unset logger makes Log a silent no-op.
-	// auth-design.md L6: --audit-log-integrity engages the hash chain.
-	if *auditLog != "" {
-		var al *audit.FileLogger
-		var err error
-		if *auditIntegrity {
-			al, err = audit.NewFileLoggerWithIntegrity(*auditLog, audit.RotationConfig{})
-		} else {
-			al, err = audit.NewFileLogger(*auditLog, audit.RotationConfig{})
-		}
-		if err != nil {
-			logger.Fatalf("failed to open audit log %s: %v", *auditLog, err)
-		}
-		audit.SetDefaultLogger(al)
-	} else if *auditIntegrity {
-		logger.Println("WARNING: --audit-log-integrity has no effect without --audit-log")
+	// auth-design.md L1/L6: audit is per-network. When --audit is set,
+	// the api Server opens one FileLogger per registered network in the
+	// network's own folder (audit.Path); --audit-integrity adds the hash
+	// chain per network. The Server owns that lifecycle (RegisterNetwork /
+	// ReloadNetwork / UnregisterNetwork), so cmd/newt-server just passes
+	// the two booleans through Config below.
+	if *auditIntegrity && !*auditEnable {
+		logger.Println("WARNING: --audit-integrity has no effect without --audit")
 	}
 
 	// auth-design.md L0: open the secret store when --secret-store
@@ -240,7 +229,8 @@ func main() {
 		UnixSocketPath:       *unixSocket,
 		SecretStore:          store,
 		Platforms:            platforms,
-		AuditLogPath:         *auditLog,
+		Audit:                *auditEnable,
+		AuditIntegrity:       *auditIntegrity,
 		EnforceAuthorization: *enforceAuthz,
 		GlobalSuperUsers:     globalSuperUsers,
 		EnforceWriteControl:  *enforceWriteControl,

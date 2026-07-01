@@ -16,15 +16,15 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// auditServeGet constructs a Server with auditLogPath wired to the
-// provided file (empty string disables the endpoint), registers a
-// network from specDir, and serves the GET. Used by all audit-
-// endpoint tests so the wiring is consistent.
-func auditServeGet(t *testing.T, specDir, auditPath, path string) *httptest.ResponseRecorder {
+// auditServeGet constructs a Server with per-network audit enabled iff
+// auditOn (audit storage is per-network now — the log lives in the
+// network's own folder, audit.Path(specDir)), registers a network from
+// specDir as "default", and serves the GET. Seed events with seedAuditLog
+// before calling when auditOn. Used by all audit-endpoint tests so the
+// wiring is consistent.
+func auditServeGet(t *testing.T, specDir string, auditOn bool, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	s := NewServer(Config{
-		AuditLogPath: auditPath,
-	})
+	s := NewServer(Config{Audit: auditOn})
 	if err := s.RegisterNetwork("default", specDir); err != nil {
 		t.Fatalf("RegisterNetwork: %v", err)
 	}
@@ -36,9 +36,9 @@ func auditServeGet(t *testing.T, specDir, auditPath, path string) *httptest.Resp
 	return w
 }
 
-// scaffoldAuditNetwork builds an empty network network dir suitable
-// for audit-endpoint tests. The network needs no spec content for
-// the endpoints to work — they only consult the audit log and the
+// scaffoldAuditNetwork builds an empty network dir suitable for
+// audit-endpoint tests. The network needs no spec content for the
+// endpoints to work — they only consult the audit log and the
 // authorization table.
 func scaffoldAuditNetwork(t *testing.T) string {
 	t.Helper()
@@ -49,24 +49,21 @@ func scaffoldAuditNetwork(t *testing.T) string {
 	return dir
 }
 
-// writeAuditLog writes integrity-chained events into a fresh log
-// file in t.TempDir and returns the path. The chain is clean.
+// seedAuditLog writes integrity-chained events into specDir's audit log
+// (audit.Path(specDir)) — the location the per-network read path reads.
+// Returns that path for tests that manipulate the file directly (tamper).
 //
 // Events with no Network default to "default" — the network every
-// audit-endpoint test here registers and serves. The per-network read
-// path filters by the request's {netID}, so an unstamped event (as the
-// middleware would never produce) would be invisible; defaulting it
-// makes the seed reflect "these are default's events." A test probing
-// cross-network scoping sets Network explicitly and is left untouched.
-func writeAuditLog(t *testing.T, events []audit.Event) string {
+// audit-endpoint test here registers and serves. The middleware always
+// stamps Network, so a seed reflects "these are default's events." A test
+// probing cross-network scoping sets Network explicitly and is untouched.
+func seedAuditLog(t *testing.T, specDir string, events []audit.Event) string {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "audit.jsonl")
+	path := audit.Path(specDir)
 	logger, err := audit.NewFileLoggerWithIntegrity(path, audit.RotationConfig{})
 	if err != nil {
 		t.Fatalf("NewFileLoggerWithIntegrity: %v", err)
 	}
-	defer logger.Close()
 	for i := range events {
 		if events[i].Network == "" {
 			events[i].Network = "default"
@@ -75,15 +72,27 @@ func writeAuditLog(t *testing.T, events []audit.Event) string {
 			t.Fatalf("Log[%d]: %v", i, err)
 		}
 	}
+	_ = logger.Close()
 	return path
 }
 
+// writeAuditLog scaffolds a "default" network dir, seeds its audit log
+// (integrity-chained) with events, and returns the dir — the value tests
+// pass to auditServeGet. Audit storage is per-network, so the seed and the
+// served network are one location (audit.Path(dir)).
+func writeAuditLog(t *testing.T, events []audit.Event) string {
+	t.Helper()
+	dir := scaffoldAuditNetwork(t)
+	seedAuditLog(t, dir, events)
+	return dir
+}
+
 // TestAuditEvents_NoAuditLogConfigured pins the "audit endpoint
-// returns 404 when --audit-log was never set" contract. There is
+// returns 404 when --audit was never set" contract. There is
 // no log to inspect; the endpoint truthfully reports it.
 func TestAuditEvents_NoAuditLogConfigured(t *testing.T) {
 	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, "" /* no audit log */, "/newtron/v1/networks/default/audit/events")
+	w := auditServeGet(t, dir, false, "/newtron/v1/networks/default/audit/events")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404; body: %s", w.Code, w.Body.String())
 	}
@@ -93,7 +102,7 @@ func TestAuditEvents_NoAuditLogConfigured(t *testing.T) {
 // integrity endpoint.
 func TestAuditIntegrity_NoAuditLogConfigured(t *testing.T) {
 	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, "" /* no audit log */, "/newtron/v1/networks/default/audit/integrity")
+	w := auditServeGet(t, dir, false, "/newtron/v1/networks/default/audit/integrity")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404; body: %s", w.Code, w.Body.String())
 	}
@@ -112,8 +121,7 @@ func TestAuditEvents_ReturnsPage(t *testing.T) {
 		{User: "bob", Device: "switch1", Operation: "POST /create-vrf", Success: true},
 		{User: "mallory", Device: "switch1", Operation: "POST /delete-acl", Success: false, Error: "permission denied"},
 	})
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/events")
+	w := auditServeGet(t, logPath, true, "/newtron/v1/networks/default/audit/events")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -145,23 +153,24 @@ func TestAuditEvents_ReturnsPage(t *testing.T) {
 	}
 }
 
-// TestAuditEvents_PerNetworkScope is the PR-1 leak regression. Two networks
-// share one audit log (the pre-partition global file); each network's endpoint
-// must return ONLY its own events — the list AND the single-event-by-id detail.
-// Before Event.Network + the path-forced filter, network A's per-network,
-// per-network-gated endpoint returned every network's events: a caller
-// authorized for A could read B's mutations. This is the test whose absence let
-// that leak exist.
+// TestAuditEvents_PerNetworkScope pins that each network's endpoint returns
+// ONLY its own events — the list AND the single-event-by-id detail. With
+// per-network storage each network has its OWN audit file, so a caller
+// authorized for net-a physically cannot reach net-b's log; the cross-network
+// detail fetch 404s because net-b's event isn't in net-a's file. (The scope
+// leak this guards against — a caller authorized for A reading B's events —
+// was possible when one global file backed every network's gated endpoint.)
 func TestAuditEvents_PerNetworkScope(t *testing.T) {
-	logPath := writeAuditLog(t, []audit.Event{
-		{Network: "net-a", User: "alice", Operation: "POST /op-a", Success: true},
-		{Network: "net-b", User: "bob", Operation: "POST /op-b", Success: true},
-	})
-	s := NewServer(Config{AuditLogPath: logPath})
-	if err := s.RegisterNetwork("net-a", scaffoldAuditNetwork(t)); err != nil {
+	dirA := scaffoldAuditNetwork(t)
+	dirB := scaffoldAuditNetwork(t)
+	seedAuditLog(t, dirA, []audit.Event{{Network: "net-a", User: "alice", Operation: "POST /op-a", Success: true}})
+	seedAuditLog(t, dirB, []audit.Event{{Network: "net-b", User: "bob", Operation: "POST /op-b", Success: true}})
+
+	s := NewServer(Config{Audit: true})
+	if err := s.RegisterNetwork("net-a", dirA); err != nil {
 		t.Fatalf("RegisterNetwork net-a: %v", err)
 	}
-	if err := s.RegisterNetwork("net-b", scaffoldAuditNetwork(t)); err != nil {
+	if err := s.RegisterNetwork("net-b", dirB); err != nil {
 		t.Fatalf("RegisterNetwork net-b: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
@@ -215,6 +224,43 @@ func TestAuditEvents_PerNetworkScope(t *testing.T) {
 	}
 }
 
+// TestCreateNetwork_NoHashedAuditEntry pins that network creation — a
+// server-registry lifecycle act, not a network-scoped mutation — leaves no
+// entry in the per-network hashed chain. POST /networks carries no {netID},
+// so the mutation middleware resolves no logger and emits nothing; the new
+// network's audit endpoint therefore returns zero events. ("Who created it"
+// is answerable via the operational log, not the chain.)
+func TestCreateNetwork_NoHashedAuditEntry(t *testing.T) {
+	base := t.TempDir()
+	s := NewServer(Config{Audit: true, NetworksBase: base})
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	create := httptest.NewRequest(http.MethodPost, "/newtron/v1/networks", strings.NewReader(`{"id":"foo"}`))
+	cw := httptest.NewRecorder()
+	s.Handler().ServeHTTP(cw, create)
+	if cw.Code != http.StatusCreated {
+		t.Fatalf("create: got %d, want 201; body: %s", cw.Code, cw.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/newtron/v1/networks/foo/audit/events", nil)
+	gw := httptest.NewRecorder()
+	s.Handler().ServeHTTP(gw, get)
+	if gw.Code != http.StatusOK {
+		t.Fatalf("audit events: got %d, want 200; body: %s", gw.Code, gw.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Total int `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(gw.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, gw.Body.String())
+	}
+	if env.Data.Total != 0 {
+		t.Errorf("create-network produced %d hashed audit event(s); want 0", env.Data.Total)
+	}
+}
+
 // TestAuditEvents_ExposesVerificationSource pins that the public wire shape
 // carries verification_source so a reviewer can tell a verified identity from a
 // self-attested one — and, crucially, an anonymous (permissive-mode) request
@@ -224,8 +270,7 @@ func TestAuditEvents_ExposesVerificationSource(t *testing.T) {
 		{User: "alice", Operation: "op1", Success: true, VerificationSource: audit.VerificationPAM},
 		{User: "", Operation: "op2", Success: true, VerificationSource: audit.VerificationAnonymous},
 	})
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/events?order=asc")
+	w := auditServeGet(t, logPath, true, "/newtron/v1/networks/default/audit/events?order=asc")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -260,11 +305,10 @@ func TestAuditEvent_Detail(t *testing.T) {
 		RequestBody: json.RawMessage(`{"vlan_id":100}`),
 		Changes:     []node.Change{{Table: "VLAN", Key: "Vlan100", Type: sonic.ChangeTypeAdd}},
 	}})
-	dir := scaffoldAuditNetwork(t)
 	base := "/newtron/v1/networks/default/audit/events"
 
 	// List: must NOT carry the request body (lean), but should carry changes.
-	listW := auditServeGet(t, dir, logPath, base)
+	listW := auditServeGet(t, logPath, true, base)
 	var list struct {
 		Data struct {
 			Events []map[string]any `json:"events"`
@@ -285,7 +329,7 @@ func TestAuditEvent_Detail(t *testing.T) {
 	}
 
 	// Detail: must carry the request body and changes.
-	detailW := auditServeGet(t, dir, logPath, base+"/"+id)
+	detailW := auditServeGet(t, logPath, true, base+"/"+id)
 	if detailW.Code != http.StatusOK {
 		t.Fatalf("detail status: got %d, want 200; body: %s", detailW.Code, detailW.Body.String())
 	}
@@ -306,7 +350,7 @@ func TestAuditEvent_Detail(t *testing.T) {
 	}
 
 	// Unknown id: 404.
-	missingW := auditServeGet(t, dir, logPath, base+"/deadbeefnonexistent")
+	missingW := auditServeGet(t, logPath, true, base+"/deadbeefnonexistent")
 	if missingW.Code != http.StatusNotFound {
 		t.Errorf("unknown id status: got %d, want 404; body: %s", missingW.Code, missingW.Body.String())
 	}
@@ -321,11 +365,10 @@ func TestAuditEvents_Order(t *testing.T) {
 		{User: "alice", Operation: "op2", Success: true},
 		{User: "alice", Operation: "op3", Success: true},
 	})
-	dir := scaffoldAuditNetwork(t)
 	base := "/newtron/v1/networks/default/audit/events"
 
 	firstOp := func(path string) string {
-		w := auditServeGet(t, dir, logPath, path)
+		w := auditServeGet(t, logPath, true, path)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s: status %d; body: %s", path, w.Code, w.Body.String())
 		}
@@ -353,7 +396,7 @@ func TestAuditEvents_Order(t *testing.T) {
 	if op := firstOp(base + "?order=desc"); op != "op3" {
 		t.Errorf("order=desc: first event = %q, want op3 (newest first)", op)
 	}
-	if w := auditServeGet(t, dir, logPath, base+"?order=sideways"); w.Code != http.StatusBadRequest {
+	if w := auditServeGet(t, logPath, true, base+"?order=sideways"); w.Code != http.StatusBadRequest {
 		t.Errorf("order=sideways: status = %d, want 400", w.Code)
 	}
 }
@@ -368,8 +411,7 @@ func TestAuditEvents_FilterByUser(t *testing.T) {
 		{User: "bob", Operation: "op2", Success: true},
 		{User: "alice", Operation: "op3", Success: true},
 	})
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/events?user=alice")
+	w := auditServeGet(t, logPath, true, "/newtron/v1/networks/default/audit/events?user=alice")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -399,8 +441,7 @@ func TestAuditEvents_Paging(t *testing.T) {
 		events[i] = audit.Event{User: "alice", Operation: "op", Success: true}
 	}
 	logPath := writeAuditLog(t, events)
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/events?limit=2")
+	w := auditServeGet(t, logPath, true, "/newtron/v1/networks/default/audit/events?limit=2")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -429,8 +470,7 @@ func TestAuditEvents_Paging(t *testing.T) {
 // timestamp") is part of the contract.
 func TestAuditEvents_BadFilterParse(t *testing.T) {
 	logPath := writeAuditLog(t, []audit.Event{{User: "alice"}})
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/events?since=not-a-date")
+	w := auditServeGet(t, logPath, true, "/newtron/v1/networks/default/audit/events?since=not-a-date")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d, want 400; body: %s", w.Code, w.Body.String())
 	}
@@ -448,8 +488,7 @@ func TestAuditIntegrity_CleanChain(t *testing.T) {
 		{User: "alice", Operation: "op2", Success: true},
 		{User: "alice", Operation: "op3", Success: true},
 	})
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/integrity")
+	w := auditServeGet(t, logPath, true, "/newtron/v1/networks/default/audit/integrity")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -488,12 +527,14 @@ func TestAuditIntegrity_CleanChain(t *testing.T) {
 // populate. This is the operational tripwire test — if the hash
 // chain ever stops detecting tampering, this test fails loud.
 func TestAuditIntegrity_TamperedChain(t *testing.T) {
-	logPath := writeAuditLog(t, []audit.Event{
+	dir := writeAuditLog(t, []audit.Event{
 		{User: "alice", Operation: "op1", Success: true},
 		{User: "alice", Operation: "op2", Success: true},
 	})
-	// Read, tamper with line 2, write back.
-	data, err := os.ReadFile(logPath)
+	// Read, tamper with line 2, write back — the audit log lives at
+	// audit.Path(dir) inside the network folder.
+	logFile := audit.Path(dir)
+	data, err := os.ReadFile(logFile)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -501,12 +542,11 @@ func TestAuditIntegrity_TamperedChain(t *testing.T) {
 	if tampered == string(data) {
 		t.Fatal("test fixture broken: no substring to tamper")
 	}
-	if err := os.WriteFile(logPath, []byte(tampered), 0o600); err != nil {
+	if err := os.WriteFile(logFile, []byte(tampered), 0o600); err != nil {
 		t.Fatalf("write tampered: %v", err)
 	}
 
-	dir := scaffoldAuditNetwork(t)
-	w := auditServeGet(t, dir, logPath, "/newtron/v1/networks/default/audit/integrity")
+	w := auditServeGet(t, dir, true, "/newtron/v1/networks/default/audit/integrity")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -545,11 +585,11 @@ func TestAuditEvents_EngageWhenConfigured_GateDenies(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(netJSON), 0o644); err != nil {
 		t.Fatalf("write network.json: %v", err)
 	}
-	logPath := writeAuditLog(t, []audit.Event{{User: "alice", Operation: "op", Success: true}})
+	seedAuditLog(t, dir, []audit.Event{{User: "alice", Operation: "op", Success: true}})
 
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
-		AuditLogPath:         logPath,
+		Audit:                true,
 		EnforceAuthorization: true,
 	})
 	if err := s.RegisterNetwork("default", dir); err != nil {
@@ -585,10 +625,10 @@ func TestAuditEvents_EngageWhenConfigured_GateDenies(t *testing.T) {
 // `bin/newtron audit list` enjoys against a no-flag-set server.
 func TestAuditEvents_EngageWhenConfigured_Fallback(t *testing.T) {
 	dir := scaffoldAuditNetwork(t)
-	logPath := writeAuditLog(t, []audit.Event{{User: "alice", Operation: "op", Success: true}})
+	seedAuditLog(t, dir, []audit.Event{{User: "alice", Operation: "op", Success: true}})
 	s := NewServer(Config{
 		AuditCallerHeader:    "X-Newtron-Caller",
-		AuditLogPath:         logPath,
+		Audit:                true,
 		EnforceAuthorization: true,
 	})
 	if err := s.RegisterNetwork("default", dir); err != nil {

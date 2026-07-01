@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -40,25 +41,21 @@ func (c *captureLogger) Query(_ audit.Filter) ([]*audit.Event, error) {
 
 func (c *captureLogger) Close() error { return nil }
 
-// withCaptureLogger installs a fresh captureLogger as the default
-// audit logger for the duration of the test, restoring whatever was
-// there before on cleanup. Returns the capture so tests can inspect
-// the recorded events.
-func withCaptureLogger(t *testing.T) *captureLogger {
-	t.Helper()
-	cap := &captureLogger{}
-	audit.SetDefaultLogger(cap)
-	t.Cleanup(func() { audit.SetDefaultLogger(nil) })
-	return cap
+// constResolver returns an auditLoggerResolver that yields l for every
+// netID — the injection seam middleware tests use to hand the middleware a
+// capture logger without standing up a Server. constResolver(nil) models
+// the audit-disabled state.
+func constResolver(l audit.Logger) auditLoggerResolver {
+	return func(string) audit.Logger { return l }
 }
 
 // TestAuditMiddleware_EmitsOnMutationRequests covers the L1 happy
 // path: a POST handler returns 200; the audit middleware emits one
 // Event with Method+URL as Operation and Success=true.
 func TestAuditMiddleware_EmitsOnMutationRequests(t *testing.T) {
-	cap := withCaptureLogger(t)
+	cap := &captureLogger{}
 
-	handler := auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := auditMiddleware(constResolver(cap), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -88,20 +85,14 @@ func TestAuditMiddleware_EmitsOnMutationRequests(t *testing.T) {
 }
 
 // TestAuditMiddleware_StampsNetworkFromPath pins that the middleware stamps
-// Event.Network from the request path's {netID}. Routed through a real
-// ServeMux carrying the {netID}/{node} pattern (not a bare handler) so
-// r.PathValue is populated — which also confirms the production wiring:
-// auditMiddleware is outer to the mux, and its post-call emit still sees the
-// path values the mux set on the shared request. The Device assertion is the
-// canary: if PathValue weren't populated, Network AND Device would both be
-// empty, exposing a test artifact rather than a real emit.
+// Event.Network (and Device) from the request URL path. Parsed from
+// r.URL.Path, not r.PathValue — see TestAuditMiddleware_StampsThroughRequestRewrap
+// for why.
 func TestAuditMiddleware_StampsNetworkFromPath(t *testing.T) {
-	cap := withCaptureLogger(t)
+	cap := &captureLogger{}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/create-vlan",
-		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := auditMiddleware(mux)
+	handler := auditMiddleware(constResolver(cap), http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	req := httptest.NewRequest(http.MethodPost,
 		"/newtron/v1/networks/prod-east/nodes/switch1/create-vlan", nil)
@@ -111,20 +102,60 @@ func TestAuditMiddleware_StampsNetworkFromPath(t *testing.T) {
 		t.Fatalf("got %d events; want 1", len(cap.events))
 	}
 	if got := cap.events[0].Network; got != "prod-east" {
-		t.Errorf("Network = %q, want prod-east (stamped from {netID})", got)
+		t.Errorf("Network = %q, want prod-east (from URL path)", got)
 	}
 	if got := cap.events[0].Device; got != "switch1" {
-		t.Errorf("Device = %q, want switch1 (canary: PathValue populated in middleware)", got)
+		t.Errorf("Device = %q, want switch1 (from URL path)", got)
 	}
 }
+
+// TestAuditMiddleware_StampsThroughRequestRewrap is the regression guard for
+// the bug per-network storage surfaced: httputil.Timeout (and any middleware
+// between auditMiddleware and the mux) calls r.WithContext, handing the mux a
+// DIFFERENT *http.Request than auditMiddleware holds. The mux sets PathValue
+// on that copy, so the outer middleware's r.PathValue is empty — meaning no
+// {netID} resolved, no logger, no audit. Parsing r.URL.Path (stable across
+// re-wraps) fixes it. Here a rewrap middleware sits between audit and the mux;
+// Network/Device must still be stamped.
+func TestAuditMiddleware_StampsThroughRequestRewrap(t *testing.T) {
+	cap := &captureLogger{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/create-vlan",
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// Re-wrap the request with a fresh context, exactly as httputil.Timeout
+	// does in the production chain.
+	rewrap := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), rewrapKey{}, true)))
+		})
+	}
+	handler := auditMiddleware(constResolver(cap), rewrap(mux))
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/newtron/v1/networks/prod-east/nodes/switch1/create-vlan", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(cap.events) != 1 {
+		t.Fatalf("got %d events; want 1 (a re-wrap must not swallow the audit event)", len(cap.events))
+	}
+	if got := cap.events[0].Network; got != "prod-east" {
+		t.Errorf("Network = %q, want prod-east (must survive request re-wrap)", got)
+	}
+	if got := cap.events[0].Device; got != "switch1" {
+		t.Errorf("Device = %q, want switch1 (must survive request re-wrap)", got)
+	}
+}
+
+type rewrapKey struct{}
 
 // TestAuditMiddleware_SkipsReads pins that GET requests do not
 // produce audit events — L1 scope is mutation forensics, not
 // query telemetry.
 func TestAuditMiddleware_SkipsReads(t *testing.T) {
-	cap := withCaptureLogger(t)
+	cap := &captureLogger{}
 
-	handler := auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := auditMiddleware(constResolver(cap), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
@@ -141,9 +172,9 @@ func TestAuditMiddleware_SkipsReads(t *testing.T) {
 // response is recorded with Success=false and an Error field
 // populated, so a reviewer can find failed mutations.
 func TestAuditMiddleware_FailureSetsSuccessFalse(t *testing.T) {
-	cap := withCaptureLogger(t)
+	cap := &captureLogger{}
 
-	handler := auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := auditMiddleware(constResolver(cap), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	req := httptest.NewRequest(http.MethodDelete, "/newtron/v1/networks/default/nodes/switch1/vlans/100", nil)
@@ -162,16 +193,12 @@ func TestAuditMiddleware_FailureSetsSuccessFalse(t *testing.T) {
 }
 
 // TestAuditMiddleware_NoLoggerIsNoOp pins the L1 disabled state:
-// when no default audit logger is configured, the middleware is a
-// silent passthrough — handlers run, no events are queued, no
-// panics, no errors.
+// when the resolver yields no logger (audit off, or the network has
+// none), the middleware is a silent passthrough — handlers run, no
+// events are queued, no panics, no errors.
 func TestAuditMiddleware_NoLoggerIsNoOp(t *testing.T) {
-	// Explicitly clear the default logger for this test only.
-	audit.SetDefaultLogger(nil)
-	t.Cleanup(func() { audit.SetDefaultLogger(nil) })
-
 	handlerCalled := false
-	handler := auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := auditMiddleware(constResolver(nil), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		handlerCalled = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -188,10 +215,10 @@ func TestAuditMiddleware_NoLoggerIsNoOp(t *testing.T) {
 // (b) the change-set the operation returned — and the handler must still see
 // the full, untruncated body despite the middleware reading it first.
 func TestAuditMiddleware_CapturesBodyAndChanges(t *testing.T) {
-	cap := withCaptureLogger(t)
+	cap := &captureLogger{}
 
 	var handlerSawBody string
-	handler := auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := auditMiddleware(constResolver(cap), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		handlerSawBody = string(b)
 		// Respond with a faithful device-write envelope so the middleware
@@ -255,9 +282,9 @@ func TestAuditMiddleware_CapturesBodyAndChanges(t *testing.T) {
 // callerMiddleware). Together with the caller-middleware tests this
 // asserts the full L1 identity pipeline.
 func TestAuditMiddleware_PropagatesCallerFromContext(t *testing.T) {
-	cap := withCaptureLogger(t)
+	cap := &captureLogger{}
 
-	chain := callerMiddleware("X-Newtron-Caller")(auditMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	chain := callerMiddleware("X-Newtron-Caller")(auditMiddleware(constResolver(cap), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 

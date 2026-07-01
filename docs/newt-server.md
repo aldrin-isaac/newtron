@@ -97,8 +97,8 @@ scenario overrides this default for every call that scenario makes.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--audit-log` | `""` | File path for the mutation audit log. Empty disables audit emission. |
-| `--audit-log-integrity` | `false` | Hash-chain each audit entry so tampering is detectable via `bin/newtron audit verify`. Requires `--audit-log`. |
+| `--audit` | `false` | Enable per-network mutation audit logging. Each network's mutations are recorded in its own folder (`<networks-base>/<network>/audit/audit.log`) — no path to configure. Empty disables audit emission. |
+| `--audit-integrity` | `false` | Hash-chain each per-network audit log (one chain per network) so tampering is detectable via `bin/newtron audit verify`. Requires `--audit`. |
 | `--secret-store` | `""` | File path for the operator-managed secret store. When set, `${secret:KEY}` references in spec values resolve at network load. Empty disables — references become hard errors at load. |
 
 ### TLS (auth-design.md §L2a)

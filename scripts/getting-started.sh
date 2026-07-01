@@ -93,7 +93,7 @@ header() {
 run_cmd() {
     echo -e "  ${GRAY}\$${RESET} ${CYAN}$*${RESET}"
     echo ""
-    "$@" 2> >(grep -v "Could not initialize audit" >&2)
+    "$@"
 }
 
 # run_ssh executes a command on switch1 via SSH and displays it
