@@ -149,6 +149,37 @@ func TestAuditMiddleware_StampsThroughRequestRewrap(t *testing.T) {
 
 type rewrapKey struct{}
 
+// TestAuditPathValues pins netID/node/interface extraction. The
+// load-bearing case: netID comes from its FIXED position, so a network
+// validly named "networks" or "nodes" routes to its OWN logger — a keyword
+// scan would misroute it (netID is the logger key).
+func TestAuditPathValues(t *testing.T) {
+	cases := []struct {
+		path                   string
+		wantNet, wantNode, wantIf string
+	}{
+		{"/newtron/v1/networks/prod/nodes/switch1/interfaces/Ethernet0/set-property", "prod", "switch1", "Ethernet0"},
+		{"/newtron/v1/networks/prod/nodes/switch1/create-vlan", "prod", "switch1", ""},
+		{"/newtron/v1/networks/prod/create-service", "prod", "", ""},
+		// Network named "networks" — netID must be "networks", not misrouted.
+		{"/newtron/v1/networks/networks/nodes/sw/create-vlan", "networks", "sw", ""},
+		// Network named "nodes".
+		{"/newtron/v1/networks/nodes/nodes/sw/create-vlan", "nodes", "sw", ""},
+		// No {netID} (network creation) → all empty.
+		{"/newtron/v1/networks", "", "", ""},
+		{"/newtron/v1/networks/", "", "", ""},
+		// Foreign path → all empty.
+		{"/some/other/path", "", "", ""},
+	}
+	for _, tc := range cases {
+		net, node, iface := auditPathValues(tc.path)
+		if net != tc.wantNet || node != tc.wantNode || iface != tc.wantIf {
+			t.Errorf("auditPathValues(%q) = (%q,%q,%q), want (%q,%q,%q)",
+				tc.path, net, node, iface, tc.wantNet, tc.wantNode, tc.wantIf)
+		}
+	}
+}
+
 // TestAuditMiddleware_SkipsReads pins that GET requests do not
 // produce audit events — L1 scope is mutation forensics, not
 // query telemetry.

@@ -11,18 +11,31 @@ import (
 )
 
 // auditPathValues extracts the {netID}, {node}, and {interface} segments
-// from a newtron API request path (e.g.
-// /newtron/v1/networks/<net>/nodes/<node>/interfaces/<iface>/...). Keyed by
-// the preceding literal segment, so it is position-independent; an absent
-// dimension is "". The audit middleware uses this rather than r.PathValue
-// because it runs outside a request-re-wrapping middleware (see
-// emitMutationEvent) where PathValue is unavailable.
+// from a newtron API request path
+// (/newtron/v1/networks/<net>[/nodes/<node>[/interfaces/<iface>]]/...). The
+// audit middleware uses this rather than r.PathValue because it runs outside a
+// request-re-wrapping middleware (see emitMutationEvent) where PathValue is
+// unavailable.
+//
+// netID is taken from its FIXED position (the segment after the
+// `/newtron/v1/networks/` prefix), not by scanning for the literal
+// "networks" — a network is validly named "networks" or "nodes"
+// (idPattern), and a keyword scan would misroute its audit to another
+// network's logger. node/interface follow their keyword positionally after
+// netID; an absent dimension is "".
 func auditPathValues(path string) (netID, node, iface string) {
 	seg := strings.Split(strings.Trim(path, "/"), "/")
-	for i := 0; i+1 < len(seg); i++ {
+	// Anchor on the fixed prefix: newtron / v1 / networks / {netID}.
+	if len(seg) < 4 || seg[0] != "newtron" || seg[2] != "networks" {
+		return "", "", ""
+	}
+	netID = seg[3]
+	// After {netID}: optional nodes/{node}[/interfaces/{iface}]. Scan the
+	// remainder by keyword — node/interface names colliding with these
+	// literals is astronomically less consequential than a netID collision
+	// (they are informational fields, not the logger key).
+	for i := 4; i+1 < len(seg); i++ {
 		switch seg[i] {
-		case "networks":
-			netID = seg[i+1]
 		case "nodes":
 			node = seg[i+1]
 		case "interfaces":
