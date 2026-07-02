@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -704,6 +705,62 @@ func deriveHostIP(switchIP, mask string, hostIndex int) string {
 	}
 
 	return fmt.Sprintf("%s.%s.%s.%d%s", parts[0], parts[1], parts[2], hostOctet, mask)
+}
+
+// ResyncBridges re-establishes link telemetry for an already-running lab
+// without touching its VMs or its data plane. It ensures the lab has a
+// TelemetryToken (minting one if a pre-token deploy left it empty), injects that
+// token into the local worker's on-disk bridge.json, and sends the running
+// newtlink a SIGHUP so it hot-reloads the credential. newtlink is NOT restarted:
+// it relays the QEMU socket connections between VMs, and those netdevs don't
+// reconnect — restarting it would drop the data plane. SIGHUP keeps the bridge
+// workers (and their connections) alive and only rotates the push token. This
+// is the "resync to a running lab, including newtlink" operation, distinct from
+// a destroy+redeploy.
+//
+// A lab with no bridge workers (no links) is a no-op. Remote (multi-host)
+// workers are not resynced in place yet — their bridge.json and newtlink live
+// on another host — so ResyncBridges refuses, naming the host, and the operator
+// redeploys instead. Returns the updated state.
+func ResyncBridges(name string) (*LabState, error) {
+	state, err := LoadState(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(state.Bridges) == 0 {
+		return state, nil // no links / no bridge workers — nothing to resync
+	}
+	for host, bs := range state.Bridges {
+		if host != "" || bs.HostIP != "" {
+			return nil, fmt.Errorf("newtlab: lab %q has a remote bridge worker on %q; in-place resync of remote workers is not supported — redeploy the lab", name, host)
+		}
+	}
+	if state.TelemetryToken == "" {
+		tok, err := NewTelemetryToken()
+		if err != nil {
+			return nil, err
+		}
+		state.TelemetryToken = tok
+	}
+
+	// Inject the token into the on-disk bridge.json, then SIGHUP the running
+	// newtlink to hot-reload it. The bridge workers — and the VM connections
+	// they relay — keep running.
+	stateDir := LabDir(name)
+	if err := injectBridgeToken(filepath.Join(stateDir, "bridge.json"), state.TelemetryToken); err != nil {
+		return nil, err
+	}
+	bs := state.Bridges[""]
+	if bs == nil || bs.PID == 0 {
+		return nil, fmt.Errorf("newtlab: lab %q has no local bridge worker to signal", name)
+	}
+	if err := syscall.Kill(bs.PID, syscall.SIGHUP); err != nil {
+		return nil, fmt.Errorf("newtlab: signal newtlink (pid %d) to reload token: %w", bs.PID, err)
+	}
+	if err := SaveState(state); err != nil {
+		return nil, err
+	}
+	return state, nil
 }
 
 // setupBridges starts bridge worker processes for inter-VM networking.

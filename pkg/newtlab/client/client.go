@@ -181,6 +181,18 @@ func (c *Client) Destroy(ctx context.Context, lab string) error {
 	return c.doPost(ctx, path, nil, nil)
 }
 
+// Resync re-establishes link telemetry for a running lab: the server ensures a
+// per-lab telemetry token, injects it into the worker's bridge.json, and
+// restarts newtlink so it pushes authenticated — without touching the VMs.
+// Calls POST /newtlab/v1/labs/{lab}/resync.
+func (c *Client) Resync(ctx context.Context, lab string) error {
+	if lab == "" {
+		return fmt.Errorf("newtlab: lab is required")
+	}
+	path := "/newtlab/v1/labs/" + url.PathEscape(lab) + "/resync"
+	return c.doPost(ctx, path, nil, nil)
+}
+
 // doPost issues a POST with a JSON body against newtlab-server. body
 // may be nil for empty-body POSTs (destroy). result may be nil when
 // the caller doesn't need the response payload.

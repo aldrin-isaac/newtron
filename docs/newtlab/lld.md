@@ -657,6 +657,7 @@ Process lifecycle:
 - **Local:** `WriteBridgeConfig()` serializes config → `startBridgeProcess()` spawns `newtlink <configPath>` (detached process group).
 - **Remote:** `buildBridgeConfig()` → upload config JSON + `newtlink` binary via SSH → `startBridgeProcessRemote()` starts via `nohup`.
 - `RunBridgeFromFile()` is the newtlink entry point: reads config, starts workers, writes PID file, fires an initial `BridgeStats` push, then loops pushing every 5s until SIGTERM/SIGINT — and fires one final push on shutdown so the operator's last status view shows the terminal counters.
+- **SIGHUP hot-reloads the telemetry token** without restarting the bridge workers. `newtlab resync <lab>` (`ResyncBridges`) injects a fresh token into `bridge.json` and SIGHUPs newtlink; newtlink re-reads just the token (`reloadBridgeToken`) and keeps its worker sockets — and thus the VM link connections it relays — alive. This is how a running lab re-authenticates after a server restart/upgrade **without** a redeploy: restarting newtlink would drop the QEMU socket connections (the netdevs have no `reconnect=`), so SIGHUP is mandatory, not a convenience.
 
 ### 5.6 BridgeWorker Runtime and Stats
 

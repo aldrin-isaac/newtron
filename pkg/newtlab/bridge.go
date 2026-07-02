@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -90,6 +91,46 @@ func WriteBridgeConfig(stateDir string, links []*LinkConfig, push BridgePushPara
 		return fmt.Errorf("newtlab: marshal bridge config: %w", err)
 	}
 	return os.WriteFile(filepath.Join(stateDir, "bridge.json"), data, 0644)
+}
+
+// injectBridgeToken reads bridge.json at path, sets its Token, and writes it
+// back in the same indented form WriteBridgeConfig uses. Resync uses it to give
+// a running worker's newtlink a credential without rebuilding the link config
+// (the config is already on disk from deploy).
+func injectBridgeToken(path, token string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("newtlab: read bridge config %s: %w", path, err)
+	}
+	var cfg BridgeConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("newtlab: parse bridge config %s: %w", path, err)
+	}
+	cfg.Token = token
+	out, err := json.MarshalIndent(cfg, "", "    ")
+	if err != nil {
+		return fmt.Errorf("newtlab: marshal bridge config: %w", err)
+	}
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		return fmt.Errorf("newtlab: write bridge config %s: %w", path, err)
+	}
+	return nil
+}
+
+// reloadBridgeToken re-reads just the Token from a bridge.json file. Used by
+// newtlink's SIGHUP handler so a resync can rotate the telemetry credential
+// without restarting the bridge workers (and thus without dropping the VM link
+// connections newtlink relays).
+func reloadBridgeToken(configPath string) (string, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", err
+	}
+	var cfg BridgeConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", err
+	}
+	return cfg.Token, nil
 }
 
 // buildBridgeConfig creates a BridgeConfig from links and push parameters.
@@ -183,8 +224,16 @@ func RunBridgeFromFile(configPath string) error {
 	pushCtx, cancelPush := context.WithCancel(context.Background())
 	defer cancelPush()
 
+	// The push token can be hot-reloaded on SIGHUP (resync injects a fresh token
+	// into bridge.json and signals us) WITHOUT restarting the bridge workers —
+	// so the VM link connections newtlink relays stay up. Guard it: the push
+	// loop reads it concurrently with the SIGHUP handler that rewrites it.
+	var tokMu sync.Mutex
+	curToken := cfg.Token
+	pushToken := func() string { tokMu.Lock(); defer tokMu.Unlock(); return curToken }
+
 	push := func(ctx context.Context) {
-		if err := pushBridgeStats(ctx, pushHTTPClient, pushURL, cfg.Token, bridge.Stats()); err != nil {
+		if err := pushBridgeStats(ctx, pushHTTPClient, pushURL, pushToken(), bridge.Stats()); err != nil {
 			fmt.Fprintf(os.Stderr, "newtlink: push stats to %s: %v\n", pushURL, err)
 		}
 	}
@@ -208,9 +257,28 @@ func RunBridgeFromFile(configPath string) error {
 		}
 	}()
 
+	// SIGHUP hot-reloads the telemetry token (resync path); SIGTERM/SIGINT shut
+	// down. On SIGHUP we re-read just the token from bridge.json and keep the
+	// bridge workers running, so the VM connections newtlink relays are never
+	// dropped — the whole point of resync-without-redeploy.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	<-sigCh
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	for {
+		sig := <-sigCh
+		if sig != syscall.SIGHUP {
+			break // SIGTERM / SIGINT → shut down
+		}
+		tok, err := reloadBridgeToken(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "newtlink: SIGHUP token reload: %v\n", err)
+			continue
+		}
+		tokMu.Lock()
+		curToken = tok
+		tokMu.Unlock()
+		fmt.Fprintln(os.Stderr, "newtlink: reloaded telemetry token on SIGHUP")
+		push(pushCtx) // push immediately so authenticated stats land without waiting a tick
+	}
 
 	cancelPush()
 	<-pushDone
