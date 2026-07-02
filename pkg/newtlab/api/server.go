@@ -61,6 +61,11 @@ type Server struct {
 	broker     *httputil.Broker[Event]
 	registry   *DeployRegistry
 	statsStore *BridgeStatsStore
+	// tokenFor returns the per-lab telemetry token used to authenticate a
+	// newtlink BridgeStats push (handlePushBridgeStats). Defaults to the
+	// on-disk LabState.TelemetryToken; injectable so handler tests don't
+	// touch ~/.newtlab.
+	tokenFor func(lab string) (string, error)
 }
 
 // NewServer constructs a server with the given config. The HTTP
@@ -78,6 +83,7 @@ func NewServer(cfg Config) *Server {
 		broker:     httputil.NewBroker[Event](),
 		registry:   NewDeployRegistry(),
 		statsStore: NewBridgeStatsStore(),
+		tokenFor:   defaultTelemetryTokenLookup,
 	}
 	s.Server = httputil.NewServer(s.buildHandler(), cfg.Logger,
 		httputil.ServerLabel("newtlab-server"),

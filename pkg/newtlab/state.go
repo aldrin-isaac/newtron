@@ -1,12 +1,27 @@
 package newtlab
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
+
+// NewTelemetryToken mints a 256-bit random token for LabState.TelemetryToken —
+// the per-lab credential newtlink presents when pushing BridgeStats. Drawn from
+// crypto/rand; a rand failure surfaces rather than falling back to a weaker
+// source (mirrors sessionkey.Mint). Called once per deploy; the value is
+// persisted in state.json so it survives a server restart.
+func NewTelemetryToken() (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("newtlab: mint telemetry token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf[:]), nil
+}
 
 // LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
@@ -17,6 +32,13 @@ type LabState struct {
 	Nodes      map[string]*NodeState   `json:"nodes"`
 	Links      []*LinkState            `json:"links"`
 	Bridges    map[string]*BridgeState `json:"bridges,omitempty"` // host ("" = local) → bridge info
+	// TelemetryToken is the per-lab credential newtlink presents (as a Bearer)
+	// when pushing BridgeStats to newtlab-server. Minted at deploy and persisted
+	// here so it survives a server restart: on rehydration the newtlab engine
+	// re-reads it and keeps accepting the running newtlink's pushes without a
+	// redeploy. It authorizes only this lab's stats push (least privilege), not
+	// any user-facing operation. See handlePushBridgeStats.
+	TelemetryToken string `json:"telemetry_token,omitempty"`
 }
 
 // NodeState tracks per-node runtime state.

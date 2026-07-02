@@ -110,6 +110,7 @@ func TestBridgeStatsStoreOverwriteSameHost(t *testing.T) {
 // the CLI consumes.
 func TestPushBridgeStatsRoundTrip(t *testing.T) {
 	s := newTestServer(t)
+	s.tokenFor = func(string) (string, error) { return "tok-a", nil }
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
@@ -121,7 +122,7 @@ func TestPushBridgeStatsRoundTrip(t *testing.T) {
 	body, _ := json.Marshal(payload)
 
 	pushURL := ts.URL + "/newtlab/v1/labs/lab-a/bridges/local/stats"
-	resp, err := ts.Client().Post(pushURL, "application/json", bytes.NewReader(body))
+	resp, err := postWithToken(t, ts, pushURL, "tok-a", body)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -160,11 +161,12 @@ func TestPushBridgeStatsRoundTrip(t *testing.T) {
 
 func TestPushBridgeStatsRejectsBadJSON(t *testing.T) {
 	s := newTestServer(t)
+	s.tokenFor = func(string) (string, error) { return "tok-a", nil }
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 
-	resp, err := ts.Client().Post(ts.URL+"/newtlab/v1/labs/lab-a/bridges/local/stats",
-		"application/json", bytes.NewReader([]byte("{not valid json")))
+	resp, err := postWithToken(t, ts, ts.URL+"/newtlab/v1/labs/lab-a/bridges/local/stats",
+		"tok-a", []byte("{not valid json"))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -172,6 +174,64 @@ func TestPushBridgeStatsRejectsBadJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
+}
+
+// TestPushBridgeStatsRejectsBadToken pins the per-lab telemetry gate: a push
+// with a missing or wrong Bearer is 401, and nothing is stored — so the
+// positive round-trip test above isn't passing vacuously.
+func TestPushBridgeStatsRejectsBadToken(t *testing.T) {
+	s := newTestServer(t)
+	s.tokenFor = func(string) (string, error) { return "tok-a", nil }
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	body, _ := json.Marshal(newtlab.BridgeStats{Links: []newtlab.LinkStats{{A: "x", Z: "y"}}})
+	pushURL := ts.URL + "/newtlab/v1/labs/lab-a/bridges/local/stats"
+
+	for _, tc := range []struct {
+		name, token string
+	}{
+		{"no token", ""},
+		{"wrong token", "nope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := postWithToken(t, ts, pushURL, tc.token, body)
+			if err != nil {
+				t.Fatalf("POST: %v", err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", resp.StatusCode)
+			}
+		})
+	}
+
+	// Nothing landed in the store.
+	getResp, err := ts.Client().Get(ts.URL + "/newtlab/v1/labs/lab-a/bridges/stats")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer getResp.Body.Close()
+	var snaps []BridgeStatsSnapshot
+	decodeEnvelope(t, readAll(t, getResp), &snaps)
+	if len(snaps) != 0 {
+		t.Errorf("got %d snapshots after rejected pushes, want 0", len(snaps))
+	}
+}
+
+// postWithToken issues a POST with an optional Bearer token (empty ⇒ no
+// Authorization header), mirroring newtlink's push.
+func postWithToken(t *testing.T, ts *httptest.Server, url, token string, body []byte) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return ts.Client().Do(req)
 }
 
 func TestGetBridgeStatsEmptyForUnknownLab(t *testing.T) {

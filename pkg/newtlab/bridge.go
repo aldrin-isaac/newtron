@@ -38,6 +38,11 @@ type BridgeConfig struct {
 	OrchestratorURL string `json:"orchestrator_url"`
 	LabName         string `json:"lab_name"`
 	WorkerHost      string `json:"worker_host"` // "" for the local worker
+	// Token is the per-lab telemetry credential (LabState.TelemetryToken).
+	// newtlink presents it as `Authorization: Bearer <token>` on every push so
+	// an --enforce-authorization server accepts it without a user session key.
+	// Empty ⇒ no header sent (server not gating telemetry).
+	Token string `json:"token,omitempty"`
 }
 
 // BridgeLink holds the bind/port config for one link's bridge worker.
@@ -74,6 +79,7 @@ type BridgePushParams struct {
 	OrchestratorURL string
 	LabName         string
 	WorkerHost      string // "" for the local worker
+	Token           string // per-lab telemetry token (LabState.TelemetryToken)
 }
 
 // WriteBridgeConfig serializes link config to bridge.json in the state dir.
@@ -93,6 +99,7 @@ func buildBridgeConfig(links []*LinkConfig, push BridgePushParams) BridgeConfig 
 		OrchestratorURL: push.OrchestratorURL,
 		LabName:         push.LabName,
 		WorkerHost:      push.WorkerHost,
+		Token:           push.Token,
 	}
 	for i, lc := range links {
 		cfg.Links[i] = BridgeLink{
@@ -177,7 +184,7 @@ func RunBridgeFromFile(configPath string) error {
 	defer cancelPush()
 
 	push := func(ctx context.Context) {
-		if err := pushBridgeStats(ctx, pushHTTPClient, pushURL, bridge.Stats()); err != nil {
+		if err := pushBridgeStats(ctx, pushHTTPClient, pushURL, cfg.Token, bridge.Stats()); err != nil {
 			fmt.Fprintf(os.Stderr, "newtlink: push stats to %s: %v\n", pushURL, err)
 		}
 	}
@@ -233,8 +240,11 @@ func pushURLFor(baseURL, labName, workerHost string) string {
 }
 
 // pushBridgeStats POSTs the snapshot to newtlab-server. Reads and
-// discards the body so the underlying connection can be reused.
-func pushBridgeStats(ctx context.Context, c *http.Client, url string, stats BridgeStats) error {
+// discards the body so the underlying connection can be reused. When token
+// is non-empty it is sent as `Authorization: Bearer <token>` — the per-lab
+// telemetry credential an --enforce-authorization server validates against
+// the lab's stored TelemetryToken (handlePushBridgeStats).
+func pushBridgeStats(ctx context.Context, c *http.Client, url, token string, stats BridgeStats) error {
 	body, err := json.Marshal(stats)
 	if err != nil {
 		return fmt.Errorf("marshal stats: %w", err)
@@ -244,6 +254,9 @@ func pushBridgeStats(ctx context.Context, c *http.Client, url string, stats Brid
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := c.Do(req)
 	if err != nil {
 		return err

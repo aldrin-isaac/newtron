@@ -307,9 +307,17 @@ func main() {
 	// then verifies any Basic credentials. Both layers attach the
 	// verified username to the request context; the engines'
 	// callerMiddleware reads it without caring which layer set it.
-	var handler http.Handler = mux
-	handler = httputil.PAMMiddleware(pamAuth)(handler)
-	handler = sessionkey.Middleware(sessionKeys)(handler)
+	var authed http.Handler = mux
+	authed = httputil.PAMMiddleware(pamAuth)(authed)
+	authed = sessionkey.Middleware(sessionKeys)(authed)
+
+	// auth-design.md: newtlink's BridgeStats push authenticates with the
+	// per-lab TelemetryToken, which the newtlab handler validates itself
+	// (handlePushBridgeStats). newtlink holds neither a session key nor PAM
+	// credentials, so route just that one path straight to the engine mux —
+	// bypassing sessionkey/PAM but still hitting the newtlab engine's own
+	// middleware. Every other request goes through the user-facing auth chain.
+	handler := exemptBridgeStatsPush(mux, authed)
 
 	srv := httputil.NewServer(handler, logger,
 		httputil.ServerLabel("newt-server"),
@@ -364,6 +372,34 @@ func parseCommaList(s string) []string {
 		}
 	}
 	return out
+}
+
+// exemptBridgeStatsPush routes newtlink's telemetry push straight to the engine
+// mux, bypassing the user-facing sessionkey/PAM chain; that path authenticates
+// with the per-lab telemetry token inside the newtlab handler. Every other
+// request flows through authed (sessionkey → PAM → mux).
+func exemptBridgeStatsPush(mux, authed http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isBridgeStatsPush(r) {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		authed.ServeHTTP(w, r)
+	})
+}
+
+// isBridgeStatsPush matches exactly POST /newtlab/v1/labs/{lab}/bridges/{host}/stats
+// (7 path segments) — the only endpoint newtlink pushes to. The read view
+// (GET .../bridges/stats) has 6 segments and a different method, so it stays on
+// the authenticated chain.
+func isBridgeStatsPush(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	p := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	return len(p) == 7 &&
+		p[0] == "newtlab" && p[1] == "v1" && p[2] == "labs" &&
+		p[4] == "bridges" && p[6] == "stats"
 }
 
 // newtronModulePath is the go.mod module line that identifies a directory as the

@@ -722,6 +722,16 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 		hostLinks[lc.WorkerHost] = append(hostLinks[lc.WorkerHost], lc)
 	}
 
+	// Mint the per-lab telemetry token once, so every worker's bridge.json
+	// carries the same credential. It lands in l.State and is persisted by the
+	// deploy's SaveState, so a server restart re-reads it and the running
+	// newtlink keeps authenticating without a redeploy.
+	token, err := NewTelemetryToken()
+	if err != nil {
+		return err
+	}
+	l.State.TelemetryToken = token
+
 	l.State.Bridges = make(map[string]*BridgeState)
 
 	for _, host := range sortedHosts(hostLinks) {
@@ -731,6 +741,7 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 			OrchestratorURL: l.OrchestratorURL,
 			LabName:         l.Name,
 			WorkerHost:      host,
+			Token:           token,
 		}
 
 		if host == "" {
