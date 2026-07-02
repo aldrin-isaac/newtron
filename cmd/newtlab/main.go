@@ -214,6 +214,19 @@ func newtlabURL() string {
 	return url
 }
 
+// cliBearer resolves the operator's cached session key for the newtlab-server
+// listener so read paths gated by --enforce-authorization (e.g. GET bridge
+// stats) authenticate. Mirrors the newtron-client Bearer wiring in prepareLab.
+// Returns "" when no session is cached — WithBearer("") is a no-op, preserving
+// the no-auth path.
+func cliBearer() string {
+	rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), newtlabURL())
+	if err != nil || rec == nil {
+		return ""
+	}
+	return rec.Key
+}
+
 // resolveTarget resolves both lab name and network directory from:
 // -S flag > positional network name > auto-detect from deployed labs.
 // This is the shared resolution logic used by resolveLabName and
