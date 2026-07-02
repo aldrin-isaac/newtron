@@ -1,65 +1,222 @@
 {
   "version": "1.0",
   "description": "Grant table the 1node-vs-auth suite exercises against an --enforce-authorization newtron-server. Mixes the legacy [\"group\"] shorthand and the L5 typed [{groups, where}] form across every permission family and every where dimension so each layer of the auth arc is exercised end to end.",
-  "super_users": ["root"],
+  "super_users": [
+    "root"
+  ],
   "user_groups": {
-    "spec-team":    ["alice", "dave"],
-    "ops":          ["bob", "charlie"],
-    "architects":   ["arch-anna"],
-    "iam-team":     ["iam-ian"],
-    "intf-ops":     ["intf-isaac"],
-    "device-team":  ["dev-dora"],
-    "service-team": ["svc-sam"]
+    "architects": [
+      "arch-anna"
+    ],
+    "device-team": [
+      "dev-dora"
+    ],
+    "iam-team": [
+      "iam-ian"
+    ],
+    "intf-ops": [
+      "intf-isaac"
+    ],
+    "ops": [
+      "bob",
+      "charlie"
+    ],
+    "service-team": [
+      "svc-sam"
+    ],
+    "spec-team": [
+      "alice",
+      "dave"
+    ]
   },
   "permissions": {
-    "spec.author": [
-      { "groups": ["spec-team"] },
-      { "groups": ["architects"], "where": { "field": "!permissions,!user_groups,!super_users" } },
-      { "groups": ["iam-team"],   "where": { "field": "permissions,user_groups,super_users" } }
+    "acl.create": [
+      "ops"
     ],
-    "qos.create":     ["spec-team", "ops"],
-    "qos.delete":     ["spec-team"],
-    "qos.modify":     ["spec-team", "ops"],
-    "filter.create":  ["spec-team"],
-    "filter.delete":  ["spec-team"],
-    "vlan.create":    ["ops"],
-    "vlan.modify":    ["ops"],
-    "vlan.delete":    ["ops"],
-    "vrf.create": [
-      { "groups": ["ops"] },
-      { "groups": ["service-team"], "where": { "service": "TRANSIT_*" } }
+    "acl.delete": [
+      "ops"
     ],
-    "vrf.bind":       ["ops"],
-    "vrf.route":      ["ops"],
-    "vrf.delete":     ["ops"],
-    "bgp.peer":       ["ops"],
-    "acl.create":     ["ops"],
     "acl.modify": [
-      { "groups": ["ops"] },
-      { "groups": ["intf-ops"], "where": { "interface": "Ethernet0" } }
+      {
+        "groups": [
+          "ops"
+        ]
+      },
+      {
+        "groups": [
+          "intf-ops"
+        ],
+        "where": {
+          "interface": "Ethernet0"
+        }
+      }
     ],
-    "acl.delete":     ["ops"],
-    "lag.create":     ["ops"],
-    "lag.modify":     ["ops"],
-    "lag.delete":     ["ops"],
-    "evpn.peer":      ["ops"],
-    "evpn.macvpn":    ["ops"],
-    "interface.modify": ["spec-team", "ops"],
-    "auth.read":         ["iam-team"],
-    "audit.read":        ["iam-team"],
-    "service.apply": [
-      { "groups": ["spec-team"],    "where": { "resource": "TRANSIT_*" } },
-      { "groups": ["ops"],          "where": { "resource": "VPN_*" } },
-      { "groups": ["service-team"], "where": { "service":  "TRANSIT_*" } }
+    "audit.read": [
+      "iam-team"
     ],
-    "service.remove": [
-      { "groups": ["spec-team", "ops"] },
-      { "groups": ["service-team"], "where": { "service": "TRANSIT_*" } }
+    "auth.read": [
+      "iam-team"
+    ],
+    "bgp.peer": [
+      "ops"
     ],
     "device.write": [
-      { "groups": ["spec-team", "ops"] },
-      { "groups": ["device-team"],  "where": { "device": "switch1" } },
-      { "groups": ["service-team"], "where": { "device": "switch1" } }
+      {
+        "groups": [
+          "spec-team",
+          "ops"
+        ]
+      },
+      {
+        "groups": [
+          "device-team"
+        ],
+        "where": {
+          "device": "switch1"
+        }
+      },
+      {
+        "groups": [
+          "service-team"
+        ],
+        "where": {
+          "device": "switch1"
+        }
+      }
+    ],
+    "evpn.macvpn": [
+      "ops"
+    ],
+    "evpn.peer": [
+      "ops"
+    ],
+    "filter.create": [
+      "spec-team"
+    ],
+    "filter.delete": [
+      "spec-team"
+    ],
+    "interface.modify": [
+      "spec-team",
+      "ops"
+    ],
+    "lag.create": [
+      "ops"
+    ],
+    "lag.delete": [
+      "ops"
+    ],
+    "lag.modify": [
+      "ops"
+    ],
+    "qos.create": [
+      "spec-team",
+      "ops"
+    ],
+    "qos.delete": [
+      "spec-team"
+    ],
+    "qos.modify": [
+      "spec-team",
+      "ops"
+    ],
+    "service.apply": [
+      {
+        "groups": [
+          "spec-team"
+        ],
+        "where": {
+          "resource": "TRANSIT_*"
+        }
+      },
+      {
+        "groups": [
+          "ops"
+        ],
+        "where": {
+          "resource": "VPN_*"
+        }
+      },
+      {
+        "groups": [
+          "service-team"
+        ],
+        "where": {
+          "service": "TRANSIT_*"
+        }
+      }
+    ],
+    "service.remove": [
+      {
+        "groups": [
+          "spec-team",
+          "ops"
+        ]
+      },
+      {
+        "groups": [
+          "service-team"
+        ],
+        "where": {
+          "service": "TRANSIT_*"
+        }
+      }
+    ],
+    "spec.author": [
+      {
+        "groups": [
+          "spec-team"
+        ]
+      },
+      {
+        "groups": [
+          "architects"
+        ],
+        "where": {
+          "field": "!permissions,!user_groups,!super_users"
+        }
+      },
+      {
+        "groups": [
+          "iam-team"
+        ],
+        "where": {
+          "field": "permissions,user_groups,super_users"
+        }
+      }
+    ],
+    "vlan.create": [
+      "ops"
+    ],
+    "vlan.delete": [
+      "ops"
+    ],
+    "vlan.modify": [
+      "ops"
+    ],
+    "vrf.bind": [
+      "ops"
+    ],
+    "vrf.create": [
+      {
+        "groups": [
+          "ops"
+        ]
+      },
+      {
+        "groups": [
+          "service-team"
+        ],
+        "where": {
+          "service": "TRANSIT_*"
+        }
+      }
+    ],
+    "vrf.delete": [
+      "ops"
+    ],
+    "vrf.route": [
+      "ops"
     ]
   },
   "services": {
