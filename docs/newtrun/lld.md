@@ -931,6 +931,8 @@ Action: `newtron`. Dispatches one HTTP call per device (or one global call for n
 
 Action: `newtron-cli`. Spawns `bin/newtron <device> <command...>` as a subprocess. Passes `--server <runner.ServerURL>` so the subprocess targets the same newtron-server the in-process client uses. Honors `step.Expect` against the subprocess exit code, stdout, and stderr.
 
+**Identity forwarding.** The executor forwards the run's identity to the subprocess exactly as the HTTP actions forward it: it resolves the Bearer via `Runner.scenarioBearer` (a scenario's `as:` user's session key, else the operator's own forwarded Bearer — the single owner of per-scenario identity, shared with `newtronExecutor`) and passes it as **`NEWTRON_BEARER`** in the child's environment (env, not a flag — the credential must never appear in `ps`-visible argv). The `newtron` CLI honors `NEWTRON_BEARER` with precedence over its `~/.newtron/sessions/` cache. So the subprocess authenticates as the run's identity **without reading the session cache**, and the suite doesn't depend on there being exactly one cached session (multi-user/multi-session is honored). An empty Bearer (unenforced run) sets no env var — the prior behavior.
+
 If the command includes `--json` and `step.Expect.JQ` is set, the executor parses stdout as JSON and evaluates the jq expression.
 
 ### 10.3 hostExecExecutor

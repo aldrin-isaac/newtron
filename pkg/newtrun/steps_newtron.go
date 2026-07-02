@@ -198,9 +198,9 @@ func (e *newtronExecutor) doCall(r *Runner, step *Step, method, urlTemplate stri
 	// credential at all when the run was triggered without one
 	// — in charge.
 	if r.scenario != nil && r.scenario.As != "" {
-		key, ok := r.UserSessions[r.scenario.As]
-		if !ok || key == "" {
-			return "", nil, fmt.Errorf("scenario requires identity %q but no session was supplied — run `newtron auth login --user %s` before starting the suite", r.scenario.As, r.scenario.As)
+		key, err := r.scenarioBearer()
+		if err != nil {
+			return "", nil, err
 		}
 		opts = append(opts, client.WithHeader("Authorization", "Bearer "+key))
 	}

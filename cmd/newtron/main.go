@@ -211,8 +211,17 @@ func (app *App) initClient() error {
 	// needed identity. A malformed cache (bad JSON, bad permissions) is a hard
 	// error so the operator knows to chmod or re-login rather than silently
 	// running with a degraded credential surface.
+	// NEWTRON_BEARER (a raw session key) takes precedence over the session-file
+	// cache. It's the channel for a caller that already holds a Bearer and must
+	// not depend on ~/.newtron/sessions/ — notably newtrun's `newtron-cli`
+	// action, which forwards the run's operator / `as:` credential this way (the
+	// same identity it forwards on its HTTP calls). Passed via env, not a flag,
+	// so the key never appears in ps-visible argv. Absent → fall back to the
+	// cached session as before.
 	var bearerKey string
-	if rec, err := client.LoadCLISession(os.Getenv("NEWTRON_USER"), app.serverURL); err != nil {
+	if key := os.Getenv("NEWTRON_BEARER"); key != "" {
+		bearerKey = key
+	} else if rec, err := client.LoadCLISession(os.Getenv("NEWTRON_USER"), app.serverURL); err != nil {
 		return fmt.Errorf("loading cached session: %w", err)
 	} else if rec != nil {
 		bearerKey = rec.Key
