@@ -84,6 +84,7 @@ func init() {
 		newListCmd(),
 		newDeployCmd(),
 		newDestroyCmd(),
+		newResyncCmd(),
 		newStatusCmd(),
 		newSSHCmd(),
 		newConsoleCmd(),

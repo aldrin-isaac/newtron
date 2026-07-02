@@ -173,6 +173,27 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"lab": name, "status": "destroyed"})
 }
 
+// handleResync re-establishes link telemetry for an already-running lab: it
+// ensures a per-lab telemetry token, injects it into the worker's bridge.json,
+// and restarts newtlink so it pushes authenticated — without touching the VMs.
+// This recovers a lab deployed before the token feature (whose newtlink 401s)
+// and is the "resync to a running lab, including newtlink" operation.
+func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		httputil.WriteError(w, http.StatusBadRequest, fmt.Errorf("lab name required"))
+		return
+	}
+	if _, err := newtlab.ResyncBridges(name); err != nil {
+		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("resync %s: %w", name, err))
+		return
+	}
+	// Drop stale snapshots from the previous newtlink so the first read after
+	// resync reflects the restarted worker.
+	s.statsStore.EvictLab(name)
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"lab": name, "status": "resynced"})
+}
+
 // handleProvision runs newtlab's post-deploy provisioning pass on an
 // already-deployed lab. Synchronous; operators that want to deploy +
 // provision atomically should use POST /deploy?provision=true.

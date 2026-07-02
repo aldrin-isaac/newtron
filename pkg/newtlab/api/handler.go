@@ -20,6 +20,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("GET /newtlab/v1/labs/{name}/status", s.handleGetStatus)
 	mux.HandleFunc("POST /newtlab/v1/labs/{name}/deploy", s.handleDeploy)
 	mux.HandleFunc("POST /newtlab/v1/labs/{name}/destroy", s.handleDestroy)
+	mux.HandleFunc("POST /newtlab/v1/labs/{name}/resync", s.handleResync)
 	mux.HandleFunc("POST /newtlab/v1/labs/{name}/provision", s.handleProvision)
 	mux.HandleFunc("GET /newtlab/v1/labs/{name}/events", s.handleEvents)
 

@@ -119,6 +119,7 @@ Returns server status. No authentication, no side effects.
 | `GET` | `/newtlab/v1/labs/{name}/status` | 200 / 404 | Read `LabState` |
 | `POST` | `/newtlab/v1/labs/{name}/deploy` | 202 / 404 / 409 | Start an async deploy |
 | `POST` | `/newtlab/v1/labs/{name}/destroy` | 200 / 404 | Tear down VMs (synchronous) |
+| `POST` | `/newtlab/v1/labs/{name}/resync` | 200 / 404 / 500 | Re-establish link telemetry: SIGHUP newtlink to hot-reload its token (VMs untouched) |
 | `POST` | `/newtlab/v1/labs/{name}/provision` | 200 / 404 | Run the post-deploy provisioning pass |
 | `GET` | `/newtlab/v1/labs/{name}/events` | 200 (SSE) | Subscribe to deploy phase events |
 | `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | 204 / 400 / 401 | newtlink pushes `BridgeStats` here every 5s (Bearer = per-lab telemetry token) |
@@ -202,6 +203,12 @@ All four are also accepted as query parameters (`?provision=true&force=true`) so
 Synchronously tears down the lab: stops every QEMU node, removes overlay disks, stops bridge workers, deletes the state directory. Returns when the operation completes.
 
 **Response:** `{ "data": { "lab": "<name>", "status": "destroyed" } }`
+
+### `POST /newtlab/v1/labs/{name}/resync`
+
+Re-establishes link telemetry for an already-running lab **without touching its VMs or data plane**. Ensures the lab has a telemetry token (minting one if it was deployed before the token feature), injects it into the worker's `bridge.json`, and sends the running newtlink a **SIGHUP** so it hot-reloads the credential. newtlink is *not* restarted — it relays the QEMU socket connections between VMs, and those netdevs don't reconnect, so a restart would drop the data plane. Recovers a lab whose newtlink is pushing with no / a stale credential (symptom: 401s in the lab's `bridge.log`, no link stats in `newtlab status`) after a server restart or upgrade. Remote (multi-host) workers are not resynced in place — the response is 500 naming the host, and the operator redeploys.
+
+**Response:** `{ "data": { "lab": "<name>", "status": "resynced" } }`
 
 ### `POST /newtlab/v1/labs/{name}/provision`
 
