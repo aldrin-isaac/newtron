@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -98,10 +99,25 @@ func (e *newtronCLIExecutor) runCLI(ctx context.Context, r *Runner, step *Step, 
 	}
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	// Forward the run's identity to the exec'd CLI exactly as the HTTP actions
+	// forward it (scenarioBearer: scenario.As's key, else the operator's own),
+	// via NEWTRON_BEARER in the child env — not a flag, so the credential never
+	// lands in ps-visible argv. This makes the exec authenticate as that
+	// identity WITHOUT reading ~/.newtron/sessions, so the suite no longer
+	// depends on exactly one cached session. Empty (unenforced run) → no env,
+	// unchanged behavior.
+	bearer, err := r.scenarioBearer()
+	if err != nil {
+		return "", err
+	}
+	cmd.Env = os.Environ()
+	if bearer != "" {
+		cmd.Env = append(cmd.Env, "NEWTRON_BEARER="+bearer)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	outStr := stdout.String()
 	errStr := stderr.String()
 

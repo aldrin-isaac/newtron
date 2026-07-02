@@ -570,6 +570,22 @@ This is how the 1node-vs-auth suite drives authorization-by-
 identity tests (alice allowed, mallory denied) without dropping
 back to self-attested headers.
 
+The same identity also reaches the runner's **`newtron-cli`
+action**, which runs `bin/newtron` as a subprocess rather than an
+in-process HTTP call. `Runner.scenarioBearer` (the single owner of
+per-scenario identity — `as:` user's key, else the operator's own)
+resolves the Bearer, and the executor passes it to the child as the
+**`NEWTRON_BEARER`** environment variable — env, not a flag, so the
+credential never lands in `ps`-visible argv. The `newtron` CLI reads
+`NEWTRON_BEARER` with precedence over its `~/.newtron/sessions/`
+cache, so the subprocess authenticates as the run's identity without
+consulting the session-file cache at all — the exec path is exactly
+as identity-aware as the HTTP path, and a loopback suite that shells
+out (e.g. `1node-vs-config`) no longer depends on there being exactly
+one cached session. `NEWTRON_BEARER` is a general CLI input: any
+caller that already holds a session key can present it this way
+instead of relying on the cache.
+
 **Storage model.** In-memory `map[key]→{user, expires_at}` protected
 by a mutex, with a background sweeper that drops expired entries. No
 disk persistence: a server restart invalidates all keys. This is

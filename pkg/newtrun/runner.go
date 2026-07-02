@@ -505,6 +505,24 @@ func (r *Runner) deployTopology(ctx context.Context, dir string, opts RunOptions
 // unchanged. Per-scenario `as: <user>` overrides the default for
 // every call the scenario makes via the UserSessions map (see
 // steps_newtron.go).
+// scenarioBearer resolves the Bearer session key the current scenario's calls
+// authenticate with: scenario.As names a cached user whose key the runner
+// forwards (one scenario, one identity); an absent As leaves the operator's own
+// forwarded Bearer. Returns "" when the run carried no credential (an
+// unenforced server needs none). This is the single owner of per-scenario
+// identity resolution — every action routes through it (HTTP in steps_newtron,
+// exec'd CLI in steps_cli) so the two surfaces can't diverge (§27, §13).
+func (r *Runner) scenarioBearer() (string, error) {
+	if r.scenario != nil && r.scenario.As != "" {
+		key, ok := r.UserSessions[r.scenario.As]
+		if !ok || key == "" {
+			return "", fmt.Errorf("scenario requires identity %q but no session was supplied — run `newtron auth login --user %s` before starting the suite", r.scenario.As, r.scenario.As)
+		}
+		return key, nil
+	}
+	return r.OperatorBearer, nil
+}
+
 func (r *Runner) connectToServer() error {
 	opts := []client.Option{
 		client.WithTLS(r.NewtronClientTLS),
