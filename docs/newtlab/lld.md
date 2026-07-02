@@ -625,12 +625,22 @@ Bridge workers run as separate `newtlink` processes. Each process reads a
 `bridge.json` config, opens TCP listeners for all assigned links, and pushes
 telemetry to newtlab-server.
 
+Under an `--enforce-authorization` server the push must authenticate. newtlink
+holds no session key or PAM credential, so newtlab mints a **per-lab telemetry
+token** at deploy (`LabState.TelemetryToken`, persisted in `state.json`), passes
+it in `bridge.json` (`Token`), and newtlink presents it as `Authorization:
+Bearer` on every push. The server exempts only the stats-push path from its
+user-auth chain and validates the token against the lab's stored value; since
+the token is on disk it survives a server restart (no redeploy needed) and
+authorizes only that lab's stats push. See auth-design.md §L2b/L2c.
+
 ```go
 type BridgeConfig struct {
     Links           []BridgeLink `json:"links"`
     OrchestratorURL string       `json:"orchestrator_url"`
     LabName         string       `json:"lab_name"`
     WorkerHost      string       `json:"worker_host"` // "" for the local worker
+    Token           string       `json:"token,omitempty"` // per-lab telemetry Bearer
 }
 
 type BridgeLink struct {

@@ -121,7 +121,7 @@ Returns server status. No authentication, no side effects.
 | `POST` | `/newtlab/v1/labs/{name}/destroy` | 200 / 404 | Tear down VMs (synchronous) |
 | `POST` | `/newtlab/v1/labs/{name}/provision` | 200 / 404 | Run the post-deploy provisioning pass |
 | `GET` | `/newtlab/v1/labs/{name}/events` | 200 (SSE) | Subscribe to deploy phase events |
-| `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | 204 / 400 | newtlink pushes `BridgeStats` here every 5s |
+| `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | 204 / 400 / 401 | newtlink pushes `BridgeStats` here every 5s (Bearer = per-lab telemetry token) |
 | `GET` | `/newtlab/v1/labs/{lab}/bridges/stats` | 200 | Aggregate per-host bridge telemetry |
 
 ### `GET /newtlab/v1/labs` — list deployed labs
@@ -261,7 +261,9 @@ newtlink → newtlab-server. Body is the canonical `newtlab.BridgeStats`:
 
 Empty body host segment is encoded as the literal `local` (URL paths can't carry empty segments). The server stores it as `""` internally to match `BridgeState.Bridges[""]` elsewhere in newtlab.
 
-**Response:** 204 No Content on success; 400 on malformed body or empty lab/host segment.
+**Authentication:** newtlink presents the per-lab telemetry token (`LabState.TelemetryToken`, delivered via `bridge.json`) as `Authorization: Bearer <token>`. This path is exempt from the server's user-facing session-key/PAM chain; the handler validates the Bearer against the lab's stored token in constant time. A missing or wrong token, or an unknown lab, is 401. See auth-design.md.
+
+**Response:** 204 No Content on success; 400 on malformed body or empty lab/host segment; 401 on missing/invalid telemetry token.
 
 ### `GET /newtlab/v1/labs/{lab}/bridges/stats`
 

@@ -52,6 +52,22 @@ a human operator's CLI or browser talking to `cmd/newt-server`. L2a
 keys) caches the PAM result so the operator's CLI doesn't re-present
 credentials per request.
 
+One internal client is **not** in-process and cannot use that service key:
+**newtlink**, the per-lab bridge worker newtlab spawns, pushes link telemetry
+(`BridgeStats`) to newtlab-server over HTTP every few seconds and outlives
+server restarts. The process-lifetime service key is in-memory and dies with the
+server, so newtlink's copy would go stale on the first restart — reintroducing
+the 401 it was meant to fix. Instead newtlab mints a **per-lab telemetry token**
+at deploy, persists it in the lab's `state.json` (newtlab owns lab state, §27),
+and passes it to newtlink in `bridge.json`; newtlink presents it as a Bearer on
+every push. `cmd/newt-server` exempts only
+`POST /newtlab/v1/labs/{lab}/bridges/{host}/stats` from the L2b/L2c chain, and
+the newtlab handler (`handlePushBridgeStats`) validates the Bearer against the
+lab's stored token in constant time. Because the token lives on disk, a server
+restart re-reads it and the running newtlink keeps authenticating without a
+redeploy; because it authorizes only that one lab's stats push, it is
+least-privilege — not a super-user like the in-process service key.
+
 | Threat | Surface | Layer that addresses it |
 |---|---|---|
 | **Insider misuse — accidental.** A teammate runs the wrong CLI against the wrong network and changes config they shouldn't have. | Operator-to-server | L1 (audit log catches), L3 (authorization gates) |
