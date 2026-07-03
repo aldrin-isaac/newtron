@@ -969,7 +969,7 @@ display. Defined in `state.go`.
 ```go
 type LabState struct {
     Name       string
-    NetworkID  string                  // newtron network the lab was deployed against; persisted so post-deploy ops (provision, resync) resolve the same network. Empty on pre-existing labs → falls back to the lab name (ResolveLabNetworkID)
+    NetworkID  string                  // newtron network the lab was deployed against; persisted so post-deploy ops (provision, resync) resolve the same network. Defaults to the lab name (#116) absent a -N override; see ResolveLabNetworkID
     Created    time.Time
     Dir    string                  // legacy: populated by pre-#66 state.json files; new Lab() leaves this empty (spec data flows from newtron via HTTP per §27)
     SSHKeyPath string                  // lab Ed25519 private key path

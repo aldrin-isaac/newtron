@@ -61,8 +61,8 @@ func (l *Lab) boundNetworkID() string {
 //  2. LabState.NetworkID — the network the lab was deployed against, so
 //     post-deploy ops (provision, resync) reach the same network the lab was
 //     built from even when it differs from the lab name.
-//  3. the lab name — the default binding, and the fallback for a lab deployed
-//     before NetworkID was persisted.
+//  3. the lab name — the default binding (#116), used when no override and no
+//     persisted binding exist (a lab being deployed for the first time).
 //
 // A missing/unreadable state file is not an error: it means "not deployed yet",
 // which falls through to the lab name.
