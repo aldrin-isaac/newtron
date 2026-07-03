@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -99,13 +98,7 @@ func createNetwork(_ context.Context, name, description, _ string) error {
 // ignored; for network-scoped calls (e.g. CreateNetwork), pass the
 // target network's ID.
 func newNewtronClient(networkID string) *newtronclient.Client {
-	url := newtrunServerFlag
-	if url == "" {
-		url = os.Getenv("NEWTRUN_SERVER")
-	}
-	if url == "" {
-		url = httputil.DefaultServerURL
-	}
+	url := newtrunServerURL()
 	// Identity + TLS come from the single owner of the newtron CLI client build
 	// (§27) — one login serves every command across all three CLIs.
 	c, err := newtronclient.NewCLIClient(url, networkID)
