@@ -278,7 +278,7 @@ func init() {
 	}
 
 	// Configuration & Meta
-	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, nodeCmd, zoneCmd, versionCmd, networkCmd, topologyCmd, secretsCmd} {
+	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, nodeCmd, zoneCmd, versionCmd, networkCmd, topologyCmd, secretsCmd, sshCredentialsCmd} {
 		cmd.GroupID = "meta"
 		rootCmd.AddCommand(cmd)
 	}
