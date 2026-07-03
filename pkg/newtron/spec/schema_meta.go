@@ -51,6 +51,7 @@ type FieldMeta struct {
 	Format    string `json:"format,omitempty"`    // semantic hint — "cidr", "ipv4", "ipv6", "mac", "asn"
 	Immutable bool   `json:"immutable,omitempty"` // value is fixed at create time — UI suppresses edit affordance in update-mode forms
 	ReadOnly  bool   `json:"read_only,omitempty"` // value is derived/computed server-side — UI displays it but never offers an input and never submits it (e.g. an IP-VPN's vrf_name)
+	Secret    bool   `json:"secret,omitempty"`    // value is a credential — UI renders a masked (password) input, never echoes it back, and saves it to the network's secret store, submitting a ${secret:KEY} reference for this field rather than the plaintext (see the secrets write endpoint)
 
 	// RequiredWhen declares a predicate over sibling field values that —
 	// when true — makes this field required even though the static
@@ -647,6 +648,7 @@ func extractFields(t reflect.Type) []FieldMeta {
 			Pattern:     sf.Tag.Get("pattern"),
 			Format:      sf.Tag.Get("format"),
 			Immutable:   sf.Tag.Get("immutable") == "true",
+			Secret:      sf.Tag.Get("secret") == "true",
 		}
 		if minTag := sf.Tag.Get("min"); minTag != "" {
 			if v, ok := parseIntTag(minTag); ok {

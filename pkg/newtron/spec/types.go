@@ -479,7 +479,7 @@ type NodeSpec struct {
 	// state owned by newtlab (§27) — not stored here; resolved through
 	// newtron's PortResolver at Connect time.
 	SSHUser string `json:"ssh_user,omitempty" label:"SSH User" tooltip:"Username for the SSH tunnel to Redis"`
-	SSHPass string `json:"ssh_pass,omitempty" label:"SSH Password" tooltip:"Password or ${secret:KEY} reference for the SSH tunnel"`
+	SSHPass string `json:"ssh_pass,omitempty" label:"SSH Password" tooltip:"Password or ${secret:KEY} reference for the SSH tunnel" secret:"true"`
 
 	// OPTIONAL - newtlab per-device overrides
 	VMMemory int    `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Per-device override for VM memory size"`
