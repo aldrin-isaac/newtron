@@ -21,12 +21,19 @@ func deletePortChannelConfig(name string) []sonic.Entry {
 	return []sonic.Entry{{Table: "PORTCHANNEL", Key: name}}
 }
 
+// portChannelMemberKey returns the CONFIG_DB key for a PORTCHANNEL_MEMBER entry.
+// Format: {portchannel}|{member}. One owner so the add and delete paths can
+// never drift apart (§15 forward/reverse symmetry).
+func portChannelMemberKey(pcName, member string) string {
+	return fmt.Sprintf("%s|%s", pcName, member)
+}
+
 // createPortChannelMemberConfig returns a CONFIG_DB entry for adding a member to a PortChannel.
 func createPortChannelMemberConfig(pcName, member string) []sonic.Entry {
-	return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member), Fields: map[string]string{}}}
+	return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: portChannelMemberKey(pcName, member), Fields: map[string]string{}}}
 }
 
 // deletePortChannelMemberConfig returns a delete entry for removing a member from a PortChannel.
 func deletePortChannelMemberConfig(pcName, member string) []sonic.Entry {
-	return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member)}}
+	return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: portChannelMemberKey(pcName, member)}}
 }
