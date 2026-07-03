@@ -10,6 +10,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -233,15 +234,25 @@ func (n *Network) ListSecrets() ([]string, error) {
 	return n.secretStore.List()
 }
 
-// DeleteSecret removes key from the network's secret store. Errors when no store
-// is configured (nothing to delete from) — the reverse of SetSecret (§15).
+// DeleteSecret removes key from the network's secret store — the reverse of
+// SetSecret (§15). Idempotent, like its sibling RemoveSuperUser (§13): a key
+// that isn't present — or a network with no store at all — is a no-op, not an
+// error, so the desired end state (key absent) is reported as reached rather
+// than surfacing a 500 for an already-satisfied request.
 func (n *Network) DeleteSecret(key string) error {
 	n.secretMu.Lock()
 	defer n.secretMu.Unlock()
 	if n.secretStore == nil {
-		return fmt.Errorf("no secret store for this network (nothing to delete)")
+		return nil
 	}
-	return n.secretStore.Delete(key)
+	if err := n.secretStore.Delete(key); err != nil {
+		var notFound *secret.ErrNotFound
+		if errors.As(err, &notFound) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // ResolvePlatformSecrets walks every PlatformSpec.Credentials in

@@ -183,17 +183,26 @@ func TestNetwork_SetSecret_CreatesStoreAndResolves(t *testing.T) {
 	}
 }
 
-// TestNetwork_DeleteSecret_NoStoreErrors pins that deleting from a network with
-// no secret store is a clear error, not a silent no-op.
-func TestNetwork_DeleteSecret_NoStoreErrors(t *testing.T) {
+// TestNetwork_DeleteSecret_Idempotent pins that deleting a key that isn't present
+// — or from a network with no store at all — is a no-op, not an error (§13, like
+// RemoveSuperUser; avoids a 500 for an already-satisfied delete).
+func TestNetwork_DeleteSecret_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	writeNetwork(t, dir)
 	n, err := NewNetwork(dir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	if err := n.DeleteSecret("nope"); err == nil {
-		t.Error("expected DeleteSecret to error when no store is configured")
+	// No store at all → no-op.
+	if err := n.DeleteSecret("nope"); err != nil {
+		t.Errorf("DeleteSecret with no store = %v; want nil (idempotent)", err)
+	}
+	// Store exists but the key doesn't → no-op.
+	if err := n.SetSecret("present", "v"); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	if err := n.DeleteSecret("absent"); err != nil {
+		t.Errorf("DeleteSecret of an absent key = %v; want nil (idempotent)", err)
 	}
 }
 
