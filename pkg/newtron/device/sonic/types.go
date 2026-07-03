@@ -68,9 +68,9 @@ const (
 // RouteEntry represents a route read from a device's routing table.
 // Returned by Device.GetRoute (APP_DB) and Device.GetRouteASIC (ASIC_DB).
 type RouteEntry struct {
-	Prefix   string      // "10.1.0.0/31"
-	VRF      string      // "default", "Vrf-customer"
-	Protocol string      // "bgp", "connected", "static"
+	Prefix   string // "10.1.0.0/31"
+	VRF      string // "default", "Vrf-customer"
+	Protocol string // "bgp", "connected", "static"
 	NextHops []NextHop
 	Source   RouteSource // AppDB or AsicDB
 }
@@ -198,10 +198,39 @@ type SSHTunnel struct {
 	wg        sync.WaitGroup
 }
 
+// DefaultConnectTimeout bounds the device SSH dial (TCP connect + handshake)
+// when a caller sets no shorter deadline — long enough to wait out a device that
+// is mid-reconfiguration (e.g. during provisioning).
+const DefaultConnectTimeout = 30 * time.Second
+
+// LivenessConnectTimeout is the short dial bound a liveness/read path uses so an
+// unreachable or mid-provision device fails fast — a status poll must not hang
+// for the whole operation — instead of blocking for DefaultConnectTimeout.
+const LivenessConnectTimeout = 3 * time.Second
+
+type connectTimeoutKey struct{}
+
+// WithConnectTimeout bounds the device SSH dial for connections opened under the
+// returned context. Read/liveness paths set LivenessConnectTimeout (fail fast);
+// config-mutating ops leave it unset so a device briefly unreachable
+// mid-reconfigure is waited for (DefaultConnectTimeout). It bounds only the dial
+// — an already-established tunnel's reads are unaffected.
+func WithConnectTimeout(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, connectTimeoutKey{}, d)
+}
+
+func connectTimeoutFromContext(ctx context.Context) time.Duration {
+	if d, ok := ctx.Value(connectTimeoutKey{}).(time.Duration); ok && d > 0 {
+		return d
+	}
+	return DefaultConnectTimeout
+}
+
 // NewSSHTunnel dials SSH on host:port and opens a local listener on a random port.
 // Connections to the local port are forwarded to 127.0.0.1:6379 inside the SSH host.
-// If port is 0, defaults to 22.
-func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
+// If port is 0, defaults to 22. The dial is bounded by connectTimeoutFromContext(ctx)
+// so a liveness read can fail fast on an unreachable device (WithConnectTimeout).
+func NewSSHTunnel(ctx context.Context, host, user, pass string, port int) (*SSHTunnel, error) {
 	if port == 0 {
 		port = 22
 	}
@@ -212,7 +241,7 @@ func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
 		},
 		// Lab/test environment — production would need known_hosts verification.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         30 * time.Second,
+		Timeout:         connectTimeoutFromContext(ctx),
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -357,4 +386,3 @@ func (t *SSHTunnel) forward(local net.Conn) {
 	}()
 	<-done
 }
-

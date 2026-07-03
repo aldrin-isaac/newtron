@@ -9,6 +9,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -415,7 +416,16 @@ func (na *NodeActor) saveTopologyNow() error {
 // connectAndRead ensures the correct node mode, checks connectivity via Ping,
 // and runs a read-only function. Ping is a no-op without transport (topology
 // offline mode — architecture §7 transport guard).
+//
+// Reads bound the device SSH dial short (LivenessConnectTimeout) so a status/
+// liveness probe fails fast on an unreachable or mid-provision device instead of
+// blocking on the 30s config-op dial — a console polling /info, /status, or
+// /drift must stay responsive while newtron reconfigures the device. Config
+// writes (connectAndExecute) leave the default so a device briefly unreachable
+// mid-reconfigure is waited for. Bounds only the dial; established reads are
+// unaffected.
 func (na *NodeActor) connectAndRead(ctx context.Context, fn func(n *newtron.Node) (any, error)) (any, error) {
+	ctx = sonic.WithConnectTimeout(ctx, sonic.LivenessConnectTimeout)
 	return na.execute(ctx, func() (any, error) {
 		if err := na.node.Ping(ctx); err != nil {
 			// Ping failure means the SSH tunnel is dead.
