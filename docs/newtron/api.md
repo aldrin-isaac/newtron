@@ -162,6 +162,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/reload-config` | Reload CONFIG_DB from disk |
 | `/save-config` | Save CONFIG_DB to disk |
 | `/restart-daemon` | Restart a SONiC daemon |
+| `/refresh-bgp` | Force a BGP soft clear (re-advertise routes) |
 | `/ssh-command` | Execute SSH command |
 | `GET /configdb` | Full CONFIG_DB snapshot (RawConfigDB); `?owned_only=false` for all tables |
 | `GET /configdb/{table}` | List CONFIG_DB keys |
@@ -243,7 +244,7 @@ Lock -> fn -> Commit -> Save cycle):
 | `no_save` | string | `"false"` | When `"true"`, commits to Redis but skips `config save` (changes persist in running config only, lost on reboot). |
 | `persist` | string | `""` | When `"topology"`, the successful write is also persisted to `topology.json` via `SaveDeviceIntents` before the response returns. Atomic write+persist (issue #75C). No-op when the handler didn't mutate the intent tree (read-only paths, `/intent/save` after it clears the unsaved flag). See "Atomic write+persist" below. |
 
-These parameters apply to endpoints documented with "**Query parameters:** `dry_run`, `no_save`" below. Read-only endpoints and lifecycle operations (reload-config, save-config, restart-daemon, ssh-command) ignore them.
+These parameters apply to endpoints documented with "**Query parameters:** `dry_run`, `no_save`" below. Read-only endpoints and lifecycle operations (reload-config, save-config, restart-daemon, refresh-bgp, ssh-command) ignore them.
 
 #### Atomic write+persist (`?persist=topology`)
 
@@ -3407,6 +3408,16 @@ Restart a SONiC daemon on the device (`systemctl restart <daemon>`).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `daemon` | string | yes | Daemon name (e.g., `"bgp"`, `"swss"`) |
+
+**Response (200):** `null` data on success
+
+### POST /newtron/v1/networks/{netID}/nodes/{node}/refresh-bgp
+
+Force FRR to re-advertise all BGP routes by issuing a soft clear
+(`vtysh -c 'clear bgp * soft'`). An operational convergence nudge — used
+after a parallel provision, where a device may complete its own soft clear
+before its peers are up, leaving routes un-advertised until FRR's next timer.
+No request body. Requires `device.write`.
 
 **Response (200):** `null` data on success
 

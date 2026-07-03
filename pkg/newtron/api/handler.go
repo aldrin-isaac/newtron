@@ -198,6 +198,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/update-bgp-evpn-peer", s.handleUpdateBGPEVPNPeer)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/remove-bgp-evpn-peer", s.handleRemoveBGPEVPNPeer)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/restart-daemon", s.handleRestartDaemon)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/refresh-bgp", s.handleRefreshBGP)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/setup-device", s.handleSetupDevice)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/configdb", s.handleConfigDBSnapshot)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/configdb/{table}", s.handleConfigDBTableKeys)

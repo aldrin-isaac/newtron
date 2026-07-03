@@ -993,6 +993,23 @@ func (s *Server) handleRestartDaemon(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+// handleRefreshBGP forces a BGP soft clear on the device to re-advertise routes
+// — an operational nudge with no request body (see Node.RefreshBGP).
+func (s *Server) handleRefreshBGP(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return nil, n.RefreshBGP(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

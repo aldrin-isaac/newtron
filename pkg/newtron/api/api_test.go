@@ -230,6 +230,7 @@ func TestAPICompleteness(t *testing.T) {
 			"RemovePortChannelMember": true,
 			"ConfigReload":            true,
 			"RestartService":          true,
+			"RefreshBGP":              true, // POST /networks/{netID}/nodes/{device}/refresh-bgp
 			"ExecCommand":             true,
 			// Intent operations
 			"Projection":     true, // #5: GET /networks/{netID}/nodes/{device}/intent/projection
@@ -384,6 +385,7 @@ func TestAPICompleteness(t *testing.T) {
 			"RemovePortChannelMember": auth.PermLAGModify,
 			"ConfigReload":            auth.PermDeviceWrite,
 			"RestartService":          auth.PermDeviceWrite,
+			"RefreshBGP":              auth.PermDeviceWrite,
 			"ExecCommand":             auth.PermDeviceWrite,
 			"Save":                    auth.PermDeviceWrite,
 			"Reconcile":               auth.PermDeviceWrite,

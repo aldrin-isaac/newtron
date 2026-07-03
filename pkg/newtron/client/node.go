@@ -500,7 +500,6 @@ func (c *Client) RemovePortChannelMember(device, pc, member string, opts newtron
 	return c.nodeWrite(device, "remove-portchannel-member", body, opts)
 }
 
-
 // ============================================================================
 // Device lifecycle operations (no ChangeSet)
 // ============================================================================
@@ -521,6 +520,13 @@ func (c *Client) RestartService(device, service string) error {
 	return c.doPost(c.nodePath(device)+"/restart-daemon", body, nil)
 }
 
+// RefreshBGP forces the device's FRR to re-advertise all BGP routes via a soft
+// clear — the operational post-provision convergence nudge newtlab invokes so
+// device interaction stays inside newtron (§27). No request body.
+func (c *Client) RefreshBGP(device string) error {
+	return c.doPost(c.nodePath(device)+"/refresh-bgp", nil, nil)
+}
+
 // SSHCommand runs a command via SSH on the device.
 func (c *Client) SSHCommand(device, command string) (string, error) {
 	body := api.SSHCommandRequest{Command: command}
@@ -534,7 +540,6 @@ func (c *Client) SSHCommand(device, command string) (string, error) {
 // ============================================================================
 // Intent methods
 // ============================================================================
-
 
 // ============================================================================
 // Intent operations
@@ -642,4 +647,3 @@ func (c *Client) Reconcile(device, mode, reconcileMode string, opts newtron.Exec
 	}
 	return &result, nil
 }
-

@@ -39,6 +39,10 @@ type NewtronClient interface {
 	// "reconcile a device" is newtron's HTTP client, and both engines route
 	// through it (DESIGN_PRINCIPLES_NEWTRON.md §27, ai-instructions §25).
 	Reconcile(device, mode, reconcileMode string, opts newtron.ExecOpts) (*newtron.ReconcileResult, error)
+	// RefreshBGP forces a BGP soft clear on the device to re-advertise routes —
+	// the post-provision convergence nudge. Device interaction (vtysh) is
+	// newtron's alone (§27), so newtlab asks newtron rather than SSHing in.
+	RefreshBGP(device string) error
 }
 
 // HostVMGroup represents virtual hosts coalesced into one VM.
@@ -1264,55 +1268,38 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 	return nil
 }
 
-// refreshBGP SSHs to each device and runs "clear bgp * soft" via vtysh.
-// Errors are logged but not returned — this is a best-effort convergence aid.
-// SSH credentials are read from l.Nodes (already resolved during NewLab).
-// bgpRefreshDelay is the wait time after provisioning before issuing
-// "clear bgp * soft" to allow the last device's BGP session to initialize.
+// refreshBGP asks newtron to run a BGP soft clear on each provisioned switch,
+// forcing route re-advertisement once all devices are up. Errors are logged but
+// not returned — this is a best-effort convergence aid.
+//
+// The soft clear is a device operation (vtysh), which is newtron's alone (§27);
+// newtlab does not SSH to devices. It routes through the same newtron client it
+// provisions with — newtron resolves the device's SSH port (via newtlab's own
+// port resolver) and carries the caller's identity, so this needs no per-device
+// credentials or dial here.
+//
+// bgpRefreshDelay is the wait after provisioning before the clear, to let the
+// last device's BGP session initialize.
 const bgpRefreshDelay = 5 * time.Second
 
 func (l *Lab) refreshBGP(state *LabState) {
 	// Brief delay for the last-provisioned device's BGP to start.
 	time.Sleep(bgpRefreshDelay)
 
-	for name, nodeState := range state.Nodes {
+	for name := range state.Nodes {
 		nc := l.Nodes[name]
-		if nc == nil || nc.SSHUser == "" {
+		if nc == nil {
 			continue
 		}
-		// Skip host/host-vm devices — they have no FRR/BGP
+		// Skip host/host-vm devices — they have no FRR/BGP.
 		if nc.DeviceType == "host" || nc.DeviceType == "host-vm" {
 			continue
 		}
-
-		host := resolveHostIP(nc.Host, l.Config)
-		addr := fmt.Sprintf("%s:%d", host, nodeState.SSHPort)
-
-		config := &ssh.ClientConfig{
-			User:            nc.SSHUser,
-			Auth:            []ssh.AuthMethod{ssh.Password(nc.SSHPass)},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         5 * time.Second,
-		}
-
-		client, err := ssh.Dial("tcp", addr, config)
-		if err != nil {
-			util.Logger.Warnf("refreshBGP %s: SSH dial: %v", name, err)
-			continue
-		}
-		session, err := client.NewSession()
-		if err != nil {
-			util.Logger.Warnf("refreshBGP %s: new session: %v", name, err)
-			client.Close()
-			continue
-		}
-		if err := session.Run("vtysh -c 'clear bgp * soft'"); err != nil {
-			util.Logger.Warnf("refreshBGP %s: clear bgp: %v", name, err)
+		if err := l.newtronClient.RefreshBGP(name); err != nil {
+			util.Logger.Warnf("refreshBGP %s: %v", name, err)
 		} else {
 			util.Logger.Infof("refreshBGP %s: done", name)
 		}
-		session.Close()
-		client.Close()
 	}
 }
 
