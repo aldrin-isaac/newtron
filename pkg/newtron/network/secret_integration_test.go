@@ -47,6 +47,76 @@ func TestNewNetwork_SecretRefInNodeSpecResolves(t *testing.T) {
 	}
 }
 
+// TestResolveNodeSpec_PlatformVMCredentialsFallback pins that a node which omits
+// ssh_pass inherits the platform's vm_credentials.pass — mirroring newtlab's
+// NodeConfig resolution so newtron and newtlab reach a device with the same
+// login. This is what lets a lab node authored with just a platform (e.g. one
+// created through newtcon, which sets no ssh_pass) be reachable by newtron.
+func TestResolveNodeSpec_PlatformVMCredentialsFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeNetwork(t, dir)
+	writeTopology(t, dir, "switch1")
+	// The newtcon create shape: only ssh_user + platform, no ssh_pass.
+	writeNodeSpec(t, dir, "switch1", `{
+		"mgmt_ip": "127.0.0.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "amer",
+		"platform": "p1",
+		"ssh_user": "admin",
+		"underlay_asn": 65001
+	}`)
+
+	platforms := map[string]*spec.PlatformSpec{
+		"p1": {Name: "p1", VMCredentials: &spec.VMCredentials{User: "aldrin", Pass: "YourPaSsWoRd"}},
+	}
+	n, err := NewNetwork(dir, "", nil, nil, platforms)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	resolved, err := n.resolveNodeSpecByName("switch1")
+	if err != nil {
+		t.Fatalf("resolveNodeSpec: %v", err)
+	}
+	if resolved.SSHPass != "YourPaSsWoRd" {
+		t.Errorf("SSHPass = %q; want the platform vm_credentials pass (YourPaSsWoRd)", resolved.SSHPass)
+	}
+	if resolved.SSHUser != "admin" {
+		t.Errorf("SSHUser = %q; want admin", resolved.SSHUser)
+	}
+}
+
+// TestResolveNodeSpec_NodeSSHPassOverridesPlatform pins that an explicit node
+// ssh_pass wins over the platform default — the platform is only a fallback.
+func TestResolveNodeSpec_NodeSSHPassOverridesPlatform(t *testing.T) {
+	dir := t.TempDir()
+	writeNetwork(t, dir)
+	writeTopology(t, dir, "switch1")
+	writeNodeSpec(t, dir, "switch1", `{
+		"mgmt_ip": "127.0.0.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "amer",
+		"platform": "p1",
+		"ssh_user": "admin",
+		"ssh_pass": "node-pw",
+		"underlay_asn": 65001
+	}`)
+
+	platforms := map[string]*spec.PlatformSpec{
+		"p1": {Name: "p1", VMCredentials: &spec.VMCredentials{User: "aldrin", Pass: "platform-pw"}},
+	}
+	n, err := NewNetwork(dir, "", nil, nil, platforms)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	resolved, err := n.resolveNodeSpecByName("switch1")
+	if err != nil {
+		t.Fatalf("resolveNodeSpec: %v", err)
+	}
+	if resolved.SSHPass != "node-pw" {
+		t.Errorf("SSHPass = %q; want node-pw (explicit node value wins over platform)", resolved.SSHPass)
+	}
+}
+
 // TestNewNetwork_SecretRefWithoutStoreErrors pins the disabled-state
 // behavior: a nodeSpec with a reference but no store configured fails
 // at network load (not at first SSH attempt) — the operator sees the

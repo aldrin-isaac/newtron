@@ -2082,6 +2082,26 @@ func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.R
 	if err != nil {
 		return nil, fmt.Errorf("node spec %q ssh_pass: %w", name, err)
 	}
+	// Fall back to the platform's baked-in VM credentials for any SSH field the
+	// node omits — mirroring newtlab's NodeConfig resolution (pkg/newtlab/node.go:
+	// SSHUser = profile > "admin"; SSHPass = profile > platform vm_credentials.pass)
+	// so newtron and newtlab reach the same device with the same login. A device's
+	// login is a property of its image/platform; without this a lab node authored
+	// with just a platform (e.g. one created through newtcon, which sets no
+	// ssh_pass) had an empty password and Device.Connect couldn't open its SSH
+	// tunnel. Production nodes set ssh_pass per-node and this never triggers.
+	if sshPass == "" {
+		if plat, ok := n.platforms[nodeSpec.Platform]; ok && plat.VMCredentials != nil {
+			p, err := secret.Resolve(plat.VMCredentials.Pass, n.secretStore)
+			if err != nil {
+				return nil, fmt.Errorf("platform %q vm_credentials pass: %w", nodeSpec.Platform, err)
+			}
+			sshPass = p
+		}
+	}
+	if sshUser == "" {
+		sshUser = "admin"
+	}
 	resolved.SSHUser = sshUser
 	resolved.SSHPass = sshPass
 
