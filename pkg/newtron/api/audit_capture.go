@@ -83,10 +83,19 @@ var redactSensitiveKeys = map[string]bool{
 	"secret":      true,
 	"token":       true,
 	"private_key": true,
-	// The secret-store write endpoint (POST .../secrets) body is {key, value};
-	// `value` carries the credential. No other audited request body uses a bare
-	// `value` field, so redacting it here is safe.
-	"value": true,
+}
+
+// pathScopedRedactKeys returns request-body field names to redact for a specific
+// endpoint, in addition to redactSensitiveKeys. It exists for fields whose name
+// is too generic to redact globally — a bare `value` would over-redact unrelated
+// endpoints — but that carry a secret on one specific path.
+func pathScopedRedactKeys(path string) map[string]bool {
+	// POST /networks/{n}/secrets body is {key, value}; `value` is the credential.
+	// (GET .../secrets has no body; DELETE .../secrets/{key} carries no value.)
+	if strings.HasSuffix(path, "/secrets") {
+		return map[string]bool{"value": true}
+	}
+	return nil
 }
 
 // redactedPlaceholder replaces a redacted secret value in the recorded body.
@@ -94,11 +103,12 @@ const redactedPlaceholder = "***redacted***"
 
 // redactRequestBody returns the captured request payload with secret-bearing
 // fields masked, ready to store on the audit event. The body is parsed as JSON
-// and walked recursively; any value under a redactSensitiveKeys field is
-// replaced unless it is a ${secret:…} reference. A body that isn't a JSON
-// object (or doesn't parse) is dropped rather than stored raw — a payload we
-// can't inspect for secrets must not land in the audit log verbatim.
-func redactRequestBody(reqBody []byte) json.RawMessage {
+// and walked recursively; any value under a redactSensitiveKeys field — or a
+// field named by pathScopedRedactKeys(path) for this endpoint — is replaced
+// unless it is a ${secret:…} reference. A body that isn't a JSON object (or
+// doesn't parse) is dropped rather than stored raw — a payload we can't inspect
+// for secrets must not land in the audit log verbatim.
+func redactRequestBody(reqBody []byte, path string) json.RawMessage {
 	if len(bytes.TrimSpace(reqBody)) == 0 {
 		return nil
 	}
@@ -108,7 +118,7 @@ func redactRequestBody(reqBody []byte) json.RawMessage {
 		// holds no secret, so record that a body existed without its content.
 		return json.RawMessage(`"<unparseable request body, not recorded>"`)
 	}
-	redactValue(parsed)
+	redactValue(parsed, pathScopedRedactKeys(path))
 	out, err := json.Marshal(parsed)
 	if err != nil {
 		return nil
@@ -118,20 +128,23 @@ func redactRequestBody(reqBody []byte) json.RawMessage {
 
 // redactValue walks a decoded JSON value in place, masking the value of any
 // sensitive key (redactScalar) and recursing through objects and arrays so a
-// nested sensitive field is caught at any depth.
-func redactValue(v any) {
+// nested sensitive field is caught at any depth. extra names endpoint-scoped
+// sensitive fields (pathScopedRedactKeys) on top of the global set; it may be
+// nil.
+func redactValue(v any, extra map[string]bool) {
 	switch val := v.(type) {
 	case map[string]any:
 		for k, child := range val {
-			if redactSensitiveKeys[strings.ToLower(k)] {
+			lk := strings.ToLower(k)
+			if redactSensitiveKeys[lk] || extra[lk] {
 				val[k] = redactScalar(child)
 				continue
 			}
-			redactValue(child)
+			redactValue(child, extra)
 		}
 	case []any:
 		for _, child := range val {
-			redactValue(child)
+			redactValue(child, extra)
 		}
 	}
 }

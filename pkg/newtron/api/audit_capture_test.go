@@ -91,7 +91,7 @@ func TestRedactRequestBody(t *testing.T) {
 		"peers": [{"secret": "leaf-psk"}]
 	}`)
 
-	out := redactRequestBody(in)
+	out := redactRequestBody(in, "/newtron/v1/networks/n/create-service")
 	var got map[string]any
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("redacted body did not round-trip: %v", err)
@@ -116,17 +116,51 @@ func TestRedactRequestBody(t *testing.T) {
 	}
 }
 
+// TestRedactRequestBody_PathScoped pins that a generically-named field is
+// redacted ONLY on the endpoint that carries a secret there: `value` is masked
+// on POST .../secrets but left intact on an unrelated endpoint (so a non-secret
+// `value` field elsewhere is not silently redacted).
+func TestRedactRequestBody_PathScoped(t *testing.T) {
+	body := []byte(`{"key": "switch1_ssh_pass", "value": "hunter2"}`)
+
+	// On the secrets endpoint, `value` is the credential → redacted; the key,
+	// which is not a secret, is preserved so an auditor sees which key was set.
+	onSecrets := decodeMap(t, redactRequestBody(body, "/newtron/v1/networks/n/secrets"))
+	if onSecrets["value"] != redactedPlaceholder {
+		t.Errorf("value on /secrets = %v; want redacted", onSecrets["value"])
+	}
+	if onSecrets["key"] != "switch1_ssh_pass" {
+		t.Errorf("key on /secrets = %v; want preserved", onSecrets["key"])
+	}
+
+	// On any other endpoint, a bare `value` is NOT a global secret → preserved.
+	elsewhere := decodeMap(t, redactRequestBody([]byte(`{"property": "mtu", "value": "9000"}`),
+		"/newtron/v1/networks/n/nodes/d/interfaces/e/set-property"))
+	if elsewhere["value"] != "9000" {
+		t.Errorf("value on set-property = %v; want preserved (not globally redacted)", elsewhere["value"])
+	}
+}
+
+func decodeMap(t *testing.T, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode redacted body: %v", err)
+	}
+	return m
+}
+
 // TestRedactRequestBody_EdgeCases pins the no-body and unparseable paths.
 func TestRedactRequestBody_EdgeCases(t *testing.T) {
-	if got := redactRequestBody(nil); got != nil {
+	if got := redactRequestBody(nil, ""); got != nil {
 		t.Errorf("nil body: got %s; want nil", got)
 	}
-	if got := redactRequestBody([]byte("   ")); got != nil {
+	if got := redactRequestBody([]byte("   "), ""); got != nil {
 		t.Errorf("whitespace body: got %s; want nil", got)
 	}
 	// Unparseable: must not be stored verbatim — a body we can't inspect for
 	// secrets must not leak into the log.
-	got := redactRequestBody([]byte(`{not valid json`))
+	got := redactRequestBody([]byte(`{not valid json`), "")
 	if string(got) == `{not valid json` {
 		t.Errorf("unparseable body stored verbatim; want placeholder")
 	}
