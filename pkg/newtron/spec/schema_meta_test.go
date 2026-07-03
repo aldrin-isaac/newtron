@@ -267,7 +267,10 @@ func TestSchema_OverrideMapsExcluded(t *testing.T) {
 			t.Errorf("NodeSpec schema dropped its own field %q", want)
 		}
 	}
-	// ZoneSpec is a pure scope container — only the injected name field remains.
+	// ZoneSpec is a pure scope container in the schema — only the injected name
+	// field. Its OverridableSpecs override maps AND its SSHCredentials (zone-scope
+	// device login) are both schema:"-": file-authored (zones/<zone>.json), not
+	// via a form. (Node-scope ssh_user/ssh_pass ARE form fields — see NodeSpec.)
 	zm := LookupSchema("ZoneSpec")
 	if len(zm.Fields) != 1 || zm.Fields[0].Name != "name" {
 		names := make([]string, len(zm.Fields))

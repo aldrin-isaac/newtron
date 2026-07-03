@@ -218,6 +218,7 @@ type NetworkSpecFile struct {
     UserGroups  map[string][]string       `json:"user_groups,omitempty"`
     Permissions map[string][]string       `json:"permissions,omitempty"`  // action → allowed groups
     OverridableSpecs                      // embedded: 7 spec maps (network scope)
+    SSHCredentials                        // embedded: network-scope device login (base of node > zone > network)
 }
 ```
 
@@ -239,13 +240,29 @@ type OverridableSpecs struct {
 }
 ```
 
+### 2.2b SSHCredentials
+
+Embedded in `NetworkSpecFile`, `ZoneSpec`, and `NodeSpec` — the **scalar** analog of `OverridableSpecs` for the device SSH login. Where `OverridableSpecs` resolves *maps* by name (union, lower-wins), `SSHCredentials` resolves the two scalar fields node > zone > network (first non-empty wins), then falls back to the platform's `Credentials`, then `"admin"` for the user. A device login is usually uniform across a network, so an operator sets it once at network scope and only the exceptions carry a zone/node override. Either field may be a `${secret:KEY}` reference resolved against the network's secret store.
+
+```go
+type SSHCredentials struct {
+    SSHUser string `json:"ssh_user,omitempty"`
+    SSHPass string `json:"ssh_pass,omitempty" secret:"true"`
+}
+```
+
+Resolution lives in `Network.resolveNodeSpec` (`firstNonEmpty(node, zone, network)` → `secret.Resolve` → platform fallback).
+
+**Authoring differs by scope.** The embed is a **form field only at node scope** (`NodeSpec`, API-authorable via `create`/`update-node`; the `secret:"true"` flag drives a masked UI input, and the `value` is audit-redacted). At **network** and **zone** scope the embed is `schema:"-"` — that scalar config is **file-authored** (`network.json` / `zones/{zone}.json`), consistent with `super_users`/`permissions` and the zone override maps, since there is no network/zone scalar-field-set form. A `${secret:KEY}` reference resolves at every scope regardless.
+
 ### 2.2a ZoneSpec
 
-Per-zone overrides, one file per zone at `zones/{zone}.json` (mirroring `nodes/{node}.json`). A `ZoneSpec` is nothing but an embedded `OverridableSpecs` — a zone is a named bucket of spec overrides that sit between the network base and the node. There are no zone-authoring fields: overrides are written through the flat `create-<kind>?scope=zone` API, never by hand-editing the maps (hence the `schema:"-"` tag).
+Per-zone overrides, one file per zone at `zones/{zone}.json` (mirroring `nodes/{node}.json`). A `ZoneSpec` embeds `OverridableSpecs` (the map overrides between network and node) **and** `SSHCredentials` (the zone-scope device login). Both are `schema:"-"` — zone-scope config is file-authored (`zones/{zone}.json`): the override maps go through the flat `create-<kind>?scope=zone` API, and the SSH fields are edited in the zone file (`create-zone` is name-only). Node-scope `ssh_user`/`ssh_pass` ARE form fields (see [§2.4 NodeSpec]).
 
 ```go
 type ZoneSpec struct {
     OverridableSpecs `schema:"-"`  // embedded: zone-level spec overrides
+    SSHCredentials   `schema:"-"`  // embedded: zone-scope device login (file-authored)
 }
 ```
 
@@ -413,8 +430,7 @@ type NodeSpec struct {
     EVPN        *EVPNConfig     `json:"evpn,omitempty"`
     MAC         string          `json:"mac,omitempty"`
     Platform    string          `json:"platform"`
-    SSHUser     string          `json:"ssh_user,omitempty"`
-    SSHPass     string          `json:"ssh_pass,omitempty"`
+    SSHCredentials              // embedded: node-scope ssh_user/ssh_pass (most-specific level of node > zone > network)
     SSHPort     int             `json:"ssh_port,omitempty"`
     ConsolePort int             `json:"console_port,omitempty"`
     VMMemory    string          `json:"vm_memory,omitempty"`

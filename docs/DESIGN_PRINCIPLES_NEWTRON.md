@@ -663,6 +663,13 @@ available to every device. A zone ("datacenter-east") can specialize.
 An individual device can override further. You never copy-paste a full
 spec at every level; you only define what differs.
 
+The device **SSH login** (`ssh_user` / `ssh_pass`) resolves the same
+way — a scalar rather than a map (`SSHCredentials`, embedded alongside
+the seven maps). A login is usually uniform across a network, so it is
+set once at network scope and overridden only where a zone or node
+differs; it then falls back to the platform's default `Credentials`.
+Same principle — define once, override the exceptions.
+
 **Platforms are global-only.** Platform definitions describe hardware
 capabilities — HWSKU, port count, NIC driver — not network intent.
 They have no meaningful per-zone or per-node variation.

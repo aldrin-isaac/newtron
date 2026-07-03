@@ -85,9 +85,11 @@ func TestResolveNodeConfig_ProfileOverridesPlatform(t *testing.T) {
 		VMImage:  "/override/image.qcow2",
 		VMMemory: 8192,
 		VMCPUs:   4,
-		SSHUser:  "myuser",
-		SSHPass:  "mypass",
-		VMHost:   "server-a",
+		SSHCredentials: spec.SSHCredentials{
+			SSHUser: "myuser",
+			SSHPass: "mypass",
+		},
+		VMHost: "server-a",
 	}
 	platform := &spec.PlatformSpec{
 		VMImage:     "/platform/image.qcow2",

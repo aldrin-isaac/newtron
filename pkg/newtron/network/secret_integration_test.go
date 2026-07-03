@@ -206,6 +206,84 @@ func TestNetwork_DeleteSecret_Idempotent(t *testing.T) {
 	}
 }
 
+// TestResolveNodeSpec_SSHCredentialsHierarchy pins node > zone > network
+// resolution: a login set once at network scope reaches every node, a zone
+// override wins over it, and a node override wins over both.
+func TestResolveNodeSpec_SSHCredentialsHierarchy(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Network-scope login — the base, usually the only place it's set.
+	mustWrite("network.json", `{"version":"1.0","ssh_user":"netuser","ssh_pass":"netpass"}`)
+	mustWrite("zones/amer.json", `{}`)                                            // no override
+	mustWrite("zones/emea.json", `{"ssh_user":"zoneuser","ssh_pass":"zonepass"}`) // zone override
+	mustWrite("nodes/inherit.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.1","zone":"amer","platform":"p1","underlay_asn":65001}`)
+	mustWrite("nodes/zoneovr.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"emea","platform":"p1","underlay_asn":65002}`)
+	mustWrite("nodes/nodeovr.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.3","zone":"amer","platform":"p1","ssh_user":"nodeuser","ssh_pass":"nodepass","underlay_asn":65003}`)
+	mustWrite("topology.json", `{"version":"1.0","nodes":{"inherit":{},"zoneovr":{},"nodeovr":{}},"links":[]}`)
+
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	cases := []struct{ node, user, pass string }{
+		{"inherit", "netuser", "netpass"},   // node + zone empty → network base
+		{"zoneovr", "zoneuser", "zonepass"}, // zone overrides network
+		{"nodeovr", "nodeuser", "nodepass"}, // node overrides zone + network
+	}
+	for _, c := range cases {
+		r, err := n.resolveNodeSpecByName(c.node)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", c.node, err)
+		}
+		if r.SSHUser != c.user || r.SSHPass != c.pass {
+			t.Errorf("%s: user=%q pass=%q, want %q / %q", c.node, r.SSHUser, r.SSHPass, c.user, c.pass)
+		}
+	}
+}
+
+// TestResolveNodeSpec_SSHNetworkSecretRef pins that a ${secret:KEY} reference at
+// network scope resolves against the per-network store and is inherited by a
+// node that sets no login of its own.
+func TestResolveNodeSpec_SSHNetworkSecretRef(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("network.json", `{"version":"1.0","ssh_user":"admin","ssh_pass":"${secret:net_ssh_pass}"}`)
+	mustWrite("secrets.json", `{"net_ssh_pass":"resolved-net-pass"}`) // auto-discovered
+	mustWrite("zones/amer.json", `{}`)
+	mustWrite("nodes/n1.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.1","zone":"amer","platform":"p1","underlay_asn":65001}`)
+	mustWrite("topology.json", `{"version":"1.0","nodes":{"n1":{}},"links":[]}`)
+
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	r, err := n.resolveNodeSpecByName("n1")
+	if err != nil {
+		t.Fatalf("resolve n1: %v", err)
+	}
+	if r.SSHPass != "resolved-net-pass" {
+		t.Errorf("SSHPass = %q, want resolved-net-pass (network-level ${secret:} inherited)", r.SSHPass)
+	}
+}
+
 // TestNewNetwork_SecretRefWithoutStoreErrors pins the disabled-state
 // behavior: a nodeSpec with a reference but no store configured fails
 // at network load (not at first SSH attempt) — the operator sees the
