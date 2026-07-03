@@ -52,6 +52,20 @@ type OverridableSpecs struct {
 	Services      map[string]*ServiceSpec `json:"services,omitempty" kind:"ServiceSpec"`
 }
 
+// SSHCredentials is the device SSH login (the tunnel to CONFIG_DB Redis),
+// authored at network, zone, or node scope. Like OverridableSpecs it is embedded
+// in NetworkSpecFile, ZoneSpec, and NodeSpec — one declaration (including the
+// secret:"true" tag) defines the fields at every level (§27/§13). Each field
+// resolves node > zone > network (lower scope wins, §7), then the platform's
+// Credentials, then "admin" for the user. Because the login is usually uniform
+// across a network, an operator sets it once at network scope and overrides only
+// the exceptions at zone/node. A ${secret:KEY} reference is allowed at any level
+// and resolved against the network's secret store.
+type SSHCredentials struct {
+	SSHUser string `json:"ssh_user,omitempty" label:"SSH User" tooltip:"Username for the SSH tunnel to the device. Resolves node > zone > network, then the platform default, then \"admin\"."`
+	SSHPass string `json:"ssh_pass,omitempty" label:"SSH Password" tooltip:"Password (or ${secret:KEY} reference) for the SSH tunnel. Resolves node > zone > network, then the platform default." secret:"true"`
+}
+
 // NetworkSpecFile represents the global network specification file (network.json).
 type NetworkSpecFile struct {
 	Version string `json:"version"`
@@ -71,6 +85,13 @@ type NetworkSpecFile struct {
 
 	OverridableSpecs // Embedded — all 7 overridable spec maps
 
+	// SSHCredentials — network-scope device login, the base of the
+	// node > zone > network resolution. Set once here; overridden at zone/node.
+	// `schema:"-"`: network-scope scalar config is file-authored (network.json),
+	// like super_users/permissions — there is no network-field-set form; still
+	// serialized to JSON. (Node-scope ssh IS form-authored — see NodeSpec.)
+	SSHCredentials `schema:"-"`
+
 	// Zones are NOT stored here — each lives in its own zones/<name>.json,
 	// loaded and owned by spec.Loader (mirroring nodes/<name>.json). Access
 	// them through the Loader (Zone/Zones/CreateZoneSpec/…), never a field on
@@ -84,6 +105,12 @@ type ZoneSpec struct {
 	// the flat create-<kind>?scope=zone API, not by editing these maps, so they
 	// are storage, not authoring-schema fields. Still serialized to JSON.
 	OverridableSpecs `schema:"-"`
+
+	// SSHCredentials — zone-scope device login, overriding the network base and
+	// overridden in turn by a node. `schema:"-"` like the override maps above:
+	// zone-scope config is file-authored (zones/<zone>.json), not via a form
+	// (create-zone is name-only). Still serialized to JSON.
+	SSHCredentials `schema:"-"`
 }
 
 // ============================================================================
@@ -479,11 +506,12 @@ type NodeSpec struct {
 	// are storage, not authoring-schema fields. Still serialized to JSON.
 	OverridableSpecs `schema:"-"`
 
-	// OPTIONAL - SSH credentials for Redis tunnel. SSH port is runtime
-	// state owned by newtlab (§27) — not stored here; resolved through
-	// newtron's PortResolver at Connect time.
-	SSHUser string `json:"ssh_user,omitempty" label:"SSH User" tooltip:"Username for the SSH tunnel to Redis"`
-	SSHPass string `json:"ssh_pass,omitempty" label:"SSH Password" tooltip:"Password or ${secret:KEY} reference for the SSH tunnel" secret:"true"`
+	// SSHCredentials — node-scope device login (the SSH tunnel to Redis), the
+	// most-specific level of the node > zone > network resolution. Usually left
+	// empty so the node inherits the network/zone login; set only to override.
+	// SSH port is runtime state owned by newtlab (§27) — not stored here;
+	// resolved through newtron's PortResolver at Connect time.
+	SSHCredentials
 
 	// OPTIONAL - newtlab per-device overrides
 	VMMemory int    `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Per-device override for VM memory size"`

@@ -50,8 +50,10 @@ func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		Platform:    req.Platform,
 		MAC:         req.MAC,
 		UnderlayASN: req.UnderlayASN,
-		SSHUser:     req.SSHUser,
-		SSHPass:     req.SSHPass,
+		SSHCredentials: spec.SSHCredentials{
+			SSHUser: req.SSHUser,
+			SSHPass: req.SSHPass,
+		},
 	}
 	if req.EVPN != nil {
 		nodeSpec.EVPN = &spec.EVPNConfig{
@@ -166,8 +168,10 @@ func (net *Network) UpdateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		Platform:    req.Platform,
 		MAC:         req.MAC,
 		UnderlayASN: req.UnderlayASN,
-		SSHUser:     req.SSHUser,
-		SSHPass:     req.SSHPass,
+		SSHCredentials: spec.SSHCredentials{
+			SSHUser: req.SSHUser,
+			SSHPass: req.SSHPass,
+		},
 	}
 	if req.EVPN != nil {
 		nodeSpec.EVPN = &spec.EVPNConfig{

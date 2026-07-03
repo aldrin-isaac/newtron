@@ -14,7 +14,7 @@ import (
 // disabled-state path: a nodeSpec whose SSHPass is a plain literal
 // stays unchanged regardless of whether a store is configured.
 func TestResolveNodeSpecSecrets_PlaintextPassesThrough(t *testing.T) {
-	p := &spec.NodeSpec{SSHUser: "admin", SSHPass: "literal-pass"}
+	p := &spec.NodeSpec{SSHCredentials: spec.SSHCredentials{SSHUser: "admin", SSHPass: "literal-pass"}}
 	if err := resolveNodeSpecSecrets(p, nil); err != nil {
 		t.Fatalf("resolveNodeSpecSecrets: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestResolveNodeSpecSecrets_PlaintextPassesThrough(t *testing.T) {
 // step on the suite returned the unresolved ${secret:...} string.
 func TestResolveNodeSpecSecrets_ReferenceResolves(t *testing.T) {
 	store := newFileStoreWith(t, map[string]string{"switch1_ssh_pass": "real-password"})
-	p := &spec.NodeSpec{SSHUser: "admin", SSHPass: "${secret:switch1_ssh_pass}"}
+	p := &spec.NodeSpec{SSHCredentials: spec.SSHCredentials{SSHUser: "admin", SSHPass: "${secret:switch1_ssh_pass}"}}
 	if err := resolveNodeSpecSecrets(p, store); err != nil {
 		t.Fatalf("resolveNodeSpecSecrets: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestResolveNodeSpecSecrets_ReferenceResolves(t *testing.T) {
 // reference under a nil store is a hard error — the operator must
 // see this immediately rather than discover via a failed SSH login.
 func TestResolveNodeSpecSecrets_MissingStoreFailsClosed(t *testing.T) {
-	p := &spec.NodeSpec{SSHPass: "${secret:KEY}"}
+	p := &spec.NodeSpec{SSHCredentials: spec.SSHCredentials{SSHPass: "${secret:KEY}"}}
 	if err := resolveNodeSpecSecrets(p, nil); err == nil {
 		t.Error("resolveNodeSpecSecrets succeeded on a reference with nil store; expected hard error")
 	}
@@ -54,7 +54,7 @@ func TestResolveNodeSpecSecrets_MissingStoreFailsClosed(t *testing.T) {
 // access; idempotency must hold or cached nodeSpecs would corrupt.
 func TestResolveNodeSpecSecrets_Idempotent(t *testing.T) {
 	store := newFileStoreWith(t, map[string]string{"k": "v"})
-	p := &spec.NodeSpec{SSHPass: "${secret:k}"}
+	p := &spec.NodeSpec{SSHCredentials: spec.SSHCredentials{SSHPass: "${secret:k}"}}
 	for i := 0; i < 3; i++ {
 		if err := resolveNodeSpecSecrets(p, store); err != nil {
 			t.Fatalf("pass %d: %v", i, err)
