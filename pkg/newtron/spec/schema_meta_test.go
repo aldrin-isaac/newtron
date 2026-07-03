@@ -267,10 +267,18 @@ func TestSchema_OverrideMapsExcluded(t *testing.T) {
 			t.Errorf("NodeSpec schema dropped its own field %q", want)
 		}
 	}
+	// The device SSH login is NOT a node-form field at ANY scope: like the
+	// override maps and like network/zone SSHCredentials, node-scope ssh_user/
+	// ssh_pass are schema:"-", authored uniformly via set-ssh-credentials (§27).
+	for _, notWant := range []string{"ssh_user", "ssh_pass"} {
+		if has(nm, notWant) {
+			t.Errorf("NodeSpec schema still advertises %q — the login is authored via set-ssh-credentials, not the node form", notWant)
+		}
+	}
 	// ZoneSpec is a pure scope container in the schema — only the injected name
 	// field. Its OverridableSpecs override maps AND its SSHCredentials (zone-scope
 	// device login) are both schema:"-": file-authored (zones/<zone>.json), not
-	// via a form. (Node-scope ssh_user/ssh_pass ARE form fields — see NodeSpec.)
+	// via a form. Node-scope ssh_user/ssh_pass are schema:"-" too (asserted above).
 	zm := LookupSchema("ZoneSpec")
 	if len(zm.Fields) != 1 || zm.Fields[0].Name != "name" {
 		names := make([]string, len(zm.Fields))

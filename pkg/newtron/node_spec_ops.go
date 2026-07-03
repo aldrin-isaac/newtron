@@ -23,7 +23,7 @@ func (net *Network) ListNodeSpecs() []string {
 func (net *Network) ShowNodeSpec(name string) (*spec.NodeSpec, error) {
 	// Effective (inherited) login, not the authored own-value: this read feeds
 	// newtlab's profile fetch and the CLI/API node view, both of which need the
-	// login the device actually dials (§24). resolveEffectiveSSH owns the rule.
+	// login the device actually dials (§24). resolveSSHLogin owns the rule.
 	return net.internal.EffectiveNodeSpec(name)
 }
 
@@ -53,10 +53,6 @@ func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		Platform:    req.Platform,
 		MAC:         req.MAC,
 		UnderlayASN: req.UnderlayASN,
-		SSHCredentials: spec.SSHCredentials{
-			SSHUser: req.SSHUser,
-			SSHPass: req.SSHPass,
-		},
 	}
 	if req.EVPN != nil {
 		nodeSpec.EVPN = &spec.EVPNConfig{
@@ -171,10 +167,6 @@ func (net *Network) UpdateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 		Platform:    req.Platform,
 		MAC:         req.MAC,
 		UnderlayASN: req.UnderlayASN,
-		SSHCredentials: spec.SSHCredentials{
-			SSHUser: req.SSHUser,
-			SSHPass: req.SSHPass,
-		},
 	}
 	if req.EVPN != nil {
 		nodeSpec.EVPN = &spec.EVPNConfig{

@@ -119,7 +119,7 @@ func (n *Network) withSSHTarget(scope, instance string, fn func(*spec.SSHCredent
 }
 
 // SetSSHCredentials sets (replaces) the SSH login at the given scope. Either
-// field may be empty, meaning "not set at this scope" — resolveEffectiveSSH then
+// field may be empty, meaning "not set at this scope" — resolveSSHLogin then
 // inherits it from the next scope up. ssh_pass may be a ${secret:KEY} reference;
 // it is stored verbatim and resolved only at read/connect (never eagerly here).
 //

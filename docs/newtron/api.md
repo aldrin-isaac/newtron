@@ -2510,10 +2510,13 @@ Create a new node spec.
 | `zone` | string | yes | Zone name (must exist as `zones/{zone}.json`) |
 | `platform` | string | no | Platform name (from platforms.json) |
 | `underlay_asn` | integer | no | BGP underlay AS number |
-| `ssh_user` | string | no | SSH username |
-| `ssh_pass` | string | no | SSH password |
-| `ssh_port` | integer | no | SSH port (default 22) |
 | `evpn` | object | no | EVPN config: `peers` (array), `route_reflector` (bool), `cluster_id` (string) |
+
+The device SSH login is **not** set here. Author it at any scope
+(network/zone/node) via `POST .../set-ssh-credentials` — the single authoring path
+for the login (§27). A node inherits the network login unless a node-scope
+override is set. (The SSH *port* is runtime state resolved from newtlab at connect
+time, never authored on the node spec.)
 
 **Response (201):**
 
