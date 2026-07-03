@@ -27,15 +27,11 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// ServerError represents an error response from the server.
-type ServerError struct {
-	StatusCode int
-	Message    string
-}
-
-func (e *ServerError) Error() string {
-	return fmt.Sprintf("server error (%d): %s", e.StatusCode, e.Message)
-}
+// ServerError is the typed error the client returns for a non-2xx response (or
+// an error envelope). It aliases the shared httputil.ServerError (§27) so a
+// caller can errors.As the same shape across the newtron / newtlab / newtrun
+// clients.
+type ServerError = httputil.ServerError
 
 // New creates a new Client. Functional options configure transport-
 // level concerns (TLS for L2a inter-service mTLS, etc.) without
@@ -314,77 +310,14 @@ func (c *Client) RawRequest(method, path string, body any, opts ...RequestOption
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	if len(respBody) == 0 {
-		if resp.StatusCode >= 400 {
-			return nil, &ServerError{StatusCode: resp.StatusCode, Message: resp.Status}
-		}
-		return nil, nil
-	}
-
-	var envelope httputil.APIResponse
-	if err := json.Unmarshal(respBody, &envelope); err != nil {
-		if resp.StatusCode >= 400 {
-			return nil, &ServerError{StatusCode: resp.StatusCode, Message: string(respBody)}
-		}
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if envelope.Error != "" {
-		return nil, &ServerError{StatusCode: resp.StatusCode, Message: envelope.Error}
-	}
-
-	if envelope.Data == nil {
-		return nil, nil
-	}
-
-	data, err := json.Marshal(envelope.Data)
-	if err != nil {
-		return nil, fmt.Errorf("re-marshal data: %w", err)
-	}
-	return data, nil
+	// RawRequest is the passthrough case — the caller (newtrun's jq evaluation)
+	// wants the envelope's Data as raw JSON, so unwrap without typed decoding.
+	return httputil.UnwrapAPIResponse(resp, "newtron-server")
 }
 
-// decodeResponse unwraps the APIResponse envelope.
+// decodeResponse unwraps the APIResponse envelope into result (nil = success
+// with no typed decode). The envelope/error handling is the shared owner in
+// httputil (§27); this method only binds the server label.
 func (c *Client) decodeResponse(resp *http.Response, result any) error {
-	var envelope httputil.APIResponse
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
-	}
-
-	if len(body) == 0 {
-		if resp.StatusCode >= 400 {
-			return &ServerError{StatusCode: resp.StatusCode, Message: resp.Status}
-		}
-		return nil
-	}
-
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		if resp.StatusCode >= 400 {
-			return &ServerError{StatusCode: resp.StatusCode, Message: string(body)}
-		}
-		return fmt.Errorf("decode response: %w", err)
-	}
-
-	if envelope.Error != "" {
-		return &ServerError{StatusCode: resp.StatusCode, Message: envelope.Error}
-	}
-
-	if result != nil && envelope.Data != nil {
-		// Re-marshal data and decode into the typed result
-		data, err := json.Marshal(envelope.Data)
-		if err != nil {
-			return fmt.Errorf("re-marshal data: %w", err)
-		}
-		if err := json.Unmarshal(data, result); err != nil {
-			return fmt.Errorf("decode data into %T: %w", result, err)
-		}
-	}
-
-	return nil
+	return httputil.DecodeAPIResponse(resp, result, "newtron-server")
 }
