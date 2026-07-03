@@ -29,12 +29,13 @@ func TestResolveLabNetworkID(t *testing.T) {
 		t.Errorf("explicit override = %q, want override", got)
 	}
 
-	// State predating the NetworkID field (empty) → fall back to the lab name.
-	if err := SaveState(&LabState{Name: "legacylab"}); err != nil {
+	// State with no NetworkID resolves to the lab-name default — the resolver
+	// never returns an empty (invalid) network id.
+	if err := SaveState(&LabState{Name: "noidlab"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	if got := ResolveLabNetworkID("legacylab", ""); got != "legacylab" {
-		t.Errorf("empty NetworkID in state = %q, want lab name legacylab (fallback)", got)
+	if got := ResolveLabNetworkID("noidlab", ""); got != "noidlab" {
+		t.Errorf("empty NetworkID in state = %q, want the lab-name default noidlab", got)
 	}
 }
 
