@@ -194,14 +194,7 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 // multi-host labs, where remote workers must reach the server at a
 // publicly-reachable address that differs from the operator's CLI-to-server URL.
 func newtlabURL() string {
-	url := newtlabServer
-	if url == "" {
-		url = os.Getenv("NEWTLAB_SERVER")
-	}
-	if url == "" {
-		url = newtronServer
-	}
-	return url
+	return httputil.ResolveServerURL(newtlabServer, "NEWTLAB_SERVER", newtronServer)
 }
 
 // resolveTarget resolves both lab name and network directory from:

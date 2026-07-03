@@ -25,10 +25,7 @@ import (
 // resolved against NEWTRON_USER). Empty key when no identity resolves →
 // WithBearer is a no-op, preserving the unenforced quickstart path (#184).
 func newClient() *client.Client {
-	url := newtrunServerFlag
-	if url == "" {
-		url = os.Getenv("NEWTRUN_SERVER")
-	}
+	url := newtrunServerURL()
 	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
@@ -37,11 +34,7 @@ func newClient() *client.Client {
 	// Resolve the operator's identity through the single owner (§27) — same
 	// NEWTRON_BEARER / session-cache precedence every in-repo CLI now shares.
 	// An empty key reduces WithBearer to a no-op (the no-auth quickstart path).
-	resolveURL := url
-	if resolveURL == "" {
-		resolveURL = client.DefaultBaseURL
-	}
-	bearerKey, err := newtronclient.ResolveCLIBearer(resolveURL)
+	bearerKey, err := newtronclient.ResolveCLIBearer(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -52,22 +45,21 @@ func newClient() *client.Client {
 	return client.New(url, client.WithTLS(tlsCfg), client.WithBearer(bearerKey))
 }
 
-// newtlabURL resolves the URL for newtlab-server's HTTP surface from
-// the persistent --newtlab-server flag, the NEWTLAB_SERVER env var,
-// and the default `http://127.0.0.1:18080` (newt-server's composed
-// listen address). Used by stop / status to read lab state and
-// destroy topologies through newtlab's HTTP API — newtlab owns
-// LabState (§27) so the CLI consults it via the client rather than
-// reading state.json from disk.
+// newtrunServerURL resolves newtrun-server's URL from the standard CLI ladder:
+// --newtrun-server flag > NEWTRUN_SERVER env > the default newt-server address.
+// The one place the newtrun-server URL ladder lives (§27) — newClient and
+// newNewtronClient both resolve through it.
+func newtrunServerURL() string {
+	return httputil.ResolveServerURL(newtrunServerFlag, "NEWTRUN_SERVER", client.DefaultBaseURL)
+}
+
+// newtlabURL resolves the URL for newtlab-server's HTTP surface:
+// --newtlab-server flag > NEWTLAB_SERVER env > the default newt-server address
+// (its composed listen address). Used by stop / status to read lab state and
+// destroy topologies through newtlab's HTTP API — newtlab owns LabState (§27)
+// so the CLI consults it via the client rather than reading state.json from disk.
 func newtlabURL() string {
-	url := newtlabServerFlag
-	if url == "" {
-		url = os.Getenv("NEWTLAB_SERVER")
-	}
-	if url == "" {
-		url = client.DefaultBaseURL
-	}
-	return url
+	return httputil.ResolveServerURL(newtlabServerFlag, "NEWTLAB_SERVER", client.DefaultBaseURL)
 }
 
 // newNewtlabClient constructs a newtlab-server client at newtlabURL()

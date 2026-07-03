@@ -37,6 +37,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
@@ -189,13 +190,9 @@ func (app *App) initClient() error {
 	// app.dir is the same string as rootDir.
 	app.dir = app.rootDir
 
-	// Resolve server URL and network ID: flag > env > settings > default.
-	if app.serverURL == "" {
-		app.serverURL = os.Getenv("NEWTRON_SERVER")
-	}
-	if app.serverURL == "" {
-		app.serverURL = app.settings.GetServerURL()
-	}
+	// Resolve server URL via the shared ladder: --server flag > NEWTRON_SERVER
+	// env > settings (which itself falls back to httputil.DefaultServerURL).
+	app.serverURL = httputil.ResolveServerURL(app.serverURL, "NEWTRON_SERVER", app.settings.GetServerURL())
 	if app.networkID == "" {
 		app.networkID = os.Getenv("NEWTRON_NETWORK_ID")
 	}

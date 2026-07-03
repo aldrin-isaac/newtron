@@ -20,6 +20,22 @@ const (
 	EnvTLSCA   = "NEWTRON_TLS_CA"
 )
 
+// ResolveServerURL resolves the server URL a CLI should dial from the standard
+// three-rung precedence every in-repo CLI uses: an explicit flag value wins;
+// then the named environment variable; then fallback (a default URL, or another
+// already-resolved URL). "" at every rung yields "". This is the single owner of
+// the flag > env > fallback ladder (§27) — the newtron / newtrun / newtlab CLIs
+// all resolve their server URLs through it instead of open-coding the climb.
+func ResolveServerURL(flag, envVar, fallback string) string {
+	if flag != "" {
+		return flag
+	}
+	if v := os.Getenv(envVar); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // DefaultServerURL is the single canonical address every in-repo client dials
 // when no flag / env / setting overrides it — the composed newt-server on its
 // default loopback listener (cmd/newt-server's defaultListen, 127.0.0.1:18080).

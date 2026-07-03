@@ -305,3 +305,35 @@ func writeECKey(t *testing.T, path string, key *ecdsa.PrivateKey) {
 	}
 	writePEM(t, path, "EC PRIVATE KEY", der)
 }
+
+// TestResolveServerURL pins the flag > env > fallback precedence every in-repo
+// CLI shares. The flag wins outright; an empty flag falls to the env var; an
+// empty flag+env falls to the caller-supplied fallback; all-empty yields "".
+func TestResolveServerURL(t *testing.T) {
+	const envVar = "NEWTRON_TEST_SERVER"
+
+	t.Run("flag wins over env and fallback", func(t *testing.T) {
+		t.Setenv(envVar, "http://env:1")
+		if got := ResolveServerURL("http://flag:1", envVar, "http://fallback:1"); got != "http://flag:1" {
+			t.Errorf("got %q, want the flag value", got)
+		}
+	})
+	t.Run("empty flag falls to env", func(t *testing.T) {
+		t.Setenv(envVar, "http://env:1")
+		if got := ResolveServerURL("", envVar, "http://fallback:1"); got != "http://env:1" {
+			t.Errorf("got %q, want the env value", got)
+		}
+	})
+	t.Run("empty flag+env falls to fallback", func(t *testing.T) {
+		t.Setenv(envVar, "")
+		if got := ResolveServerURL("", envVar, "http://fallback:1"); got != "http://fallback:1" {
+			t.Errorf("got %q, want the fallback", got)
+		}
+	})
+	t.Run("all empty yields empty", func(t *testing.T) {
+		t.Setenv(envVar, "")
+		if got := ResolveServerURL("", envVar, ""); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
