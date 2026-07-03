@@ -465,6 +465,52 @@ before any spec reads, device operations, or provisioning can occur. Registratio
 loads the network directory (network.json, nodes, service definitions) into
 memory.
 
+### Network lifecycle
+
+A network moves along **three independent axes**. Keeping them distinct is what
+makes the endpoints compose correctly — in particular, a UI's network selector is
+a *viewing* concern and must never drive the *serving* axis.
+
+| Axis | Verbs | Where it lives | Who it affects |
+|------|-------|----------------|----------------|
+| **Existence** | create / delete | the spec dir on disk | everyone |
+| **Serving** (registration) | register / unregister | server-global, in-memory | everyone |
+| **Viewing** (selection) | pick a `netID` | the client | just that caller |
+
+**Registration is a server-global singleton** — `GET /networks` lists the shared
+registry; it is not per-user, per-session, or ref-counted. Boot-time
+auto-discovery registers every `<networks-base>/<name>/topology.json`, so on a
+running server essentially every on-disk network is already registered.
+
+- **create** (`POST /networks`) — scaffold a spec dir **and** register it. Only
+  *scaffolding a new* network is gated at the global super-user set; registering
+  an already-on-disk network (the idempotent case) is ungated (it is the serving
+  layer — the same thing auto-discovery does at boot, and the path
+  `bin/newtlab deploy` takes).
+- **register** (also `POST /networks`, idempotent) — attach an existing on-disk
+  network to the running server. Auto-discovery does this at boot; a client rarely
+  needs to.
+- **select** — *not an API call.* A client chooses which registered network its
+  requests target (`/networks/{netID}/...`). It registers nothing, unregisters
+  nothing, and does not affect other callers. Concurrent callers on one network is
+  a normal, supported state (reads are concurrent; writes serialize through the
+  per-network [write-control](#write-control-per-network-reservation) reservation
+  when enforced).
+- **unregister** (`POST .../unregister`) — stop serving a network but keep its
+  files. A deliberate "take offline temporarily" act (maintenance, freeing
+  connections); reversible via `POST /networks` or a restart. It is **not** a
+  prelude to delete.
+- **delete** (`POST .../delete`) — soft-delete: **tear down serving (unregister,
+  if registered) and archive the spec dir**, atomically, in one call. Delete owns
+  its teardown — the caller does not unregister first. Global super-user only.
+  Guards run before any teardown, so a guard failure leaves the network fully in
+  service. See [POST .../delete](#post-newtronv1networksnetiddelete).
+
+There is **no active per-network monitor** today: registration makes a network
+addressable and watches its *spec files* for reload (with `--spec-watch`); it does
+not poll devices. Device connections are opened lazily on first request and torn
+down after idle. Drift, health, and reconcile are all on-demand.
+
 ### Schema metadata endpoints
 
 Two read-only endpoints expose human-facing presentation metadata (label, tooltip,
