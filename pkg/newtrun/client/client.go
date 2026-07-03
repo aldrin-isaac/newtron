@@ -34,7 +34,7 @@ type Client struct {
 	// httpClient applies to short-lived request/response calls. The SSE
 	// stream uses a separate no-timeout client because the connection is
 	// expected to be long-lived; the caller's context controls termination.
-	httpClient *http.Client
+	httpClient   *http.Client
 	streamClient *http.Client
 }
 
@@ -96,38 +96,14 @@ func WithBearer(key string) Option {
 		if key == "" {
 			return
 		}
-		c.httpClient.Transport = wrapBearer(c.httpClient.Transport, key)
-		c.streamClient.Transport = wrapBearer(c.streamClient.Transport, key)
+		// httputil.BearerTransport is the single owner of the client-side
+		// Bearer round-tripper (§27) — the same one pkg/newtron/client and
+		// pkg/newtlab/client wrap with. It respects a caller-set Authorization
+		// header (for /auth/login Basic and /auth/logout) and falls back to
+		// http.DefaultTransport on a nil base.
+		c.httpClient.Transport = httputil.BearerTransport(c.httpClient.Transport, key)
+		c.streamClient.Transport = httputil.BearerTransport(c.streamClient.Transport, key)
 	}
-}
-
-func wrapBearer(base http.RoundTripper, key string) http.RoundTripper {
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	return &bearerRoundTripper{base: base, key: key}
-}
-
-// bearerRoundTripper sets Authorization: Bearer <key> on every
-// outbound request unless the caller has already set their own
-// Authorization header. The "respect caller-set Authorization"
-// rule mirrors the newtron client's contract — important for the
-// /auth/login (Basic) and /auth/logout (often a different Bearer
-// being revoked) endpoints — but newtrun-server has no such
-// endpoints today; the rule is preserved here for parity in case
-// they're added.
-type bearerRoundTripper struct {
-	base http.RoundTripper
-	key  string
-}
-
-func (b *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Header.Get("Authorization") != "" {
-		return b.base.RoundTrip(req)
-	}
-	cloned := req.Clone(req.Context())
-	cloned.Header.Set("Authorization", "Bearer "+b.key)
-	return b.base.RoundTrip(cloned)
 }
 
 // ServerError is returned by every client method when the server returned
