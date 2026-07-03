@@ -141,13 +141,19 @@ func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	netID := r.PathValue("netID")
 	force := r.URL.Query().Get("force") == "true"
 	timestamp := time.Now().UTC().Format("20060102T150405Z")
-	archived, err := s.DeleteNetwork(r.Context(), r.PathValue("netID"), force, timestamp)
+	archived, err := s.DeleteNetwork(r.Context(), netID, force, timestamp)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
+	// Identity-stamped line for "who deleted this network" — the network's own
+	// audit log travels to the archive, so this server line is where the answer
+	// lives (symmetric with create's "created by", §15). DeleteNetwork already
+	// logged the archive path.
+	s.logger.Printf("network %q deleted by %s", netID, auditCallerDesc(r))
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "archived", "archived_to": archived})
 }
 
