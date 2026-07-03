@@ -56,7 +56,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
 | GET | `/networks/{n}/spec-instances` | Flat cross-scope inventory of every spec (network/zone/node), tagged with scope + scope_instance |
 | GET | `/networks/{n}/nodes` | List node spec names |
-| GET | `/networks/{n}/nodes/{name}` | Show node spec |
+| GET | `/networks/{n}/nodes/{name}` | Show node spec — ssh_user/ssh_pass are the **effective** login (resolved node > zone > network > platform > "admin") the device dials |
+| GET | `/networks/{n}/ssh-credentials` | Show the device SSH login **authored** at one scope — `?scope=zone&scope_instance=…`; ssh_pass masked (a `${secret:}` ref kept, plaintext → `***redacted***`) |
 | GET | `/networks/{n}/zones` | List zone names |
 | GET | `/networks/{n}/zones/{name}` | Show zone |
 | GET | `/networks/{n}/topology` | Full topology spec (devices, links, metadata) |
@@ -73,6 +74,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
 | POST | `/networks/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
 | POST | `/networks/{n}/update-service` | Replace service in place — full-replacement (also: update-ipvpn, update-macvpn, update-qos-policy, update-filter, update-prefix-list, update-route-policy, update-node, update-zone) |
+| POST | `/networks/{n}/set-ssh-credentials` | Set the device SSH login at a scope (`{scope, scope_instance, ssh_user, ssh_pass}`) — scalar scope-write, upsert; ssh_pass may be a `${secret:KEY}` ref |
+| POST | `/networks/{n}/clear-ssh-credentials` | Clear the device SSH login override at a scope (`{scope, scope_instance}`) — the reverse of set |
 | POST | `/networks/{n}/create-node` | Create node spec |
 | POST | `/networks/{n}/delete-node` | Delete node spec |
 | POST | `/networks/{n}/create-zone` | Create zone |
@@ -1655,6 +1658,24 @@ rule to the zone's filter override (which must already exist at that scope), not
 the network base. A node-scope write persists to `nodes/<name>.json` and never
 rewrites a secret-resolved value — the profile is round-tripped through disk so
 `${secret:…}` references stay intact.
+
+**Device SSH login — a scalar scope-write.** The device login (`ssh_user` /
+`ssh_pass`) uses the same `scope`/`scope_instance` surface but is a **singleton
+per scope**, not a named collection, so its verbs are `set-ssh-credentials`
+(upsert) and `clear-ssh-credentials` (the reverse), with `GET /ssh-credentials`
+reading the value authored at one scope (ssh_pass masked). It is registered in
+the schema as kind `SSHCredentials` (`Scoped`, no name identifier), so a UI
+renders the same scope dropdown + instance dropdown. **Two differences from the
+map kinds:** (1) **no network-floor invariant** — a zone/node login override
+needs no network base, because resolution is already total without one (it falls
+back to the platform `credentials`, then `"admin"`); so a scoped `set` never
+requires a network login first, and every `clear` is safe. (2) The **effective**
+login a device dials (after the node > zone > network merge) is read via
+`GET /nodes/{name}`, which resolves the hierarchy — distinct from
+`GET /ssh-credentials`, which returns only what is authored *at* the requested
+scope. `ssh_pass` never leaves the server in the clear: a `${secret:KEY}`
+reference is returned intact (a pointer, not a secret), a plaintext value is
+`***redacted***`.
 
 **Deleting a scope container.** A zone or node profile that still holds spec
 overrides — or that something else references — cannot be deleted out from under

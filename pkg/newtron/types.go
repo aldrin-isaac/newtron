@@ -737,6 +737,37 @@ type ScopeSelector struct {
 	ScopeInstance string `json:"scope_instance,omitempty" label:"Scope Instance" tooltip:"Zone or node name for a scoped override; empty for network scope"`
 }
 
+// SetSSHCredentialsRequest sets the device SSH login (ssh_user / ssh_pass) at a
+// scope — the scalar analog of the map-overridable spec writes. Same
+// ScopeSelector surface as create-service / create-ipvpn ("flat at the boundary,
+// hierarchical underneath", §7), but the login is one value per scope rather than
+// a named collection, so there is no name field. Either field may be empty,
+// meaning "inherit from the next scope up"; ssh_pass may be a ${secret:KEY}
+// reference (the masked input on the UI, secret:"true").
+//
+// Unlike the map overridables there is NO network-floor invariant: a zone/node
+// login override needs no network base because resolution falls back to the
+// platform default, then "admin".
+type SetSSHCredentialsRequest struct {
+	ScopeSelector
+	SSHUser string `json:"ssh_user,omitempty" label:"SSH User" tooltip:"Username for the SSH tunnel at this scope; empty inherits from the next scope up (node > zone > network), then the platform default, then \"admin\"."`
+	SSHPass string `json:"ssh_pass,omitempty" label:"SSH Password" tooltip:"Password, or a ${secret:KEY} reference, for the SSH tunnel at this scope; empty inherits from the next scope up." secret:"true"`
+}
+
+// SSHCredentialsView is the read of the login AUTHORED at one scope (GET
+// ssh-credentials), the mirror of SetSSHCredentialsRequest (§24). ssh_user is
+// returned verbatim. ssh_pass is masked: a ${secret:KEY} reference is returned
+// as-is (a pointer, not a secret — so the UI can show which key is referenced), a
+// plaintext value becomes "***redacted***" (a value is set but never echoed), and
+// an empty value stays empty (nothing authored at this scope). Scope /
+// ScopeInstance echo the request as read-only provenance.
+type SSHCredentialsView struct {
+	Scope         string `json:"scope"`
+	ScopeInstance string `json:"scope_instance"`
+	SSHUser       string `json:"ssh_user,omitempty"`
+	SSHPass       string `json:"ssh_pass,omitempty"`
+}
+
 // CreateServiceRequest is the request for creating a service definition.
 type CreateServiceRequest struct {
 	ScopeSelector

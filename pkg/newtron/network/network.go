@@ -1517,6 +1517,30 @@ func (n *Network) GetNodeSpec(name string) (*spec.NodeSpec, error) {
 	return n.loadNodeSpec(name)
 }
 
+// EffectiveNodeSpec returns a copy of the node spec with its SSH login resolved
+// through the full node > zone > network > platform > "admin" hierarchy — the
+// effective login the device dials — as opposed to GetNodeSpec, which returns the
+// authored spec (only its own ${secret:} refs resolved). The copy is shallow and
+// overwrites only the two SSH scalars, so the inherited values never bake into
+// the loader's authored-file cache. Consumers that connect to the device use this
+// so the login they see matches resolveNodeSpec's connect-time login (§24): the
+// node-spec read endpoint (newtlab's profile fetch, the CLI/API view) and
+// GetHostConnection. resolveEffectiveSSH owns the resolution rule (§27).
+func (n *Network) EffectiveNodeSpec(name string) (*spec.NodeSpec, error) {
+	nodeSpec, err := n.loadNodeSpec(name)
+	if err != nil {
+		return nil, err
+	}
+	user, pass, err := n.resolveEffectiveSSH(nodeSpec)
+	if err != nil {
+		return nil, fmt.Errorf("node spec %q: %w", name, err)
+	}
+	eff := *nodeSpec
+	eff.SSHUser = user
+	eff.SSHPass = pass
+	return &eff, nil
+}
+
 // ListNodeSpecs returns the names of all nodeSpec files in the nodes directory.
 func (n *Network) ListNodeSpecs() []string {
 	return n.loader.ListNodeSpecs()
@@ -2120,7 +2144,6 @@ func (n *Network) loadNodeSpec(name string) (*spec.NodeSpec, error) {
 	return nodeSpec, nil
 }
 
-// resolveNodeSpec applies inheritance to resolve final values.
 // firstNonEmpty returns the first non-empty string in vals ("" if all empty) —
 // the "lower scope wins" pick for hierarchical scalar resolution
 // (node > zone > network).
@@ -2133,10 +2156,59 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// resolveEffectiveSSH resolves a node's effective SSH login through the
+// node > zone > network hierarchy (lower scope wins, §7), then the platform's
+// baked-in Credentials for the password, then "admin" for the user. Each scope's
+// value may be a ${secret:KEY} reference (auth-design.md L0); secret.Resolve runs
+// once on the winning value.
+//
+// This is the single owner of the SSH-login resolution rule (§27). Both the
+// connect path (resolveNodeSpec, which feeds the Redis tunnel) and the node-spec
+// read view (EffectiveNodeSpec, which the API/CLI and newtlab's profile fetch
+// consume) call it, so the login a reader is shown is exactly the login the
+// device dials (§24 read/write symmetry). It is idempotent over its own output —
+// a value carrying no "${secret:" prefix resolves to itself — so running it on a
+// nodeSpec whose own secret refs loadNodeSpec already resolved is a no-op.
+func (n *Network) resolveEffectiveSSH(nodeSpec *spec.NodeSpec) (user, pass string, err error) {
+	var zoneUser, zonePass string
+	if zoneSpec, ok := n.loader.Zone(nodeSpec.Zone); ok {
+		zoneUser, zonePass = zoneSpec.SSHUser, zoneSpec.SSHPass
+	}
+	user, err = secret.Resolve(
+		firstNonEmpty(nodeSpec.SSHUser, zoneUser, n.spec.SSHUser), n.secretStore)
+	if err != nil {
+		return "", "", fmt.Errorf("ssh_user: %w", err)
+	}
+	pass, err = secret.Resolve(
+		firstNonEmpty(nodeSpec.SSHPass, zonePass, n.spec.SSHPass), n.secretStore)
+	if err != nil {
+		return "", "", fmt.Errorf("ssh_pass: %w", err)
+	}
+	// Platform fallback: a device's default password is a property of its
+	// image/hardware (PlatformSpec.Credentials), so a node authored with just a
+	// platform — e.g. one created through newtcon, which sets no ssh_pass — is
+	// still reachable without any scope having set a password. Mirrors newtlab's
+	// NodeConfig resolution so newtron and newtlab reach the same device with the
+	// same login.
+	if pass == "" {
+		if plat, ok := n.platforms[nodeSpec.Platform]; ok && plat.Credentials != nil {
+			p, perr := secret.Resolve(plat.Credentials.Pass, n.secretStore)
+			if perr != nil {
+				return "", "", fmt.Errorf("platform %q credentials pass: %w", nodeSpec.Platform, perr)
+			}
+			pass = p
+		}
+	}
+	if user == "" {
+		user = "admin"
+	}
+	return user, pass, nil
+}
+
 func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.ResolvedNodeSpec, error) {
-	// Validate zone exists (and keep the spec for zone-scope SSH resolution).
-	zoneSpec, ok := n.loader.Zone(nodeSpec.Zone)
-	if !ok {
+	// Validate zone exists — a node in an undeclared zone is a spec error.
+	// (Zone-scope SSH values are read by resolveEffectiveSSH below.)
+	if _, ok := n.loader.Zone(nodeSpec.Zone); !ok {
 		return nil, fmt.Errorf("zone '%s' not found", nodeSpec.Zone)
 	}
 
@@ -2167,39 +2239,12 @@ func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.R
 	resolved.BGPNeighbors, resolved.BGPNeighborASNs = n.deriveBGPNeighbors(nodeSpec, name)
 
 	// SSH credentials (for the Redis tunnel). SSH port is resolved from newtlab at
-	// Device.Connect time, not from the spec. The login resolves node > zone >
-	// network (lower scope wins, §7) — a login is usually uniform across a network,
-	// so an operator sets it once at network scope and only exceptions carry a
-	// zone/node override — then the platform's baked-in Credentials, then "admin"
-	// for the user. Each level may be a ${secret:KEY} reference (auth-design.md L0);
-	// secret.Resolve runs once on the winning value.
-	sshUser, err := secret.Resolve(
-		firstNonEmpty(nodeSpec.SSHUser, zoneSpec.SSHUser, n.spec.SSHUser), n.secretStore)
+	// Device.Connect time, not from the spec. The login resolution rule — node >
+	// zone > network > platform > "admin" — is owned by resolveEffectiveSSH (§27),
+	// shared with the node-spec read view (EffectiveNodeSpec) so both agree (§24).
+	sshUser, sshPass, err := n.resolveEffectiveSSH(nodeSpec)
 	if err != nil {
-		return nil, fmt.Errorf("node %q ssh_user: %w", name, err)
-	}
-	sshPass, err := secret.Resolve(
-		firstNonEmpty(nodeSpec.SSHPass, zoneSpec.SSHPass, n.spec.SSHPass), n.secretStore)
-	if err != nil {
-		return nil, fmt.Errorf("node %q ssh_pass: %w", name, err)
-	}
-	// Platform fallback: a device's default login is a property of its
-	// image/hardware (PlatformSpec.Credentials), so a node authored with just a
-	// platform — e.g. one created through newtcon, which sets no ssh_pass — is
-	// still reachable without any scope having set a password. Mirrors newtlab's
-	// NodeConfig resolution so newtron and newtlab reach the same device with the
-	// same login.
-	if sshPass == "" {
-		if plat, ok := n.platforms[nodeSpec.Platform]; ok && plat.Credentials != nil {
-			p, err := secret.Resolve(plat.Credentials.Pass, n.secretStore)
-			if err != nil {
-				return nil, fmt.Errorf("platform %q credentials pass: %w", nodeSpec.Platform, err)
-			}
-			sshPass = p
-		}
-	}
-	if sshUser == "" {
-		sshUser = "admin"
+		return nil, fmt.Errorf("node %q: %w", name, err)
 	}
 	resolved.SSHUser = sshUser
 	resolved.SSHPass = sshPass

@@ -250,6 +250,106 @@ func TestResolveNodeSpec_SSHCredentialsHierarchy(t *testing.T) {
 	}
 }
 
+// TestEffectiveNodeSpec_MatchesConnectLogin pins the §24 read/write symmetry the
+// node-spec read endpoint depends on: EffectiveNodeSpec (the login a reader — the
+// API/CLI view, newtlab's profile fetch — is shown) returns the SAME ssh_user /
+// ssh_pass that resolveNodeSpec (the connect path that dials the device) does,
+// across inherit / zone-override / node-override. Same fixture as
+// TestResolveNodeSpec_SSHCredentialsHierarchy, read through the other door.
+func TestEffectiveNodeSpec_MatchesConnectLogin(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("network.json", `{"version":"1.0","ssh_user":"netuser","ssh_pass":"netpass"}`)
+	mustWrite("zones/amer.json", `{}`)                                            // no override → inherits network
+	mustWrite("zones/emea.json", `{"ssh_user":"zoneuser","ssh_pass":"zonepass"}`) // zone override
+	mustWrite("nodes/inherit.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.1","zone":"amer","platform":"p1","underlay_asn":65001}`)
+	mustWrite("nodes/zoneovr.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"emea","platform":"p1","underlay_asn":65002}`)
+	mustWrite("nodes/nodeovr.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.3","zone":"amer","platform":"p1","ssh_user":"nodeuser","ssh_pass":"nodepass","underlay_asn":65003}`)
+	mustWrite("topology.json", `{"version":"1.0","nodes":{"inherit":{},"zoneovr":{},"nodeovr":{}},"links":[]}`)
+
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	cases := []struct{ node, user, pass string }{
+		{"inherit", "netuser", "netpass"},   // node + zone empty → network base
+		{"zoneovr", "zoneuser", "zonepass"}, // zone overrides network
+		{"nodeovr", "nodeuser", "nodepass"}, // node overrides zone + network
+	}
+	for _, c := range cases {
+		eff, err := n.EffectiveNodeSpec(c.node)
+		if err != nil {
+			t.Fatalf("EffectiveNodeSpec %s: %v", c.node, err)
+		}
+		if eff.SSHUser != c.user || eff.SSHPass != c.pass {
+			t.Errorf("%s: read view user=%q pass=%q, want %q / %q", c.node, eff.SSHUser, eff.SSHPass, c.user, c.pass)
+		}
+		// Symmetry: the read view must equal the connect view for the same node.
+		conn, err := n.resolveNodeSpecByName(c.node)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", c.node, err)
+		}
+		if eff.SSHUser != conn.SSHUser || eff.SSHPass != conn.SSHPass {
+			t.Errorf("%s: read view (%q/%q) != connect view (%q/%q) — §24 symmetry broken",
+				c.node, eff.SSHUser, eff.SSHPass, conn.SSHUser, conn.SSHPass)
+		}
+	}
+}
+
+// TestEffectiveNodeSpec_DoesNotBakeInheritedIntoAuthoredCache pins that reading
+// the effective (inherited) login does not mutate the loader's authored-file
+// cache: GetNodeSpec — the authored view — still reports the node's OWN empty
+// ssh_user after EffectiveNodeSpec has filled it from network scope. Guards the
+// shallow-copy in EffectiveNodeSpec against a regression to in-place mutation.
+func TestEffectiveNodeSpec_DoesNotBakeInheritedIntoAuthoredCache(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("network.json", `{"version":"1.0","ssh_user":"netuser","ssh_pass":"netpass"}`)
+	mustWrite("zones/amer.json", `{}`)
+	mustWrite("nodes/inherit.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.1","zone":"amer","platform":"p1","underlay_asn":65001}`)
+	mustWrite("topology.json", `{"version":"1.0","nodes":{"inherit":{}},"links":[]}`)
+
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	// Effective read fills ssh_user from network scope.
+	eff, err := n.EffectiveNodeSpec("inherit")
+	if err != nil {
+		t.Fatalf("EffectiveNodeSpec: %v", err)
+	}
+	if eff.SSHUser != "netuser" {
+		t.Fatalf("effective SSHUser = %q, want netuser (inherited)", eff.SSHUser)
+	}
+	// Authored view must still report the node's own (empty) ssh_user — the
+	// inherited value must not have leaked into the cached authored spec.
+	authored, err := n.GetNodeSpec("inherit")
+	if err != nil {
+		t.Fatalf("GetNodeSpec: %v", err)
+	}
+	if authored.SSHUser != "" {
+		t.Errorf("authored SSHUser = %q, want \"\" — inherited value leaked into the authored cache", authored.SSHUser)
+	}
+}
+
 // TestResolveNodeSpec_SSHNetworkSecretRef pins that a ${secret:KEY} reference at
 // network scope resolves against the per-network store and is inherited by a
 // node that sets no login of its own.

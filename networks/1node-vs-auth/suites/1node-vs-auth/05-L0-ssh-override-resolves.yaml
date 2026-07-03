@@ -1,0 +1,38 @@
+name: L0-ssh-override-resolves
+description: |
+  auth-design.md L0 / DESIGN_PRINCIPLES §7 (network→zone→node scope) + §24
+  (read view == connect view): the node-spec read endpoint reports the
+  EFFECTIVE SSH login the device dials, resolved through the
+  node > zone > network hierarchy — not the raw authored file.
+
+  The fixture is arranged so authored ≠ effective, which is what makes this
+  non-vacuous (an endpoint that merely echoed the node file would fail both
+  steps):
+    - network.json sets ssh_user "admin" and ssh_pass "network-base-pass"
+    - zones/amer.json overrides ssh_pass to "zone-base-pass"
+    - nodes/switch1.json sets NO ssh_user (inherits network) and overrides
+      ssh_pass with ${secret:switch1_ssh_pass}
+
+  So switch1's effective login is ssh_user "admin" (inherited from network
+  through a zone that does not override it) and ssh_pass = the resolved
+  secret (node override winning over both the zone and network bases).
+
+steps:
+  - name: ssh-user-inherits-network-scope
+    action: newtron
+    method: GET
+    url: /nodes/switch1
+    # switch1 authors no ssh_user; "admin" can only appear if the endpoint
+    # resolved it from network scope. An echo-the-file endpoint returns "".
+    expect:
+      jq: '.ssh_user == "admin"'
+
+  - name: ssh-pass-node-override-beats-zone-and-network
+    action: newtron
+    method: GET
+    url: /nodes/switch1
+    # The node ${secret:} override must win over the zone base ("zone-base-pass")
+    # and the network base ("network-base-pass"), and resolve to plaintext (no
+    # dangling "${secret:" reference).
+    expect:
+      jq: '.ssh_pass != "zone-base-pass" and .ssh_pass != "network-base-pass" and .ssh_pass != null and (.ssh_pass | startswith("${secret:") | not)'
