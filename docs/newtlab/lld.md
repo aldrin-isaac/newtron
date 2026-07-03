@@ -969,6 +969,7 @@ display. Defined in `state.go`.
 ```go
 type LabState struct {
     Name       string
+    NetworkID  string                  // newtron network the lab was deployed against; persisted so post-deploy ops (provision, resync) resolve the same network. Empty on pre-existing labs → falls back to the lab name (ResolveLabNetworkID)
     Created    time.Time
     Dir    string                  // legacy: populated by pre-#66 state.json files; new Lab() leaves this empty (spec data flows from newtron via HTTP per §27)
     SSHKeyPath string                  // lab Ed25519 private key path
@@ -1195,7 +1196,7 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 `Lab.Deploy(ctx)`:
 
 1. **Pre-checks:** `CollectAllPorts()` → 24 allocations (3 SSH + 3 console + 18 link). `ProbeAllPorts()` checks all free. Bridge stats no longer allocates a port — newtlink pushes to newtlab-server (#118).
-2. **State init:** `LabState{Name: "2node-ngdp", Dir: ..., Nodes: {}}`, 9 link state entries. `SaveState()`.
+2. **State init:** `LabState{Name: "2node-ngdp", NetworkID: "2node-ngdp", Dir: ..., Nodes: {}}` (NetworkID = the client's bound network, so provision reaches the same one), 9 link state entries. `SaveState()`.
 3. **Overlay disks:** `CreateOverlay(platform.VMImage, ~/.newtlab/labs/2node-ngdp/disks/switch1.qcow2)` for switch1, switch2, and hostvm-0 (3 VMs).
 4. **Bridges:** `WriteBridgeConfig()` → `bridge.json` with 9 links + `orchestrator_url` / `lab_name` / `worker_host` for newtlink push. `startBridgeProcess()` → `newtlink ~/.newtlab/labs/2node-ngdp/bridge.json`. Wait for ports 10000–10017. newtlink fires its first push to `/newtlab/v1/labs/2node-ngdp/bridges/local/stats` once workers are up.
 5. **Boot VMs:** `StartNode(switch1, stateDir, "")` → `QEMUCommand.Build()` → `qemu-system-x86_64 -m 8192 -smp 6 -cpu host -enable-kvm -drive file=.../switch1.qcow2,... -serial tcp::12006,server,nowait -netdev user,id=mgmt,hostfwd=tcp::13006-:22 -device e1000,... -netdev socket,id=eth1,connect=127.0.0.1:10000 ...`. Same for switch2 and hostvm-0.
@@ -1207,11 +1208,13 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 ### Phase 3 — Provision
 
 `Lab.Provision(ctx, parallel)` runs topology reconcile with semaphore-bounded
-concurrency. Shells out to `newtron <name> --network-id <id> --topology intent
-reconcile -x` (the lab's network id is forwarded via `reconcileArgs` so the
-subprocess reconciles the lab's own network, not the CLI default) rather than
-importing `pkg/newtron/network` — this keeps newtlab and newtron loosely coupled
-(newtlab only needs the `newtron` binary on PATH).
+concurrency. For each device it calls `l.newtronClient.Reconcile(name, "topology",
+…)` — newtron's HTTP reconcile, the single owner of "reconcile a device" (§27),
+the same method newtrun's provision step calls (#356). The client is
+network-scoped (built via `NewtronClientFor(networkID)`, the network id resolved
+by `ResolveLabNetworkID` — see Phase 2), so it reconciles the lab's own network
+and carries the caller's identity under `--enforce-authorization`. newtlab no
+longer spawns the `newtron` binary; it reaches newtron only over HTTP (§33).
 
 - Goroutine per device, bounded by `parallel` semaphore.
 - For each switch (host devices skipped): `exec.CommandContext(ctx, "newtron", name, "--topology", "intent", "reconcile", "-x")`.

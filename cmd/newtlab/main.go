@@ -141,13 +141,12 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Default the network ID to the lab name so concurrent labs get
-	// separate registration slots on newtron (issue #116). Operators can
-	// still pin a different name via --net-id.
-	effectiveNetID := netID
-	if effectiveNetID == "" {
-		effectiveNetID = name
-	}
+	// Resolve the newtron network id: an explicit --net-id wins; else the network
+	// the lab was deployed against (persisted in LabState); else the lab name, so
+	// concurrent labs get separate registration slots on newtron (issue #116).
+	// Single owner of this precedence (§27) — shared with the server's openLab —
+	// so a lab deployed under a distinct id also provisions against it.
+	effectiveNetID := newtlab.ResolveLabNetworkID(name, netID)
 	// Identity (per-user session cache / NEWTRON_BEARER) and TLS posture
 	// (NEWTRON_TLS_CERT/KEY/CA) both come from the single owner of the newtron
 	// CLI client build (§27) — one `newtron auth login` carries through every

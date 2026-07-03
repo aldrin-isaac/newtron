@@ -25,7 +25,15 @@ func NewTelemetryToken() (string, error) {
 
 // LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
-	Name       string                  `json:"name"`
+	Name string `json:"name"`
+	// NetworkID is the newtron network this lab was deployed against — persisted
+	// at Deploy so post-deploy operations (provision, resync) reach the SAME
+	// network the lab was built from, rather than re-deriving it from the lab
+	// name. The two are equal by the long-standing convention, but an operator can
+	// pin a distinct id (`newtlab deploy -N <id>`); persisting it makes the binding
+	// explicit and keeps provision correct when they diverge. Empty on a lab
+	// deployed before this field existed — resolution falls back to the lab name.
+	NetworkID string                  `json:"network_id,omitempty"`
 	Created    time.Time               `json:"created"`
 	Dir    string                  `json:"dir"`
 	SSHKeyPath string                  `json:"ssh_key_path,omitempty"` // path to lab Ed25519 private key

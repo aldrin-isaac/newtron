@@ -229,7 +229,12 @@ func (s *Server) openLab(ctx context.Context, name string) (*newtlab.Lab, error)
 	if s.cfg.NewtronClientFor == nil {
 		return nil, fmt.Errorf("newtlab-server has no newtron client configured; pass --newtron-server when starting")
 	}
-	client := s.cfg.NewtronClientFor(name)
+	// Reach the network the lab was deployed against (persisted in LabState),
+	// not a re-derivation from the lab name — the server has no -N override, so
+	// pass "" and let the resolver prefer state.NetworkID, falling back to the
+	// lab name for a not-yet-deployed or pre-existing lab (§27, closes #300's
+	// class of "provision targets the wrong network").
+	client := s.cfg.NewtronClientFor(newtlab.ResolveLabNetworkID(name, ""))
 	lab, err := newtlab.NewLab(ctx, client, name)
 	if err != nil {
 		return nil, fmt.Errorf("lab %q: %w", name, err)

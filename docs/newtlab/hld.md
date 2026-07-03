@@ -135,14 +135,13 @@ state directory tracks everything needed for destroy, stop/start, and status.
   bridge process. Each link gets one worker that bridges Ethernet frames
   between two TCP listeners. The bridge process starts before VMs (workers
   must be listening when QEMU tries to connect at boot).
-- **newtron** is invoked as a sibling binary during the optional
-  provisioning step. newtlab finds it adjacent to its own binary or on
-  PATH. For each switch, newtlab runs
-  `newtron <name> --network-id <id> --topology intent reconcile -x`
-  (topology-mode full reconcile), which replays topology.json steps and delivers
-  the resulting CONFIG_DB projection to the device. The lab's network id is
-  forwarded so the subprocess reconciles the lab's own network rather than the
-  CLI's default.
+- **newtron** is reached over its HTTP API during the optional provisioning
+  step (never as a subprocess, §33). For each switch, newtlab calls newtron's
+  reconcile — `l.newtronClient.Reconcile(device, "topology", …)`, a topology-mode
+  full reconcile — which replays topology.json steps and delivers the resulting
+  CONFIG_DB projection to the device. The client is network-scoped (bound to the
+  lab's network via `ResolveLabNetworkID`), so reconcile targets the lab's own
+  network rather than a default.
 - **State directory** (`~/.newtlab/labs/<name>/`) holds everything needed to
   manage the lab after deployment: PIDs, overlay disks, logs, bridge config,
   and `state.json`.
@@ -684,9 +683,9 @@ failure should not prevent the rest of the topology from deploying) and
 | **Patch** | Apply platform boot patches, write patched profiles | Fix platform quirks, then enable newtron to connect |
 | **Hosts** | Create network namespaces in coalesced VMs | Only runs when the topology includes virtual hosts |
 
-If `--provision` is passed, an additional provisioning phase shells out to
-the `newtron` binary for each switch device (parallel, with configurable
-concurrency), followed by a BGP soft-clear (see §10).
+If `--provision` is passed, an additional provisioning phase calls newtron's
+HTTP reconcile for each switch device (parallel, with configurable concurrency),
+followed by a BGP soft-clear (see §10).
 
 ### Overlay Disks
 
@@ -808,19 +807,23 @@ Profiles without `ssh_port` default to port 22 — backward compatible with
 profiles that were never deployed by newtlab. On destroy, newtlab restores
 the original `mgmt_ip` and removes the runtime fields.
 
-### Provisioning Shells Out
+### Provisioning Goes Through newtron's HTTP API
 
-When `--provision` is passed, newtlab invokes
-`newtron <name> --network-id <id> --topology intent reconcile -x` as a
-subprocess for each switch device. This is intentional:
+When `--provision` is passed, newtlab reconciles each switch device by calling
+newtron's HTTP reconcile — `l.newtronClient.Reconcile(device, "topology", …)`,
+the single owner of "reconcile a device" (§27), the same call newtrun's provision
+step makes. This keeps the engines cleanly separated:
 
-- **No library coupling.** newtlab depends on spec types for reading
-  topology files, but has no dependency on newtron's device operations,
-  CONFIG_DB logic, or network model.
-- **Independent versioning.** newtlab and newtron can be built and updated
-  independently. A newtron change never requires rebuilding newtlab.
-- **Binary resolution.** newtlab looks for the `newtron` binary adjacent to
-  its own binary first, then falls back to PATH.
+- **No library coupling.** newtlab depends on newtron's spec *types* for reading
+  topology, but reaches newtron's device operations, CONFIG_DB logic, and network
+  model only over HTTP — never by importing them or spawning the `newtron` binary
+  (§33).
+- **Network-scoped, identity-carrying.** The client is bound to the lab's network
+  (resolved by `ResolveLabNetworkID` — persisted `LabState.NetworkID`, else the
+  lab name) and carries the caller's identity, so reconcile targets the lab's own
+  network and works under `--enforce-authorization`.
+- **Independent versioning.** newtlab and newtron are built and deployed
+  independently; the HTTP contract is the seam.
 
 ### Post-Provision BGP Refresh
 
@@ -950,11 +953,11 @@ configuration) begins.
 
 ### Provisioning and the Parallel Race
 
-Because `--provision` was passed, newtlab invokes
-`newtron <name> --network-id <id> --topology intent reconcile -x` for each
-switch as a subprocess. newtron reads the patched profiles, connects via SSH tunnel,
-replays the topology.json steps to build the expected CONFIG_DB projection,
-and delivers it to the device. Both switches provision in parallel.
+Because `--provision` was passed, newtlab calls newtron's HTTP reconcile for
+each switch (network-scoped client, topology mode). newtron reads the patched
+profiles, connects via SSH tunnel, replays the topology.json steps to build the
+expected CONFIG_DB projection, and delivers it to the device. Both switches
+provision in parallel.
 
 **Non-obvious problem:** switch1 finishes provisioning and its BGP daemon
 tries to peer with switch2. But switch2 is still being provisioned — its
