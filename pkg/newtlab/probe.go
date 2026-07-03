@@ -228,7 +228,13 @@ func probePortLocal(port int) error {
 
 // findFreeLocalPort finds a free local TCP port starting from preferred,
 // skipping any ports in the avoid set. Searches up to 100 ports above preferred.
-func findFreeLocalPort(preferred int, avoid map[int]bool) (int, error) {
+//
+// It is a package var, not a plain func, so allocation-logic unit tests can
+// substitute a deterministic finder (no live net.Listen) and pin exact port
+// assignments — the real finder's result floats with whatever the host's port
+// table looks like (e.g. a running lab holding the base range), which is
+// correct behavior but makes it untestable against absolute values.
+var findFreeLocalPort = func(preferred int, avoid map[int]bool) (int, error) {
 	for port := preferred; port < preferred+100; port++ {
 		if avoid[port] {
 			continue

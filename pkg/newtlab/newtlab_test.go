@@ -224,7 +224,28 @@ func TestResolveNodeConfig_MgmtNIC(t *testing.T) {
 // Link Allocation Tests
 // ============================================================================
 
+// stubPortFinder makes findFreeLocalPort deterministic for the duration of a
+// test: it keeps the real "skip avoided ports" logic but drops the live
+// net.Listen probe, so allocation asserts exact ports regardless of what the
+// host's port table looks like (a running lab holding the base range would
+// otherwise shift every assignment). Restored via t.Cleanup.
+func stubPortFinder(t *testing.T) {
+	t.Helper()
+	real := findFreeLocalPort
+	t.Cleanup(func() { findFreeLocalPort = real })
+	findFreeLocalPort = func(preferred int, avoid map[int]bool) (int, error) {
+		for port := preferred; port < preferred+100; port++ {
+			if !avoid[port] {
+				return port, nil
+			}
+		}
+		return 0, fmt.Errorf("no free port found in range %d-%d", preferred, preferred+99)
+	}
+}
+
 func TestAllocateLinks(t *testing.T) {
+	stubPortFinder(t)
+
 	nodes := map[string]*NodeConfig{
 		"spine1": {
 			Name:  "spine1",
@@ -298,6 +319,7 @@ func TestAllocateLinks(t *testing.T) {
 }
 
 func TestAllocateLinks_PortSequence(t *testing.T) {
+	stubPortFinder(t)
 	nodes := map[string]*NodeConfig{
 		"a": {Name: "a", Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3}}, NICs: []NICConfig{{Index: 0, NetdevID: "mgmt"}}},
 		"b": {Name: "b", Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet1", NICIndex: 2}, {Name: "Ethernet2", NICIndex: 3}}, NICs: []NICConfig{{Index: 0, NetdevID: "mgmt"}}},
