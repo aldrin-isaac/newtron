@@ -495,3 +495,59 @@ rejects, the write path must reject too, from the same validator.
 write can target a variant no read can fetch, or a write can persist state a load
 would reject, you have created an asymmetry. Close it in the same change, not a
 follow-up.
+
+---
+
+## 25. Route Every Caller Through the Single Owner — IMPL+REVIEW
+
+The mechanical check for `DESIGN_PRINCIPLES.md §27` ("Single Owner"). §27 gives
+the rule — every data object *and every operation* has exactly one owner, and
+consumers call the owner's interface (a function within a program; the program's
+HTTP API across programs). This directive is how not to violate it while writing
+or fixing code — and it names the way the violation actually slips through:
+fixing one copy of a duplicated behavior and missing its twins.
+
+**Before writing code that performs a behavior** — invoke an operation, build a
+client, resolve an identity, parse a wire shape, connect to a device, construct a
+data object's entries — grep for an existing implementation of *that behavior*.
+Then:
+
+- **0 found:** you are establishing the owner. Put it where callers can reach it
+  (a shared helper or package), not inline where only this caller sees it.
+- **1 found:** route through it. Do not re-derive it locally because the owner's
+  interface is one field short — *widen the owner's interface.* A caller that
+  shells out to a binary, or copies a five-line client build, almost always does
+  so because the interface it holds omits the one method it needed.
+- **≥2 found:** that is *already* a §27 violation. Converge them to one owner and
+  route every caller through it in this change — never add a third.
+
+**Grep by behavior, not by symbol.** Twins rarely share a name (§13): a
+subprocess `exec("newtron … reconcile")` and an HTTP `client.Reconcile()` are one
+operation under two names; a private `wrapBearer` and a shared `BearerTransport`
+are one transport. A symbol grep finds neither twin. Search by what the code
+*does* — the operation verb, the exec target, the resource — across every engine
+and every caller, and list each site.
+
+**A bug in a duplicated behavior is fixed at the owner — never at the one instance
+in front of you.** Before fixing any behavior, ask: *"is this implemented once, or
+copied? Could this same bug exist in a twin?"* Grep by behavior. If it is copied,
+the fix is to **extract one owner and converge every caller, then fix once** — not
+to patch this copy and declare done. Patching a single instance leaves the twins
+carrying the identical bug. This is the failure this directive exists to stop: an
+identity-forwarding fix that landed in one exec site and missed the second; a
+raw-Bearer override that landed in one of five duplicated client builds.
+
+**Cross-engine operations go through the owner's API, never its binary.** Per
+§27's interface table, a program consuming another program's operation calls its
+HTTP API. An engine that spawns the other engine's CLI to *do* work — rather than
+to *test the CLI itself* — is a single-owner violation wearing a subprocess. The
+one legitimate spawn is a harness whose purpose is to exercise the CLI binary
+end-to-end; name that intent explicitly at the call site.
+
+**The test:** if two code paths accomplish the same thing through different code —
+a subprocess that reimplements an API call, a second copy of a client build, a
+re-derived identity resolution, a second writer of one table — that is a
+single-owner violation. Converge it in the same change, not a follow-up.
+Cross-references: §3 (don't create what already exists), §7 (second instance =
+stop), §13 (unify the name, then merge the paths), §24 (the sibling mechanical
+check, for §15).
