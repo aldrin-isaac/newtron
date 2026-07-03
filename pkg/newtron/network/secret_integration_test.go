@@ -160,9 +160,26 @@ func TestNetwork_SetSecret_CreatesStoreAndResolves(t *testing.T) {
 		t.Errorf("SSHPass = %q, want s3cr3t (the value just set)", resolved.SSHPass)
 	}
 
-	// DeleteSecret is the reverse (§15) — succeeds against the now-present store.
+	// ListSecrets (the §24 read) returns the key — never the value.
+	keys, err := n.ListSecrets()
+	if err != nil {
+		t.Fatalf("ListSecrets: %v", err)
+	}
+	if len(keys) != 1 || keys[0] != "switch1_ssh_pass" {
+		t.Errorf("ListSecrets = %v, want [switch1_ssh_pass]", keys)
+	}
+
+	// DeleteSecret is the reverse (§15) — succeeds against the now-present store,
+	// and the key is gone from the listing.
 	if err := n.DeleteSecret("switch1_ssh_pass"); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
+	}
+	keys, err = n.ListSecrets()
+	if err != nil {
+		t.Fatalf("ListSecrets after delete: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("ListSecrets after delete = %v, want empty", keys)
 	}
 }
 

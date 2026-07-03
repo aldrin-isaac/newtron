@@ -171,6 +171,7 @@ func TestAPICompleteness(t *testing.T) {
 			"GetAuthorization": true, // GET /networks/{netID}/authorization
 			"AddSuperUser":     true, // POST /networks/{netID}/super-users
 			"RemoveSuperUser":  true, // DELETE /networks/{netID}/super-users/{user}
+			"ListSecrets":      true, // GET /networks/{netID}/secrets (keys only)
 			"SetSecret":        true, // POST /networks/{netID}/secrets
 			"DeleteSecret":     true, // DELETE /networks/{netID}/secrets/{key}
 		},
@@ -340,6 +341,7 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateZone":            auth.PermSpecAuthor,
 			"AddSuperUser":          auth.PermSpecAuthor, // meta-authz: spec.author scoped to super_users
 			"RemoveSuperUser":       auth.PermSpecAuthor,
+			"ListSecrets":           auth.PermSpecAuthor, // read mirrors the write's gate
 			"SetSecret":             auth.PermSpecAuthor, // spec.author scoped to secrets
 			"DeleteSecret":          auth.PermSpecAuthor,
 			"DeleteZone":            auth.PermSpecAuthor,

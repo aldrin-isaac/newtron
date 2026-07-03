@@ -64,6 +64,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/authorization` | Read user_groups + permissions + super_users from network.json |
 | POST | `/networks/{n}/super-users` | Grant a user per-network super-user status (`{user}`) |
 | DELETE | `/networks/{n}/super-users/{user}` | Revoke a user's per-network super-user status |
+| GET | `/networks/{n}/secrets` | List secret-store **key names** (never values) |
 | POST | `/networks/{n}/secrets` | Write a secret-store value (`{key, value}`) that a `${secret:KEY}` reference resolves — write-only |
 | DELETE | `/networks/{n}/secrets/{key}` | Remove a secret-store value |
 | GET | `/networks/{n}/nodes/{node}/host-connection` | Get host SSH connection |
@@ -1159,6 +1160,18 @@ super-users** (set server-wide via `--super-users` / `$NEWTRON_SUPER_USERS`
 on `newt-server`) are not network state and cannot be added or removed
 here — they are configured at the process and audited at startup. See
 [auth-design.md §L3](auth-design.md).
+
+#### GET /newtron/v1/networks/{netID}/secrets
+
+Lists the **key names** in the network's secret store — the read that mirrors the
+POST (§24), so a UI can show which credentials are set (e.g. a "✓ set" indicator
+next to a `${secret:KEY}`-referencing field). **Values are never returned** by
+design; a secret's value only ever flows into the device at spec-resolution time,
+never back out through the API.
+
+**Response (200):** `{ "keys": ["switch1_ssh_pass", ...] }` — sorted, possibly
+empty (`[]` when the network has no store). Gated by the same `spec.author`
+scoped to `secrets` as the write.
 
 #### POST /newtron/v1/networks/{netID}/secrets
 

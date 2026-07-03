@@ -16,6 +16,20 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 )
 
+// ListSecrets returns the key names in the network's secret store — never the
+// values (Store.List's contract, so a listing can't leak secrets). The read that
+// mirrors SetSecret (§24): an operator or UI can see which credentials are set
+// (e.g. render a "✓ set" indicator) without exposing them. Gated by the same
+// spec.author/secrets permission as the write — the role that sets a credential
+// is the role that sees which exist.
+func (net *Network) ListSecrets(ctx context.Context) ([]string, error) {
+	if err := net.checkPermission(ctx, auth.PermSpecAuthor,
+		auth.NewContext().WithField("secrets")); err != nil {
+		return nil, err
+	}
+	return net.internal.ListSecrets()
+}
+
 // SetSecret writes key → value in the network's secret store, creating the
 // per-network secrets.json on first write. Gated by spec.author, scoped to the
 // `secrets` field so a service-architect role scoped `!secrets` cannot inject

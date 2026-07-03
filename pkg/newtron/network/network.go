@@ -156,14 +156,11 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 	// 0600 hygiene check use --secret-store=PATH (which routes
 	// through the strict NewFileStore).
 	if secretStore == nil {
-		candidatePath := filepath.Join(specDir, "secrets.json")
-		if _, statErr := os.Stat(candidatePath); statErr == nil {
-			fs, err := secret.NewFileStoreLooseMode(candidatePath)
-			if err != nil {
-				return nil, fmt.Errorf("opening spec-dir secret store %s: %w", candidatePath, err)
-			}
-			secretStore = fs
+		fs, err := openNetworkSecretStore(specDir, false /* discover only, don't create */)
+		if err != nil {
+			return nil, err
 		}
+		secretStore = fs
 	}
 
 	return &Network{
@@ -189,19 +186,51 @@ func (n *Network) SetSecret(key, value string) error {
 	n.secretMu.Lock()
 	defer n.secretMu.Unlock()
 	if n.secretStore == nil {
-		path := filepath.Join(n.specDir, "secrets.json")
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
-				return fmt.Errorf("creating secret store %s: %w", path, err)
-			}
-		}
-		fs, err := secret.NewFileStoreLooseMode(path)
+		fs, err := openNetworkSecretStore(n.specDir, true /* create if missing */)
 		if err != nil {
-			return fmt.Errorf("opening secret store %s: %w", path, err)
+			return err
 		}
 		n.secretStore = fs
 	}
 	return n.secretStore.Set(key, value)
+}
+
+// openNetworkSecretStore opens the per-network secret store at
+// <specDir>/secrets.json — the single owner of that path + opener (§27), shared
+// by NewNetwork's auto-discovery and SetSecret. NewFileStoreLooseMode
+// (auth-design.md L0) lets a git-checked-in secrets.json load at the umask
+// default without a chmod. create=false is the auto-discovery "opt-in by
+// presence" contract — a missing file yields (nil, nil); create=true creates it
+// empty at mode 0600 first.
+func openNetworkSecretStore(specDir string, create bool) (secret.Store, error) {
+	path := filepath.Join(specDir, "secrets.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if !create {
+			return nil, nil
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			return nil, fmt.Errorf("creating secret store %s: %w", path, err)
+		}
+	}
+	fs, err := secret.NewFileStoreLooseMode(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening secret store %s: %w", path, err)
+	}
+	return fs, nil
+}
+
+// ListSecrets returns the names of the keys in the network's secret store,
+// sorted — never the values (Store.List's contract, so a listing can't leak
+// secrets). Empty when the network has no store. This is the read that mirrors
+// SetSecret (§24): an operator or UI can see which credentials are set without
+// exposing them.
+func (n *Network) ListSecrets() ([]string, error) {
+	n.secretMu.Lock()
+	defer n.secretMu.Unlock()
+	if n.secretStore == nil {
+		return []string{}, nil
+	}
+	return n.secretStore.List()
 }
 
 // DeleteSecret removes key from the network's secret store. Errors when no store

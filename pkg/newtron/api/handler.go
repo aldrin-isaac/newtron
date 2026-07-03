@@ -89,6 +89,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/authorization", s.handleGetAuthorization)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/super-users", s.handleAddSuperUser)
 	mux.HandleFunc("DELETE /newtron/v1/networks/{netID}/super-users/{user}", s.handleRemoveSuperUser)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/secrets", s.handleListSecrets)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/secrets", s.handleSetSecret)
 	mux.HandleFunc("DELETE /newtron/v1/networks/{netID}/secrets/{key}", s.handleDeleteSecret)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/audit/events", s.handleAuditEvents)
