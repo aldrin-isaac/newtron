@@ -479,3 +479,109 @@ func TestSessionRecord_JSONShape(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveCLIBearer pins the single owner of "the Bearer a CLI presents"
+// (§27). The load-bearing case is NEWTRON_BEARER precedence: a forwarded
+// identity must win over — and never be blocked by — whatever the on-disk
+// cache holds, including an otherwise-fatal ambiguous cache. This is the
+// behavior that previously lived in cmd/newtron only; every CLI now shares it.
+func TestResolveCLIBearer(t *testing.T) {
+	const server = "http://127.0.0.1:18080"
+
+	saveTwo := func(t *testing.T) {
+		t.Helper()
+		for _, u := range []string{"alice", "bob"} {
+			rec := &SessionRecord{User: u, Server: server, Key: "key-" + u, ExpiresAt: time.Now().Add(time.Hour)}
+			if err := SaveSessionFor(rec); err != nil {
+				t.Fatalf("SaveSessionFor(%s): %v", u, err)
+			}
+		}
+	}
+
+	t.Run("NEWTRON_BEARER wins over the cache", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("NEWTRON_BEARER", "forwarded-key")
+		if err := SaveSessionFor(&SessionRecord{User: "alice", Server: server, Key: "cached-key", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatalf("SaveSessionFor: %v", err)
+		}
+		got, err := ResolveCLIBearer(server)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "forwarded-key" {
+			t.Errorf("got %q, want the env key to win over the cache", got)
+		}
+	})
+
+	t.Run("NEWTRON_BEARER short-circuits an ambiguous cache", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("NEWTRON_USER", "") // no selector → cache alone would be ambiguous
+		t.Setenv("NEWTRON_BEARER", "forwarded-key")
+		saveTwo(t)
+		got, err := ResolveCLIBearer(server)
+		if err != nil {
+			t.Fatalf("env key must short-circuit before the ambiguous-cache error, got: %v", err)
+		}
+		if got != "forwarded-key" {
+			t.Errorf("got %q, want forwarded-key", got)
+		}
+	})
+
+	t.Run("falls back to the cache when NEWTRON_BEARER is unset", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("NEWTRON_BEARER", "")
+		if err := SaveSessionFor(&SessionRecord{User: "alice", Server: server, Key: "cached-key", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatalf("SaveSessionFor: %v", err)
+		}
+		got, err := ResolveCLIBearer(server)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "cached-key" {
+			t.Errorf("got %q, want the cached key", got)
+		}
+	})
+
+	t.Run("no env, no cache → empty (no-auth path)", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("NEWTRON_BEARER", "")
+		got, err := ResolveCLIBearer(server)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("got %q, want empty string (WithBearer no-op)", got)
+		}
+	})
+
+	t.Run("no env, ambiguous cache, no selector → empty (no-op, not fatal)", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("NEWTRON_BEARER", "")
+		t.Setenv("NEWTRON_USER", "")
+		saveTwo(t)
+		// An ambiguous cache must NOT be fatal — the CLI presents no Bearer so
+		// the no-auth quickstart keeps working; an enforced server's 401 (or
+		// NEWTRON_USER) is how a multi-identity operator disambiguates.
+		got, err := ResolveCLIBearer(server)
+		if err != nil {
+			t.Fatalf("ambiguous cache must not error, got: %v", err)
+		}
+		if got != "" {
+			t.Errorf("got %q, want empty (no single identity to present)", got)
+		}
+	})
+
+	t.Run("NEWTRON_USER selects one identity out of several", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("NEWTRON_BEARER", "")
+		t.Setenv("NEWTRON_USER", "bob")
+		saveTwo(t)
+		got, err := ResolveCLIBearer(server)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "key-bob" {
+			t.Errorf("got %q, want key-bob (NEWTRON_USER disambiguates)", got)
+		}
+	})
+}

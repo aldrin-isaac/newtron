@@ -54,6 +54,32 @@ func New(baseURL, networkID string, opts ...Option) *Client {
 	return c
 }
 
+// NewCLIClient builds the newtron client a CLI presents to server for the given
+// network, resolving both identity and TLS posture from the environment:
+//
+//   - identity via ResolveCLIBearer(server) — NEWTRON_BEARER over the on-disk
+//     session cache (see its doc for the precedence and the no-auth path).
+//   - TLS via httputil.LoadClientTLSConfigFromEnv — the shared
+//     NEWTRON_TLS_CERT/KEY/CA env contract (auth-design.md L2a).
+//
+// WithTLS is applied before WithBearer so the Bearer round-tripper wraps the
+// TLS transport rather than being clobbered by it (see WithTLS).
+//
+// The single owner of "the newtron client a CLI builds" (DESIGN_PRINCIPLES
+// §27): cmd/newtron, cmd/newtlab, and cmd/newtrun all construct it here, so
+// identity + TLS wiring can never drift between them (ai-instructions §25).
+func NewCLIClient(server, networkID string) (*Client, error) {
+	bearer, err := ResolveCLIBearer(server)
+	if err != nil {
+		return nil, err
+	}
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("loading client TLS config from env: %w", err)
+	}
+	return New(server, networkID, WithTLS(tlsCfg), WithBearer(bearer)), nil
+}
+
 // Option configures a Client at construction.
 type Option func(*Client)
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -106,19 +105,12 @@ func newNewtronClient(networkID string) *newtronclient.Client {
 	if url == "" {
 		url = "http://127.0.0.1:18080"
 	}
-	// Honor the per-user session cache the same way the newtron
-	// CLI does — one login serves every command across all three
-	// CLIs. LoadCLISession resolves --user / NEWTRON_USER against
-	// the multi-user cache and returns nil on missing / expired /
-	// ambiguous cache; WithBearer("") is a no-op.
-	var bearerKey string
-	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), url); err == nil && rec != nil {
-		bearerKey = rec.Key
-	}
-	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	// Identity + TLS come from the single owner of the newtron CLI client build
+	// (§27) — one login serves every command across all three CLIs.
+	c, err := newtronclient.NewCLIClient(url, networkID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	return newtronclient.New(url, networkID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
+	return c
 }

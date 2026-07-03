@@ -247,16 +247,16 @@ var ErrAmbiguousSession = errors.New("multiple cached sessions; specify --user o
 // LoadCLISession resolves "the session the CLI should use" against
 // the multi-user cache. Resolution order:
 //
-//   1. user != "" — caller passed --user X explicitly. Load that
-//      user's session for server (or any server if server == "").
-//   2. exactly one session cached — unambiguous default. Return it
-//      whether server matches or not, because a single-user
-//      operator's "the cached session" is unambiguous regardless
-//      of which CLI flag spelled the server URL.
-//   3. multiple sessions cached — ErrAmbiguousSession; caller
-//      surfaces the hint listing cached users.
-//   4. zero sessions cached — (nil, nil); caller proceeds with no
-//      Bearer (the no-auth fallback for unauth-enforced servers).
+//  1. user != "" — caller passed --user X explicitly. Load that
+//     user's session for server (or any server if server == "").
+//  2. exactly one session cached — unambiguous default. Return it
+//     whether server matches or not, because a single-user
+//     operator's "the cached session" is unambiguous regardless
+//     of which CLI flag spelled the server URL.
+//  3. multiple sessions cached — ErrAmbiguousSession; caller
+//     surfaces the hint listing cached users.
+//  4. zero sessions cached — (nil, nil); caller proceeds with no
+//     Bearer (the no-auth fallback for unauth-enforced servers).
 //
 // server is used as a tiebreaker for the multi-cached case: if
 // user is empty AND multiple cached but all share the named
@@ -298,6 +298,58 @@ func LoadCLISession(user, server string) (*SessionRecord, error) {
 	}
 	return nil, fmt.Errorf("%w: cached sessions: %s",
 		ErrAmbiguousSession, strings.Join(users, ", "))
+}
+
+// ResolveCLIBearer resolves the Bearer key a CLI should present on outbound
+// requests to a newtron-family server (newtron-server / newtlab-server /
+// newtrun-server, all sharing the L2c session model). Resolution order:
+//
+//  1. NEWTRON_BEARER — a raw session key in the environment. The channel for a
+//     caller that already holds a Bearer and must not depend on the on-disk
+//     cache — notably newtrun's `newtron-cli` action, which forwards the run's
+//     operator / `as:` identity this way (the same identity it forwards on its
+//     HTTP calls). Passed via env, never argv, so the key never appears in
+//     ps-visible output. It takes precedence so a forwarded identity is never
+//     shadowed by whatever the on-disk cache happens to hold.
+//  2. the on-disk session cache, via LoadCLISession(NEWTRON_USER, server) — the
+//     credential a prior `newtron auth login` stored, resolved against
+//     NEWTRON_USER per the multi-user cache contract.
+//
+// Returns "" (nil error) when no identity can be resolved — WithBearer("") is a
+// no-op, so the unenforced no-auth quickstart path (#184) keeps working. Two
+// cases yield the empty no-op:
+//
+//   - zero sessions cached (the operator never logged in), and
+//   - an ambiguous cache: multiple valid sessions with no NEWTRON_USER to
+//     choose among them. This is deliberately NOT a hard error — the CLI cannot
+//     auto-pick an identity, so it presents none. An unenforced server proceeds;
+//     an enforced one returns 401/403 and the operator sets NEWTRON_USER (or
+//     NEWTRON_BEARER). Treating it as fatal would break the quickstart for any
+//     operator carrying several stale sessions in ~/.newtron/sessions.
+//
+// A genuinely broken cache — a NEWTRON_USER-selected file with insecure
+// permissions or corrupt JSON — surfaces as a non-nil error so the operator
+// fixes it rather than silently running with a degraded credential surface.
+//
+// This is the single owner of "the Bearer a CLI presents" (DESIGN_PRINCIPLES
+// §27): every in-repo CLI that builds a newtron / newtlab / newtrun client
+// resolves its identity here, so the NEWTRON_BEARER override can never again
+// reach some CLIs but not others (ai-instructions §25).
+func ResolveCLIBearer(server string) (string, error) {
+	if key := os.Getenv("NEWTRON_BEARER"); key != "" {
+		return key, nil
+	}
+	rec, err := LoadCLISession(os.Getenv("NEWTRON_USER"), server)
+	if errors.Is(err, ErrAmbiguousSession) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if rec == nil {
+		return "", nil
+	}
+	return rec.Key, nil
 }
 
 // normalizeServerHost reduces a server URL to its host[:port] form

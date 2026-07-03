@@ -37,7 +37,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
-	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
@@ -204,38 +203,15 @@ func (app *App) initClient() error {
 		app.networkID = app.settings.GetNetworkID()
 	}
 
-	// When a valid session is cached at ~/.newtron/sessions/<user>@<host>.json
-	// (mode 0600), attach its key as Authorization: Bearer on every outbound
-	// call. An expired or missing cache is silently ignored — the CLI proceeds
-	// without auth and the server's 401/403 tells the operator whether the call
-	// needed identity. A malformed cache (bad JSON, bad permissions) is a hard
-	// error so the operator knows to chmod or re-login rather than silently
-	// running with a degraded credential surface.
-	// NEWTRON_BEARER (a raw session key) takes precedence over the session-file
-	// cache. It's the channel for a caller that already holds a Bearer and must
-	// not depend on ~/.newtron/sessions/ — notably newtrun's `newtron-cli`
-	// action, which forwards the run's operator / `as:` credential this way (the
-	// same identity it forwards on its HTTP calls). Passed via env, not a flag,
-	// so the key never appears in ps-visible argv. Absent → fall back to the
-	// cached session as before.
-	var bearerKey string
-	if key := os.Getenv("NEWTRON_BEARER"); key != "" {
-		bearerKey = key
-	} else if rec, err := client.LoadCLISession(os.Getenv("NEWTRON_USER"), app.serverURL); err != nil {
-		return fmt.Errorf("loading cached session: %w", err)
-	} else if rec != nil {
-		bearerKey = rec.Key
-	}
-	// auth-design.md L2a: NEWTRON_TLS_CERT/KEY/CA in the operator's env
-	// configure the client's TLS posture automatically. Unset → plain HTTP
-	// (pre-L2a default); set → trust the server cert against $NEWTRON_TLS_CA
-	// and (if cert+key also set) present them for mTLS. Same env drives
-	// cmd/newt-server when running locally.
-	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	// Identity (NEWTRON_BEARER over the ~/.newtron/sessions cache) and TLS
+	// posture (NEWTRON_TLS_CERT/KEY/CA) are both resolved from the environment
+	// by the single owner of the newtron CLI client build (§27) — see
+	// client.NewCLIClient / ResolveCLIBearer for the precedence and no-auth path.
+	c, err := client.NewCLIClient(app.serverURL, app.networkID)
 	if err != nil {
-		return fmt.Errorf("loading client TLS config from env: %w", err)
+		return err
 	}
-	app.client = client.New(app.serverURL, app.networkID, client.WithBearer(bearerKey), client.WithTLS(tlsCfg))
+	app.client = c
 	return nil
 }
 
