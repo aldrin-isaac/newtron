@@ -106,16 +106,11 @@ func WithBearer(key string) Option {
 	}
 }
 
-// ServerError is returned by every client method when the server returned
-// an error envelope. Wraps the HTTP status and the server's error message.
-type ServerError struct {
-	StatusCode int
-	Message    string
-}
-
-func (e *ServerError) Error() string {
-	return fmt.Sprintf("newtrun-server returned %d: %s", e.StatusCode, e.Message)
-}
+// ServerError is returned by every client method when the server returned an
+// error envelope or a non-2xx status. It aliases the shared httputil.ServerError
+// (§27) so a caller can errors.As the same shape across the newtron / newtlab /
+// newtrun clients.
+type ServerError = httputil.ServerError
 
 // Health pings the server. Used by the CLI to produce a clear error when
 // the server isn't running.
@@ -345,40 +340,17 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		return readServerError(resp)
-	}
-	if out == nil {
-		return nil
-	}
-	var envelope httputil.APIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return fmt.Errorf("decoding response: %w", err)
-	}
-	if envelope.Data == nil {
-		return nil
-	}
-	// Re-marshal Data then decode into out — clean way to translate the
-	// envelope's any value into the caller's typed target without a second
-	// HTTP read.
-	buf, err := json.Marshal(envelope.Data)
-	if err != nil {
-		return fmt.Errorf("re-encoding response data: %w", err)
-	}
-	if err := json.Unmarshal(buf, out); err != nil {
-		return fmt.Errorf("decoding response data into target type: %w", err)
-	}
-	return nil
+	// Envelope unwrap + typed decode + non-2xx→*ServerError are the shared
+	// owner in httputil (§27); this method only binds the server label.
+	return httputil.DecodeAPIResponse(resp, out, "newtrun-server")
 }
 
+// readServerError builds a *ServerError from a response the caller already knows
+// is non-2xx (putRaw / getRaw, whose success bodies aren't JSON envelopes).
+// Routes through the shared kernel so the "envelope.Error else status" message
+// logic lives in one place (§27).
 func readServerError(resp *http.Response) error {
-	var envelope httputil.APIResponse
-	_ = json.NewDecoder(resp.Body).Decode(&envelope)
-	msg := envelope.Error
-	if msg == "" {
-		msg = resp.Status
-	}
-	return &ServerError{StatusCode: resp.StatusCode, Message: msg}
+	return httputil.DecodeAPIResponse(resp, nil, "newtrun-server")
 }
 
 // errorsAs avoids importing errors in this file only for the As call.
