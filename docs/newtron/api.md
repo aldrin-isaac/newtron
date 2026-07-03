@@ -1207,7 +1207,8 @@ credentials.
 
 Removes a key from the network's secret store (the reverse of the POST). Same
 `spec.author` gate. **Response (200):** `{"status": "deleted", "key": "<name>"}`.
-Errors 409/500 when no store is configured for the network (nothing to delete).
+Idempotent — deleting a key that isn't present, or from a network with no store,
+is a 200 no-op (matching the `super-users` DELETE).
 
 ### Audit log
 
