@@ -65,6 +65,14 @@ steps:
     expect:
       jq: '.kinds | map(.kind) | contains(["PrefixListEntry"])'
 
+  # SSHCredentials — the scalar scope-write kind (the device SSH login,
+  # network/zone/node), registered alongside the map overridables.
+  - name: schema-list-has-SSHCredentials
+    action: newtron
+    url: /schema
+    expect:
+      jq: '.kinds | map(.kind) | contains(["SSHCredentials"])'
+
   - name: schema-list-is-alphabetical
     action: newtron
     url: /schema
@@ -375,7 +383,8 @@ steps:
       # a hard count against the known registry size — if a kind is
       # added or removed intentionally, the author updates both this
       # number and the corresponding /schema-list-has-X step above.
-      jq: '(.schemas | length) == 18'
+      # 19 since #382 added SSHCredentials (the scalar scope-write kind).
+      jq: '(.schemas | length) == 19'
 
   # ====================================================================
   # GET /schema/ServiceSpec — required_when on ipvpn / macvpn (PR #243).
