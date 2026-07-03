@@ -493,9 +493,9 @@ running server essentially every on-disk network is already registered.
 - **select** — *not an API call.* A client chooses which registered network its
   requests target (`/networks/{netID}/...`). It registers nothing, unregisters
   nothing, and does not affect other callers. Concurrent callers on one network is
-  a normal, supported state (reads are concurrent; writes serialize through the
-  per-network [write-control](#write-control-per-network-reservation) reservation
-  when enforced).
+  a normal, supported state (reads run concurrently; a per-network
+  [write-control](#write-control-per-network-reservation) reservation can gate
+  writes when `--enforce-write-control` is set).
 - **unregister** (`POST .../unregister`) — stop serving a network but keep its
   files. A deliberate "take offline temporarily" act (maintenance, freeing
   connections); reversible via `POST /networks` or a restart. It is **not** a
@@ -503,13 +503,12 @@ running server essentially every on-disk network is already registered.
 - **delete** (`POST .../delete`) — soft-delete: **tear down serving (unregister,
   if registered) and archive the spec dir**, atomically, in one call. Delete owns
   its teardown — the caller does not unregister first. Global super-user only.
-  Guards run before any teardown, so a guard failure leaves the network fully in
-  service. See [POST .../delete](#post-newtronv1networksnetiddelete).
+  See [POST .../delete](#post-newtronv1networksnetiddelete).
 
 There is **no active per-network monitor** today: registration makes a network
-addressable and watches its *spec files* for reload (with `--spec-watch`); it does
-not poll devices. Device connections are opened lazily on first request and torn
-down after idle. Drift, health, and reconcile are all on-demand.
+addressable and watches its *spec files* for reload (with `--spec-watch`) — it
+does not poll devices. Drift, health, and reconcile are **on-demand**: the client
+calls the endpoint; the server never pushes.
 
 ### Schema metadata endpoints
 
