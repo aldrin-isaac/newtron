@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -150,6 +151,38 @@ func TestAuthorizeRegistry(t *testing.T) {
 	t.Cleanup(func() { _ = off.Stop(context.Background()) })
 	if err := off.authorizeRegistry(withCaller("mallory"), "network.delete"); err != nil {
 		t.Errorf("enforcement off should allow: %v", err)
+	}
+}
+
+// TestHandleCreateNetwork_GatesOnlyGenuineCreation pins that the create gate
+// fires ONLY when scaffolding a brand-new network — registering an existing
+// on-disk network (the serving layer, the path bin/newtlab deploy takes) stays
+// open to a non-super operator. Guards the regression where gating all of
+// POST /networks 403'd every non-super deploy.
+func TestHandleCreateNetwork_GatesOnlyGenuineCreation(t *testing.T) {
+	base := t.TempDir()
+	s := NewServer(Config{
+		AuditCallerHeader:    "X-Newtron-Caller",
+		EnforceAuthorization: true,
+		GlobalSuperUsers:     []string{"ron"},
+		NetworksBase:         base,
+	})
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	// (1) Non-super scaffolding a brand-new network → 403.
+	if w := postAs(t, s, "mallory", "/newtron/v1/networks", map[string]string{"id": "brandnew"}); w.Code != http.StatusForbidden {
+		t.Errorf("non-super create-new = %d, want 403", w.Code)
+	}
+
+	// (2) Non-super registering an EXISTING on-disk network → allowed (serving layer).
+	scaffoldNetworkDir(t, base, "existing")
+	if w := postAs(t, s, "mallory", "/newtron/v1/networks", map[string]string{"id": "existing"}); w.Code == http.StatusForbidden {
+		t.Errorf("non-super register-existing = 403, want allowed; body=%s", w.Body.String())
+	}
+
+	// (3) Global super-user CAN scaffold a new network.
+	if w := postAs(t, s, "ron", "/newtron/v1/networks", map[string]string{"id": "supernet"}); w.Code == http.StatusForbidden {
+		t.Errorf("super-user create-new = 403, want created; body=%s", w.Body.String())
 	}
 }
 

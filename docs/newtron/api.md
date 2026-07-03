@@ -749,14 +749,18 @@ learns the path the server picked.
 }
 ```
 
-Creating a network is a **registry-level act**, gated at the **global super-user**
-set (server `--super-users`) under `--enforce-authorization` — symmetric with
-`POST .../delete`. The reserved name `archives` (the soft-delete store) is
-rejected as an `id`.
+**Creating a NEW network** (scaffolding a spec dir that doesn't exist yet) is a
+registry-level act gated at the **global super-user** set (server `--super-users`)
+under `--enforce-authorization` — symmetric with `POST .../delete`.
+**Registering an existing** on-disk network — the idempotent 200 case, and the
+201 "disk slot has valid specs" case — is the *serving* layer, not creation, and
+is **ungated** (the same thing unauthenticated auto-discovery does at boot, and
+the path `bin/newtlab deploy` takes for an already-present network). The reserved
+name `archives` (the soft-delete store) is rejected as an `id`.
 
 **Status codes:** 201 created, 200 already exists, 400 missing/malformed/reserved
-`id`, 403 not a global super-user, 500 server has no `--networks-base` configured
-/ spec load error.
+`id`, 403 not a global super-user (only when scaffolding a new network), 500
+server has no `--networks-base` configured / spec load error.
 
 **Examples:**
 
