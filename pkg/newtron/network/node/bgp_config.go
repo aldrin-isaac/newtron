@@ -57,7 +57,7 @@ func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts 
 
 	entries = append(entries, sonic.Entry{
 		Table:  "BGP_NEIGHBOR",
-		Key:    fmt.Sprintf("%s|%s", vrf, neighborIP),
+		Key:    BGPNeighborKey(vrf, neighborIP),
 		Fields: fields,
 	})
 
@@ -70,11 +70,7 @@ func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts 
 		if opts.NextHopSelf {
 			afFields["nhself"] = "true"
 		}
-		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("%s|%s|ipv4_unicast", vrf, neighborIP),
-			Fields: afFields,
-		})
+		entries = append(entries, createBgpNeighborAFConfig(vrf, neighborIP, "ipv4_unicast", afFields))
 	}
 
 	// Activate IPv6 unicast
@@ -86,11 +82,7 @@ func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts 
 		if opts.NextHopSelfIPv6 {
 			afFields["nhself"] = "true"
 		}
-		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("%s|%s|ipv6_unicast", vrf, neighborIP),
-			Fields: afFields,
-		})
+		entries = append(entries, createBgpNeighborAFConfig(vrf, neighborIP, "ipv6_unicast", afFields))
 	}
 
 	// Activate L2VPN EVPN
@@ -102,11 +94,7 @@ func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts 
 		if opts.RRClientEVPN {
 			evpnFields["rrclient"] = "true"
 		}
-		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("%s|%s|l2vpn_evpn", vrf, neighborIP),
-			Fields: evpnFields,
-		})
+		entries = append(entries, createBgpNeighborAFConfig(vrf, neighborIP, "l2vpn_evpn", evpnFields))
 	}
 
 	return entries
@@ -132,10 +120,16 @@ func DeleteBGPNeighborConfig(vrf, neighborIP string) []sonic.Entry {
 	// Remove neighbor entry
 	entries = append(entries, sonic.Entry{
 		Table: "BGP_NEIGHBOR",
-		Key:   fmt.Sprintf("%s|%s", vrf, neighborIP),
+		Key:   BGPNeighborKey(vrf, neighborIP),
 	})
 
 	return entries
+}
+
+// BGPNeighborKey returns the CONFIG_DB key for a BGP_NEIGHBOR entry.
+// Format: vrf|neighborIP (e.g., "default|10.0.0.1").
+func BGPNeighborKey(vrf, neighborIP string) string {
+	return fmt.Sprintf("%s|%s", vrf, neighborIP)
 }
 
 // CreateBGPGlobalsConfig returns sonic.Entry for BGP_GLOBALS.

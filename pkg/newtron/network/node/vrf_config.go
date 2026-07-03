@@ -69,7 +69,7 @@ func bindIpvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, 
 	for _, rt := range ipvpnDef.RouteTargets {
 		entries = append(entries, sonic.Entry{
 			Table:  "BGP_GLOBALS_EVPN_RT",
-			Key:    fmt.Sprintf("%s|L2VPN_EVPN|%s", vrfName, rt),
+			Key:    bgpGlobalsEvpnRTKey(vrfName, rt),
 			Fields: map[string]string{"route-target-type": "both"},
 		})
 	}
@@ -154,11 +154,19 @@ func unbindIpvpnConfig(vrfName string, routeTargets []string) []sonic.Entry {
 	for _, rt := range routeTargets {
 		entries = append(entries, sonic.Entry{
 			Table: "BGP_GLOBALS_EVPN_RT",
-			Key:   fmt.Sprintf("%s|L2VPN_EVPN|%s", vrfName, rt),
+			Key:   bgpGlobalsEvpnRTKey(vrfName, rt),
 		})
 	}
 
 	return entries
+}
+
+// bgpGlobalsEvpnRTKey returns the CONFIG_DB key for a BGP_GLOBALS_EVPN_RT entry
+// — the table frrcfgd's bgp_globals_evpn_rt_handler watches for VRF route
+// targets. Format: {vrf}|L2VPN_EVPN|{rt} (uppercase AF segment). One owner so
+// the forward (bind) and reverse (unbind) paths can never drift apart.
+func bgpGlobalsEvpnRTKey(vrf, rt string) string {
+	return fmt.Sprintf("%s|L2VPN_EVPN|%s", vrf, rt)
 }
 
 // destroyVrfConfig returns all delete entries for fully removing a VRF:
