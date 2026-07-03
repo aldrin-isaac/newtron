@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"sync"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
@@ -92,6 +93,12 @@ type Network struct {
 	// behavior exactly.
 	secretStore secret.Store
 
+	// specDir is this network's spec directory (where secrets.json lives).
+	// Retained so SetSecret can create the per-network store on first write.
+	specDir string
+	// secretMu guards lazy creation of the per-network secret store in SetSecret.
+	secretMu sync.Mutex
+
 	// Loader for loading nodes (already initialized with Load())
 	loader *spec.Loader
 
@@ -166,9 +173,46 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 		topologyName: topologyName,
 		portResolver: pr,
 		secretStore:  secretStore,
+		specDir:      specDir,
 		loader:       loader,
 		devices:      make(map[string]*node.Node),
 	}, nil
+}
+
+// SetSecret writes key → value in the network's secret store — the backing
+// value a spec field references via ${secret:KEY}. When the network has no store
+// yet (no --secret-store and no secrets.json), it creates the per-network store
+// at <specDir>/secrets.json (mode 0600) and adopts it, so a later ${secret:KEY}
+// resolves in this live network without a reload. The value is never read back
+// through the API. FileStore.Set persists atomically (temp-rename).
+func (n *Network) SetSecret(key, value string) error {
+	n.secretMu.Lock()
+	defer n.secretMu.Unlock()
+	if n.secretStore == nil {
+		path := filepath.Join(n.specDir, "secrets.json")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+				return fmt.Errorf("creating secret store %s: %w", path, err)
+			}
+		}
+		fs, err := secret.NewFileStoreLooseMode(path)
+		if err != nil {
+			return fmt.Errorf("opening secret store %s: %w", path, err)
+		}
+		n.secretStore = fs
+	}
+	return n.secretStore.Set(key, value)
+}
+
+// DeleteSecret removes key from the network's secret store. Errors when no store
+// is configured (nothing to delete from) — the reverse of SetSecret (§15).
+func (n *Network) DeleteSecret(key string) error {
+	n.secretMu.Lock()
+	defer n.secretMu.Unlock()
+	if n.secretStore == nil {
+		return fmt.Errorf("no secret store for this network (nothing to delete)")
+	}
+	return n.secretStore.Delete(key)
 }
 
 // ResolvePlatformSecrets walks every PlatformSpec.Credentials in
