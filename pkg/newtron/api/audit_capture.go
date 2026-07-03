@@ -83,6 +83,10 @@ var redactSensitiveKeys = map[string]bool{
 	"secret":      true,
 	"token":       true,
 	"private_key": true,
+	// The secret-store write endpoint (POST .../secrets) body is {key, value};
+	// `value` carries the credential. No other audited request body uses a bare
+	// `value` field, so redacting it here is safe.
+	"value": true,
 }
 
 // redactedPlaceholder replaces a redacted secret value in the recorded body.

@@ -171,6 +171,8 @@ func TestAPICompleteness(t *testing.T) {
 			"GetAuthorization": true, // GET /networks/{netID}/authorization
 			"AddSuperUser":     true, // POST /networks/{netID}/super-users
 			"RemoveSuperUser":  true, // DELETE /networks/{netID}/super-users/{user}
+			"SetSecret":        true, // POST /networks/{netID}/secrets
+			"DeleteSecret":     true, // DELETE /networks/{netID}/secrets/{key}
 		},
 		"Node": {
 			// Lifecycle (exposed via connectAndExecute/connectAndRead)
@@ -338,6 +340,8 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateZone":            auth.PermSpecAuthor,
 			"AddSuperUser":          auth.PermSpecAuthor, // meta-authz: spec.author scoped to super_users
 			"RemoveSuperUser":       auth.PermSpecAuthor,
+			"SetSecret":             auth.PermSpecAuthor, // spec.author scoped to secrets
+			"DeleteSecret":          auth.PermSpecAuthor,
 			"DeleteZone":            auth.PermSpecAuthor,
 			"UpdateService":         auth.PermSpecAuthor,
 			"UpdateIPVPN":           auth.PermSpecAuthor,

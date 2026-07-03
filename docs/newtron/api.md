@@ -64,6 +64,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/authorization` | Read user_groups + permissions + super_users from network.json |
 | POST | `/networks/{n}/super-users` | Grant a user per-network super-user status (`{user}`) |
 | DELETE | `/networks/{n}/super-users/{user}` | Revoke a user's per-network super-user status |
+| POST | `/networks/{n}/secrets` | Write a secret-store value (`{key, value}`) that a `${secret:KEY}` reference resolves — write-only |
+| DELETE | `/networks/{n}/secrets/{key}` | Remove a secret-store value |
 | GET | `/networks/{n}/nodes/{node}/host-connection` | Get host SSH connection |
 | GET | `/networks/{n}/features` | List features (also: `/{name}/dependencies`, `/{name}/unsupported-due-to`) |
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
@@ -1157,6 +1159,42 @@ super-users** (set server-wide via `--super-users` / `$NEWTRON_SUPER_USERS`
 on `newt-server`) are not network state and cannot be added or removed
 here — they are configured at the process and audited at startup. See
 [auth-design.md §L3](auth-design.md).
+
+#### POST /newtron/v1/networks/{netID}/secrets
+
+Writes a value into the network's **secret store** — the value a spec field
+references via `${secret:KEY}` (auth-design.md §L0). This is the API/UI half of
+the secret-store design: an operator populates a credential (e.g. a node's
+`ssh_pass`) through the API instead of hand-editing `secrets.json`. Schema
+metadata marks such fields with `"secret": true` (see [§ schema metadata](#3-schema-metadata))
+so a UI renders a masked input and submits the value here, then references it
+from the spec field as `${secret:<key>}`.
+
+When the network has no store yet (no `--secret-store` and no `secrets.json`),
+the first write **creates** `secrets.json` (mode 0600) in the network's spec
+directory and adopts it, so the referenced value resolves in the live network
+without a reload.
+
+**Body:** `{ "key": "<name>", "value": "<secret>" }` (both required).
+
+**Response (200):** `{"status": "set", "key": "<name>"}` — the key only; the
+value is **never** echoed. There is deliberately **no GET** that returns a
+secret's value: the store is write-only through the API. The `value` is redacted
+in the audit log.
+
+**Authorization:** gated by `spec.author` scoped to the `secrets` field — a
+secret backs a spec-authored field, so the same permission that authors the
+`${secret:KEY}` reference sets its value; a role scoped `!secrets` cannot inject
+credentials.
+
+**Errors:** 400 when `key` or `value` is empty; 403 when the caller lacks
+`spec.author` (enforcing mode); 404 when `{netID}` is not registered.
+
+#### DELETE /newtron/v1/networks/{netID}/secrets/{key}
+
+Removes a key from the network's secret store (the reverse of the POST). Same
+`spec.author` gate. **Response (200):** `{"status": "deleted", "key": "<name>"}`.
+Errors 409/500 when no store is configured for the network (nothing to delete).
 
 ### Audit log
 

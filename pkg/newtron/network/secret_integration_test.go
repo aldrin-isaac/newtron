@@ -117,6 +117,69 @@ func TestResolveNodeSpec_NodeSSHPassOverridesPlatform(t *testing.T) {
 	}
 }
 
+// TestNetwork_SetSecret_CreatesStoreAndResolves pins the API/UI half of the
+// ${secret:KEY} design: SetSecret on a network that has no store yet creates
+// <specDir>/secrets.json and adopts it, so the referenced value resolves in the
+// live network without a reload — the flow newtcon uses to populate a credential
+// it collected in a masked (secret:"true") input.
+func TestNetwork_SetSecret_CreatesStoreAndResolves(t *testing.T) {
+	dir := t.TempDir()
+	writeNetwork(t, dir)
+	writeTopology(t, dir, "switch1")
+	writeNodeSpec(t, dir, "switch1", `{
+		"mgmt_ip": "127.0.0.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "amer",
+		"platform": "p1",
+		"ssh_user": "admin",
+		"ssh_pass": "${secret:switch1_ssh_pass}",
+		"underlay_asn": 65001
+	}`)
+
+	// No secrets.json, no explicit store — resolution is the disabled state.
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	if _, err := n.resolveNodeSpecByName("switch1"); err == nil {
+		t.Fatal("expected resolve to fail before the secret is set (reference, no store)")
+	}
+
+	// Set the secret through the API path — this must create <dir>/secrets.json.
+	if err := n.SetSecret("switch1_ssh_pass", "s3cr3t"); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "secrets.json")); statErr != nil {
+		t.Errorf("secrets.json not created by SetSecret: %v", statErr)
+	}
+	resolved, err := n.resolveNodeSpecByName("switch1")
+	if err != nil {
+		t.Fatalf("resolve after SetSecret: %v", err)
+	}
+	if resolved.SSHPass != "s3cr3t" {
+		t.Errorf("SSHPass = %q, want s3cr3t (the value just set)", resolved.SSHPass)
+	}
+
+	// DeleteSecret is the reverse (§15) — succeeds against the now-present store.
+	if err := n.DeleteSecret("switch1_ssh_pass"); err != nil {
+		t.Fatalf("DeleteSecret: %v", err)
+	}
+}
+
+// TestNetwork_DeleteSecret_NoStoreErrors pins that deleting from a network with
+// no secret store is a clear error, not a silent no-op.
+func TestNetwork_DeleteSecret_NoStoreErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeNetwork(t, dir)
+	n, err := NewNetwork(dir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewNetwork: %v", err)
+	}
+	if err := n.DeleteSecret("nope"); err == nil {
+		t.Error("expected DeleteSecret to error when no store is configured")
+	}
+}
+
 // TestNewNetwork_SecretRefWithoutStoreErrors pins the disabled-state
 // behavior: a nodeSpec with a reference but no store configured fails
 // at network load (not at first SSH attempt) — the operator sees the
