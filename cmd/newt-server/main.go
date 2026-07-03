@@ -224,6 +224,19 @@ func main() {
 		Logger:               logger,
 		IdleTimeout:          *idleTimeout,
 		PortResolver:         newtronPortResolver,
+		// LabDeployed lets the delete-network guard refuse while a lab still runs
+		// under the name. Reaches newtlab through the same loopback client the
+		// port resolver uses (§27 — never the ~/.newtlab files); ListLabs returns
+		// every lab that has state, so membership is a conservative "a lab exists
+		// under this name" signal. Composition lives here in cmd — newtron's api
+		// package never sees newtlab (§33).
+		LabDeployed: func(ctx context.Context, name string) (bool, error) {
+			labs, err := newtlabClient.ListLabs(ctx)
+			if err != nil {
+				return false, err
+			}
+			return slices.Contains(labs, name), nil
+		},
 		NetworksBase:         *networksBase,
 		AuditCallerHeader:    *auditCallerHeader,
 		UnixSocketPath:       *unixSocket,

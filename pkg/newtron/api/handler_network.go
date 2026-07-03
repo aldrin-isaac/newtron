@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
@@ -44,6 +45,13 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // existing one and register it). Always idempotent — the status
 // code distinguishes new (201) from already-existed (200).
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
+	// Creating a network is a registry-level act — gated at the global super-user
+	// set, symmetric with delete (a network has no per-network permission model
+	// until it exists).
+	if err := s.authorizeRegistry(r.Context(), "network.create"); err != nil {
+		writeError(w, err)
+		return
+	}
 	var req CreateNetworkRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -111,6 +119,28 @@ func (s *Server) handleUnregisterNetwork(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "unregistered"})
+}
+
+// handleDeleteNetwork soft-deletes a network: it archives the spec directory
+// (secrets + audit + specs move to <networksBase>/archives/<id>-<ts>) — the
+// on-disk reverse of POST /networks (§15). It is the EXISTENCE layer only: the
+// network must already be unregistered (409 otherwise) — the serving layer
+// (unregister) is a separate, explicit step. Gated at the global super-user set
+// (a registry-level act). Refuses (409) while a lab is deployed under the name
+// unless ?force=true. Returns the archive path for a manual undo.
+func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
+	if err := s.authorizeRegistry(r.Context(), "network.delete"); err != nil {
+		writeError(w, err)
+		return
+	}
+	force := r.URL.Query().Get("force") == "true"
+	timestamp := time.Now().UTC().Format("20060102T150405Z")
+	archived, err := s.DeleteNetwork(r.Context(), r.PathValue("netID"), force, timestamp)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "archived", "archived_to": archived})
 }
 
 func (s *Server) handleReloadNetwork(w http.ResponseWriter, r *http.Request) {
