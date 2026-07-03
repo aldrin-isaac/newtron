@@ -608,29 +608,25 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 // then searches the switch device's steps for an IP address on that interface.
 // Returns the peer IP (without mask) and the mask (e.g., "/24"), or empty strings if not found.
 func (l *Lab) findPeerInterfaceIP(hostName string) (string, string) {
-	// Step 1: Find the link connecting to this host
+	// Step 1: Find the link connecting to this host. splitLinkEndpoint is the
+	// sole owner of "device:interface" parsing (§27) — use the device AND
+	// interface it already returns rather than re-splitting the raw endpoint.
 	var switchName, switchIntf string
 	for _, link := range l.Topology.Links {
-		aDevice, _, errA := splitLinkEndpoint(link.A)
-		zDevice, _, errZ := splitLinkEndpoint(link.Z)
+		aDevice, aIntf, errA := splitLinkEndpoint(link.A)
+		zDevice, zIntf, errZ := splitLinkEndpoint(link.Z)
 		if errA != nil || errZ != nil {
 			continue
 		}
 		if aDevice == hostName {
 			// Z side is the switch
-			parts := strings.SplitN(link.Z, ":", 2)
-			if len(parts) == 2 {
-				switchName, switchIntf = parts[0], parts[1]
-				break
-			}
+			switchName, switchIntf = zDevice, zIntf
+			break
 		}
 		if zDevice == hostName {
 			// A side is the switch
-			parts := strings.SplitN(link.A, ":", 2)
-			if len(parts) == 2 {
-				switchName, switchIntf = parts[0], parts[1]
-				break
-			}
+			switchName, switchIntf = aDevice, aIntf
+			break
 		}
 	}
 	if switchName == "" || switchIntf == "" {
