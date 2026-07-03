@@ -3,7 +3,5 @@
     "loopback_ip": "10.0.0.1",
     "zone": "amer",
     "platform": "Force10-S6000_vs",
-    "ssh_user": "admin",
-    "ssh_pass": "${secret:switch1_ssh_pass}",
     "underlay_asn": 65001
 }

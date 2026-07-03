@@ -1,7 +1,9 @@
 {
   "version": "1.0",
-  "description": "Single vJunos-router lab — opennetconf smoke tests via --newtlab. newtlab deploys the VM; netconf.pl owns device config.",
+  "description": "Single vJunos-router lab \u2014 opennetconf smoke tests via --newtlab. newtlab deploys the VM; netconf.pl owns device config.",
   "super_users": null,
   "user_groups": null,
-  "permissions": null
+  "permissions": null,
+  "ssh_user": "root",
+  "ssh_pass": "${secret:ssh_pass}"
 }

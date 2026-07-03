@@ -4,9 +4,10 @@
     "zone": "amer",
     "platform": "Force10-S6000_vpp",
     "evpn": {
-        "peers": ["spine1", "spine2"]
+        "peers": [
+            "spine1",
+            "spine2"
+        ]
     },
-    "ssh_pass": "${secret:leaf2_ssh_pass}",
-    "ssh_user": "admin",
     "underlay_asn": 65012
 }

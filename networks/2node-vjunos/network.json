@@ -1,7 +1,9 @@
 {
   "version": "1.0",
-  "description": "2-node vJunos-router lab: r1 ↔ r2 over two ge-0/0/N links. newtlab deploys the VMs; netconf.pl owns device config.",
+  "description": "2-node vJunos-router lab: r1 \u2194 r2 over two ge-0/0/N links. newtlab deploys the VMs; netconf.pl owns device config.",
   "super_users": null,
   "user_groups": null,
-  "permissions": null
+  "permissions": null,
+  "ssh_user": "root",
+  "ssh_pass": "${secret:ssh_pass}"
 }
