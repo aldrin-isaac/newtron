@@ -50,10 +50,10 @@ func TestDeleteNetwork_ArchivesUnregistered(t *testing.T) {
 	}
 }
 
-// TestDeleteNetwork_RefusesRegistered pins the layer separation: a network that
-// is still registered (served) cannot be archived — the caller must unregister
-// first. 409 ConflictError.
-func TestDeleteNetwork_RefusesRegistered(t *testing.T) {
+// TestDeleteNetwork_UnregistersAndArchivesRegistered pins that delete OWNS its
+// teardown: a still-registered network is unregistered (serving torn down) and
+// archived in one call — no separate unregister step required.
+func TestDeleteNetwork_UnregistersAndArchivesRegistered(t *testing.T) {
 	base := t.TempDir()
 	dir := scaffoldNetworkDir(t, base, "mynet")
 	s := NewServer(Config{NetworksBase: base})
@@ -62,14 +62,18 @@ func TestDeleteNetwork_RefusesRegistered(t *testing.T) {
 		t.Fatalf("RegisterNetwork: %v", err)
 	}
 
-	_, err := s.DeleteNetwork(context.Background(), "mynet", false, testStamp)
-	var ce *util.ConflictError
-	if !errors.As(err, &ce) {
-		t.Fatalf("err = %v, want *util.ConflictError (still registered)", err)
+	dst, err := s.DeleteNetwork(context.Background(), "mynet", false, testStamp)
+	if err != nil {
+		t.Fatalf("DeleteNetwork on a registered network: %v", err)
 	}
-	// And the dir was NOT moved.
-	if _, statErr := os.Stat(dir); statErr != nil {
-		t.Errorf("dir should be untouched while registered: %v", statErr)
+	if s.getNetwork("mynet") != nil {
+		t.Error("network still registered after delete — teardown didn't run")
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("source dir still present after archive: %v", statErr)
+	}
+	if _, statErr := os.Stat(dst); statErr != nil {
+		t.Errorf("archived dir missing: %v", statErr)
 	}
 }
 
@@ -85,30 +89,47 @@ func TestDeleteNetwork_NotFound(t *testing.T) {
 	}
 }
 
-// TestDeleteNetwork_LabGuard pins the cross-engine guard: a deployed lab blocks
-// the delete (409) unless force; force archives anyway.
-func TestDeleteNetwork_LabGuard(t *testing.T) {
+// TestDeleteNetwork_LabGuardRunsBeforeTeardown pins the key property of the
+// re-bundled delete: a lab-guard failure changes NOTHING — the network stays
+// registered and on disk, never torn down for a delete that didn't happen. force
+// then bypasses the guard and does the teardown+archive.
+func TestDeleteNetwork_LabGuardRunsBeforeTeardown(t *testing.T) {
 	base := t.TempDir()
-	scaffoldNetworkDir(t, base, "mynet")
+	dir := scaffoldNetworkDir(t, base, "mynet")
 	s := NewServer(Config{
 		NetworksBase: base,
 		LabDeployed:  func(context.Context, string) (bool, error) { return true, nil },
 	})
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	if err := s.RegisterNetwork("mynet", dir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
 
 	_, err := s.DeleteNetwork(context.Background(), "mynet", false, testStamp)
 	var ce *util.ConflictError
 	if !errors.As(err, &ce) {
 		t.Fatalf("err = %v, want *util.ConflictError (lab deployed)", err)
 	}
-	// force bypasses the lab guard.
+	// Guard ran BEFORE teardown: still in service, dir intact.
+	if s.getNetwork("mynet") == nil {
+		t.Error("network unregistered by a delete that failed the lab guard")
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Errorf("dir moved by a delete that failed the lab guard: %v", statErr)
+	}
+
+	// force bypasses the guard → teardown + archive.
 	if _, err := s.DeleteNetwork(context.Background(), "mynet", true, testStamp); err != nil {
 		t.Errorf("force delete with lab deployed = %v, want nil", err)
+	}
+	if s.getNetwork("mynet") != nil {
+		t.Error("network still registered after force delete")
 	}
 }
 
 // TestDeleteNetwork_LabCheckErrorFailsClosed pins that an error probing lab state
-// refuses the delete (never archives on uncertainty).
+// refuses the delete AND leaves the network fully in service (never torn down on
+// uncertainty).
 func TestDeleteNetwork_LabCheckErrorFailsClosed(t *testing.T) {
 	base := t.TempDir()
 	dir := scaffoldNetworkDir(t, base, "mynet")
@@ -117,12 +138,18 @@ func TestDeleteNetwork_LabCheckErrorFailsClosed(t *testing.T) {
 		LabDeployed:  func(context.Context, string) (bool, error) { return false, errors.New("newtlab unreachable") },
 	})
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	if err := s.RegisterNetwork("mynet", dir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
 
 	if _, err := s.DeleteNetwork(context.Background(), "mynet", false, testStamp); err == nil {
 		t.Error("lab-check error should refuse the delete; got nil")
 	}
+	if s.getNetwork("mynet") == nil {
+		t.Error("network unregistered despite a lab-check error")
+	}
 	if _, statErr := os.Stat(dir); statErr != nil {
-		t.Errorf("dir should be untouched when the lab check errors: %v", statErr)
+		t.Errorf("dir moved despite a lab-check error: %v", statErr)
 	}
 }
 

@@ -443,12 +443,18 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 func (s *Server) UnregisterNetwork(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.unregisterLocked(id)
+}
 
+// unregisterLocked is the body of UnregisterNetwork with the registry lock
+// already held — the single owner of the unregister teardown (§27), shared by
+// UnregisterNetwork (which locks) and DeleteNetwork (which holds s.mu across
+// unregister+archive so no register can interleave). Caller holds s.mu.
+func (s *Server) unregisterLocked(id string) error {
 	entity, exists := s.networks[id]
 	if !exists {
 		return fmt.Errorf("network '%s' not registered", id)
 	}
-
 	entity.stop()
 	delete(s.networks, id)
 	if s.watcher != nil {
@@ -480,49 +486,46 @@ func (s *Server) authorizeRegistry(ctx context.Context, action string) error {
 	return &newtron.AuthorizationError{Caller: caller, Permission: action, Resource: "network"}
 }
 
-// DeleteNetwork soft-deletes the network `id` by MOVING its spec directory to the
-// archive store (<networksBase>/archives/<id>-<timestamp>) — the on-disk reverse
-// of CreateNetwork's scaffold (§15). Nothing is erased: the specs, secrets.json,
-// and audit log travel to the archive intact, so the delete is undoable, but only
-// by manually moving the archived directory back. The archive is invisible to the
+// DeleteNetwork soft-deletes the network `id`: it tears down serving (if the
+// network is registered) and MOVES its spec directory to the archive store
+// (<networksBase>/archives/<id>-<timestamp>) — the reverse of CreateNetwork's
+// scaffold+register (§15). Nothing is erased: the specs, secrets.json, and audit
+// log travel to the archive intact, so the delete is undoable, but only by
+// manually moving the archived directory back. The archive is invisible to the
 // API (auto-discovery skips the reserved dir; list-networks is in-memory).
 //
-// This is the EXISTENCE layer only — it does not touch the serving layer. The two
-// are kept separate: a network must be UNREGISTERED first (POST .../unregister),
-// because the running server holds the dir open (audit handle, fs-watch, live
-// SSH) and archiving it out from under a live entity would dangle those. So:
-//   - still registered → *util.ConflictError (409): "unregister first";
-//   - not on disk → *newtron.NotFoundError (404);
-//   - unless force, a lab deployed under this name blocks the delete
-//     (*util.ConflictError → 409) — destroy the lab first. A lab-check error
-//     fails closed: the delete is refused, never forced through on uncertainty.
+// Delete OWNS its teardown: ending service is the point of delete, so it
+// unregisters as the first step of removal rather than requiring the caller to do
+// it (which — since auto-discovery registers every on-disk network — would always
+// be a mandatory, non-atomic two-step). Unregister remains a standalone op for
+// the pause-serving case; this is not that. Order is deliberate:
 //
-// The caller (the handler) is responsible for the registry authorization gate.
-// timestamp is the archive suffix (a UTC stamp like "20060102T150405Z"), passed
-// in so the method stays clock-free and testable. Returns the archive path.
+//	guards (no state change)  →  unregister + archive (atomic under s.mu)
+//
+// so a guard failure leaves the network FULLY IN SERVICE (still registered, still
+// served) — never torn down for a delete that didn't happen. Guards:
+//   - not on disk → *newtron.NotFoundError (404);
+//   - unless force, a lab deployed under this name → *util.ConflictError (409):
+//     destroy the lab first. A lab-check error fails closed (refused, never
+//     forced through on uncertainty).
+//
+// The unregister+archive run under s.mu (via unregisterLocked) so no concurrent
+// register/reload can interleave and be left holding a moved directory. The
+// caller (the handler) owns the registry authorization gate. timestamp is the
+// archive suffix (a UTC stamp like "20060102T150405Z"), passed in so the method
+// stays clock-free and testable. Returns the archive path.
 func (s *Server) DeleteNetwork(ctx context.Context, id string, force bool, timestamp string) (string, error) {
 	if s.networksBase == "" {
 		return "", fmt.Errorf("server has no networks-base configured; cannot resolve dir for id %q", id)
 	}
-	// Serving layer must be torn down first — an explicit precondition, not a
-	// hidden side effect (Register/Unregister and Create/Delete are separate).
-	s.mu.RLock()
-	_, registered := s.networks[id]
-	s.mu.RUnlock()
-	if registered {
-		return "", &util.ConflictError{
-			Resource:   "network",
-			Name:       id,
-			References: []string{"network is still registered — POST /newtron/v1/networks/" + id + "/unregister first"},
-		}
-	}
 
+	// --- Guards: no state change, so a failure here leaves everything serving. ---
 	dir := filepath.Join(s.networksBase, id)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return "", &newtron.NotFoundError{Resource: "network", Name: id}
 	}
-
-	// Lab guard — reached through newtlab (§27), never the ~/.newtlab files.
+	// Lab guard — reached through newtlab (§27), never the ~/.newtlab files. Run
+	// outside s.mu: it may make a loopback call we must not hold the lock across.
 	if !force && s.labDeployed != nil {
 		deployed, err := s.labDeployed(ctx, id)
 		if err != nil {
@@ -538,6 +541,14 @@ func (s *Server) DeleteNetwork(ctx context.Context, id string, force bool, times
 		}
 	}
 
+	// --- Teardown + archive: atomic under the registry lock. ---
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, registered := s.networks[id]; registered {
+		if err := s.unregisterLocked(id); err != nil {
+			return "", err
+		}
+	}
 	archived, err := spec.ArchiveNetwork(s.networksBase, id, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("archiving network %q: %w", id, err)

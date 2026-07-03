@@ -129,13 +129,13 @@ func (s *Server) handleUnregisterNetwork(w http.ResponseWriter, r *http.Request)
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "unregistered"})
 }
 
-// handleDeleteNetwork soft-deletes a network: it archives the spec directory
-// (secrets + audit + specs move to <networksBase>/archives/<id>-<ts>) — the
-// on-disk reverse of POST /networks (§15). It is the EXISTENCE layer only: the
-// network must already be unregistered (409 otherwise) — the serving layer
-// (unregister) is a separate, explicit step. Gated at the global super-user set
-// (a registry-level act). Refuses (409) while a lab is deployed under the name
-// unless ?force=true. Returns the archive path for a manual undo.
+// handleDeleteNetwork soft-deletes a network: it tears down serving (unregisters
+// if registered) and archives the spec directory (secrets + audit + specs move to
+// <networksBase>/archives/<id>-<ts>) — the reverse of POST /networks (§15).
+// Delete owns its teardown, atomically, with guards run BEFORE any teardown, so a
+// lab-guard failure leaves the network fully in service. Gated at the global
+// super-user set (a registry-level act). Refuses (409) while a lab is deployed
+// under the name unless ?force=true. Returns the archive path for a manual undo.
 func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
 	if err := s.authorizeRegistry(r.Context(), "network.delete"); err != nil {
 		writeError(w, err)
