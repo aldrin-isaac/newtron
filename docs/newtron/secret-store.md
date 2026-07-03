@@ -20,8 +20,8 @@ Two spec fields currently carry `${secret:KEY}` references:
 |---|---|---|
 | `NodeSpec.SSHPass` | `ssh_pass` | `nodes/<device>.json` |
 | `NodeSpec.SSHUser` | `ssh_user` | `nodes/<device>.json` |
-| `VMCredentials.Pass` | `vm_credentials.pass` | `platforms.json` (per platform) |
-| `VMCredentials.User` | `vm_credentials.user` | `platforms.json` (per platform) |
+| `Credentials.Pass` | `credentials.pass` | `platforms.json` (per platform) |
+| `Credentials.User` | `credentials.user` | `platforms.json` (per platform) |
 
 Other spec fields pass through unchanged. A future Store implementation
 may add encryption-at-rest of the secret file itself — the resolver

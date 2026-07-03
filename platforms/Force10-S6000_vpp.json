@@ -139,7 +139,7 @@
   "vm_cpus": 4,
   "vm_nic_driver": "virtio-net-pci",
   "vm_cpu_features": "+sse4.2",
-  "vm_credentials": {
+  "credentials": {
     "user": "aldrin",
     "pass": "YourPaSsWoRd"
   },

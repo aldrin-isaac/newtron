@@ -123,7 +123,7 @@ docker restart bgp
     "vm_cpus": 4,
     "vm_nic_driver": "virtio-net-pci",
     "vm_cpu_features": "+sse4.2",
-    "vm_credentials": {"user": "admin", "pass": "YourPaSsWoRd"},
+    "credentials": {"user": "admin", "pass": "YourPaSsWoRd"},
     "vm_boot_timeout": 300,
     "dataplane": "vpp",
     "unsupported_features": ["acl", "macvpn", "evpn-vxlan"]

@@ -25,8 +25,8 @@ type NodeConfig struct {
 	CPUFeatures   string // resolved: platform > ""
 	SSHUser       string // resolved: profile ssh_user > "admin"
 	SSHPass       string // resolved: profile ssh_pass > platform credentials pass
-	ConsoleUser   string // resolved: platform vm_credentials user (image default user)
-	ConsolePass   string // resolved: platform vm_credentials pass (image default password)
+	ConsoleUser   string // resolved: platform credentials user (image default user)
+	ConsolePass   string // resolved: platform credentials pass (image default password)
 	BootTimeout   int    // resolved: platform > 180
 	SkipBootstrap bool   // resolved: platform vm_skip_bootstrap > false. When true, the image is
 	// pre-bootstrapped (mgmt IP + ssh user already configured) and the
@@ -115,10 +115,10 @@ func ResolveNodeConfig(
 		nc.CPUFeatures = platform.VMCPUFeatures
 	}
 
-	// ConsoleUser/ConsolePass: platform vm_credentials (the user baked into the image)
-	if platform != nil && platform.VMCredentials != nil {
-		nc.ConsoleUser = platform.VMCredentials.User
-		nc.ConsolePass = platform.VMCredentials.Pass
+	// ConsoleUser/ConsolePass: platform credentials (the user baked into the image)
+	if platform != nil && platform.Credentials != nil {
+		nc.ConsoleUser = platform.Credentials.User
+		nc.ConsolePass = platform.Credentials.Pass
 	}
 
 	// SSHUser: profile > "admin"
@@ -132,8 +132,8 @@ func ResolveNodeConfig(
 	switch {
 	case profile.SSHPass != "":
 		nc.SSHPass = profile.SSHPass
-	case platform != nil && platform.VMCredentials != nil:
-		nc.SSHPass = platform.VMCredentials.Pass
+	case platform != nil && platform.Credentials != nil:
+		nc.SSHPass = platform.Credentials.Pass
 	}
 
 	// BootTimeout: platform > 180

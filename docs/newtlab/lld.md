@@ -60,7 +60,7 @@ type PlatformSpec struct {
     VMCPUs               int            `json:"vm_cpus,omitempty"`
     VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
     VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
-    VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
+    Credentials        *Credentials `json:"credentials,omitempty"`
     VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
     Dataplane            string         `json:"dataplane,omitempty"`
     VMImageRelease       string         `json:"vm_image_release,omitempty"`
@@ -75,19 +75,19 @@ type PlatformSpec struct {
 | `vm_nic_driver` | string | `"e1000"` | QEMU NIC model (`e1000`, `virtio-net-pci`) |
 | `ports` | []PortSpec | (generated) | Per-port `name → nic_index` inventory; `ResolveNICIndex` resolves topology interfaces against it (§5.3) |
 | `vm_cpu_features` | string | `""` | QEMU `-cpu host,<features>` suffix |
-| `vm_credentials` | *VMCredentials | nil | Image-baked login credentials |
+| `credentials` | *Credentials | nil | Image-baked login credentials |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for boot |
 | `dataplane` | string | `""` | Selects boot patch directory: `"vpp"`, `"ciscovs"`, `""` |
 | `vm_image_release` | string | `""` | Release-specific boot patches (e.g., `"202405"`) |
 | `device_type` | string | `"switch"` | `"host"` triggers VM coalescing (§3.6) |
 
-### 2.2 VMCredentials
+### 2.2 Credentials
 
 Image-baked login credentials for serial console bootstrap (§7.1) and SSH
 password fallback.
 
 ```go
-type VMCredentials struct {
+type Credentials struct {
     User string `json:"user"` // user baked into the image (e.g., "aldrin" for CiscoVS)
     Pass string `json:"pass"` // image default password
 }
@@ -239,7 +239,7 @@ type NodeConfig struct {
     CPUFeatures  string
     SSHUser      string
     SSHPass      string
-    ConsoleUser  string     // from platform vm_credentials
+    ConsoleUser  string     // from platform credentials
     ConsolePass  string
     BootTimeout  int        // seconds
     Host         string     // server pool target ("" = local)
@@ -271,9 +271,9 @@ first non-zero value wins.
 | Ports | — | `ports` | (none) |
 | CPUFeatures | — | `vm_cpu_features` | `""` |
 | SSHUser | `ssh_user` | — | `"admin"` |
-| SSHPass | `ssh_pass` | `vm_credentials.pass` | `""` |
-| ConsoleUser | — | `vm_credentials.user` | `""` |
-| ConsolePass | — | `vm_credentials.pass` | `""` |
+| SSHPass | `ssh_pass` | `credentials.pass` | `""` |
+| ConsoleUser | — | `credentials.user` | `""` |
+| ConsolePass | — | `credentials.pass` | `""` |
 | BootTimeout | — | `vm_boot_timeout` | 180 |
 | Host | `vm_host` | — | `""` (local) |
 | DeviceType | — | `device_type` | `""` (switch) |
@@ -778,7 +778,7 @@ patches. For why deploy-time patching instead of image baking, see HLD §7.
 ### 7.1 BootstrapNetwork — Switch VMs
 
 `BootstrapNetwork()` in `boot.go` connects to the serial console via TCP and
-prepares the VM for SSH access. Uses `VMCredentials` (§2.2) for console login.
+prepares the VM for SSH access. Uses `Credentials` (§2.2) for console login.
 
 ```go
 func BootstrapNetwork(ctx context.Context, consoleHost string, consolePort int,

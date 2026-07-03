@@ -138,7 +138,7 @@
   "vm_memory": 4096,
   "vm_cpus": 2,
   "vm_nic_driver": "virtio-net-pci",
-  "vm_credentials": {
+  "credentials": {
     "user": "admin",
     "pass": "YourPaSsWoRd"
   },

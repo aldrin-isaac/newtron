@@ -90,10 +90,10 @@ func TestResolveNodeConfig_ProfileOverridesPlatform(t *testing.T) {
 		VMHost:   "server-a",
 	}
 	platform := &spec.PlatformSpec{
-		VMImage:       "/platform/image.qcow2",
-		VMMemory:      4096,
-		VMCPUs:        2,
-		VMCredentials: &spec.VMCredentials{User: "admin", Pass: "admin"},
+		VMImage:     "/platform/image.qcow2",
+		VMMemory:    4096,
+		VMCPUs:      2,
+		Credentials: &spec.Credentials{User: "admin", Pass: "admin"},
 	}
 
 	nc, err := ResolveNodeConfig("leaf1", profile, platform)
@@ -131,7 +131,7 @@ func TestResolveNodeConfig_PlatformDefaults(t *testing.T) {
 		Ports:         []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}},
 		VMCPUFeatures: "+sse4.2",
 		VMBootTimeout: 300,
-		VMCredentials: &spec.VMCredentials{User: "admin", Pass: "admin"},
+		Credentials:   &spec.Credentials{User: "admin", Pass: "admin"},
 	}
 
 	nc, err := ResolveNodeConfig("spine1", profile, platform)

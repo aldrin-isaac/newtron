@@ -2420,7 +2420,7 @@ at the same JSON level as `name`. Operators can copy a
 will accept it unchanged (DPN §46 — wire shape mirrors canonical
 types).
 
-**`vm_credentials` field**: API-submitted values are stored as
+**`credentials` field**: API-submitted values are stored as
 plaintext. The `${secret:KEY}` reference indirection is a load-time
 mechanism and is **not** re-resolved on Save. Operators authoring
 secret references edit `platforms.json` directly and rely on

@@ -47,12 +47,12 @@ func TestNewNetwork_SecretRefInNodeSpecResolves(t *testing.T) {
 	}
 }
 
-// TestResolveNodeSpec_PlatformVMCredentialsFallback pins that a node which omits
-// ssh_pass inherits the platform's vm_credentials.pass — mirroring newtlab's
+// TestResolveNodeSpec_PlatformCredentialsFallback pins that a node which omits
+// ssh_pass inherits the platform's credentials.pass — mirroring newtlab's
 // NodeConfig resolution so newtron and newtlab reach a device with the same
 // login. This is what lets a lab node authored with just a platform (e.g. one
 // created through newtcon, which sets no ssh_pass) be reachable by newtron.
-func TestResolveNodeSpec_PlatformVMCredentialsFallback(t *testing.T) {
+func TestResolveNodeSpec_PlatformCredentialsFallback(t *testing.T) {
 	dir := t.TempDir()
 	writeNetwork(t, dir)
 	writeTopology(t, dir, "switch1")
@@ -67,7 +67,7 @@ func TestResolveNodeSpec_PlatformVMCredentialsFallback(t *testing.T) {
 	}`)
 
 	platforms := map[string]*spec.PlatformSpec{
-		"p1": {Name: "p1", VMCredentials: &spec.VMCredentials{User: "aldrin", Pass: "YourPaSsWoRd"}},
+		"p1": {Name: "p1", Credentials: &spec.Credentials{User: "aldrin", Pass: "YourPaSsWoRd"}},
 	}
 	n, err := NewNetwork(dir, "", nil, nil, platforms)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestResolveNodeSpec_PlatformVMCredentialsFallback(t *testing.T) {
 		t.Fatalf("resolveNodeSpec: %v", err)
 	}
 	if resolved.SSHPass != "YourPaSsWoRd" {
-		t.Errorf("SSHPass = %q; want the platform vm_credentials pass (YourPaSsWoRd)", resolved.SSHPass)
+		t.Errorf("SSHPass = %q; want the platform credentials pass (YourPaSsWoRd)", resolved.SSHPass)
 	}
 	if resolved.SSHUser != "admin" {
 		t.Errorf("SSHUser = %q; want admin", resolved.SSHUser)
@@ -102,7 +102,7 @@ func TestResolveNodeSpec_NodeSSHPassOverridesPlatform(t *testing.T) {
 	}`)
 
 	platforms := map[string]*spec.PlatformSpec{
-		"p1": {Name: "p1", VMCredentials: &spec.VMCredentials{User: "aldrin", Pass: "platform-pw"}},
+		"p1": {Name: "p1", Credentials: &spec.Credentials{User: "aldrin", Pass: "platform-pw"}},
 	}
 	n, err := NewNetwork(dir, "", nil, nil, platforms)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestNewNetwork_PlaintextNodeSpecPassesThrough(t *testing.T) {
 }
 
 // TestNewNetwork_SecretRefInPlatformResolves pins the platform path:
-// a vm_credentials.pass = "${secret:KEY}" reference resolves at the
+// a credentials.pass = "${secret:KEY}" reference resolves at the
 // global-platforms load step (ResolvePlatformSecrets) so every
 // Network sees plaintext.
 func TestResolvePlatformSecrets_Resolves(t *testing.T) {
@@ -190,14 +190,14 @@ func TestResolvePlatformSecrets_Resolves(t *testing.T) {
 
 	platforms := map[string]*spec.PlatformSpec{
 		"p1": {
-			Name:          "p1",
-			VMCredentials: &spec.VMCredentials{User: "admin", Pass: "${secret:p1-pass}"},
+			Name:        "p1",
+			Credentials: &spec.Credentials{User: "admin", Pass: "${secret:p1-pass}"},
 		},
 	}
 	if err := ResolvePlatformSecrets(platforms, store); err != nil {
 		t.Fatalf("ResolvePlatformSecrets: %v", err)
 	}
-	if got := platforms["p1"].VMCredentials.Pass; got != "real-platform-pass" {
+	if got := platforms["p1"].Credentials.Pass; got != "real-platform-pass" {
 		t.Errorf("platform pass = %q; want real-platform-pass (resolved from store)", got)
 	}
 }
@@ -212,8 +212,8 @@ func TestResolvePlatformSecrets_MissingKeyErrors(t *testing.T) {
 	}
 	platforms := map[string]*spec.PlatformSpec{
 		"p1": {
-			Name:          "p1",
-			VMCredentials: &spec.VMCredentials{User: "admin", Pass: "${secret:nope}"},
+			Name:        "p1",
+			Credentials: &spec.Credentials{User: "admin", Pass: "${secret:nope}"},
 		},
 	}
 	err = ResolvePlatformSecrets(platforms, store)
