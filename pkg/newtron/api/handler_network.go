@@ -45,13 +45,6 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // existing one and register it). Always idempotent — the status
 // code distinguishes new (201) from already-existed (200).
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
-	// Creating a network is a registry-level act — gated at the global super-user
-	// set, symmetric with delete (a network has no per-network permission model
-	// until it exists).
-	if err := s.authorizeRegistry(r.Context(), "network.create"); err != nil {
-		writeError(w, err)
-		return
-	}
 	var req CreateNetworkRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -70,10 +63,25 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Already registered? Return its info with 200 (idempotent — the
-	// slot is already in the state the caller asked for).
+	// slot is already in the state the caller asked for). A no-op serving-layer
+	// touch: ungated.
 	if info := s.getNetworkInfo(req.ID); info != nil {
 		httputil.WriteJSON(w, http.StatusOK, info)
 		return
+	}
+
+	// Gate only genuine CREATION. Scaffolding a brand-new network (no specs on
+	// disk) is the existence-layer act the global super-user owns. Attaching an
+	// EXISTING on-disk network (dirHasSpecs) is the SERVING layer — "register",
+	// not "create" — so it is ungated, the same thing unauthenticated
+	// auto-discovery does at boot, and the path `bin/newtlab deploy` takes for an
+	// already-present network. Gating it would 403 every non-super operator's
+	// deploy (this endpoint is POST /networks, which does register AND create).
+	if !dirHasSpecs(filepath.Join(s.networksBase, req.ID)) {
+		if err := s.authorizeRegistry(r.Context(), "network.create"); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 
 	if err := s.CreateNetwork(req.ID, req.Description); err != nil {
