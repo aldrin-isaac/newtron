@@ -7,6 +7,22 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
+// handleListSecrets returns the key names in the network's secret store — never
+// the values. The read that mirrors handleSetSecret (§24), so a UI can show
+// which credentials are set. Gated (in Network.ListSecrets) by spec.author.
+func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	keys, err := ne.net.ListSecrets(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string][]string{"keys": keys})
+}
+
 // handleSetSecret writes a value into the network's secret store — the API/UI
 // half of the ${secret:KEY} design (auth-design.md §L0), so an operator populates
 // the credential a spec field references (e.g. a node's ssh_pass) through the API
