@@ -57,7 +57,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/networks/{n}/services/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
 | GET | `/networks/{n}/spec-instances` | Flat cross-scope inventory of every spec (network/zone/node), tagged with scope + scope_instance |
 | GET | `/networks/{n}/nodes` | List node spec names |
-| GET | `/networks/{n}/nodes/{name}` | Show node spec — ssh_user/ssh_pass are the **effective** login (resolved node > zone > network > platform > "admin") the device dials |
+| GET | `/networks/{n}/nodes/{name}` | Show node spec — ssh_user/ssh_pass are the **effective** login (resolved node > zone > network > platform > "admin") the device dials; **ssh_pass in the clear** (credential-bearing — newtlab reads it to connect) |
 | GET | `/networks/{n}/ssh-credentials` | Show the device SSH login **authored** at one scope — `?scope=zone&scope_instance=…`; ssh_pass masked (a `${secret:}` ref kept, plaintext → `***redacted***`) |
 | GET | `/networks/{n}/zones` | List zone names |
 | GET | `/networks/{n}/zones/{name}` | Show zone |
@@ -1779,11 +1779,20 @@ clear bottom-up). The "base exists" predicate is whole-object — the network lo
 is non-empty — since the login is one resource, not a named collection. **One
 difference from the map kinds:** the **effective** login a device dials (after
 the node > zone > network merge) is read via `GET /nodes/{name}`, which resolves
-the hierarchy — distinct from
-`GET /ssh-credentials`, which returns only what is authored *at* the requested
-scope. `ssh_pass` never leaves the server in the clear: a `${secret:KEY}`
-reference is returned intact (a pointer, not a secret), a plaintext value is
-`***redacted***`.
+the hierarchy — distinct from `GET /ssh-credentials`, which returns only what is
+authored *at* the requested scope.
+
+The two reads mask differently, on purpose:
+
+- **`GET /ssh-credentials` masks** — a `${secret:KEY}` reference is returned intact
+  (a pointer, not a secret), a plaintext value is `***redacted***`. This is the
+  authoring read, for a UI.
+- **`GET /nodes/{name}` does NOT mask** — it returns the *effective* `ssh_pass` in
+  the clear (a `${secret:}` reference is resolved to its value). This is the login
+  a consumer dials with — newtlab reads it to connect to the device — so it must be
+  the real password. Treat this read as credential-bearing: it is available to any
+  authorized reader of the node spec, so restrict who can reach the network under
+  `--enforce-authorization` accordingly.
 
 **Deleting a scope container.** A zone or node profile that still holds spec
 overrides — or that something else references — cannot be deleted out from under
