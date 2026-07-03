@@ -65,7 +65,7 @@ func newtlabURL() string {
 		url = os.Getenv("NEWTLAB_SERVER")
 	}
 	if url == "" {
-		url = "http://127.0.0.1:18080"
+		url = client.DefaultBaseURL
 	}
 	return url
 }

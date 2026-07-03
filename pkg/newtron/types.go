@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -1117,18 +1118,17 @@ func (us *UserSettings) GetDir() string {
 	return DefaultDir
 }
 
-// DefaultServerURL is the default newtron-server address.
-const DefaultServerURL = "http://localhost:18080"
-
 // DefaultNetworkID is the default network identifier.
 const DefaultNetworkID = "default"
 
-// GetServerURL returns the server URL with a fallback default.
+// GetServerURL returns the configured server URL, or the canonical default
+// (httputil.DefaultServerURL — the single owner shared with every other
+// client) when unset.
 func (us *UserSettings) GetServerURL() string {
 	if us.ServerURL != "" {
 		return us.ServerURL
 	}
-	return DefaultServerURL
+	return httputil.DefaultServerURL
 }
 
 // GetNetworkID returns the network ID with a fallback default.

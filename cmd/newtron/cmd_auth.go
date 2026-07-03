@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -124,7 +125,7 @@ func init() {
 func runAuthLogin(cmd *cobra.Command, _ []string) error {
 	server := app.serverURL
 	if server == "" {
-		server = "http://localhost:18080"
+		server = httputil.DefaultServerURL
 	}
 	user := authLoginUser
 	if user == "" {
