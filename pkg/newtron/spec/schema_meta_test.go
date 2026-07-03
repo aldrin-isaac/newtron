@@ -702,18 +702,19 @@ func TestRegister_SyntheticIdentifierField(t *testing.T) {
 }
 
 // TestExtractFields_Validation covers the validation tag parsing —
-// pattern, min, max, format, immutable.
+// pattern, min, max, format, immutable, secret.
 type fixValidation struct {
 	Name     string `json:"name" label:"Name" pattern:"^[A-Z]+$" immutable:"true"`
 	VlanID   int    `json:"vlan_id" label:"VLAN ID" min:"1" max:"4094"`
 	LoopIP   string `json:"loop_ip" label:"Loopback" format:"cidr"`
 	Negative int    `json:"negative" min:"-100" max:"-1"`
+	Password string `json:"password" label:"Password" secret:"true"`
 }
 
 func TestExtractFields_Validation(t *testing.T) {
 	got := extractFields(reflect.TypeOf(fixValidation{}))
-	if len(got) != 4 {
-		t.Fatalf("want 4 fields, got %d", len(got))
+	if len(got) != 5 {
+		t.Fatalf("want 5 fields, got %d", len(got))
 	}
 	byName := make(map[string]FieldMeta, len(got))
 	for _, f := range got {
@@ -730,6 +731,14 @@ func TestExtractFields_Validation(t *testing.T) {
 	}
 	if neg := byName["negative"]; neg.Min == nil || *neg.Min != -100 || neg.Max == nil || *neg.Max != -1 {
 		t.Errorf("negative: min=%v max=%v", neg.Min, neg.Max)
+	}
+	// secret:"true" → FieldMeta.Secret, so newtcon renders a masked input and
+	// routes the value to the secret store instead of storing it inline.
+	if pw := byName["password"]; !pw.Secret {
+		t.Errorf("password: Secret=%v, want true", pw.Secret)
+	}
+	if name := byName["name"]; name.Secret {
+		t.Errorf("name: Secret=%v, want false (no secret tag)", name.Secret)
 	}
 }
 
