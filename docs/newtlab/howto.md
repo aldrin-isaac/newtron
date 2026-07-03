@@ -272,7 +272,7 @@ Each platform defines the SONiC image, VM resources, and (generated) port invent
       "vm_memory": 8192,
       "vm_cpus": 6,
       "vm_nic_driver": "e1000",
-      "vm_credentials": { "user": "aldrin", "pass": "YourPaSsWoRd" },
+      "credentials": { "user": "aldrin", "pass": "YourPaSsWoRd" },
       "vm_boot_timeout": 600,
       "dataplane": "ciscovs"
     }
@@ -288,7 +288,7 @@ Each platform defines the SONiC image, VM resources, and (generated) port invent
 | `vm_nic_driver` | `"e1000"` | QEMU NIC driver: `"e1000"` or `"virtio-net-pci"`. |
 | `ports` | *(generated)* | Per-port `name → nic_index` inventory. Produced by `newtron platform generate`, not hand-authored (see "Port inventory" below). |
 | `vm_cpu_features` | `""` | QEMU CPU feature flags (e.g., `"+sse4.2"` for VPP). |
-| `vm_credentials` | *(none)* | Image-baked username and password. |
+| `credentials` | *(none)* | Image-baked username and password. |
 | `vm_boot_timeout` | 180 | Seconds to wait for SSH readiness. |
 | `dataplane` | `""` | Selects boot patch directory: `"ciscovs"`, `"vpp"`, or `""` (none). |
 | `vm_image_release` | `""` | Selects release-specific boot patches (e.g., `"202505"`). |
@@ -307,7 +307,7 @@ Each platform defines the SONiC image, VM resources, and (generated) port invent
     "vm_cpus": 4,
     "vm_nic_driver": "virtio-net-pci",
     "vm_cpu_features": "+sse4.2",
-    "vm_credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
+    "credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
     "vm_boot_timeout": 300,
     "dataplane": "vpp"
   }
@@ -359,7 +359,7 @@ VM configuration resolves per-field (first non-zero wins):
 | Ports | — | `ports` | *(generated)* |
 | CPU features | — | `vm_cpu_features` | `""` |
 | SSH user | `ssh_user` | — | `"admin"` |
-| SSH password | `ssh_pass` | `vm_credentials.pass` | `""` |
+| SSH password | `ssh_pass` | `credentials.pass` | `""` |
 | Boot timeout | — | `vm_boot_timeout` | 180s |
 
 NIC driver, port inventory, CPU features, and boot timeout are platform-only —
@@ -843,7 +843,7 @@ This creates `~/.newtlab/images/alpine-testhost.qcow2` with:
     "vm_memory": 256,
     "vm_cpus": 1,
     "vm_nic_driver": "virtio-net-pci",
-    "vm_credentials": { "user": "root", "pass": "root" },
+    "credentials": { "user": "root", "pass": "root" },
     "vm_boot_timeout": 60
   }
 }

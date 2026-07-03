@@ -474,7 +474,7 @@ type PlatformSpec struct {
     VMCPUs              int           `json:"vm_cpus,omitempty"`
     VMNICDriver         string        `json:"vm_nic_driver,omitempty"`
     VMCPUFeatures       string        `json:"vm_cpu_features,omitempty"`
-    VMCredentials       *VMCredentials `json:"vm_credentials,omitempty"`
+    Credentials       *Credentials `json:"credentials,omitempty"`
     VMBootTimeout       int           `json:"vm_boot_timeout,omitempty"`
     VMImageRelease      string        `json:"vm_image_release,omitempty"`
     Dataplane           string        `json:"dataplane,omitempty"`

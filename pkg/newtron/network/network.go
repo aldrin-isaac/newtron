@@ -118,7 +118,7 @@ type Network struct {
 //
 // secretStore (auth-design.md L0) is the operator-configured secret
 // backend. When non-nil, ${secret:KEY} references in spec values
-// (currently NodeSpec.SSHPass and PlatformSpec.VMCredentials)
+// (currently NodeSpec.SSHPass and PlatformSpec.Credentials)
 // are resolved at network load. nil triggers spec-dir auto-discovery
 // (#176): if <specDir>/secrets.json exists, it's opened as a
 // FileStore and used; otherwise resolution stays disabled — plaintext
@@ -171,7 +171,7 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 	}, nil
 }
 
-// ResolvePlatformSecrets walks every PlatformSpec.VMCredentials in
+// ResolvePlatformSecrets walks every PlatformSpec.Credentials in
 // the global registry and resolves any ${secret:KEY} references
 // against the configured store. Mutates the specs in place. Called
 // once at newt-server startup, after LoadPlatformsFromDir loads the
@@ -182,19 +182,19 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 // store configured are an error.
 func ResolvePlatformSecrets(platforms map[string]*spec.PlatformSpec, store secret.Store) error {
 	for name, platform := range platforms {
-		if platform == nil || platform.VMCredentials == nil {
+		if platform == nil || platform.Credentials == nil {
 			continue
 		}
-		user, err := secret.Resolve(platform.VMCredentials.User, store)
+		user, err := secret.Resolve(platform.Credentials.User, store)
 		if err != nil {
-			return fmt.Errorf("platform %q vm_credentials.user: %w", name, err)
+			return fmt.Errorf("platform %q credentials.user: %w", name, err)
 		}
-		pass, err := secret.Resolve(platform.VMCredentials.Pass, store)
+		pass, err := secret.Resolve(platform.Credentials.Pass, store)
 		if err != nil {
-			return fmt.Errorf("platform %q vm_credentials.pass: %w", name, err)
+			return fmt.Errorf("platform %q credentials.pass: %w", name, err)
 		}
-		platform.VMCredentials.User = user
-		platform.VMCredentials.Pass = pass
+		platform.Credentials.User = user
+		platform.Credentials.Pass = pass
 	}
 	return nil
 }
@@ -2084,17 +2084,17 @@ func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.R
 	}
 	// Fall back to the platform's baked-in VM credentials for any SSH field the
 	// node omits — mirroring newtlab's NodeConfig resolution (pkg/newtlab/node.go:
-	// SSHUser = profile > "admin"; SSHPass = profile > platform vm_credentials.pass)
+	// SSHUser = profile > "admin"; SSHPass = profile > platform credentials.pass)
 	// so newtron and newtlab reach the same device with the same login. A device's
 	// login is a property of its image/platform; without this a lab node authored
 	// with just a platform (e.g. one created through newtcon, which sets no
 	// ssh_pass) had an empty password and Device.Connect couldn't open its SSH
 	// tunnel. Production nodes set ssh_pass per-node and this never triggers.
 	if sshPass == "" {
-		if plat, ok := n.platforms[nodeSpec.Platform]; ok && plat.VMCredentials != nil {
-			p, err := secret.Resolve(plat.VMCredentials.Pass, n.secretStore)
+		if plat, ok := n.platforms[nodeSpec.Platform]; ok && plat.Credentials != nil {
+			p, err := secret.Resolve(plat.Credentials.Pass, n.secretStore)
 			if err != nil {
-				return nil, fmt.Errorf("platform %q vm_credentials pass: %w", nodeSpec.Platform, err)
+				return nil, fmt.Errorf("platform %q credentials pass: %w", nodeSpec.Platform, err)
 			}
 			sshPass = p
 		}

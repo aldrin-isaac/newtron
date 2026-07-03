@@ -6,7 +6,7 @@
   "vm_memory": 256,
   "vm_cpus": 1,
   "vm_nic_driver": "virtio-net-pci",
-  "vm_credentials": {
+  "credentials": {
     "user": "root",
     "pass": "root"
   },

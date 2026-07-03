@@ -299,17 +299,17 @@ type PlatformSpec struct {
 	Ports []PortSpec `json:"ports,omitempty" label:"Ports" tooltip:"Per-port inventory: device-native name → QEMU NIC slot, generated from the platform's port authority"`
 
 	// newtlab VM fields
-	VMImage             string         `json:"vm_image,omitempty" label:"VM Image" tooltip:"Path or URL to the platform's VM disk image"`
-	VMMemory            int            `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Default VM memory size"`
-	VMCPUs              int            `json:"vm_cpus,omitempty" label:"VM vCPUs" tooltip:"Default VM vCPU count"`
-	VMNICDriver         string         `json:"vm_nic_driver,omitempty" label:"VM NIC Driver" tooltip:"QEMU NIC driver (e.g. \"virtio-net-pci\")"`
-	VMCPUFeatures       string         `json:"vm_cpu_features,omitempty" label:"VM CPU Features" tooltip:"QEMU CPU feature flags"`
-	VMCredentials       *VMCredentials `json:"vm_credentials,omitempty" label:"VM Credentials" tooltip:"Default SSH credentials baked into the VM image"`
-	VMBootTimeout       int            `json:"vm_boot_timeout,omitempty" label:"VM Boot Timeout (s)" tooltip:"Seconds to wait for VM to reach SSH"`
-	Dataplane           string         `json:"dataplane,omitempty" label:"Dataplane" tooltip:"Forwarding plane the platform uses" enum:"vpp,barefoot"`
-	VMImageRelease      string         `json:"vm_image_release,omitempty" label:"VM Image Release" tooltip:"Release tag selecting release-specific boot patches (e.g. \"202405\")"`
-	VMSkipBootstrap     bool           `json:"vm_skip_bootstrap,omitempty" label:"Skip Bootstrap" tooltip:"Image is pre-bootstrapped — skip console-driven network bring-up"`
-	UnsupportedFeatures []string       `json:"unsupported_features,omitempty" label:"Unsupported Features" tooltip:"Features this platform cannot handle (e.g. \"acl\", \"evpn-vxlan\")"`
+	VMImage             string       `json:"vm_image,omitempty" label:"VM Image" tooltip:"Path or URL to the platform's VM disk image"`
+	VMMemory            int          `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Default VM memory size"`
+	VMCPUs              int          `json:"vm_cpus,omitempty" label:"VM vCPUs" tooltip:"Default VM vCPU count"`
+	VMNICDriver         string       `json:"vm_nic_driver,omitempty" label:"VM NIC Driver" tooltip:"QEMU NIC driver (e.g. \"virtio-net-pci\")"`
+	VMCPUFeatures       string       `json:"vm_cpu_features,omitempty" label:"VM CPU Features" tooltip:"QEMU CPU feature flags"`
+	Credentials         *Credentials `json:"credentials,omitempty" label:"Credentials" tooltip:"Default device login (SSH + console) for this platform — the login baked into the image or the hardware's factory default. Applies to physical and virtual platforms; a node's ssh_user/ssh_pass override it."`
+	VMBootTimeout       int          `json:"vm_boot_timeout,omitempty" label:"VM Boot Timeout (s)" tooltip:"Seconds to wait for VM to reach SSH"`
+	Dataplane           string       `json:"dataplane,omitempty" label:"Dataplane" tooltip:"Forwarding plane the platform uses" enum:"vpp,barefoot"`
+	VMImageRelease      string       `json:"vm_image_release,omitempty" label:"VM Image Release" tooltip:"Release tag selecting release-specific boot patches (e.g. \"202405\")"`
+	VMSkipBootstrap     bool         `json:"vm_skip_bootstrap,omitempty" label:"Skip Bootstrap" tooltip:"Image is pre-bootstrapped — skip console-driven network bring-up"`
+	UnsupportedFeatures []string     `json:"unsupported_features,omitempty" label:"Unsupported Features" tooltip:"Features this platform cannot handle (e.g. \"acl\", \"evpn-vxlan\")"`
 }
 
 // PortSpec is one front-panel port in a platform's generated port model — the
@@ -437,10 +437,14 @@ func GetFeatureDependencies(feature string) []string {
 	return featureDependencies[feature]
 }
 
-// VMCredentials holds default SSH credentials for a VM platform.
-type VMCredentials struct {
-	User string `json:"user"`
-	Pass string `json:"pass"`
+// Credentials is a platform's default device login (SSH + console) — the login
+// baked into the image or set as the hardware's factory default. It applies to
+// physical and virtual platforms alike (not a VM-only concept); a node's
+// ssh_user / ssh_pass override it. Consumed by newtlab for bootstrap + console
+// and by newtron as the ssh_pass fallback when a node omits one.
+type Credentials struct {
+	User string `json:"user" label:"User" tooltip:"Default login username for devices of this platform"`
+	Pass string `json:"pass" label:"Password" tooltip:"Default login password (or ${secret:KEY} reference)" secret:"true"`
 }
 
 // ============================================================================

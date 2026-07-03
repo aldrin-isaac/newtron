@@ -920,9 +920,8 @@ type CreateRoutePolicyRequest struct {
 // request body and the loader will accept it unchanged.
 //
 // The embedded PlatformSpec fields appear at the same JSON level as
-// Name. The `vm_credentials` field accepts plaintext only; ${secret:KEY}
-// references are a load-time mechanism and are not re-resolved on
-// Save (#173 — see SavePlatforms doc).
+// Name. The `credentials` field's ${secret:KEY} references are a load-time
+// mechanism and are not re-resolved on Save (#173 — see SavePlatforms doc).
 type CreatePlatformRequest struct {
 	Name string `json:"name"`
 	spec.PlatformSpec

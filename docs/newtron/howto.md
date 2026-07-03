@@ -533,10 +533,13 @@ newtron platform generate platform.json \
 
 What the generator does NOT derive (you fill these in after generation):
 
-- `vm_image`, `vm_memory`, `vm_cpus`, `vm_credentials`, and the other VM/lab
-  fields. Real-hardware platforms omit them entirely. Simulator platforms
-  (`Force10-S6000_vs`, `cisco-p200-32x100-vs`) need them, but the values come
-  from per-image conventions, not from `platform.json`.
+- `vm_image`, `vm_memory`, `vm_cpus`, and the other VM/lab fields. Real-hardware
+  platforms omit them entirely. Simulator platforms (`Force10-S6000_vs`,
+  `cisco-p200-32x100-vs`) need them, but the values come from per-image
+  conventions, not from `platform.json`.
+- `credentials` — the platform's default device login (SSH + console). Unlike
+  the `vm_*` fields above, this applies to real hardware too (the factory-default
+  login), not just simulators; a node's `ssh_user`/`ssh_pass` override it.
 - `dataplane` (use `--dataplane` if you want it set during generation).
 - `unsupported_features` — a runtime-discovered property; populate it from
   suite outcomes when a feature reliably fails on the target.

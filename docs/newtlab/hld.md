@@ -238,7 +238,7 @@ rejects an interface the platform does not have.
 3. Built-in default (4096 MB, 2 CPUs, `e1000`, `stride-4`)
 
 Credentials resolve: profile `ssh_user`/`ssh_pass` → platform
-`vm_credentials`. The LLD documents the complete resolution table with every
+`credentials`. The LLD documents the complete resolution table with every
 field.
 
 **Relationship to newtron:** newtron reads profiles and `network.json` but
