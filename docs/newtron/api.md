@@ -47,7 +47,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | GET | `/schema` | List every spec authoring kind with label/description |
 | GET | `/schema/{kind}` | Field metadata for one kind (label, tooltip, type, required, enum, ref) |
 | POST | `/networks/{n}/unregister` | Unregister a network (serving layer — stop serving; files untouched) |
-| POST | `/networks/{n}/delete` | Soft-delete a network: archive its spec dir (existence layer). Requires it be unregistered first; global super-user only; `?force=true` overrides the lab guard |
+| POST | `/networks/{n}/delete` | Soft-delete a network: unregister (if registered) + archive its spec dir, atomically. Global super-user only; `?force=true` overrides the lab guard |
 | POST | `/networks/{n}/reload` | Reload specs from disk |
 | GET | `/networks/{n}/control` | Write-control reservation status |
 | POST | `/networks/{n}/control/request` | Acquire / extend / take over write control |
@@ -829,30 +829,37 @@ Unregister a network. Closes all cached SSH connections for the network.
 
 **Status codes:** 200 success, 500 network not registered or has active node connections
 
-Unregister is the **serving layer**: it stops the running server from serving the
-network (closes SSH connections, releases the audit file handle, drops the
-spec-watch) but **does not touch any files on disk**. The spec directory stays,
-and boot-time auto-discovery re-registers it on the next start. It is reversible
-via `POST /networks` (or a restart). To remove the definition from disk, follow
-with `POST .../delete`.
+Unregister is the **serving layer** on its own: it stops the running server from
+serving the network (closes SSH connections, releases the audit file handle, drops
+the spec-watch) but **does not touch any files on disk**. The spec directory
+stays, and boot-time auto-discovery re-registers it on the next start. Use it to
+take a network temporarily out of service (maintenance, freeing resources); it is
+reversible via `POST /networks` (or a restart). It is **not** a required prelude
+to delete — `delete` owns its own teardown (below).
 
 ### POST /newtron/v1/networks/{netID}/delete
 
-Soft-delete a network: **move** its spec directory to the archive store
-(`<networks-base>/archives/<id>-<UTCtimestamp>/`), the on-disk reverse of
-`POST /networks`'s scaffold. This is the **existence layer** — distinct from
-unregister's serving layer:
+Soft-delete a network: tear down serving (unregister, if registered) **and move**
+its spec directory to the archive store
+(`<networks-base>/archives/<id>-<UTCtimestamp>/`) — the reverse of
+`POST /networks`'s scaffold+register.
 
+- **Delete owns its teardown, atomically.** Ending service is the point of delete,
+  so it unregisters as the first step of removal rather than requiring a separate
+  `POST .../unregister` first. (Because auto-discovery registers every on-disk
+  network, requiring the caller to unregister would make delete a mandatory,
+  non-atomic two-step.) The unregister+archive run under one lock, so no concurrent
+  register can be left holding a moved directory. `unregister` remains available as
+  a standalone op for the pause-serving case — it is just not a prelude to delete.
+- **Guards run BEFORE any teardown.** A guard failure changes nothing — the
+  network stays fully in service (still registered, still served), never torn down
+  for a delete that didn't happen.
 - **Nothing is erased.** The whole directory — `network.json`, `nodes/`, `zones/`,
   `secrets.json`, and `audit/` — travels to the archive intact. The delete is
   **undoable, but only manually**: an operator moves the archived directory back.
   The archive is invisible to the API (auto-discovery skips the reserved
   `archives` name; `GET /networks` is in-memory, so archived networks never
   appear) and is git-ignored.
-- **Must be unregistered first.** The two layers are kept separate: you can't
-  archive a directory the server holds open. A still-registered network is refused
-  (**409**) with "unregister first" — call `POST .../unregister` before
-  `POST .../delete`.
 - **Lab guard.** While a lab is deployed under the same name, the delete is
   refused (**409**) — destroy the lab first (`newtlab destroy <id>`). `?force=true`
   overrides the guard; the lab keeps running but its network definition is
@@ -860,8 +867,7 @@ unregister's serving layer:
   forced through on uncertainty).
 - **Gate.** A registry-level act — **global super-user only** (server
   `--super-users`) under `--enforce-authorization`, the same bar as
-  `POST /networks`. The network may be unregistered (no per-network permission
-  model loaded), so the gate is server-wide, not any `network.json`.
+  `POST /networks`.
 
 **Query parameters:** `force` (`true` bypasses the lab guard).
 
@@ -872,8 +878,7 @@ unregister's serving layer:
 ```
 
 **Status codes:** 200 archived, 403 not a global super-user, 404 no spec dir on
-disk, 409 still registered or a lab is deployed (unless `force`), 500 archive move
-failed.
+disk, 409 a lab is deployed (unless `force`), 500 archive move failed.
 
 ### POST /newtron/v1/networks/{netID}/reload
 
