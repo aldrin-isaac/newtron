@@ -344,7 +344,10 @@ func (net *Network) IsHostDevice(name string) bool {
 // through the configured PortResolver and included in the response so callers
 // (newtrun's host-exec path, CLI) never need to know newtlab exists.
 func (net *Network) GetHostConnection(ctx context.Context, name string) (*HostConnection, error) {
-	ns, err := net.internal.GetNodeSpec(name)
+	// Effective (inherited) login — a host reached by direct SSH resolves its
+	// credentials through the same node > zone > network > platform hierarchy as a
+	// switch, so a host relying on a network-scope login is still reachable (§24).
+	ns, err := net.internal.EffectiveNodeSpec(name)
 	if err != nil {
 		return nil, err
 	}

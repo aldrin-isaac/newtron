@@ -57,6 +57,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/services/{name}/projection", s.handleServiceProjection)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/ipvpns", s.handleListIPVPNs)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/ipvpns/{name}", s.handleShowIPVPN)
+	// Device SSH login authored at a scope (?scope=&scope_instance=), ssh_pass masked.
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/ssh-credentials", s.handleShowSSHCredentials)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/macvpns", s.handleListMACVPNs)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/macvpns/{name}", s.handleShowMACVPN)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/qos-policies", s.handleListQoSPolicies)
@@ -103,6 +105,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-service", s.handleDeleteService)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-ipvpn", s.handleCreateIPVPN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-ipvpn", s.handleDeleteIPVPN)
+	// Device SSH login — scalar scope-write surface (set/clear), the counterpart
+	// of the map-overridable create/delete-<kind> writes above.
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/set-ssh-credentials", s.handleSetSSHCredentials)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/clear-ssh-credentials", s.handleClearSSHCredentials)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-macvpn", s.handleCreateMACVPN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete-macvpn", s.handleDeleteMACVPN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/create-qos-policy", s.handleCreateQoSPolicy)

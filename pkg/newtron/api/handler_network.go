@@ -622,6 +622,61 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// handleShowSSHCredentials reads the device SSH login authored at one scope
+// (?scope=&scope_instance=), with ssh_pass masked. Absent scope ⇒ network.
+func (s *Server) handleShowSSHCredentials(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	val, err := ne.net.ShowSSHCredentials(scopeSelectorFromQuery(r))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
+// handleSetSSHCredentials sets (upserts) the device SSH login at the scope named
+// in the body. The scalar analog of create/update-<kind>; gated spec.author.
+func (s *Server) handleSetSSHCredentials(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.SetSSHCredentialsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	if err := ne.net.SetSSHCredentials(r.Context(), req, opts); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "set"})
+}
+
+// handleClearSSHCredentials removes the device SSH login override at the scope
+// named in the body — the reverse of set (§15); gated spec.author.
+func (s *Server) handleClearSSHCredentials(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	var req newtron.ScopeSelector
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	if err := ne.net.ClearSSHCredentials(r.Context(), req, opts); err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+}
+
 func (s *Server) handleCreateMACVPN(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {

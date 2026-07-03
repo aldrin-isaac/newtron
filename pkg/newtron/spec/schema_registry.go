@@ -95,6 +95,26 @@ func init() {
 			"routing":  {Field: "service_type", In: []any{"routed", "irb", "evpn-routed", "evpn-irb"}},
 		},
 	})
+	// SSH login — a scoped SINGLETON, not a named collection. It carries the
+	// scope dropdown (Scoped: true) like the map kinds, but has no name
+	// identifier and no List/Create: the write is an upsert (set) with a reverse
+	// (clear), and the effective per-node login is read via GET /nodes/{name}
+	// while the authored per-scope value is read via Show with a scope selector.
+	// No network-floor invariant — resolution falls back to the platform default
+	// then "admin", so a zone/node override needs no network base
+	// (DESIGN_PRINCIPLES_NEWTRON §7; see network/ssh_credentials.go).
+	RegisterSchemaKind(SchemaRegistration{
+		Kind:        "SSHCredentials",
+		Scoped:      true,
+		Label:       "SSH Login",
+		Description: "The device SSH login (the tunnel to CONFIG_DB Redis). One login per scope; resolves node > zone > network, then the platform default, then \"admin\". ssh_pass may be a ${secret:KEY} reference.",
+		Sample:      SSHCredentials{},
+		Paths: SchemaPaths{
+			Show:   "/newtron/v1/networks/{netID}/ssh-credentials",
+			Update: "/newtron/v1/networks/{netID}/set-ssh-credentials",
+			Delete: "/newtron/v1/networks/{netID}/clear-ssh-credentials",
+		},
+	})
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:            "IPVPNSpec",
 		Scoped:          true,

@@ -21,7 +21,10 @@ func (net *Network) ListNodeSpecs() []string {
 // device. Consumers (CLI, newtrun, newtlab) read whatever subset of
 // fields they need.
 func (net *Network) ShowNodeSpec(name string) (*spec.NodeSpec, error) {
-	return net.internal.GetNodeSpec(name)
+	// Effective (inherited) login, not the authored own-value: this read feeds
+	// newtlab's profile fetch and the CLI/API node view, both of which need the
+	// login the device actually dials (§24). resolveEffectiveSSH owns the rule.
+	return net.internal.EffectiveNodeSpec(name)
 }
 
 // CreateNodeSpec creates a new node spec.
