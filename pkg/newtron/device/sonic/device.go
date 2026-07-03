@@ -109,7 +109,7 @@ func (d *Device) Connect(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("resolving SSH port for %s: %w", d.Name, err)
 		}
-		tun, err := NewSSHTunnel(d.NodeSpec.MgmtIP, d.NodeSpec.SSHUser, d.NodeSpec.SSHPass, sshPort)
+		tun, err := NewSSHTunnel(ctx, d.NodeSpec.MgmtIP, d.NodeSpec.SSHUser, d.NodeSpec.SSHPass, sshPort)
 		if err != nil {
 			return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
 		}
