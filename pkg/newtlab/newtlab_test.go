@@ -328,17 +328,11 @@ func TestAllocateLinks_PortSequence(t *testing.T) {
 	}
 }
 
-// TestReconcileArgs pins that Provision forwards --network-id to the reconcile
-// subprocess so a non-default-network lab reconciles its own network (not the
-// CLI's default), and omits the flag when no id is set.
-func TestReconcileArgs(t *testing.T) {
-	if got := strings.Join(reconcileArgs("switch1", "2node-vs"), " "); got != "switch1 --network-id 2node-vs --topology intent reconcile -x" {
-		t.Errorf("with network id: got %q", got)
-	}
-	if got := strings.Join(reconcileArgs("switch1", ""), " "); got != "switch1 --topology intent reconcile -x" {
-		t.Errorf("empty network id should omit --network-id: got %q", got)
-	}
-}
+// Provision now reconciles each device through newtron's HTTP client
+// (NewtronClient.Reconcile), the single owner of that operation (§27), instead
+// of spawning `newtron … reconcile`. There is no argv to pin; the network is
+// carried by the per-network client (NewtronClientFor). Provision's behavior is
+// exercised end-to-end (it reads on-disk lab state and calls a live newtron).
 
 // ============================================================================
 // State Tests
