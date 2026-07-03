@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
@@ -103,7 +104,7 @@ func newNewtronClient(networkID string) *newtronclient.Client {
 		url = os.Getenv("NEWTRUN_SERVER")
 	}
 	if url == "" {
-		url = "http://127.0.0.1:18080"
+		url = httputil.DefaultServerURL
 	}
 	// Identity + TLS come from the single owner of the newtron CLI client build
 	// (§27) — one login serves every command across all three CLIs.

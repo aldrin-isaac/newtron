@@ -22,11 +22,11 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
 
-// DefaultBaseURL is the default URL the newtrun CLI dials. Points at
-// newt-server on port 18080 — the only entry point for the newtrun
-// engine. URLs are routed by path prefix (/newtrun/v1/...) so all
-// three engines share the one port.
-const DefaultBaseURL = "http://127.0.0.1:18080"
+// DefaultBaseURL is the default URL the newtrun CLI dials — the canonical
+// newt-server address (httputil.DefaultServerURL, shared with every other
+// client). URLs are routed by path prefix (/newtrun/v1/...) so all three
+// engines share the one port.
+const DefaultBaseURL = httputil.DefaultServerURL
 
 // Client is the HTTP client for newtrun-server.
 type Client struct {

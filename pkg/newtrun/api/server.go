@@ -85,7 +85,7 @@ func NewServer(cfg Config) *Server {
 		cfg.NetworksBase = "networks"
 	}
 	if cfg.NewtronServer == "" {
-		cfg.NewtronServer = "http://127.0.0.1:18080"
+		cfg.NewtronServer = httputil.DefaultServerURL
 	}
 	if cfg.NetworkID == "" {
 		cfg.NetworkID = "default"
@@ -173,4 +173,3 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Version: "0.1.0-dev",
 	})
 }
-

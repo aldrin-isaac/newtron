@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
@@ -75,7 +76,7 @@ Networks are resolved by name from networks/.
 func init() {
 	rootCmd.PersistentFlags().StringVar(&dir, "dir", "", "network directory (overrides network name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
-	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", "http://127.0.0.1:18080", "newtron-server URL (newtlab consumes specs via /newtron/v1)")
+	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", httputil.DefaultServerURL, "newtron-server URL (newtlab consumes specs via /newtron/v1)")
 	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — the orchestrator URL newtlink pushes BridgeStats to (#118) and the read path for `newtlab status` link telemetry. Defaults to --newtron-server (same listener in the aggregated newt-server); set explicitly only for multi-host labs where remote workers reach the server at a different, publicly-reachable address. Env: NEWTLAB_SERVER")
 	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "", "newtron network ID (default: derived from the lab name, so concurrent labs get separate registration slots — issue #116)")
 

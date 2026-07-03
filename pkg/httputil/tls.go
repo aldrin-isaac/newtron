@@ -20,6 +20,18 @@ const (
 	EnvTLSCA   = "NEWTRON_TLS_CA"
 )
 
+// DefaultServerURL is the single canonical address every in-repo client dials
+// when no flag / env / setting overrides it — the composed newt-server on its
+// default loopback listener (cmd/newt-server's defaultListen, 127.0.0.1:18080).
+// Owned here (a leaf both the clients and pkg/newtron import) so the three
+// engine clients and the CLIs can't drift to different spellings.
+//
+// It is 127.0.0.1, deliberately NOT localhost: newt-server listens on
+// 127.0.0.1, `localhost` can resolve to ::1 (IPv4/IPv6 mismatch) and a
+// loopback TLS cert's SAN typically pins the literal IP — dialing the literal
+// keeps the plain-HTTP and TLS paths on the same host the server bound.
+const DefaultServerURL = "http://127.0.0.1:18080"
+
 // LoadClientTLSConfigFromEnv reads NEWTRON_TLS_CERT / NEWTRON_TLS_KEY /
 // NEWTRON_TLS_CA from the environment and delegates to
 // LoadClientTLSConfig. Returns nil + nil when NEWTRON_TLS_CA is
