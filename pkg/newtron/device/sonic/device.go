@@ -103,7 +103,8 @@ func (d *Device) Connect(ctx context.Context) error {
 	}()
 
 	var addr string
-	if d.NodeSpec.SSHUser != "" && d.NodeSpec.SSHPass != "" {
+	switch {
+	case d.NodeSpec.SSHUser != "" && d.NodeSpec.SSHPass != "":
 		sshPort, err := d.resolveSSHPort(ctx)
 		if err != nil {
 			return fmt.Errorf("resolving SSH port for %s: %w", d.Name, err)
@@ -114,7 +115,19 @@ func (d *Device) Connect(ctx context.Context) error {
 		}
 		d.tunnel = tun
 		addr = tun.LocalAddr()
-	} else {
+	case d.NodeSpec.SSHUser != "":
+		// ssh_user is set but ssh_pass is empty — the intent is clearly "reach
+		// this device over SSH," so an empty password is a misconfiguration
+		// (an unresolved ${secret:...}, or a missing secret store), not a cue to
+		// fall through to a direct Redis dial. Without this guard the else branch
+		// below silently connects to mgmt_ip:6379 — for a lab device that is
+		// 127.0.0.1:6379 on the newt-server host, NOT the device — and the read
+		// surfaces later as the baffling "DEVICE_METADATA|localhost not found in
+		// CONFIG_DB". Fail here, at the real cause.
+		return fmt.Errorf("%s: ssh_user %q is set but ssh_pass is empty — cannot open the SSH tunnel to read CONFIG_DB (unresolved ${secret:...} or missing secrets store?)", d.Name, d.NodeSpec.SSHUser)
+	default:
+		// No SSH credentials at all: the device's Redis is expected to be
+		// directly reachable at mgmt_ip:6379 (no tunnel).
 		addr = fmt.Sprintf("%s:6379", d.NodeSpec.MgmtIP)
 	}
 
