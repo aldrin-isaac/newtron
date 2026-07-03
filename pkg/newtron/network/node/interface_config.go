@@ -24,15 +24,22 @@ func enableIpRoutingConfig(intfName string) []sonic.Entry {
 		Fields: map[string]string{}}}
 }
 
+// interfaceIPKey returns the CONFIG_DB key for an INTERFACE IP sub-entry.
+// Format: {intf}|{ip}. One owner so the assign and delete paths can never
+// drift apart (§15 forward/reverse symmetry).
+func interfaceIPKey(intfName, ipAddr string) string {
+	return fmt.Sprintf("%s|%s", intfName, ipAddr)
+}
+
 // assignIpAddressConfig returns the INTERFACE entry for assigning an IP address.
 func assignIpAddressConfig(intfName, ipAddr string) []sonic.Entry {
 	return []sonic.Entry{{Table: "INTERFACE",
-		Key: fmt.Sprintf("%s|%s", intfName, ipAddr), Fields: map[string]string{}}}
+		Key: interfaceIPKey(intfName, ipAddr), Fields: map[string]string{}}}
 }
 
 // deleteInterfaceIPConfig returns a delete entry for an interface IP sub-entry.
 func deleteInterfaceIPConfig(intfName, ipAddr string) []sonic.Entry {
-	return []sonic.Entry{{Table: "INTERFACE", Key: fmt.Sprintf("%s|%s", intfName, ipAddr)}}
+	return []sonic.Entry{{Table: "INTERFACE", Key: interfaceIPKey(intfName, ipAddr)}}
 }
 
 // deleteInterfaceBaseConfig returns a delete entry for the base INTERFACE entry.
