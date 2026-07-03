@@ -1453,8 +1453,36 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("ApplyFRRDefaults failed: %w (output: %s)", err, output)
 	}
 
-	// Force route reprocessing after changing defaults.
-	_, _ = tunnel.ExecCommand("vtysh -c 'clear bgp * soft'")
+	// Force route reprocessing after changing defaults — best-effort, same as
+	// the standalone nudge (RefreshBGP owns the soft-clear command).
+	_ = n.RefreshBGP(ctx)
 
+	return nil
+}
+
+// RefreshBGP forces FRR to re-advertise all routes by issuing a BGP soft clear
+// (`clear bgp * soft`). It is an operational nudge, not a CONFIG_DB change: after
+// devices are provisioned in parallel, a device may run its own soft clear (in
+// ApplyFRRDefaults) before its peers are up, leaving routes un-advertised until
+// FRR's next timer cycle; a soft clear once all peers are ready forces immediate
+// re-advertisement. It is the sole owner of the soft-clear command — orchestrators
+// (newtlab's post-provision pass) reach it through newtron rather than SSHing in
+// themselves (§27, device interaction is newtron's).
+//
+// Inherent CLI, not a workaround: clearing BGP sessions is an FRR runtime action
+// with no CONFIG_DB representation, so the Redis-First Interaction Principle has
+// no Redis path to prefer. Being a transient runtime trigger with no persistent
+// state, it has no reverse (§15) — like other operational actions (restart).
+func (n *Node) RefreshBGP(ctx context.Context) error {
+	if !n.connected {
+		return util.ErrNotConnected
+	}
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return fmt.Errorf("RefreshBGP requires SSH connection")
+	}
+	if _, err := tunnel.ExecCommandContext(ctx, "vtysh -c 'clear bgp * soft'"); err != nil {
+		return fmt.Errorf("RefreshBGP: clear bgp soft: %w", err)
+	}
 	return nil
 }

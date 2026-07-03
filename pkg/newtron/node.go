@@ -894,6 +894,17 @@ func (n *Node) RestartService(ctx context.Context, name string) error {
 	return n.internal.RestartService(ctx, name)
 }
 
+// RefreshBGP forces the device's FRR to re-advertise all BGP routes via a soft
+// clear — an operational post-provision convergence nudge (see the internal
+// method). Orchestrators call this instead of running vtysh themselves so all
+// device interaction stays inside newtron (§27).
+func (n *Node) RefreshBGP(ctx context.Context) error {
+	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
+		return err
+	}
+	return n.internal.RefreshBGP(ctx)
+}
+
 // ============================================================================
 // HealthCheck
 // ============================================================================
