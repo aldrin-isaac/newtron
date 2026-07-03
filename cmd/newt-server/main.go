@@ -271,7 +271,7 @@ func main() {
 	newtlabSrv := newtlabapi.NewServer(newtlabapi.Config{
 		NetworksBase: *networksBase,
 		Logger:       logger,
-		NewtronClientFor: func(networkID string) newtlab.SpecClient {
+		NewtronClientFor: func(networkID string) newtlab.NewtronClient {
 			return newtronclient.New(newtronURL, networkID, newtronclient.WithBearer(serviceKey))
 		},
 		// In the composed newt-server, newtlab-server routes are
@@ -280,7 +280,6 @@ func main() {
 		// base as newtronURL (#118).
 		OrchestratorURL: newtronURL,
 	})
-
 
 	// Compose the route tree. Each engine's Handler() already returns
 	// a fully-wired mux + middleware chain serving its own /<name>/v1/

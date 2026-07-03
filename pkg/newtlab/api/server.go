@@ -22,16 +22,16 @@ type Config struct {
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
 
-	// NewtronClientFor returns a newtron SpecClient configured for the
+	// NewtronClientFor returns a newtron client configured for the
 	// named network ID. newtlab uses one client per lab — by the #116
 	// convention, the network ID equals the lab name, so each lab has
 	// its own newtron registration slot. Composed in by cmd/newt-server,
 	// typically wrapping newtronclient.New(baseURL, networkID).
 	//
 	// Required for topology lifecycle operations (deploy / status /
-	// start / stop) — newtlab no longer reads spec JSON files directly
-	// per §27.
-	NewtronClientFor func(networkID string) newtlab.SpecClient
+	// start / stop) and provisioning (reconcile) — newtlab reaches both
+	// spec data and device state through newtron's HTTP API per §27.
+	NewtronClientFor func(networkID string) newtlab.NewtronClient
 
 	// OrchestratorURL is the publicly-reachable base URL of newt-server.
 	// It is written into the bridge config sent to each newtlink worker
@@ -48,7 +48,6 @@ type Config struct {
 	// from the operator's --tls-cert / --tls-key / --client-ca flags.
 	// nil keeps the default plain-HTTP listener — the disabled state.
 	TLSConfig *tls.Config
-
 }
 
 // Server is the newtlab HTTP server. The HTTP listener lifecycle

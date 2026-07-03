@@ -26,9 +26,10 @@ type LabClient interface {
 var _ LabClient = (*newtlabclient.Client)(nil)
 
 // DeployTopology deploys the named VM topology by calling newtlab-
-// server. Spec data flows from newtron via newtlab-server's own
-// SpecClient (§27 — newtron owns spec files, newtlab owns lab
-// state); newtrun stays a client of both.
+// server. Spec data and device reconcile flow from newtron via
+// newtlab-server's own NewtronClient (§27 — newtron owns spec files
+// and device state, newtlab owns lab state); newtrun stays a client
+// of both.
 func DeployTopology(ctx context.Context, client LabClient, topologyName string) error {
 	if err := client.Deploy(ctx, topologyName, api.DeployRequest{Force: true}); err != nil {
 		return fmt.Errorf("newtrun: deploy topology: %w", err)

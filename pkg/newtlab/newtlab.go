@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,25 +15,30 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
-// SpecClient is the minimal interface newtlab needs from newtron's HTTP
-// client. Defined here (rather than imported) so test code can mock
-// without depending on the full pkg/newtron/client package, and so the
-// boundary between engines is explicit (DESIGN_PRINCIPLES_NEWTRON.md
-// §27 — newtron owns the spec data object; newtlab reads through
-// newtron's HTTP API). *pkg/newtron/client.Client satisfies this
+// NewtronClient is the interface newtlab needs from newtron's HTTP client —
+// both the spec reads it consumes and the reconcile operation it invokes to
+// provision a device. Defined here (rather than imported) so test code can mock
+// without depending on the full pkg/newtron/client package, and so the boundary
+// between engines is explicit (DESIGN_PRINCIPLES_NEWTRON.md §27 — newtron owns
+// spec data and device state; newtlab reaches both through newtron's HTTP API,
+// never by spawning its binary). *pkg/newtron/client.Client satisfies this
 // interface structurally.
-type SpecClient interface {
+type NewtronClient interface {
 	GetTopology() (*spec.TopologySpecFile, error)
 	ListPlatforms() (map[string]*spec.PlatformSpec, error)
 	ShowNodeSpec(name string) (*spec.NodeSpec, error)
-	// NetworkID is the network this client is bound to. Provision forwards it
-	// to the reconcile subprocess so the CLI stays on the lab's network instead
-	// of falling back to the default (see reconcileArgs).
+	// NetworkID is the network this client is bound to.
 	NetworkID() string
+	// Reconcile delivers a device's projection to the device — the provision
+	// operation. Same method newtrun's provision step calls; the single owner of
+	// "reconcile a device" is newtron's HTTP client, and both engines route
+	// through it (DESIGN_PRINCIPLES_NEWTRON.md §27, ai-instructions §25).
+	Reconcile(device, mode, reconcileMode string, opts newtron.ExecOpts) (*newtron.ReconcileResult, error)
 }
 
 // HostVMGroup represents virtual hosts coalesced into one VM.
@@ -72,11 +76,10 @@ type Lab struct {
 	// longer offers a fallback listener.
 	OrchestratorURL string
 
-	// specClient is the newtron HTTP client used to reload spec data
-	// when internal operations need a fresh view (e.g., Start() re-
-	// resolving a stopped node's config). Set by NewLab; not mutable
-	// after construction.
-	specClient SpecClient
+	// newtronClient is the newtron HTTP client used to read spec data and to
+	// invoke reconcile (provision) — every newtlab→newtron call routes through
+	// it (§27). Set by NewLab; not mutable after construction.
+	newtronClient NewtronClient
 
 	// OnProgress is an optional callback for reporting deploy/destroy progress.
 	OnProgress func(phase, detail string)
@@ -101,7 +104,7 @@ func (l *Lab) progress(phase, detail string) {
 // newtlab no longer reads spec JSON files directly (DESIGN_PRINCIPLES
 // §27 — newtron owns the spec files and exposes their contents through
 // `/newtron/v1/network/...`).
-func NewLab(ctx context.Context, client SpecClient, topologyName string) (*Lab, error) {
+func NewLab(ctx context.Context, client NewtronClient, topologyName string) (*Lab, error) {
 	if client == nil {
 		return nil, fmt.Errorf("newtlab: nil newtron client")
 	}
@@ -110,11 +113,11 @@ func NewLab(ctx context.Context, client SpecClient, topologyName string) (*Lab, 
 	}
 
 	l := &Lab{
-		Name:       topologyName,
-		StateDir:   LabDir(topologyName),
-		Profiles:   make(map[string]*spec.NodeSpec),
-		Nodes:      make(map[string]*NodeConfig),
-		specClient: client,
+		Name:          topologyName,
+		StateDir:      LabDir(topologyName),
+		Profiles:      make(map[string]*spec.NodeSpec),
+		Nodes:         make(map[string]*NodeConfig),
+		newtronClient: client,
 	}
 
 	// Topology from newtron
@@ -1149,13 +1152,13 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	}
 
 	// Re-load lab config to rebuild the node. The original Lab's
-	// specClient is reused — newtlab is not the owner of spec data,
+	// newtronClient is reused — newtlab is not the owner of spec data,
 	// so re-fetching from newtron picks up any operator edits since
 	// the original Deploy() was called.
-	if l.specClient == nil {
+	if l.newtronClient == nil {
 		return fmt.Errorf("newtlab: cannot reload — no newtron client (lab was constructed without one)")
 	}
-	lab, err := NewLab(ctx, l.specClient, l.Name)
+	lab, err := NewLab(ctx, l.newtronClient, l.Name)
 	if err != nil {
 		return fmt.Errorf("newtlab: reload specs: %w", err)
 	}
@@ -1196,21 +1199,11 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	return SaveState(state)
 }
 
-// reconcileArgs builds the argv for the per-device `newtron … intent reconcile`
-// subprocess. It forwards --network-id when set so the CLI stays on the lab's
-// network instead of resolving to the default (the newtron CLI resolves
-// flag > env > settings > default; without the flag a non-default lab's device
-// isn't found). Mirrors newtrun's pkg/newtrun/steps_cli.go forwarding.
-func reconcileArgs(device, networkID string) []string {
-	args := []string{device}
-	if networkID != "" {
-		args = append(args, "--network-id", networkID)
-	}
-	return append(args, "--topology", "intent", "reconcile", "-x")
-}
-
-// Provision runs newtron provisioning for all (or specified) devices.
-// The context is threaded into exec.CommandContext for cancellation.
+// Provision reconciles every (or the filtered set of) devices to their topology
+// projection, in parallel up to `parallel`, by calling newtron's HTTP client
+// Reconcile (the single owner of that operation, §27) — not by spawning the
+// newtron binary. ctx bounds the overall call; per-device cancellation follows
+// the client's own request handling.
 func (l *Lab) Provision(ctx context.Context, parallel int) error {
 	util.Logger.Infof("newtlab: provisioning lab %s (parallel=%d)", l.Name, parallel)
 	state, err := LoadState(l.Name)
@@ -1247,11 +1240,14 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), reconcileArgs(name, l.specClient.NetworkID())...)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
+			// Provision = reconcile the device's topology projection. Route
+			// through newtron's HTTP client — the single owner of "reconcile a
+			// device" (§27), the same method newtrun's provision step calls —
+			// rather than spawning the newtron binary. The client carries the
+			// caller's identity, so this needs no session-cache lookup.
+			if _, err := l.newtronClient.Reconcile(name, "topology", "", newtron.ExecOpts{Execute: true}); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("provision %s: %w\n%s", name, err, output))
+				errs = append(errs, fmt.Errorf("provision %s: %w", name, err))
 				mu.Unlock()
 			}
 		}(name)
