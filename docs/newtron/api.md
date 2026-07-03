@@ -1665,13 +1665,15 @@ per scope**, not a named collection, so its verbs are `set-ssh-credentials`
 (upsert) and `clear-ssh-credentials` (the reverse), with `GET /ssh-credentials`
 reading the value authored at one scope (ssh_pass masked). It is registered in
 the schema as kind `SSHCredentials` (`Scoped`, no name identifier), so a UI
-renders the same scope dropdown + instance dropdown. **Two differences from the
-map kinds:** (1) **no network-floor invariant** — a zone/node login override
-needs no network base, because resolution is already total without one (it falls
-back to the platform `credentials`, then `"admin"`); so a scoped `set` never
-requires a network login first, and every `clear` is safe. (2) The **effective**
-login a device dials (after the node > zone > network merge) is read via
-`GET /nodes/{name}`, which resolves the hierarchy — distinct from
+renders the same scope dropdown + instance dropdown. The **network-floor
+invariant applies** as it does to every overridable: a zone/node login override
+requires a network-scope login (a scoped `set` with no network base → **400**),
+and the network base cannot be emptied while an override sits below it (→ **409**;
+clear bottom-up). The "base exists" predicate is whole-object — the network login
+is non-empty — since the login is one resource, not a named collection. **One
+difference from the map kinds:** the **effective** login a device dials (after
+the node > zone > network merge) is read via `GET /nodes/{name}`, which resolves
+the hierarchy — distinct from
 `GET /ssh-credentials`, which returns only what is authored *at* the requested
 scope. `ssh_pass` never leaves the server in the clear: a `${secret:KEY}`
 reference is returned intact (a pointer, not a secret), a plaintext value is

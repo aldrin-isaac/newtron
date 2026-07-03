@@ -36,9 +36,10 @@ func (net *Network) SetSSHCredentials(ctx context.Context, req SetSSHCredentials
 }
 
 // ClearSSHCredentials removes the SSH login override at a scope — the reverse of
-// SetSSHCredentials (§15), same gate. Always safe: resolution falls back through
-// the hierarchy (node > zone > network > platform > "admin"), so unlike a
-// network-base spec delete it needs no consumer/override guard.
+// SetSSHCredentials (§15), same gate. A scoped override clear is always safe
+// (consumers fall back to the network base). Clearing the network base is refused
+// (409) while any zone/node override sits below it — network-floor invariant (§7),
+// clear bottom-up.
 func (net *Network) ClearSSHCredentials(ctx context.Context, sel ScopeSelector, opts ExecOpts) error {
 	if err := validateScopeSelector(sel); err != nil {
 		return err

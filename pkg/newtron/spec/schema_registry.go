@@ -100,8 +100,8 @@ func init() {
 	// identifier and no List/Create: the write is an upsert (set) with a reverse
 	// (clear), and the effective per-node login is read via GET /nodes/{name}
 	// while the authored per-scope value is read via Show with a scope selector.
-	// No network-floor invariant — resolution falls back to the platform default
-	// then "admin", so a zone/node override needs no network base
+	// The network-floor invariant applies as it does to every overridable — a
+	// zone/node override requires a network base
 	// (DESIGN_PRINCIPLES_NEWTRON §7; see network/ssh_credentials.go).
 	RegisterSchemaKind(SchemaRegistration{
 		Kind:        "SSHCredentials",
