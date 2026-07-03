@@ -745,9 +745,9 @@ type ScopeSelector struct {
 // meaning "inherit from the next scope up"; ssh_pass may be a ${secret:KEY}
 // reference (the masked input on the UI, secret:"true").
 //
-// Unlike the map overridables there is NO network-floor invariant: a zone/node
-// login override needs no network base because resolution falls back to the
-// platform default, then "admin".
+// Network-floor invariant (§7) applies, as it does to every overridable: a
+// zone/node login override requires a network-scope login, and the network base
+// cannot be emptied while an override sits below it (clear bottom-up).
 type SetSSHCredentialsRequest struct {
 	ScopeSelector
 	SSHUser string `json:"ssh_user,omitempty" label:"SSH User" tooltip:"Username for the SSH tunnel at this scope; empty inherits from the next scope up (node > zone > network), then the platform default, then \"admin\"."`

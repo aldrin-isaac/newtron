@@ -105,11 +105,12 @@ func TestSSHCredentials_SecretRefPreservedInAuthoredRead(t *testing.T) {
 	}
 }
 
-// TestSSHCredentials_NoNetworkFloor pins the design difference from map
-// overridables: a node/zone login override needs NO network base (resolution
-// falls back to platform/"admin"), so a scoped set never requires a network-scope
-// login first — unlike checkOverrideBase for the map kinds.
-func TestSSHCredentials_NoNetworkFloor(t *testing.T) {
+// TestSSHCredentials_NetworkFloorEnforced pins the network-floor invariant (§7)
+// on the SSH login, consistent with every overridable: (1) a zone/node override
+// with no network base is refused; (2) after a network base is set, the override
+// succeeds; (3) emptying the network base while an override sits below it is
+// refused (clear bottom-up).
+func TestSSHCredentials_NetworkFloorEnforced(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite := func(rel, body string) {
 		p := filepath.Join(dir, rel)
@@ -129,14 +130,34 @@ func TestSSHCredentials_NoNetworkFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	// A node override with no network base must succeed (no floor).
-	if err := n.SetSSHCredentials(spec.ScopeNode, "leaf1", "leafuser", "leafpass"); err != nil {
-		t.Fatalf("set node with no network base = %v; want nil (ssh has no network-floor invariant)", err)
+
+	// (1) A node override with no network base is refused (the floor).
+	if err := n.SetSSHCredentials(spec.ScopeNode, "leaf1", "leafuser", "leafpass"); err == nil {
+		t.Fatal("set node with no network base = nil; want a network-floor error (400)")
 	}
-	if eff, err := n.resolveNodeSpecByName("leaf1"); err != nil {
-		t.Fatalf("resolve: %v", err)
-	} else if eff.SSHUser != "leafuser" {
-		t.Errorf("effective = %q, want leafuser", eff.SSHUser)
+
+	// (2) Set the network base, then the node override succeeds.
+	if err := n.SetSSHCredentials(spec.ScopeNetwork, "", "netuser", "netpass"); err != nil {
+		t.Fatalf("set network base: %v", err)
+	}
+	if err := n.SetSSHCredentials(spec.ScopeNode, "leaf1", "leafuser", "leafpass"); err != nil {
+		t.Fatalf("set node override after base = %v; want nil", err)
+	}
+
+	// (3) Emptying the network base while the override exists is refused.
+	if err := n.ClearSSHCredentials(spec.ScopeNetwork, ""); err == nil {
+		t.Error("clear network base with override below = nil; want a conflict error (409)")
+	}
+	if err := n.SetSSHCredentials(spec.ScopeNetwork, "", "", ""); err == nil {
+		t.Error("set network base to empty with override below = nil; want a conflict error (409)")
+	}
+
+	// Clearing the override first, then the base, is allowed (bottom-up).
+	if err := n.ClearSSHCredentials(spec.ScopeNode, "leaf1"); err != nil {
+		t.Fatalf("clear node override: %v", err)
+	}
+	if err := n.ClearSSHCredentials(spec.ScopeNetwork, ""); err != nil {
+		t.Errorf("clear network base after override removed = %v; want nil (floor satisfied)", err)
 	}
 }
 
