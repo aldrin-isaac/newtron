@@ -23,7 +23,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
-	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
@@ -32,7 +31,7 @@ import (
 )
 
 var (
-	dir       string
+	dir           string
 	verbose       bool
 	newtronServer string
 	newtlabServer string
@@ -148,24 +147,14 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	if effectiveNetID == "" {
 		effectiveNetID = name
 	}
-	// Honor the per-user session cache so a single `newtron auth
-	// login` carries through every CLI invocation. LoadCLISession
-	// resolves --user / NEWTRON_USER against the multi-user cache
-	// and returns nil for missing / expired / ambiguous caches;
-	// WithBearer("") is a no-op so the existing no-auth path is
-	// preserved.
-	var bearerKey string
-	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), newtronServer); err == nil && rec != nil {
-		bearerKey = rec.Key
-	}
-	// auth-design.md L2a: NEWTRON_TLS_CERT/KEY/CA in the operator's
-	// env configure the client's TLS posture automatically (shared
-	// across cmd/newtron, cmd/newtrun, cmd/newtlab, and cmd/newt-server).
-	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	// Identity (per-user session cache / NEWTRON_BEARER) and TLS posture
+	// (NEWTRON_TLS_CERT/KEY/CA) both come from the single owner of the newtron
+	// CLI client build (§27) — one `newtron auth login` carries through every
+	// CLI invocation.
+	client, err := newtronclient.NewCLIClient(newtronServer, effectiveNetID)
 	if err != nil {
-		return nil, fmt.Errorf("loading client TLS config from env: %w", err)
+		return nil, err
 	}
-	client := newtronclient.New(newtronServer, effectiveNetID, newtronclient.WithBearer(bearerKey), newtronclient.WithTLS(tlsCfg))
 	// Ensure the network is registered on newtron-server so it can
 	// serve this network's specs. The server resolves the spec directory
 	// under its --networks-base; this client just names the network by
@@ -212,19 +201,6 @@ func newtlabURL() string {
 		url = newtronServer
 	}
 	return url
-}
-
-// cliBearer resolves the operator's cached session key for the newtlab-server
-// listener so read paths gated by --enforce-authorization (e.g. GET bridge
-// stats) authenticate. Mirrors the newtron-client Bearer wiring in prepareLab.
-// Returns "" when no session is cached — WithBearer("") is a no-op, preserving
-// the no-auth path.
-func cliBearer() string {
-	rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), newtlabURL())
-	if err != nil || rec == nil {
-		return ""
-	}
-	return rec.Key
 }
 
 // resolveTarget resolves both lab name and network directory from:

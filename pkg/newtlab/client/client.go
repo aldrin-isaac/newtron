@@ -26,6 +26,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab/api"
+	newtronclient "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
 // Client talks to newtlab-server. Construct with New.
@@ -59,6 +60,34 @@ func New(baseURL string, opts ...Option) *Client {
 		opt(c)
 	}
 	return c
+}
+
+// NewCLIClient builds the newtlab client a CLI presents to server, resolving
+// both identity and TLS posture from the environment:
+//
+//   - identity via newtronclient.ResolveCLIBearer(server) — the shared L2c
+//     session model (NEWTRON_BEARER over the on-disk cache); the newtlab and
+//     newtron listeners honor the same session keys.
+//   - TLS via httputil.LoadClientTLSConfigFromEnv — the shared
+//     NEWTRON_TLS_CERT/KEY/CA env contract (auth-design.md L2a).
+//
+// WithTLS is applied before WithBearer so the Bearer round-tripper wraps the
+// TLS transport rather than being clobbered by it (see WithTLS).
+//
+// The single owner of "the newtlab client a CLI builds" (DESIGN_PRINCIPLES
+// §27): cmd/newtlab and cmd/newtrun both construct it here, so a CLI never
+// again ends up presenting TLS without identity (or the reverse) because two
+// call sites drifted (ai-instructions §25).
+func NewCLIClient(server string) (*Client, error) {
+	bearer, err := newtronclient.ResolveCLIBearer(server)
+	if err != nil {
+		return nil, err
+	}
+	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("loading client TLS config from env: %w", err)
+	}
+	return New(server, WithTLS(tlsCfg), WithBearer(bearer)), nil
 }
 
 // Option configures a Client at construction.

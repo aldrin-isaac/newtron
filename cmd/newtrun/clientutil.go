@@ -20,11 +20,10 @@ import (
 // TLS posture follows the shared NEWTRON_TLS_CERT/KEY/CA env vars —
 // see [httputil.LoadClientTLSConfigFromEnv].
 //
-// Operator identity is forwarded as Bearer Authorization when a cached
-// session is found via [client.LoadCLISession] (resolved against --user /
-// NEWTRON_USER per the multi-user cache contract). Empty key when no
-// session is cached → WithBearer is a no-op, preserving the unenforced
-// quickstart path (#184).
+// Operator identity comes from the single owner of CLI bearer resolution,
+// [newtronclient.ResolveCLIBearer] (NEWTRON_BEARER over the session cache,
+// resolved against NEWTRON_USER). Empty key when no identity resolves →
+// WithBearer is a no-op, preserving the unenforced quickstart path (#184).
 func newClient() *client.Client {
 	url := newtrunServerFlag
 	if url == "" {
@@ -35,17 +34,17 @@ func newClient() *client.Client {
 		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
 		os.Exit(1)
 	}
-	// Resolve the operator's cached session (if any). Same path the
-	// newtron / newtlab CLIs and cmd/newtrun/cmd_networks.go use. An
-	// empty key reduces WithBearer to a no-op, which is the right
-	// behavior for the no-auth quickstart.
+	// Resolve the operator's identity through the single owner (§27) — same
+	// NEWTRON_BEARER / session-cache precedence every in-repo CLI now shares.
+	// An empty key reduces WithBearer to a no-op (the no-auth quickstart path).
 	resolveURL := url
 	if resolveURL == "" {
 		resolveURL = client.DefaultBaseURL
 	}
-	var bearerKey string
-	if rec, err := newtronclient.LoadCLISession(os.Getenv("NEWTRON_USER"), resolveURL); err == nil && rec != nil {
-		bearerKey = rec.Key
+	bearerKey, err := newtronclient.ResolveCLIBearer(resolveURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
 	}
 	// Order matters: WithTLS before WithBearer so the bearer
 	// round-tripper wraps the TLS transport rather than being
@@ -72,16 +71,18 @@ func newtlabURL() string {
 }
 
 // newNewtlabClient constructs a newtlab-server client at newtlabURL()
-// with TLS posture from NEWTRON_TLS_CERT/KEY/CA — same env vars the
-// other in-repo CLI clients honor (auth-design.md L2a). Used by
-// status / stop to consult LabState via newtlab's HTTP surface.
+// through the single owner of the newtlab CLI client build (§27), which
+// resolves both identity (NEWTRON_BEARER / session cache) and TLS posture
+// (NEWTRON_TLS_CERT/KEY/CA) from the environment. Used by status / stop to
+// consult LabState via newtlab's HTTP surface — those reads are gated under
+// --enforce-authorization, so the client must carry the operator's identity.
 func newNewtlabClient() *newtlabclient.Client {
-	tlsCfg, err := httputil.LoadClientTLSConfigFromEnv()
+	c, err := newtlabclient.NewCLIClient(newtlabURL())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "loading client TLS config from env: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	return newtlabclient.New(newtlabURL(), newtlabclient.WithTLS(tlsCfg))
+	return c
 }
 
 // requireServer probes the server's health endpoint and returns a clear

@@ -259,7 +259,10 @@ func showLinkTableWithStats(labName string, state *newtlab.LabState) {
 // callers can iterate without nil checks.
 func fetchBridgeStats(labName string) map[string]*newtlab.LinkStats {
 	out := map[string]*newtlab.LinkStats{}
-	c := newtlabclient.New(newtlabURL(), newtlabclient.WithBearer(cliBearer()))
+	c, err := newtlabclient.NewCLIClient(newtlabURL())
+	if err != nil {
+		return out
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	snaps, err := c.LabBridgeStats(ctx, labName)
