@@ -45,6 +45,37 @@ type NewtronClient interface {
 	RefreshBGP(device string) error
 }
 
+// boundNetworkID returns the newtron network this lab's client is bound to, or
+// "" when the lab was built without a client (defensive — NewLab requires one).
+func (l *Lab) boundNetworkID() string {
+	if l.newtronClient == nil {
+		return ""
+	}
+	return l.newtronClient.NetworkID()
+}
+
+// ResolveLabNetworkID is the single owner (§27) of "which newtron network is this
+// lab bound to." Precedence:
+//
+//  1. explicit — an operator override (`newtlab -N <id>`); wins outright.
+//  2. LabState.NetworkID — the network the lab was deployed against, so
+//     post-deploy ops (provision, resync) reach the same network the lab was
+//     built from even when it differs from the lab name.
+//  3. the lab name — the default binding, and the fallback for a lab deployed
+//     before NetworkID was persisted.
+//
+// A missing/unreadable state file is not an error: it means "not deployed yet",
+// which falls through to the lab name.
+func ResolveLabNetworkID(labName, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if st, err := LoadState(labName); err == nil && st.NetworkID != "" {
+		return st.NetworkID
+	}
+	return labName
+}
+
 // HostVMGroup represents virtual hosts coalesced into one VM.
 type HostVMGroup struct {
 	VMName  string         // synthetic VM name (e.g., "hostvm-0")
@@ -389,6 +420,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	// Initialize state
 	l.State = &LabState{
 		Name:       l.Name,
+		NetworkID:  l.boundNetworkID(),
 		Created:    time.Now(),
 		SSHKeyPath: sshKeyPath,
 		Nodes:      make(map[string]*NodeState),

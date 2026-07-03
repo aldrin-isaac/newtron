@@ -15,10 +15,10 @@ func newProvisionCmd() *cobra.Command {
 		Short: "Provision devices via newtron",
 		Long: `Reconcile a deployed network to its topology.
 
-This invokes 'newtron <name> --topology intent reconcile -x' on each device
-in the network, replaying topology.json steps and delivering the resulting
-CONFIG_DB projection to the device. Equivalent to the --provision flag on
-'newtlab deploy'.
+For each device, newtlab calls newtron's reconcile over its HTTP API (the single
+owner of "reconcile a device", §27) — replaying topology.json steps and
+delivering the resulting CONFIG_DB projection to the device. Equivalent to the
+--provision flag on 'newtlab deploy'.
 
   newtlab provision 2node-ngdp
   newtlab provision 2node-ngdp --device leaf1    # single device
