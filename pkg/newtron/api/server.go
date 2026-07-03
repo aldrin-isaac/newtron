@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	netpkg "github.com/aldrin-isaac/newtron/pkg/newtron/network"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // PortResolver is newtron's public contract for resolving runtime
@@ -45,6 +48,11 @@ type Server struct {
 	// which engine provides the implementation — newtlab today).
 	// Nil disables resolver consultation (tests, real-hardware).
 	portResolver PortResolver
+
+	// labDeployed, when non-nil, reports whether a lab is deployed under a name —
+	// the delete-network guard (see Config.LabDeployed). Nil → no lab lifecycle,
+	// guard is a no-op.
+	labDeployed func(ctx context.Context, name string) (bool, error)
 
 	// networksBase is the on-disk root for every registered network's
 	// spec directory. POST /networks resolves to
@@ -128,6 +136,15 @@ type Config struct {
 	// the api package itself does not know about newtlab
 	// (DESIGN_PRINCIPLES §33, §34).
 	PortResolver PortResolver
+
+	// LabDeployed, when non-nil, reports whether a lab is deployed under the
+	// given name — the guard the delete-network endpoint consults so it refuses
+	// (409) while a lab still runs against a network. Injected by cmd/newt-server
+	// via the newtlab loopback client, so the check reaches lab state through
+	// newtlab (§27), never the ~/.newtlab files, and the api package stays
+	// unaware of newtlab (§33). Nil in a standalone newtron deployment (no lab
+	// lifecycle) — the guard is then a no-op.
+	LabDeployed func(ctx context.Context, name string) (bool, error)
 
 	// NetworksBase is the on-disk root under which every registered
 	// network's spec directory lives. POST /newtron/v1/networks
@@ -249,6 +266,7 @@ func NewServer(cfg Config) *Server {
 		idleTimeout:          idleTimeout,
 		logger:               logger,
 		portResolver:         cfg.PortResolver,
+		labDeployed:          cfg.LabDeployed,
 		networksBase:         cfg.NetworksBase,
 		auditCallerHeader:    cfg.AuditCallerHeader,
 		secretStore:          cfg.SecretStore,
@@ -318,6 +336,12 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) CreateNetwork(id, description string) error {
 	if s.networksBase == "" {
 		return fmt.Errorf("server has no networks-base configured; cannot resolve dir for id %q", id)
+	}
+	// The archive store is a reserved subdirectory of the networks tree, not a
+	// network — reject it as an id so it can never collide with a real network
+	// (§15: the create path rejects what auto-discovery skips).
+	if spec.IsReservedNetworkName(id) {
+		return &newtron.ValidationError{Field: "id", Message: fmt.Sprintf("%q is a reserved name (the archive store)", id)}
 	}
 	dir := filepath.Join(s.networksBase, id)
 
@@ -432,6 +456,94 @@ func (s *Server) UnregisterNetwork(id string) error {
 	}
 	s.logger.Printf("unregistered network '%s'", id)
 	return nil
+}
+
+// authorizeRegistry gates the server-level network-registry acts (create,
+// delete) at the global super-user set. These acts scaffold or archive a whole
+// network's spec directory — an operator/registry authority, not a per-network
+// spec write — and delete targets an UNREGISTERED network (no per-network
+// permission model is loaded), so the gate is the server-wide --super-users list,
+// not any network.json. action is the label recorded on a denial (e.g.
+// "network.create"). A no-op when enforcement is disabled, mirroring the
+// per-network checkPermission gates.
+func (s *Server) authorizeRegistry(ctx context.Context, action string) error {
+	if !s.enforceAuthorization {
+		return nil
+	}
+	var caller string
+	if c := audit.CallerFromContext(ctx); c != nil {
+		caller = c.Username
+	}
+	if slices.Contains(s.globalSuperUsers, caller) {
+		return nil
+	}
+	return &newtron.AuthorizationError{Caller: caller, Permission: action, Resource: "network"}
+}
+
+// DeleteNetwork soft-deletes the network `id` by MOVING its spec directory to the
+// archive store (<networksBase>/archives/<id>-<timestamp>) — the on-disk reverse
+// of CreateNetwork's scaffold (§15). Nothing is erased: the specs, secrets.json,
+// and audit log travel to the archive intact, so the delete is undoable, but only
+// by manually moving the archived directory back. The archive is invisible to the
+// API (auto-discovery skips the reserved dir; list-networks is in-memory).
+//
+// This is the EXISTENCE layer only — it does not touch the serving layer. The two
+// are kept separate: a network must be UNREGISTERED first (POST .../unregister),
+// because the running server holds the dir open (audit handle, fs-watch, live
+// SSH) and archiving it out from under a live entity would dangle those. So:
+//   - still registered → *util.ConflictError (409): "unregister first";
+//   - not on disk → *newtron.NotFoundError (404);
+//   - unless force, a lab deployed under this name blocks the delete
+//     (*util.ConflictError → 409) — destroy the lab first. A lab-check error
+//     fails closed: the delete is refused, never forced through on uncertainty.
+//
+// The caller (the handler) is responsible for the registry authorization gate.
+// timestamp is the archive suffix (a UTC stamp like "20060102T150405Z"), passed
+// in so the method stays clock-free and testable. Returns the archive path.
+func (s *Server) DeleteNetwork(ctx context.Context, id string, force bool, timestamp string) (string, error) {
+	if s.networksBase == "" {
+		return "", fmt.Errorf("server has no networks-base configured; cannot resolve dir for id %q", id)
+	}
+	// Serving layer must be torn down first — an explicit precondition, not a
+	// hidden side effect (Register/Unregister and Create/Delete are separate).
+	s.mu.RLock()
+	_, registered := s.networks[id]
+	s.mu.RUnlock()
+	if registered {
+		return "", &util.ConflictError{
+			Resource:   "network",
+			Name:       id,
+			References: []string{"network is still registered — POST /newtron/v1/networks/" + id + "/unregister first"},
+		}
+	}
+
+	dir := filepath.Join(s.networksBase, id)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return "", &newtron.NotFoundError{Resource: "network", Name: id}
+	}
+
+	// Lab guard — reached through newtlab (§27), never the ~/.newtlab files.
+	if !force && s.labDeployed != nil {
+		deployed, err := s.labDeployed(ctx, id)
+		if err != nil {
+			return "", fmt.Errorf("checking whether a lab is deployed under %q: %w", id, err)
+		}
+		if deployed {
+			return "", &util.ConflictError{
+				Resource:   "network",
+				Name:       id,
+				References: []string{fmt.Sprintf("lab %q is deployed — run `newtlab destroy %s` first", id, id)},
+				Force:      true,
+			}
+		}
+	}
+
+	archived, err := spec.ArchiveNetwork(s.networksBase, id, timestamp)
+	if err != nil {
+		return "", fmt.Errorf("archiving network %q: %w", id, err)
+	}
+	s.logger.Printf("deleted network '%s' (archived → %s)", id, archived)
+	return archived, nil
 }
 
 // ReloadNetwork stops the existing networkEntity, reloads specs from disk,

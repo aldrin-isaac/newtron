@@ -25,3 +25,8 @@ Thumbs.db
 
 # Per-network audit logs are runtime output, not committed spec (audit.Path)
 networks/*/audit/
+
+# Soft-deleted networks are moved here by POST /networks/{id}/delete
+# (spec.ArchiveDirName). The archive store is out-of-band recovery only —
+# never committed, never served by the API.
+networks/archives/

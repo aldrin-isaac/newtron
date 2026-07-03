@@ -31,6 +31,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/schema/all", s.handleSchemaAll)
 	mux.HandleFunc("GET /newtron/v1/schema/{kind}", s.handleSchemaShow)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/unregister", s.handleUnregisterNetwork)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/delete", s.handleDeleteNetwork)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/reload", s.handleReloadNetwork)
 
 	// Write-control reservation (per network). request/release are

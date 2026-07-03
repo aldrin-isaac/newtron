@@ -42,11 +42,12 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 
 | Method | Path | What it does |
 |--------|------|--------------|
-| POST | `/networks` | Register a network |
+| POST | `/networks` | Create/register a network (global super-user only under enforcement) |
 | GET | `/networks` | List networks |
 | GET | `/schema` | List every spec authoring kind with label/description |
 | GET | `/schema/{kind}` | Field metadata for one kind (label, tooltip, type, required, enum, ref) |
-| POST | `/networks/{n}/unregister` | Unregister a network |
+| POST | `/networks/{n}/unregister` | Unregister a network (serving layer — stop serving; files untouched) |
+| POST | `/networks/{n}/delete` | Soft-delete a network: archive its spec dir (existence layer). Requires it be unregistered first; global super-user only; `?force=true` overrides the lab guard |
 | POST | `/networks/{n}/reload` | Reload specs from disk |
 | GET | `/networks/{n}/control` | Write-control reservation status |
 | POST | `/networks/{n}/control/request` | Acquire / extend / take over write control |
@@ -748,9 +749,14 @@ learns the path the server picked.
 }
 ```
 
-**Status codes:** 201 created, 200 already exists, 400 missing or
-malformed `id`, 500 server has no `--networks-base` configured / spec
-load error.
+Creating a network is a **registry-level act**, gated at the **global super-user**
+set (server `--super-users`) under `--enforce-authorization` — symmetric with
+`POST .../delete`. The reserved name `archives` (the soft-delete store) is
+rejected as an `id`.
+
+**Status codes:** 201 created, 200 already exists, 400 missing/malformed/reserved
+`id`, 403 not a global super-user, 500 server has no `--networks-base` configured
+/ spec load error.
 
 **Examples:**
 
@@ -818,6 +824,52 @@ Unregister a network. Closes all cached SSH connections for the network.
 ```
 
 **Status codes:** 200 success, 500 network not registered or has active node connections
+
+Unregister is the **serving layer**: it stops the running server from serving the
+network (closes SSH connections, releases the audit file handle, drops the
+spec-watch) but **does not touch any files on disk**. The spec directory stays,
+and boot-time auto-discovery re-registers it on the next start. It is reversible
+via `POST /networks` (or a restart). To remove the definition from disk, follow
+with `POST .../delete`.
+
+### POST /newtron/v1/networks/{netID}/delete
+
+Soft-delete a network: **move** its spec directory to the archive store
+(`<networks-base>/archives/<id>-<UTCtimestamp>/`), the on-disk reverse of
+`POST /networks`'s scaffold. This is the **existence layer** — distinct from
+unregister's serving layer:
+
+- **Nothing is erased.** The whole directory — `network.json`, `nodes/`, `zones/`,
+  `secrets.json`, and `audit/` — travels to the archive intact. The delete is
+  **undoable, but only manually**: an operator moves the archived directory back.
+  The archive is invisible to the API (auto-discovery skips the reserved
+  `archives` name; `GET /networks` is in-memory, so archived networks never
+  appear) and is git-ignored.
+- **Must be unregistered first.** The two layers are kept separate: you can't
+  archive a directory the server holds open. A still-registered network is refused
+  (**409**) with "unregister first" — call `POST .../unregister` before
+  `POST .../delete`.
+- **Lab guard.** While a lab is deployed under the same name, the delete is
+  refused (**409**) — destroy the lab first (`newtlab destroy <id>`). `?force=true`
+  overrides the guard; the lab keeps running but its network definition is
+  archived. A lab-reachability error fails closed (the delete is refused, never
+  forced through on uncertainty).
+- **Gate.** A registry-level act — **global super-user only** (server
+  `--super-users`) under `--enforce-authorization`, the same bar as
+  `POST /networks`. The network may be unregistered (no per-network permission
+  model loaded), so the gate is server-wide, not any `network.json`.
+
+**Query parameters:** `force` (`true` bypasses the lab guard).
+
+**Response (200):**
+
+```json
+{"data": {"status": "archived", "archived_to": "networks/archives/demo-20260703T174500Z"}}
+```
+
+**Status codes:** 200 archived, 403 not a global super-user, 404 no spec dir on
+disk, 409 still registered or a lab is deployed (unless `force`), 500 archive move
+failed.
 
 ### POST /newtron/v1/networks/{netID}/reload
 

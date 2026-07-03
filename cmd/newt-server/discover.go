@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	newtronapi "github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // discoverAndRegisterNetworks scans <networksBase>/<name>/topology.json
@@ -51,6 +52,13 @@ func discoverAndRegisterNetworks(srv *newtronapi.Server, networksBase string, lo
 	sort.Strings(names)
 
 	for _, name := range names {
+		// The archive store is a reserved subdirectory, not a network — never
+		// register it or anything under it (§15: discovery skips what the create
+		// path rejects). It has no topology.json at its top anyway, but skip it
+		// explicitly so a future recursive scan can't resurrect archived networks.
+		if spec.IsReservedNetworkName(name) {
+			continue
+		}
 		dir := filepath.Join(networksBase, name)
 		// The marker file is topology.json — same shape newtlab uses
 		// to decide a directory is a deployable network. Networks
