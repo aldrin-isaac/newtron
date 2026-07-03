@@ -1525,13 +1525,13 @@ func (n *Network) GetNodeSpec(name string) (*spec.NodeSpec, error) {
 // the loader's authored-file cache. Consumers that connect to the device use this
 // so the login they see matches resolveNodeSpec's connect-time login (§24): the
 // node-spec read endpoint (newtlab's profile fetch, the CLI/API view) and
-// GetHostConnection. resolveEffectiveSSH owns the resolution rule (§27).
+// GetHostConnection. resolveSSHLogin owns the resolution rule (§27).
 func (n *Network) EffectiveNodeSpec(name string) (*spec.NodeSpec, error) {
 	nodeSpec, err := n.loadNodeSpec(name)
 	if err != nil {
 		return nil, err
 	}
-	user, pass, err := n.resolveEffectiveSSH(nodeSpec)
+	user, pass, err := n.resolveSSHLogin(nodeSpec)
 	if err != nil {
 		return nil, fmt.Errorf("node spec %q: %w", name, err)
 	}
@@ -2156,7 +2156,7 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// resolveEffectiveSSH resolves a node's effective SSH login through the
+// resolveSSHLogin resolves the SSH login a node connects with, walking the
 // node > zone > network hierarchy (lower scope wins, §7), then the platform's
 // baked-in Credentials for the password, then "admin" for the user. Each scope's
 // value may be a ${secret:KEY} reference (auth-design.md L0); secret.Resolve runs
@@ -2169,7 +2169,7 @@ func firstNonEmpty(vals ...string) string {
 // device dials (§24 read/write symmetry). It is idempotent over its own output —
 // a value carrying no "${secret:" prefix resolves to itself — so running it on a
 // nodeSpec whose own secret refs loadNodeSpec already resolved is a no-op.
-func (n *Network) resolveEffectiveSSH(nodeSpec *spec.NodeSpec) (user, pass string, err error) {
+func (n *Network) resolveSSHLogin(nodeSpec *spec.NodeSpec) (user, pass string, err error) {
 	var zoneUser, zonePass string
 	if zoneSpec, ok := n.loader.Zone(nodeSpec.Zone); ok {
 		zoneUser, zonePass = zoneSpec.SSHUser, zoneSpec.SSHPass
@@ -2207,7 +2207,7 @@ func (n *Network) resolveEffectiveSSH(nodeSpec *spec.NodeSpec) (user, pass strin
 
 func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.ResolvedNodeSpec, error) {
 	// Validate zone exists — a node in an undeclared zone is a spec error.
-	// (Zone-scope SSH values are read by resolveEffectiveSSH below.)
+	// (Zone-scope SSH values are read by resolveSSHLogin below.)
 	if _, ok := n.loader.Zone(nodeSpec.Zone); !ok {
 		return nil, fmt.Errorf("zone '%s' not found", nodeSpec.Zone)
 	}
@@ -2240,9 +2240,9 @@ func (n *Network) resolveNodeSpec(name string, nodeSpec *spec.NodeSpec) (*spec.R
 
 	// SSH credentials (for the Redis tunnel). SSH port is resolved from newtlab at
 	// Device.Connect time, not from the spec. The login resolution rule — node >
-	// zone > network > platform > "admin" — is owned by resolveEffectiveSSH (§27),
+	// zone > network > platform > "admin" — is owned by resolveSSHLogin (§27),
 	// shared with the node-spec read view (EffectiveNodeSpec) so both agree (§24).
-	sshUser, sshPass, err := n.resolveEffectiveSSH(nodeSpec)
+	sshUser, sshPass, err := n.resolveSSHLogin(nodeSpec)
 	if err != nil {
 		return nil, fmt.Errorf("node %q: %w", name, err)
 	}

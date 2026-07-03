@@ -699,9 +699,11 @@ type CreateNodeSpecRequest struct {
 	Platform    string                   `json:"platform,omitempty"`
 	MAC         string                   `json:"mac,omitempty"`
 	UnderlayASN int                      `json:"underlay_asn,omitempty"`
-	SSHUser     string                   `json:"ssh_user,omitempty"`
-	SSHPass     string                   `json:"ssh_pass,omitempty"`
 	EVPN        *CreateEVPNConfigRequest `json:"evpn,omitempty"`
+	// No ssh_user/ssh_pass: the device SSH login is authored uniformly at any
+	// scope via set-ssh-credentials (network/zone/node), not on the node body —
+	// the flat-hierarchy pattern's single authoring path (§27). A node inherits
+	// the network login unless a scoped override is set.
 }
 
 // CreateEVPNConfigRequest defines EVPN peering for nodeSpec creation.

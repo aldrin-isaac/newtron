@@ -17,8 +17,6 @@ var (
 	nodeCreateZone        string
 	nodeCreatePlatform    string
 	nodeCreateUnderlayASN int
-	nodeCreateSSHUser     string
-	nodeCreateSSHPass     string
 )
 
 var nodeCmd = &cobra.Command{
@@ -133,9 +131,9 @@ Flags:
   --zone          Zone name (required)
   --platform      Platform name
   --underlay-asn  BGP underlay AS number
-  --ssh-user      SSH username
-  --ssh-pass      SSH password
-  --ssh-port      SSH port (default 22)
+
+The device SSH login is not set here — author it at any scope (network/zone/node)
+via 'set-ssh-credentials'. A node inherits the network login unless overridden.
 
 Examples:
   newtron node create switch3 --mgmt-ip 10.0.0.3 --loopback-ip 10.0.0.3 --zone dc1 --platform ciscovs -x`,
@@ -157,8 +155,6 @@ Examples:
 			Zone:        nodeCreateZone,
 			Platform:    nodeCreatePlatform,
 			UnderlayASN: nodeCreateUnderlayASN,
-			SSHUser:     nodeCreateSSHUser,
-			SSHPass:     nodeCreateSSHPass,
 		}, execOpts()); err != nil {
 			return err
 		}
@@ -200,8 +196,6 @@ func init() {
 	nodeCreateCmd.Flags().StringVar(&nodeCreateZone, "zone", "", "Zone name (required)")
 	nodeCreateCmd.Flags().StringVar(&nodeCreatePlatform, "platform", "", "Platform name")
 	nodeCreateCmd.Flags().IntVar(&nodeCreateUnderlayASN, "underlay-asn", 0, "BGP underlay AS number")
-	nodeCreateCmd.Flags().StringVar(&nodeCreateSSHUser, "ssh-user", "", "SSH username")
-	nodeCreateCmd.Flags().StringVar(&nodeCreateSSHPass, "ssh-pass", "", "SSH password")
 
 	nodeCmd.AddCommand(nodeListCmd)
 	nodeCmd.AddCommand(nodeShowCmd)

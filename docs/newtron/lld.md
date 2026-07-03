@@ -257,7 +257,7 @@ Resolution lives in `Network.resolveNodeSpec` (`firstNonEmpty(node, zone, networ
 
 ### 2.2a ZoneSpec
 
-Per-zone overrides, one file per zone at `zones/{zone}.json` (mirroring `nodes/{node}.json`). A `ZoneSpec` embeds `OverridableSpecs` (the map overrides between network and node) **and** `SSHCredentials` (the zone-scope device login). Both are `schema:"-"` — zone-scope config is file-authored (`zones/{zone}.json`): the override maps go through the flat `create-<kind>?scope=zone` API, and the SSH fields are edited in the zone file (`create-zone` is name-only). Node-scope `ssh_user`/`ssh_pass` ARE form fields (see [§2.4 NodeSpec]).
+Per-zone overrides, one file per zone at `zones/{zone}.json` (mirroring `nodes/{node}.json`). A `ZoneSpec` embeds `OverridableSpecs` (the map overrides between network and node) **and** `SSHCredentials` (the zone-scope device login). Both are `schema:"-"` — the override maps go through the flat `create-<kind>?scope=zone` API, and the SSH login through `set-ssh-credentials?scope=zone`. The SSH login is `schema:"-"` at **every** scope — network, zone, AND node — so it is never a spec-form field; it is authored uniformly through `set-ssh-credentials` (§27, one path). See [§2.4 NodeSpec].
 
 ```go
 type ZoneSpec struct {

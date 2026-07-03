@@ -511,7 +511,12 @@ type NodeSpec struct {
 	// empty so the node inherits the network/zone login; set only to override.
 	// SSH port is runtime state owned by newtlab (§27) — not stored here;
 	// resolved through newtron's PortResolver at Connect time.
-	SSHCredentials
+	//
+	// schema:"-" — like network/zone, the login is NOT a node-form field: it is
+	// authored uniformly at any scope via set-ssh-credentials (§27, one path),
+	// never on the create/update-node body. Still serialized to JSON so a
+	// file-authored node override loads.
+	SSHCredentials `schema:"-"`
 
 	// OPTIONAL - newtlab per-device overrides
 	VMMemory int    `json:"vm_memory,omitempty" label:"VM Memory (MiB)" tooltip:"Per-device override for VM memory size"`
