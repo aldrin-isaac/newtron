@@ -1,6 +1,10 @@
 package spec
 
-import "github.com/aldrin-isaac/newtron/pkg/util"
+import (
+	"fmt"
+
+	"github.com/aldrin-isaac/newtron/pkg/util"
+)
 
 // validate.go — the single owner of spec constraint validation (DESIGN_PRINCIPLES
 // §15, "Symmetry is an axis, not a direction"; §27 single owner). Every
@@ -11,6 +15,29 @@ import "github.com/aldrin-isaac/newtron/pkg/util"
 // declarative MissingRefs (references.go); these methods cover the intrinsic
 // constraints that `ref:` tags cannot express — required fields, value ranges
 // and formats, enum membership, and internal uniqueness.
+
+// ValidateConstraints checks a platform's port inventory — the single authority
+// for which interfaces a node of this platform supports (§27), so it must be
+// internally consistent. PortCount must equal the inventory length (the bound is
+// the inventory), and every port needs a unique name and a NIC slot >= 1 (NIC 0
+// is management). name is used in diagnostics.
+func (p *PlatformSpec) ValidateConstraints(name string) error {
+	v := &util.ValidationBuilder{}
+	v.Add(p.PortCount == len(p.Ports),
+		fmt.Sprintf("platform %q: port_count %d must equal the ports inventory length %d — the inventory is the authority for supported interfaces",
+			name, p.PortCount, len(p.Ports)))
+	seenName := make(map[string]bool, len(p.Ports))
+	seenNIC := make(map[int]bool, len(p.Ports))
+	for i, ps := range p.Ports {
+		v.Add(ps.Name != "", fmt.Sprintf("platform %q: ports[%d] has an empty name", name, i))
+		v.Add(!(ps.Name != "" && seenName[ps.Name]), fmt.Sprintf("platform %q: duplicate port name %q", name, ps.Name))
+		seenName[ps.Name] = true
+		v.Add(ps.NICIndex >= 1, fmt.Sprintf("platform %q: port %q nic_index %d is invalid (1-based; NIC 0 is management)", name, ps.Name, ps.NICIndex))
+		v.Add(!(ps.NICIndex >= 1 && seenNIC[ps.NICIndex]), fmt.Sprintf("platform %q: nic_index %d is used by more than one port (%q)", name, ps.NICIndex, ps.Name))
+		seenNIC[ps.NICIndex] = true
+	}
+	return v.Build()
+}
 
 // ValidateConstraints checks a QoS policy's intrinsic constraints: queue count,
 // queue-name uniqueness, per-type weight rules, and DSCP range/uniqueness. name

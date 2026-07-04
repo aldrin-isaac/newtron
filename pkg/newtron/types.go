@@ -323,16 +323,6 @@ type DeviceInfo struct {
 	VRFCount         int      `json:"vrfs"`
 }
 
-// InterfaceSummary is a row in interface list output.
-type InterfaceSummary struct {
-	Name        string   `json:"name"`
-	AdminStatus string   `json:"admin_status"`
-	OperStatus  string   `json:"oper_status"`
-	IPAddresses []string `json:"ip_addresses,omitempty"`
-	VRF         string   `json:"vrf,omitempty"`
-	Service     string   `json:"service,omitempty"`
-}
-
 // InterfaceDetail is all properties of a single interface.
 type InterfaceDetail struct {
 	Name        string   `json:"name"`

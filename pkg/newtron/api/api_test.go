@@ -167,6 +167,8 @@ func TestAPICompleteness(t *testing.T) {
 			"InitDevice":           true,
 			// Connection
 			"ListNodes": true,
+			// Platform-supported interface inventory (issue #403)
+			"NodeInterfaceInventory": true, // GET /networks/{netID}/nodes/{node}/interfaces
 			// Device status (issue #75A+B)
 			"ProbeOnline":   true, // GET /networks/{netID}/nodes/{device}/status
 			"TopologyDrift": true, // GET /networks/{netID}/nodes/{device}/intent/topology-drift
@@ -184,7 +186,6 @@ func TestAPICompleteness(t *testing.T) {
 			"Save":    true,
 			// Read operations
 			"DeviceInfo":              true,
-			"ListInterfaceDetails":    true,
 			"ShowInterfaceDetail":     true,
 			"GetServiceBindingDetail": true,
 			"VLANStatus":              true,
@@ -441,6 +442,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ShowFilter":              "spec read",
 			"ListPlatforms":           "spec read",
 			"ShowPlatform":            "spec read",
+			"NodeInterfaceInventory":  "spec read — platform-supported interface inventory (#403)",
 			"PlatformPortDefaults":           "spec read — default port-config authoring template (#301)",
 			"ListRoutePolicies":       "spec read",
 			"ListPrefixLists":         "spec read",
@@ -467,7 +469,6 @@ func TestAPICompleteness(t *testing.T) {
 		},
 		"Node": {
 			"DeviceInfo":              "device read",
-			"ListInterfaceDetails":    "device read",
 			"ShowInterfaceDetail":     "device read",
 			"GetServiceBindingDetail": "device read",
 			"VLANStatus":              "device read",
@@ -1425,6 +1426,71 @@ func mapKeys2(m map[string]map[string]map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestNodeInterfaceInventory exercises GET /nodes/{node}/interfaces — the
+// platform-supported interface inventory (#403). It is a spec-level read, so it
+// answers for a host (which has no SONiC device) and offline: every interface
+// the platform declares, annotated with topology wiring (used/peer) and authored
+// port config.
+func TestNodeInterfaceInventory(t *testing.T) {
+	platforms, err := spec.LoadPlatformsFromDir(filepath.Join(repoRoot(t), "platforms"))
+	if err != nil {
+		t.Fatalf("load platforms: %v", err)
+	}
+	s := NewServer(Config{Platforms: platforms})
+	if err := s.RegisterNetwork("default", filepath.Join(repoRoot(t), "networks", "2node-vs")); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	get := func(node string) []newtron.InterfaceInventoryEntry {
+		w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/nodes/"+node+"/interfaces")
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s interfaces = %d: %s", node, w.Code, w.Body.String())
+		}
+		var env struct {
+			Data []newtron.InterfaceInventoryEntry `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return env.Data
+	}
+	find := func(list []newtron.InterfaceInventoryEntry, name string) *newtron.InterfaceInventoryEntry {
+		for i := range list {
+			if list[i].Name == name {
+				return &list[i]
+			}
+		}
+		return nil
+	}
+
+	// Switch: every one of the 32 platform ports is enumerated; a wired+configured
+	// port carries its peer and config, a free port carries neither.
+	sw := get("switch1")
+	if len(sw) != 32 {
+		t.Errorf("switch1: got %d interfaces, want 32 (the platform inventory)", len(sw))
+	}
+	if e := find(sw, "Ethernet4"); e == nil || !e.Used || e.Peer != "host1:eth0" || e.Config == nil {
+		t.Errorf("switch1 Ethernet4 = %+v, want used→host1:eth0 with port config", e)
+	}
+	if e := find(sw, "Ethernet24"); e == nil || e.Used || e.Config != nil {
+		t.Errorf("switch1 Ethernet24 = %+v, want free + unconfigured", e)
+	}
+
+	// Host: enumerates its declared eth0..eth7 — the point of #403. eth0 is wired
+	// to the switch (symmetric with the switch view); the rest are free.
+	h := get("host1")
+	if len(h) != 8 {
+		t.Errorf("host1: got %d interfaces, want 8 (the host platform inventory)", len(h))
+	}
+	if e := find(h, "eth0"); e == nil || !e.Used || e.Peer != "switch1:Ethernet4" || e.NICIndex != 1 {
+		t.Errorf("host1 eth0 = %+v, want used→switch1:Ethernet4, nic_index 1", e)
+	}
+	if e := find(h, "eth1"); e == nil || e.Used {
+		t.Errorf("host1 eth1 = %+v, want free (unwired)", e)
+	}
 }
 
 // TestPlatformPorts_AuthoringTemplate exercises GET /platforms/{name}/ports

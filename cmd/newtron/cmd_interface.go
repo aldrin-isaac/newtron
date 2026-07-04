@@ -47,28 +47,21 @@ var interfaceListCmd = &cobra.Command{
 			return nil
 		}
 
-		t := cli.NewTable("INTERFACE", "ADMIN", "OPER", "IP ADDRESS", "VRF", "SERVICE")
+		// The platform-supported inventory: every interface the node's platform
+		// declares, with its NIC slot, topology wiring, and authored port config.
+		// Live admin/oper state is per-interface (interface show <name>).
+		t := cli.NewTable("INTERFACE", "NIC", "WIRED", "PEER", "CONFIGURED")
 
 		for _, intf := range interfaces {
-			adminStatus := formatAdminStatus(intf.AdminStatus)
-			if adminStatus == "" {
-				adminStatus = "-"
+			wired := "no"
+			if intf.Used {
+				wired = "yes"
 			}
-
-			operStatus := formatOperStatus(intf.OperStatus)
-			if intf.OperStatus == "" {
-				operStatus = "-"
+			configured := "-"
+			if intf.Config != nil {
+				configured = "yes"
 			}
-
-			ipAddr := "-"
-			if len(intf.IPAddresses) > 0 {
-				ipAddr = strings.Join(intf.IPAddresses, ",")
-			}
-
-			vrf := dash(intf.VRF)
-			svc := dash(intf.Service)
-
-			t.Row(intf.Name, adminStatus, operStatus, ipAddr, vrf, svc)
+			t.Row(intf.Name, fmt.Sprintf("%d", intf.NICIndex), wired, dash(intf.Peer), configured)
 		}
 		t.Flush()
 
