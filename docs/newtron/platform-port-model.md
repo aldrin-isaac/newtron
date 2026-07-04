@@ -85,16 +85,21 @@ newtlab (grep-confirmed). The path:
 - `AllocateLinks` (pkg/newtlab/link.go) walks the topology's links. Each wired
   endpoint — `"r1:Ethernet0"`, split by `splitLinkEndpoint` into device +
   interface — produces exactly one `NICConfig`. Unwired ports get no NIC.
-- The NIC slot comes from `ResolveNICIndex(interfaceMap, ifaceName, customMap)`
-  (pkg/newtlab/iface_map.go), a pure function of the name and the scheme:
-  - `sequential`: `EthernetN` → NIC `N+1`.
-  - `stride-4`: `EthernetN` → NIC `N/4 + 1`, rejecting `N % 4 != 0`.
-  - `linux`: `ethN` → NIC `N`.
-  - `custom`: looks up `customMap` — but `AllocateLinks` always passes `nil`,
-    and no field on `PlatformSpec` supplies one, so **the `custom` scheme is
-    unreachable today** (dead branch).
-- The node's scheme is resolved in pkg/newtlab/node.go:
-  `nc.InterfaceMap = platform.VMInterfaceMap` (falling back to `"sequential"`).
+- The NIC slot comes from `ResolveNICIndex(ports, ifaceName)`
+  (pkg/newtlab/iface_map.go), a lookup in the platform's explicit port inventory
+  (`PlatformSpec.Ports`) — the single authority for the device-native name → NIC
+  mapping, for every platform, switch and host alike. There is no naming formula
+  (Ethernet stride-4, vJunos `ge-0/0/0`, host `eth0` all coexist), so the mapping
+  is always tabled. An unresolvable name fails the deploy with an actionable
+  error rather than producing a VM whose NIC maps to nothing.
+- **Hosts differ only in coalescing.** newtlab packs many small host VMs into one
+  shared QEMU process, so a host's `nic_index` is a per-host ordinal, not an
+  absolute slot. `coalesceHostVMs` gives each host a `NICBase` in the shared VM,
+  sized from the highest ordinal that host actually wires (the `ports[]`
+  authority — not a link count), so non-contiguous usage (eth0 and eth3) reserves
+  the full span. `AllocateLinks` then resolves a host interface as
+  `NICBase + (ResolveNICIndex(ports, name) - 1)`. A switch (a dedicated VM) needs
+  no offset — its `nic_index` is the absolute slot.
 - `qemu.go` emits the management NIC (slot 0) plus the data NICs sorted by
   index, relying on `kernel ethN == NIC index N` (QEMU PCI enumeration order)
   for TC-mirred bridging. A gap in the wired indices breaks this invariant —
@@ -104,9 +109,9 @@ newtlab (grep-confirmed). The path:
   (RCA-013) — the one place a platform's port *names* are generated rather than
   taken from the image.
 
-So the only platform-derived port input newtlab uses today is the single
-`vm_interface_map` string. Everything else is the topology's explicit names plus
-arithmetic.
+So the platform-derived port input newtlab uses is the `ports[]` inventory: the
+topology's explicit names resolve against it, and for coalesced hosts the
+per-host ordinal is offset by the shared VM's `NICBase`.
 
 ## 4. The Resolving Insight: a Pre-Boot Projection
 

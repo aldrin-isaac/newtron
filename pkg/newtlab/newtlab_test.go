@@ -322,6 +322,88 @@ func TestAllocateLinks(t *testing.T) {
 	}
 }
 
+// TestAllocateLinks_HostViaInventory verifies a coalesced host's interface
+// resolves through the platform port inventory (like a switch) plus the
+// shared-VM NICBase offset, and that an out-of-inventory name is rejected — the
+// host-side counterpart of the switch validation.
+func TestAllocateLinks_HostViaInventory(t *testing.T) {
+	stubPortFinder(t)
+	hostPorts := []spec.PortSpec{{Name: "eth0", NICIndex: 1}, {Name: "eth1", NICIndex: 2}}
+	nodes := map[string]*NodeConfig{
+		"switch1": {
+			Name:  "switch1",
+			Ports: []spec.PortSpec{{Name: "Ethernet0", NICIndex: 1}, {Name: "Ethernet4", NICIndex: 2}},
+			NICs:  []NICConfig{{Index: 0, NetdevID: "mgmt", Interface: "mgmt"}},
+		},
+		"hostvm-0": {Name: "hostvm-0", NICs: []NICConfig{{Index: 0, NetdevID: "mgmt", Interface: "mgmt"}}},
+	}
+	// host1 based at NIC 1, host2 based at NIC 3 in the shared VM.
+	hostMap := map[string]HostMapping{
+		"host1": {VMName: "hostvm-0", NICBase: 1, Ports: hostPorts},
+		"host2": {VMName: "hostvm-0", NICBase: 3, Ports: hostPorts},
+	}
+	links := []*spec.TopologyLink{
+		{A: "switch1:Ethernet0", Z: "host1:eth0"}, // NICBase 1 + (1-1) = 1
+		{A: "switch1:Ethernet4", Z: "host2:eth1"}, // NICBase 3 + (2-1) = 4
+	}
+	config := &VMLabConfig{LinkPortBase: 20000, ConsolePortBase: 30000, SSHPortBase: 40000}
+
+	result, err := AllocateLinks(links, nodes, config, hostMap, map[int]bool{})
+	if err != nil {
+		t.Fatalf("AllocateLinks: %v", err)
+	}
+	if result[0].Z.Device != "hostvm-0" || result[0].Z.NICIndex != 1 {
+		t.Errorf("host1:eth0 → %s NIC %d, want hostvm-0 NIC 1", result[0].Z.Device, result[0].Z.NICIndex)
+	}
+	if result[1].Z.Device != "hostvm-0" || result[1].Z.NICIndex != 4 {
+		t.Errorf("host2:eth1 → %s NIC %d, want hostvm-0 NIC 4", result[1].Z.Device, result[1].Z.NICIndex)
+	}
+
+	bad := []*spec.TopologyLink{{A: "switch1:Ethernet0", Z: "host1:eth9"}}
+	if _, err := AllocateLinks(bad, nodes, config, hostMap, map[int]bool{}); err == nil {
+		t.Error("host1:eth9 (not in the host inventory) should be rejected")
+	}
+}
+
+// TestCoalesceHostVMs_DeterministicNICSizing verifies each host's NIC range is
+// sized from the highest interface ordinal it uses (the ports[] authority), not
+// a link count — so a host wiring non-contiguous interfaces (eth0 and eth3)
+// reserves the full span and the next host's base does not overlap it.
+func TestCoalesceHostVMs_DeterministicNICSizing(t *testing.T) {
+	hostPorts := []spec.PortSpec{
+		{Name: "eth0", NICIndex: 1}, {Name: "eth1", NICIndex: 2},
+		{Name: "eth2", NICIndex: 3}, {Name: "eth3", NICIndex: 4},
+	}
+	l := &Lab{
+		Nodes: map[string]*NodeConfig{
+			"hostA": {Name: "hostA", DeviceType: "host", Ports: hostPorts},
+			"hostB": {Name: "hostB", DeviceType: "host", Ports: hostPorts},
+		},
+		Profiles: map[string]*spec.NodeSpec{"hostA": {}, "hostB": {}},
+		Topology: &spec.TopologySpecFile{Links: []*spec.TopologyLink{
+			// hostA wires eth0 and eth3 (non-contiguous) → spans 4 slots.
+			{A: "switch1:Ethernet0", Z: "hostA:eth0"},
+			{A: "switch1:Ethernet4", Z: "hostA:eth3"},
+			// hostB wires eth0 → 1 slot.
+			{A: "switch1:Ethernet8", Z: "hostB:eth0"},
+		}},
+	}
+
+	l.coalesceHostVMs()
+
+	if len(l.HostVMs) != 1 {
+		t.Fatalf("HostVMs = %d, want 1 group", len(l.HostVMs))
+	}
+	g := l.HostVMs[0]
+	if g.NICBase["hostA"] != 1 {
+		t.Errorf("hostA NICBase = %d, want 1", g.NICBase["hostA"])
+	}
+	// hostA reserves eth0..eth3 (ordinal 4) → 4 slots → hostB starts at 1+4 = 5.
+	if g.NICBase["hostB"] != 5 {
+		t.Errorf("hostB NICBase = %d, want 5 (hostA spans 4 slots for eth0..eth3)", g.NICBase["hostB"])
+	}
+}
+
 func TestAllocateLinks_PortSequence(t *testing.T) {
 	stubPortFinder(t)
 	nodes := map[string]*NodeConfig{

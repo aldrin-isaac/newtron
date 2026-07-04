@@ -2,22 +2,25 @@ package newtlab
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// ResolveNICIndex returns the QEMU NIC slot backing the named port, looked up
-// in the platform's explicit port inventory (PlatformSpec.Ports). The table is
-// the single source of the device-native name → NIC mapping; see
-// docs/newtron/platform-port-model.md. NIC 0 is management and never appears in
-// the table, so every resolved slot is >= 1.
+// ResolveNICIndex returns the NIC slot backing the named interface, looked up in
+// the platform's explicit port inventory (PlatformSpec.Ports) — the single
+// source of the device-native name → NIC mapping for every platform, switch and
+// host alike (see docs/newtron/platform-port-model.md). NIC 0 is management and
+// never appears in the table, so every resolved slot is >= 1.
+//
+// For a switch (a dedicated VM) the returned index is the absolute QEMU slot.
+// For a coalesced host the returned index is the interface's per-host ordinal;
+// AllocateLinks maps it to the shared VM's absolute slot as NICBase + (ord-1).
 //
 // Returns an actionable error when the name is not in the inventory — the
 // caller (AllocateLinks) wraps it with the link/device context so a mis-typed
-// or out-of-range topology port fails at deploy time rather than producing a VM
-// whose NIC maps to nothing.
+// or out-of-inventory topology interface fails at deploy time rather than
+// producing a VM whose NIC maps to nothing.
 func ResolveNICIndex(ports []spec.PortSpec, interfaceName string) (int, error) {
 	if len(ports) == 0 {
 		return 0, fmt.Errorf("newtlab: platform has no port inventory; cannot resolve %q", interfaceName)
@@ -50,19 +53,4 @@ func samplePortNames(ports []spec.PortSpec) string {
 	}
 	names = append(names, "…", ports[len(ports)-1].Name)
 	return strings.Join(names, ", ")
-}
-
-// parseLinuxEthIndex extracts the numeric index from "ethN". Returns -1 if the
-// name is not a valid Linux ethernet interface. Used by the coalesced-host link
-// path (link.go), where a host's ethN maps to NICBase+N — independent of any
-// platform port inventory.
-func parseLinuxEthIndex(name string) int {
-	if !strings.HasPrefix(name, "eth") {
-		return -1
-	}
-	n, err := strconv.Atoi(name[len("eth"):])
-	if err != nil || n < 0 {
-		return -1
-	}
-	return n
 }
