@@ -17,7 +17,7 @@ func TestLabStatus_Success(t *testing.T) {
 			t.Errorf("path = %q, want %q", got, want)
 		}
 		state := newtlab.LabState{
-			Name: "2node-vs-service",
+			NetworkID: "2node-vs-service",
 			Nodes: map[string]*newtlab.NodeState{
 				"switch1": {SSHPort: 13009, ConsolePort: 12009, Status: "running"},
 				"switch2": {SSHPort: 13010, ConsolePort: 12010, Status: "running"},
@@ -33,8 +33,8 @@ func TestLabStatus_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LabStatus: %v", err)
 	}
-	if got.Name != "2node-vs-service" {
-		t.Errorf("Name = %q, want %q", got.Name, "2node-vs-service")
+	if got.NetworkID != "2node-vs-service" {
+		t.Errorf("Name = %q, want %q", got.NetworkID, "2node-vs-service")
 	}
 	if p := got.Nodes["switch1"].SSHPort; p != 13009 {
 		t.Errorf("switch1.SSHPort = %d, want 13009", p)
@@ -136,7 +136,7 @@ func TestSSHPort_LabNotDeployed(t *testing.T) {
 func TestSSHPort_DeviceNotInLab(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		state := newtlab.LabState{
-			Name:  "1node-vs",
+			NetworkID:  "1node-vs",
 			Nodes: map[string]*newtlab.NodeState{"switch1": {SSHPort: 13000}},
 		}
 		w.Header().Set("Content-Type", "application/json")

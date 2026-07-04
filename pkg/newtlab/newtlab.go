@@ -45,37 +45,6 @@ type NewtronClient interface {
 	RefreshBGP(device string) error
 }
 
-// boundNetworkID returns the newtron network this lab's client is bound to, or
-// "" when the lab was built without a client (defensive — NewLab requires one).
-func (l *Lab) boundNetworkID() string {
-	if l.newtronClient == nil {
-		return ""
-	}
-	return l.newtronClient.NetworkID()
-}
-
-// ResolveLabNetworkID is the single owner (§27) of "which newtron network is this
-// lab bound to." Precedence:
-//
-//  1. explicit — an operator override (`newtlab -N <id>`); wins outright.
-//  2. LabState.NetworkID — the network the lab was deployed against, so
-//     post-deploy ops (provision, resync) reach the same network the lab was
-//     built from even when it differs from the lab name.
-//  3. the lab name — the default binding (#116), used when no override and no
-//     persisted binding exist (a lab being deployed for the first time).
-//
-// A missing/unreadable state file is not an error: it means "not deployed yet",
-// which falls through to the lab name.
-func ResolveLabNetworkID(labName, explicit string) string {
-	if explicit != "" {
-		return explicit
-	}
-	if st, err := LoadState(labName); err == nil && st.NetworkID != "" {
-		return st.NetworkID
-	}
-	return labName
-}
-
 // HostVMGroup represents virtual hosts coalesced into one VM.
 type HostVMGroup struct {
 	VMName  string         // synthetic VM name (e.g., "hostvm-0")
@@ -87,7 +56,10 @@ type HostVMGroup struct {
 // via the HTTP API (§27 — newtron owns spec files), resolves VM
 // configuration, and manages QEMU processes.
 type Lab struct {
-	Name         string
+	// NetworkID is the lab's identity — the newtron network it realizes (#396).
+	// It keys the state directory and the /labs/{networkID} API; there is no
+	// separate lab name.
+	NetworkID    string
 	StateDir     string
 	Topology     *spec.TopologySpecFile
 	Platform     map[string]*spec.PlatformSpec
@@ -130,26 +102,26 @@ func (l *Lab) progress(phase, detail string) {
 // configured Lab. The client must be configured for the network that
 // owns the named topology.
 //
-// topologyName is the lab's identity — it appears as the state-directory
-// name under ~/.newtlab/labs/<name>/ and as the topology reference for
-// downstream commands. The client is expected to have been constructed
-// for the network that owns this topology (per-network HTTP client per
-// pkg/newtron/client conventions).
+// networkID is the lab's identity — the newtron network it realizes (#396).
+// It appears as the state-directory name under ~/.newtlab/labs/<networkID>/
+// and as the /labs/{networkID} key. The client must have been constructed for
+// that same network (per-network HTTP client per pkg/newtron/client conventions);
+// client.NetworkID() and this argument are the same network.
 //
 // newtlab no longer reads spec JSON files directly (DESIGN_PRINCIPLES
 // §27 — newtron owns the spec files and exposes their contents through
 // `/newtron/v1/network/...`).
-func NewLab(ctx context.Context, client NewtronClient, topologyName string) (*Lab, error) {
+func NewLab(ctx context.Context, client NewtronClient, networkID string) (*Lab, error) {
 	if client == nil {
 		return nil, fmt.Errorf("newtlab: nil newtron client")
 	}
-	if topologyName == "" {
-		return nil, fmt.Errorf("newtlab: topology name required")
+	if networkID == "" {
+		return nil, fmt.Errorf("newtlab: network id required")
 	}
 
 	l := &Lab{
-		Name:          topologyName,
-		StateDir:      LabDir(topologyName),
+		NetworkID:     networkID,
+		StateDir:      LabDir(networkID),
 		Profiles:      make(map[string]*spec.NodeSpec),
 		Nodes:         make(map[string]*NodeConfig),
 		newtronClient: client,
@@ -164,7 +136,7 @@ func NewLab(ctx context.Context, client NewtronClient, topologyName string) (*La
 
 	// Links must be explicit in topology
 	if len(l.Topology.Links) == 0 {
-		util.Logger.Infof("newtlab: no links defined in topology %q", topologyName)
+		util.Logger.Infof("newtlab: no links defined in topology %q", networkID)
 	}
 
 	// Platforms from newtron
@@ -382,13 +354,13 @@ func (l *Lab) buildHostMap() map[string]HostMapping {
 // and patches profiles. The context is checked at each major phase and
 // threaded into long-running sub-operations.
 func (l *Lab) Deploy(ctx context.Context) error {
-	util.Logger.Infof("newtlab: deploying lab %s", l.Name)
+	util.Logger.Infof("newtlab: deploying lab %s", l.NetworkID)
 
 	// Check for stale state
-	if existing, err := LoadState(l.Name); err == nil && existing != nil {
+	if existing, err := LoadState(l.NetworkID); err == nil && existing != nil {
 		if !l.Force {
 			return fmt.Errorf("newtlab: lab %s already deployed (created %s); use --force to redeploy",
-				l.Name, existing.Created.Format(time.RFC3339))
+				l.NetworkID, existing.Created.Format(time.RFC3339))
 		}
 		if err := l.destroyExisting(existing); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: cleanup of existing lab failed: %v\n", err)
@@ -399,7 +371,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	// Excluding the lab's own name lets attribution skip stale self-records when
 	// a redeploy collides with an in-flight teardown.
 	allocs := CollectAllPorts(l)
-	if err := ProbeAllPorts(allocs, l.Name); err != nil {
+	if err := ProbeAllPorts(allocs, l.NetworkID); err != nil {
 		return fmt.Errorf("newtlab: port conflicts:\n%w", err)
 	}
 
@@ -419,8 +391,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 
 	// Initialize state
 	l.State = &LabState{
-		Name:       l.Name,
-		NetworkID:  l.boundNetworkID(),
+		NetworkID:  l.NetworkID,
 		Created:    time.Now(),
 		SSHKeyPath: sshKeyPath,
 		Nodes:      make(map[string]*NodeState),
@@ -446,7 +417,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		if node.Host != "" {
 			hostIP := resolveHostIP(node.Host, l.Config)
 			if !remoteHosts[hostIP] {
-				if err := setupRemoteStateDir(l.Name, hostIP); err != nil {
+				if err := setupRemoteStateDir(l.NetworkID, hostIP); err != nil {
 					return err
 				}
 				remoteHosts[hostIP] = true
@@ -459,7 +430,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		if node.Host != "" {
 			// Remote: use ~/-based paths for shell expansion on remote host
 			hostIP := resolveHostIP(node.Host, l.Config)
-			remoteOverlay := fmt.Sprintf("~/.newtlab/labs/%s/disks/%s.qcow2", l.Name, name)
+			remoteOverlay := fmt.Sprintf("~/.newtlab/labs/%s/disks/%s.qcow2", l.NetworkID, name)
 			remoteImage := unexpandHome(node.Image)
 			if err := CreateOverlayRemote(remoteImage, remoteOverlay, hostIP); err != nil {
 				return err
@@ -831,7 +802,7 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 		hostIP := resolveHostIP(host, l.Config)
 		push := BridgePushParams{
 			OrchestratorURL: l.OrchestratorURL,
-			LabName:         l.Name,
+			LabName:         l.NetworkID,
 			WorkerHost:      host,
 			Token:           token,
 		}
@@ -840,7 +811,7 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 			if err := WriteBridgeConfig(l.StateDir, links, push); err != nil {
 				return err
 			}
-			pid, err := startBridgeProcess(l.Name, l.StateDir)
+			pid, err := startBridgeProcess(l.NetworkID, l.StateDir)
 			if err != nil {
 				return fmt.Errorf("newtlab: start bridge: %w", err)
 			}
@@ -851,7 +822,7 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("newtlab: marshal remote bridge config: %w", err)
 			}
-			pid, err := startBridgeProcessRemote(l.Name, hostIP, configJSON)
+			pid, err := startBridgeProcessRemote(l.NetworkID, hostIP, configJSON)
 			if err != nil {
 				return fmt.Errorf("newtlab: start remote bridge on %s: %w", hostIP, err)
 			}
@@ -1048,17 +1019,17 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 	return err
 }
 
-// StopByName stops a node in a lab identified only by lab name and node name,
+// StopByName stops a node in a lab identified by its network-id and node name,
 // loading all necessary state from disk.
-func StopByName(ctx context.Context, labName, nodeName string) error {
-	lab := &Lab{Name: labName}
+func StopByName(ctx context.Context, networkID, nodeName string) error {
+	lab := &Lab{NetworkID: networkID}
 	return lab.Stop(ctx, nodeName)
 }
 
-// StartByName starts a node in a lab identified only by lab name and node name,
+// StartByName starts a node in a lab identified by its network-id and node name,
 // loading all necessary state from disk.
-func StartByName(ctx context.Context, labName, nodeName string) error {
-	lab := &Lab{Name: labName}
+func StartByName(ctx context.Context, networkID, nodeName string) error {
+	lab := &Lab{NetworkID: networkID}
 	return lab.Start(ctx, nodeName)
 }
 
@@ -1066,9 +1037,9 @@ func StartByName(ctx context.Context, labName, nodeName string) error {
 // and restores profiles. The context allows cancellation of the
 // teardown sequence.
 func (l *Lab) Destroy(ctx context.Context) error {
-	util.Logger.Infof("newtlab: destroying lab %s", l.Name)
+	util.Logger.Infof("newtlab: destroying lab %s", l.NetworkID)
 
-	state, err := LoadState(l.Name)
+	state, err := LoadState(l.NetworkID)
 	if err != nil {
 		return err
 	}
@@ -1094,10 +1065,10 @@ func (l *Lab) Destroy(ctx context.Context) error {
 	errs = append(errs, stopAllBridges(state)...)
 
 	// Clean up remote state directories
-	errs = append(errs, cleanupAllRemoteHosts(l.Name, state)...)
+	errs = append(errs, cleanupAllRemoteHosts(l.NetworkID, state)...)
 
 	// Remove local state directory
-	if err := RemoveState(l.Name); err != nil {
+	if err := RemoveState(l.NetworkID); err != nil {
 		errs = append(errs, fmt.Errorf("remove state: %w", err))
 	}
 
@@ -1110,7 +1081,7 @@ func (l *Lab) Destroy(ctx context.Context) error {
 // Status returns the current state by loading state.json, then live-checking
 // each PID via IsRunning() to update node status.
 func (l *Lab) Status() (*LabState, error) {
-	state, err := LoadState(l.Name)
+	state, err := LoadState(l.NetworkID)
 	if err != nil {
 		return nil, err
 	}
@@ -1152,7 +1123,7 @@ func (l *Lab) FilterHost(host string) {
 // Stop stops a single node by PID.
 func (l *Lab) Stop(ctx context.Context, nodeName string) error {
 	util.WithDevice(nodeName).Infof("newtlab: stopping node")
-	state, err := LoadState(l.Name)
+	state, err := LoadState(l.NetworkID)
 	if err != nil {
 		return err
 	}
@@ -1173,7 +1144,7 @@ func (l *Lab) Stop(ctx context.Context, nodeName string) error {
 // Start restarts a stopped node.
 func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	util.WithDevice(nodeName).Infof("newtlab: starting node")
-	state, err := LoadState(l.Name)
+	state, err := LoadState(l.NetworkID)
 	if err != nil {
 		return err
 	}
@@ -1190,7 +1161,7 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	if l.newtronClient == nil {
 		return fmt.Errorf("newtlab: cannot reload — no newtron client (lab was constructed without one)")
 	}
-	lab, err := NewLab(ctx, l.newtronClient, l.Name)
+	lab, err := NewLab(ctx, l.newtronClient, l.NetworkID)
 	if err != nil {
 		return fmt.Errorf("newtlab: reload specs: %w", err)
 	}
@@ -1209,7 +1180,7 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	if nodeState.PID > 0 && IsRunning(nodeState.PID, nodeState.HostIP) {
 		nodeState.Status = "running"
 	} else {
-		pid, err := StartNode(node, LabDir(l.Name), nodeState.HostIP)
+		pid, err := StartNode(node, LabDir(l.NetworkID), nodeState.HostIP)
 		if err != nil {
 			return err
 		}
@@ -1237,8 +1208,8 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 // newtron binary. ctx bounds the overall call; per-device cancellation follows
 // the client's own request handling.
 func (l *Lab) Provision(ctx context.Context, parallel int) error {
-	util.Logger.Infof("newtlab: provisioning lab %s (parallel=%d)", l.Name, parallel)
-	state, err := LoadState(l.Name)
+	util.Logger.Infof("newtlab: provisioning lab %s (parallel=%d)", l.NetworkID, parallel)
+	state, err := LoadState(l.NetworkID)
 	if err != nil {
 		return err
 	}
@@ -1404,10 +1375,10 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 	errs = append(errs, stopAllBridges(existing)...)
 
 	// Clean up remote state directories
-	errs = append(errs, cleanupAllRemoteHosts(l.Name, existing)...)
+	errs = append(errs, cleanupAllRemoteHosts(l.NetworkID, existing)...)
 
 	// Remove local state
-	if err := RemoveState(l.Name); err != nil {
+	if err := RemoveState(l.NetworkID); err != nil {
 		errs = append(errs, fmt.Errorf("remove state: %w", err))
 	}
 

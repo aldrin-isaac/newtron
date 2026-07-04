@@ -968,8 +968,7 @@ display. Defined in `state.go`.
 
 ```go
 type LabState struct {
-    Name       string
-    NetworkID  string                  // newtron network the lab was deployed against; persisted so post-deploy ops (provision, resync) resolve the same network. Defaults to the lab name (#116) absent a -N override; see ResolveLabNetworkID
+    NetworkID  string                  // the lab's sole identity: the newtron network it realizes (#396). It is the lab's address — the state-directory name and the /labs/{networkID} key — so LoadState stamps it from the directory. There is no separate lab name that could drift.
     Created    time.Time
     Dir    string                  // legacy: populated by pre-#66 state.json files; new Lab() leaves this empty (spec data flows from newtron via HTTP per §27)
     SSHKeyPath string                  // lab Ed25519 private key path
@@ -1211,10 +1210,10 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 concurrency. For each device it calls `l.newtronClient.Reconcile(name, "topology",
 …)` — newtron's HTTP reconcile, the single owner of "reconcile a device" (§27),
 the same method newtrun's provision step calls (#356). The client is
-network-scoped (built via `NewtronClientFor(networkID)`, the network id resolved
-by `ResolveLabNetworkID` — see Phase 2), so it reconciles the lab's own network
-and carries the caller's identity under `--enforce-authorization`. newtlab no
-longer spawns the `newtron` binary; it reaches newtron only over HTTP (§33).
+network-scoped (built via `NewtronClientFor(networkID)`, the network-id being the
+lab's identity — #396), so it reconciles the lab's own network and carries the
+caller's identity under `--enforce-authorization`. newtlab no longer spawns the
+`newtron` binary; it reaches newtron only over HTTP (§33).
 
 - Goroutine per device, bounded by `parallel` semaphore.
 - For each switch (host devices skipped): `exec.CommandContext(ctx, "newtron", name, "--topology", "intent", "reconcile", "-x")`.

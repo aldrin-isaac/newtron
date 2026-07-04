@@ -79,13 +79,13 @@ func CollectAllPorts(lab *Lab) []PortAllocation {
 // ProbeAllPorts can name the conflicting lab in its error rather than just
 // reporting a bare "port N in use" (issue #67).
 type portOwner struct {
-	Lab     string // lab name (matches the directory under ~/.newtlab/labs/)
-	PID     int    // owning process PID; 0 when the state record doesn't store one
-	Purpose string // "SSH", "console", "link bridge", "bridge stats"
+	NetworkID string // the lab's network-id (the directory under ~/.newtlab/labs/)
+	PID       int    // owning process PID; 0 when the state record doesn't store one
+	Purpose   string // "SSH", "console", "link bridge", "bridge stats"
 }
 
 // attributePortOwners walks every lab's state.json and indexes the ports each
-// lab holds. excludeLab is skipped so the lab being deployed doesn't flag
+// lab holds. excludeNetworkID is skipped so the lab being deployed doesn't flag
 // itself during a redeploy.
 //
 // Errors are absorbed silently — a corrupt or partially-written state.json on
@@ -99,14 +99,14 @@ type portOwner struct {
 // named in the error (or vice versa). The operator should treat the lab
 // name as a hint, not a contract — re-running the deploy after the error
 // resolves the ambiguity.
-func attributePortOwners(excludeLab string) map[int]portOwner {
+func attributePortOwners(excludeNetworkID string) map[int]portOwner {
 	names, err := ListLabs()
 	if err != nil {
 		return nil
 	}
 	owners := map[int]portOwner{}
 	for _, name := range names {
-		if name == excludeLab {
+		if name == excludeNetworkID {
 			continue
 		}
 		state, err := LoadState(name)
@@ -115,10 +115,10 @@ func attributePortOwners(excludeLab string) map[int]portOwner {
 		}
 		for _, node := range state.Nodes {
 			if node.SSHPort > 0 {
-				owners[node.SSHPort] = portOwner{Lab: state.Name, PID: node.PID, Purpose: "SSH"}
+				owners[node.SSHPort] = portOwner{NetworkID: state.NetworkID, PID: node.PID, Purpose: "SSH"}
 			}
 			if node.ConsolePort > 0 {
-				owners[node.ConsolePort] = portOwner{Lab: state.Name, PID: node.PID, Purpose: "console"}
+				owners[node.ConsolePort] = portOwner{NetworkID: state.NetworkID, PID: node.PID, Purpose: "console"}
 			}
 		}
 		bridgePIDByHost := map[string]int{}
@@ -128,10 +128,10 @@ func attributePortOwners(excludeLab string) map[int]portOwner {
 		for _, link := range state.Links {
 			pid := bridgePIDByHost[link.WorkerHost]
 			if link.APort > 0 {
-				owners[link.APort] = portOwner{Lab: state.Name, PID: pid, Purpose: "link bridge"}
+				owners[link.APort] = portOwner{NetworkID: state.NetworkID, PID: pid, Purpose: "link bridge"}
 			}
 			if link.ZPort > 0 {
-				owners[link.ZPort] = portOwner{Lab: state.Name, PID: pid, Purpose: "link bridge"}
+				owners[link.ZPort] = portOwner{NetworkID: state.NetworkID, PID: pid, Purpose: "link bridge"}
 			}
 		}
 	}
@@ -149,26 +149,26 @@ func formatPortConflict(purpose string, port int, hostIP string, owners map[int]
 		suffix = " on " + hostIP
 	}
 	if owner, ok := owners[port]; ok {
-		ownership := fmt.Sprintf("lab %q (%s", owner.Lab, owner.Purpose)
+		ownership := fmt.Sprintf("lab %q (%s", owner.NetworkID, owner.Purpose)
 		if owner.PID > 0 {
 			ownership += fmt.Sprintf(", PID %d", owner.PID)
 		}
 		ownership += ")"
 		return fmt.Sprintf("  %s: port %d%s held by %s; run 'newtlab destroy %s' first",
-			purpose, port, suffix, ownership, owner.Lab)
+			purpose, port, suffix, ownership, owner.NetworkID)
 	}
 	return fmt.Sprintf("  %s: port %d%s in use", purpose, port, suffix)
 }
 
 // ProbeAllPorts checks that all allocated ports are free. Local ports are
-// tested with net.Listen; remote ports via SSH + ss. excludeLab is the name
+// tested with net.Listen; remote ports via SSH + ss. excludeNetworkID is the name
 // of the lab being deployed — its own ports are not attributed to itself
 // when a redeploy collides with a stale entry. Pass "" if no exclusion.
 //
 // Returns a multi-error listing every conflict, with each line naming the
 // owning lab (and PID, when known) so the operator can stop or destroy it.
-func ProbeAllPorts(allocations []PortAllocation, excludeLab string) error {
-	owners := attributePortOwners(excludeLab)
+func ProbeAllPorts(allocations []PortAllocation, excludeNetworkID string) error {
+	owners := attributePortOwners(excludeNetworkID)
 
 	byHost := map[string][]PortAllocation{}
 	for _, a := range allocations {

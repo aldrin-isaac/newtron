@@ -159,7 +159,7 @@ func TestProbePortLocal(t *testing.T) {
 func seedLabState(t *testing.T, name string, sshPID, bridgePID int, sshPort, consolePort, linkA, linkZ int) {
 	t.Helper()
 	state := &LabState{
-		Name: name,
+		NetworkID: name,
 		Nodes: map[string]*NodeState{
 			"node1": {
 				PID:         sshPID,
@@ -361,8 +361,8 @@ func TestAttributePortOwners_CorruptStateSkipped(t *testing.T) {
 	owners := attributePortOwners("")
 	if owner, ok := owners[40000]; !ok {
 		t.Errorf("good-lab attribution missing")
-	} else if owner.Lab != "good-lab" {
-		t.Errorf("port 40000 owner: got %q, want good-lab", owner.Lab)
+	} else if owner.NetworkID != "good-lab" {
+		t.Errorf("port 40000 owner: got %q, want good-lab", owner.NetworkID)
 	}
 }
 

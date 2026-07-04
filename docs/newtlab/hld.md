@@ -140,9 +140,9 @@ state directory tracks everything needed for destroy, stop/start, and status.
   reconcile — `l.newtronClient.Reconcile(device, "topology", …)`, a topology-mode
   full reconcile — which replays topology.json steps and delivers the resulting
   CONFIG_DB projection to the device. The client is network-scoped (bound to the
-  lab's network via `ResolveLabNetworkID`), so reconcile targets the lab's own
-  network rather than a default.
-- **State directory** (`~/.newtlab/labs/<name>/`) holds everything needed to
+  lab's network-id, which is the lab's identity — #396), so reconcile targets the
+  lab's own network rather than a default.
+- **State directory** (`~/.newtlab/labs/<network-id>/`) holds everything needed to
   manage the lab after deployment: PIDs, overlay disks, logs, bridge config,
   and `state.json`.
 
@@ -818,10 +818,10 @@ step makes. This keeps the engines cleanly separated:
   topology, but reaches newtron's device operations, CONFIG_DB logic, and network
   model only over HTTP — never by importing them or spawning the `newtron` binary
   (§33).
-- **Network-scoped, identity-carrying.** The client is bound to the lab's network
-  (resolved by `ResolveLabNetworkID` — persisted `LabState.NetworkID`, else the
-  lab name) and carries the caller's identity, so reconcile targets the lab's own
-  network and works under `--enforce-authorization`.
+- **Network-scoped, identity-carrying.** The client is bound to the lab's
+  network-id — which *is* the lab's identity (#396), so no reconciliation between a
+  lab name and a network-id is needed — and carries the caller's identity, so
+  reconcile targets the lab's own network and works under `--enforce-authorization`.
 - **Independent versioning.** newtlab and newtron are built and deployed
   independently; the HTTP contract is the seam.
 

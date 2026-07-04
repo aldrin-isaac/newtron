@@ -23,7 +23,7 @@ func (s *Server) handleListLabs(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]LabListItem, 0, len(names))
 	for _, n := range names {
-		items = append(items, LabListItem{Name: n})
+		items = append(items, LabListItem{NetworkID: n})
 	}
 	httputil.WriteJSON(w, http.StatusOK, items)
 }
@@ -229,12 +229,10 @@ func (s *Server) openLab(ctx context.Context, name string) (*newtlab.Lab, error)
 	if s.cfg.NewtronClientFor == nil {
 		return nil, fmt.Errorf("newtlab-server has no newtron client configured; pass --newtron-server when starting")
 	}
-	// Reach the network the lab was deployed against (persisted in LabState),
-	// not a re-derivation from the lab name — the server has no -N override, so
-	// pass "" and let the resolver prefer state.NetworkID, falling back to the
-	// lab-name default (#116) when a lab isn't deployed yet (§27, closes #300's
-	// class of "provision targets the wrong network").
-	client := s.cfg.NewtronClientFor(newtlab.ResolveLabNetworkID(name, ""))
+	// The lab's identity is the newtron network it realizes (#396): the {name}
+	// path segment IS the network-id, so the client binds to it directly. There
+	// is no lab-name-vs-network-id divergence to reconcile.
+	client := s.cfg.NewtronClientFor(name)
 	lab, err := newtlab.NewLab(ctx, client, name)
 	if err != nil {
 		return nil, fmt.Errorf("lab %q: %w", name, err)

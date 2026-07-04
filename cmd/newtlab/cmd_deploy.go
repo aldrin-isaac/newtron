@@ -87,7 +87,7 @@ func deployWithMonitor(cmd *cobra.Command, lab *newtlab.Lab, provision bool, par
 	time.Sleep(2 * time.Second)
 
 	// Monitor until deploy phases clear or deploy goroutine finishes.
-	_ = monitorLab(lab.Name, deployDone)
+	_ = monitorLab(lab.NetworkID, deployDone)
 
 	// Wait for deploy goroutine to finish (may already be done).
 	<-deployDone
@@ -110,7 +110,7 @@ func deployWithMonitor(cmd *cobra.Command, lab *newtlab.Lab, provision bool, par
 
 func printDeploySummary(lab *newtlab.Lab) {
 	state := lab.State
-	fmt.Printf("\n%s Deployed %s (%d nodes)\n\n", green("✓"), lab.Name, len(state.Nodes))
+	fmt.Printf("\n%s Deployed %s (%d nodes)\n\n", green("✓"), lab.NetworkID, len(state.Nodes))
 	t := cli.NewTable("NODE", "STATUS", "SSH PORT", "CONSOLE").WithPrefix("  ")
 	nodeNames := make([]string, 0, len(state.Nodes))
 	for name := range state.Nodes {

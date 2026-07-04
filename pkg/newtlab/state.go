@@ -23,16 +23,14 @@ func NewTelemetryToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf[:]), nil
 }
 
-// LabState is persisted to ~/.newtlab/labs/<name>/state.json.
+// LabState is persisted to ~/.newtlab/labs/<network-id>/state.json.
 type LabState struct {
-	Name string `json:"name"`
-	// NetworkID is the newtron network this lab was deployed against — persisted
-	// at Deploy so post-deploy operations (provision, resync) reach the SAME
-	// network the lab was built from, rather than re-deriving it from the lab
-	// name. The id defaults to the lab name (#116) but an operator can pin a
-	// distinct one (`newtlab deploy -N <id>`); persisting it makes the binding
-	// explicit and keeps provision correct when they diverge. See ResolveLabNetworkID.
-	NetworkID string                  `json:"network_id,omitempty"`
+	// NetworkID is the lab's sole identity: the newtron network it realizes
+	// virtually (#396). It is the lab's address — the state-directory name and
+	// the /newtlab/v1/labs/{networkID} key — so it is authoritative from the
+	// path, not from this persisted copy: LoadState stamps it from the directory.
+	// A lab has no second "name" that could drift from its network-id.
+	NetworkID string                  `json:"network_id"`
 	Created    time.Time               `json:"created"`
 	Dir    string                  `json:"dir"`
 	SSHKeyPath string                  `json:"ssh_key_path,omitempty"` // path to lab Ed25519 private key
@@ -83,21 +81,21 @@ type LinkState struct {
 	WorkerHost string `json:"worker_host,omitempty"` // host running the bridge worker
 }
 
-// LabDir returns the state directory path for a lab name.
+// LabDir returns the state directory path for a lab, keyed by its network-id.
 // Uses the cached home directory from getHomeDir().
-func LabDir(name string) string {
+func LabDir(networkID string) string {
 	home, err := getHomeDir()
 	if err != nil {
 		// Best effort: return a relative path that will likely fail downstream
 		// with a more informative error.
-		return filepath.Join(".newtlab", "labs", name)
+		return filepath.Join(".newtlab", "labs", networkID)
 	}
-	return filepath.Join(home, ".newtlab", "labs", name)
+	return filepath.Join(home, ".newtlab", "labs", networkID)
 }
 
 // SaveState writes lab state to state.json in the lab directory.
 func SaveState(state *LabState) error {
-	dir := LabDir(state.Name)
+	dir := LabDir(state.NetworkID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("newtlab: create state dir: %w", err)
 	}
@@ -115,26 +113,30 @@ func SaveState(state *LabState) error {
 }
 
 // LoadState reads lab state from state.json. Returns error if not found.
-func LoadState(name string) (*LabState, error) {
-	path := filepath.Join(LabDir(name), "state.json")
+func LoadState(networkID string) (*LabState, error) {
+	path := filepath.Join(LabDir(networkID), "state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("newtlab: lab %s not found (no state.json)", name)
+		return nil, fmt.Errorf("newtlab: lab %s not found (no state.json)", networkID)
 	}
 
 	var state LabState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, fmt.Errorf("newtlab: parse state.json: %w", err)
 	}
+	// The directory is the lab's address, and its address is its identity (#396):
+	// stamp NetworkID from the path so it is correct regardless of what the file
+	// carries. This is the single source of a lab's identity (§27).
+	state.NetworkID = networkID
 	return &state, nil
 }
 
 // RemoveState deletes the entire lab state directory.
-func RemoveState(name string) error {
-	return os.RemoveAll(LabDir(name))
+func RemoveState(networkID string) error {
+	return os.RemoveAll(LabDir(networkID))
 }
 
-// ListLabs returns names of all labs with state directories.
+// ListLabs returns the network-ids of all labs with state directories.
 func ListLabs() ([]string, error) {
 	home, err := getHomeDir()
 	if err != nil {

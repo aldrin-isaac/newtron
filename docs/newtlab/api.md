@@ -50,7 +50,7 @@ Mirrors the convention used by `newtron-server` and `newtrun-server`.
 
 ### Path parameters
 
-- `{name}` — lab name. Resolved under `--networks-base/<name>/` for `topology.json` lookup; the on-disk directory layout still calls the spec `topology.json` (newtron owns the spec schema, see [DESIGN_PRINCIPLES_NEWTRON §27](../DESIGN_PRINCIPLES_NEWTRON.md)). At the HTTP layer the deployed instance is a *lab*.
+- `{name}` — the lab's **network-id**: a lab is identified by the newtron network it realizes (#396), so this path segment is that network-id and the lab's state lives at `~/.newtlab/labs/<network-id>/`. Resolved under `--networks-base/<network-id>/` for `topology.json` lookup; the on-disk directory layout still calls the spec `topology.json` (newtron owns the spec schema, see [DESIGN_PRINCIPLES_NEWTRON §27](../DESIGN_PRINCIPLES_NEWTRON.md)). At the HTTP layer the deployed instance is a *lab*; there is no separate lab name.
 - `{node}` — device name as defined in `topology.json` (e.g., `switch1`, `host1`).
 
 ---
@@ -134,8 +134,8 @@ Returns one entry per lab with a state directory under `~/.newtlab/labs/`. Runni
 ```json
 {
   "data": [
-    { "name": "1node-vs" },
-    { "name": "2node-vs-service" }
+    { "network_id": "1node-vs" },
+    { "network_id": "2node-vs-service" }
   ]
 }
 ```
@@ -149,7 +149,7 @@ Returns the canonical [`LabState`](../../pkg/newtlab/state.go) for a deployed la
 ```json
 {
   "data": {
-    "name": "1node-vs",
+    "network_id": "1node-vs",
     "created": "2026-05-26T22:43:32.345-07:00",
     "dir": "/path/to/networks/1node-vs",
     "ssh_key_path": "/home/.../1node-vs/lab.key",
