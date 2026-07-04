@@ -22,9 +22,10 @@ func (c *Client) DeviceInfo(device string) (*newtron.DeviceInfo, error) {
 	return &result, nil
 }
 
-// ListInterfaces returns all interface summaries.
-func (c *Client) ListInterfaces(device string) ([]newtron.InterfaceSummary, error) {
-	var result []newtron.InterfaceSummary
+// ListInterfaces returns the node's platform-supported interface inventory —
+// every interface the platform declares, with topology wiring and port config.
+func (c *Client) ListInterfaces(device string) ([]newtron.InterfaceInventoryEntry, error) {
+	var result []newtron.InterfaceInventoryEntry
 	if err := c.doGet(c.nodePath(device)+"/interfaces", &result); err != nil {
 		return nil, err
 	}

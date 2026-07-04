@@ -54,6 +54,9 @@ func LoadPlatformsFromDir(dir string) (map[string]*PlatformSpec, error) {
 		if _, dup := out[p.Name]; dup {
 			return nil, fmt.Errorf("%s: duplicate platform name %q already loaded (case-sensitive)", path, p.Name)
 		}
+		if err := p.ValidateConstraints(p.Name); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 		out[p.Name] = &p
 	}
 	return out, nil

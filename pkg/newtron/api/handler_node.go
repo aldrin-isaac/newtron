@@ -27,14 +27,18 @@ func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+// handleListInterfaces returns the platform-supported interface inventory for a
+// node — every interface the node's platform declares, annotated with topology
+// wiring (used/peer) and authored port config. It is a spec-level read
+// (NodeInterfaceInventory), so it serves hosts (which have no SONiC device) and
+// answers offline, before deployment. Live per-interface state is at
+// GET /nodes/{node}/interfaces/{name}.
 func (s *Server) handleListInterfaces(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
 		return
 	}
-	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return n.ListInterfaceDetails()
-	})
+	val, err := ne.net.NodeInterfaceInventory(r.PathValue("node"))
 	if err != nil {
 		writeError(w, err)
 		return

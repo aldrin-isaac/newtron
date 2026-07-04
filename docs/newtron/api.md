@@ -2804,9 +2804,29 @@ Get a structured overview of the device.
 
 #### GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces
 
-List all interfaces with summary status.
+List every interface the node's platform supports — the platform-supported
+inventory (`ports[]`), annotated with topology wiring and authored port config.
+This is a **spec-level** read (platform inventory × topology), so it answers for
+a host (which has no SONiC device) and offline, before deployment. A client
+enumerates a node's interfaces and selects the connectable ones (`used: false`).
+Live per-interface state (admin/oper status, addresses) is at
+`GET .../interfaces/{name}`.
 
-**Response (200):** Array of `InterfaceSummary` (see [S13](#interfacesummary))
+**Response (200):** Array of `InterfaceInventoryEntry` (see [S13](#interfaceinventoryentry)):
+
+```json
+[
+  { "name": "Ethernet4", "nic_index": 2, "used": true,
+    "peer": "host1:eth0", "config": { "admin_status": "up", "mtu": 9100 } },
+  { "name": "Ethernet24", "nic_index": 9, "used": false }
+]
+```
+
+- `name` -- device-native interface name from the platform inventory.
+- `nic_index` -- NIC slot backing the interface (1-based).
+- `used` -- true when the interface is wired by a topology link.
+- `peer` -- the `device:interface` on the far side of that link (omitted when free).
+- `config` -- the authored per-port config, or omitted when the interface is unconfigured.
 
 #### GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces/{name}
 
@@ -4433,18 +4453,20 @@ Returned by `GET .../info`.
 
 ### Interface Types
 
-#### InterfaceSummary
+#### InterfaceInventoryEntry
 
-Returned in array by `GET .../interface`.
+Returned in an array by `GET .../interfaces` — one interface the node's platform
+supports (from the platform `ports[]` inventory), annotated with topology wiring
+and authored port config. Spec-level: no device read, so it answers for hosts
+and offline.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Interface name |
-| `admin_status` | string | `"up"` or `"down"` |
-| `oper_status` | string | `"up"` or `"down"` |
-| `ip_addresses` | string[] | IP addresses on the interface |
-| `vrf` | string | VRF binding (empty if default) |
-| `service` | string | Service name (empty if no binding) |
+| `name` | string | Device-native interface name (from the platform inventory) |
+| `nic_index` | int | NIC slot backing the interface (1-based; NIC 0 is management) |
+| `used` | bool | True when wired by a topology link |
+| `peer` | string | The `device:interface` on the far side of the link (omitted when free) |
+| `config` | PortConfig | Authored per-port config; omitted when the interface is unconfigured |
 
 #### InterfaceDetail
 

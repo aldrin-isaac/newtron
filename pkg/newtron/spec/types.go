@@ -317,13 +317,17 @@ type PlatformSpec struct {
 	DefaultSpeed string   `json:"default_speed" label:"Default Port Speed" tooltip:"Default speed for each data port (e.g. \"100G\")"`
 	Breakouts    []string `json:"breakouts,omitempty" label:"Supported Breakouts" tooltip:"Breakout modes this platform can accept"`
 
-	// Ports is the explicit per-port inventory — the device-native interface
-	// name → QEMU NIC slot mapping for every front-panel port. Generated at
-	// onboarding from the platform's port authority (SONiC port_config.ini or
-	// platform.json; see platform_from_*.go). newtlab resolves every topology
-	// interface against it (ResolveNICIndex); see
-	// docs/newtron/platform-port-model.md.
-	Ports []PortSpec `json:"ports,omitempty" label:"Ports" tooltip:"Per-port inventory: device-native name → QEMU NIC slot, generated from the platform's port authority"`
+	// Ports is the explicit per-interface inventory — the device-native
+	// interface name → QEMU NIC slot mapping, and the single authority for
+	// which interfaces a node of this platform supports. Every platform
+	// declares it, switch and host alike: there is no universal naming formula
+	// (Ethernet stride-4, vJunos "ge-0/0/0", host "eth0"), so the mapping is
+	// always tabled, never derived. Switch inventories are generated at
+	// onboarding from the port authority (SONiC port_config.ini or
+	// platform.json; see platform_from_*.go); host inventories are authored.
+	// newtlab resolves every topology interface against it (ResolveNICIndex);
+	// PortCount == len(Ports). See docs/newtron/platform-port-model.md.
+	Ports []PortSpec `json:"ports,omitempty" label:"Ports" tooltip:"Per-interface inventory: device-native name → QEMU NIC slot — the interfaces a node of this platform supports"`
 
 	// newtlab VM fields
 	VMImage             string       `json:"vm_image,omitempty" label:"VM Image" tooltip:"Path or URL to the platform's VM disk image"`
@@ -339,16 +343,23 @@ type PlatformSpec struct {
 	UnsupportedFeatures []string     `json:"unsupported_features,omitempty" label:"Unsupported Features" tooltip:"Features this platform cannot handle (e.g. \"acl\", \"evpn-vxlan\")"`
 }
 
-// PortSpec is one front-panel port in a platform's generated port model — the
-// device-native interface name paired with the QEMU NIC slot that backs it.
-// The ordered set of PortSpecs is the explicit name → NIC mapping newtlab
-// resolves topology interfaces against — the only form that covers non-strided
-// naming (e.g. vJunos "ge-0/0/0") as well as Ethernet stride layouts. Generated,
-// not hand-authored, for SONiC platforms (see platform_from_*.go); the design
-// is in docs/newtron/platform-port-model.md.
+// PortSpec is one interface in a platform's port inventory — the device-native
+// interface name paired with the QEMU NIC slot that backs it. The ordered set
+// of PortSpecs is the explicit name → NIC mapping newtlab resolves topology
+// interfaces against — the only form that covers every naming convention
+// (Ethernet stride layouts, vJunos "ge-0/0/0", host "eth0") without a formula.
+// Generated for SONiC platforms (see platform_from_*.go), authored for hosts;
+// the design is in docs/newtron/platform-port-model.md.
+//
+// NICIndex is 1-based (NIC 0 is management). For a dedicated VM (switch,
+// appliance) it is the absolute QEMU slot. For a host — which newtlab coalesces
+// with its siblings into one shared VM — it is the interface's ordinal within
+// that host's own NIC range; newtlab maps it to the shared VM's absolute slot
+// as NICBase + (NICIndex-1). Either way the platform declares a stable local
+// mapping; the coalescing offset is newtlab's to apply.
 type PortSpec struct {
-	Name     string `json:"name" label:"Port Name" tooltip:"Device-native interface name (e.g. \"Ethernet0\", \"ge-0/0/0\")"`
-	NICIndex int    `json:"nic_index" label:"NIC Index" tooltip:"QEMU data-NIC slot backing this port (1-based; NIC 0 is management)" min:"1"`
+	Name     string `json:"name" label:"Port Name" tooltip:"Device-native interface name (e.g. \"Ethernet0\", \"ge-0/0/0\", \"eth0\")"`
+	NICIndex int    `json:"nic_index" label:"NIC Index" tooltip:"NIC slot backing this interface (1-based; NIC 0 is management). Absolute QEMU slot for a dedicated VM; per-host ordinal (offset by NICBase) for a coalesced host" min:"1"`
 	Speed    string `json:"speed,omitempty" label:"Speed" tooltip:"Port speed (e.g. \"40G\"); defaults to the platform default_speed when omitted"`
 	Lanes    []int  `json:"lanes,omitempty" label:"Lanes" tooltip:"SerDes lanes backing this port, when known (informational)"`
 }

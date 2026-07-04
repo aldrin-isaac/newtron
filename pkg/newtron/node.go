@@ -1346,26 +1346,6 @@ func (n *Node) GetServiceBindingDetail(iface string) (*ServiceBindingDetail, err
 	}, nil
 }
 
-// ListInterfaceDetails returns summary info for all interfaces on the device.
-func (n *Node) ListInterfaceDetails() ([]InterfaceSummary, error) {
-	var result []InterfaceSummary
-	for _, name := range n.internal.ListInterfaces() {
-		intf, err := n.internal.GetInterface(name)
-		if err != nil {
-			continue
-		}
-		result = append(result, InterfaceSummary{
-			Name:        name,
-			AdminStatus: intf.AdminStatus(),
-			OperStatus:  intf.OperStatus(),
-			IPAddresses: intf.IPAddresses(),
-			VRF:         intf.VRF(),
-			Service:     intf.ServiceName(),
-		})
-	}
-	return result, nil
-}
-
 // ShowInterfaceDetail returns all properties of a single interface.
 func (n *Node) ShowInterfaceDetail(name string) (*InterfaceDetail, error) {
 	intf, err := n.internal.GetInterface(name)
