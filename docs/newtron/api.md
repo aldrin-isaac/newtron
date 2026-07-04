@@ -71,6 +71,7 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | DELETE | `/networks/{n}/secrets/{key}` | Remove a secret-store value |
 | GET | `/networks/{n}/nodes/{node}/host-connection` | Get host SSH connection |
 | GET | `/networks/{n}/features` | List features (also: `/{name}/dependencies`, `/{name}/unsupported-due-to`) |
+| GET | `/networks/{n}/platforms/{name}/ports` | Default topology-port authoring template (name → PortConfig, drop-in for a node's `ports`) |
 | GET | `/networks/{n}/platforms/{name}/supports/{feature}` | Check platform feature support |
 | POST | `/networks/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
 | POST | `/networks/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
@@ -1596,6 +1597,37 @@ Get the dependency list for a feature.
 Get the features that cause a given feature to be unsupported.
 
 **Response (200):** Array of blocking feature strings
+
+#### GET /newtron/v1/networks/{netID}/platforms/{name}/ports
+
+Return the **default topology-port authoring template** for a platform: every
+front-panel port the platform defines, keyed by device-native name, carrying
+newtron's default port-config convention (`admin_status: "up"`, `mtu: 9100`;
+speed omitted so it inherits the platform `default_speed`). The value shape is
+`map[name → PortConfig]` — directly assignable to a topology node's `ports`, so
+an authoring client fills a device's ports without embedding SONiC conventions
+(#301).
+
+This is distinct from `GET .../platforms/{name}` (which returns the full
+`PlatformSpec`, including the port **inventory** `ports[]` — name → NIC slot,
+consumed by newtlab). Inventory answers *which ports exist*; this answers *how a
+freshly-authored port is configured*.
+
+**Path parameters:** `name` — platform name.
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "Ethernet0": { "admin_status": "up", "mtu": 9100 },
+    "Ethernet4": { "admin_status": "up", "mtu": 9100 }
+  }
+}
+```
+
+A host / HWSKU-less platform (no port inventory) returns `{"data": {}}`. An
+unknown platform returns **404**.
 
 #### GET /newtron/v1/networks/{netID}/platforms/{name}/supports/{feature}
 

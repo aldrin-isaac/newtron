@@ -277,6 +277,17 @@ func (c *Client) ShowPlatform(name string) (*spec.PlatformSpec, error) {
 	return &result, nil
 }
 
+// PlatformPortDefaults returns the default TopologyNode.Ports authoring template for a
+// platform — port name → default PortConfig — directly assignable to a
+// TopologyNode's ports (#301). Empty for a host / HWSKU-less platform.
+func (c *Client) PlatformPortDefaults(name string) (map[string]*spec.PortConfig, error) {
+	var result map[string]*spec.PortConfig
+	if err := c.doGet(c.networkPath()+"/platforms/"+url.PathEscape(name)+"/ports", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // ListRoutePolicies returns all route policy names.
 func (c *Client) ListRoutePolicies() ([]string, error) {
 	var result []string

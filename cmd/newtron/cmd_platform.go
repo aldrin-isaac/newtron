@@ -77,6 +77,57 @@ Shows platform name, HWSKU, description, and count of unsupported features.`,
 	},
 }
 
+var platformPortsCmd = &cobra.Command{
+	Use:   "ports <platform>",
+	Short: "Show the default port-config authoring template for a platform",
+	Long: `Print the platform's front-panel ports with the default topology
+port-config convention (admin_status, mtu).
+
+This is the map an operator drops into a topology node's ports when placing a
+switch — every port the platform defines, with newtron's default config. It
+mirrors what GET /platforms/{name}/ports returns; a host / HWSKU-less platform
+has no ports.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		platformName := args[0]
+		ports, err := app.client.PlatformPortDefaults(platformName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return fmt.Errorf("JSON output not yet implemented")
+		}
+
+		if len(ports) == 0 {
+			fmt.Printf("Platform %q has no ports (host or HWSKU-less platform)\n", platformName)
+			return nil
+		}
+
+		names := make([]string, 0, len(ports))
+		for name := range ports {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		fmt.Printf("%-16s %-13s %s\n", "PORT", "ADMIN_STATUS", "MTU")
+		fmt.Printf("%-16s %-13s %s\n", "----", "------------", "---")
+		for _, name := range names {
+			pc := ports[name]
+			mtu := "-"
+			if pc.MTU != 0 {
+				mtu = fmt.Sprintf("%d", pc.MTU)
+			}
+			admin := pc.AdminStatus
+			if admin == "" {
+				admin = "-"
+			}
+			fmt.Printf("%-16s %-13s %s\n", name, admin, mtu)
+		}
+		return nil
+	},
+}
+
 var platformShowCmd = &cobra.Command{
 	Use:   "show <platform>",
 	Short: "Show platform details and feature support",
@@ -199,4 +250,5 @@ and shows which features are unsupported via dependencies.`,
 func init() {
 	platformCmd.AddCommand(platformListCmd)
 	platformCmd.AddCommand(platformShowCmd)
+	platformCmd.AddCommand(platformPortsCmd)
 }

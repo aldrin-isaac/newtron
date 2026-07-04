@@ -2,8 +2,10 @@ package node
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================
@@ -54,14 +56,17 @@ func setPropertyConfig(tableName, intfName string, fields map[string]string) []s
 
 // clearPropertyConfig returns an update entry for clearing a property to its default.
 func clearPropertyConfig(tableName, intfName, property string) []sonic.Entry {
+	// mtu/admin_status revert to the shared default port convention (spec is the
+	// single owner — the same values DefaultPortConfig authors, so clearing an
+	// override never silently changes a port). speed/description clear to empty.
 	var fields map[string]string
 	switch property {
 	case "mtu":
-		fields = map[string]string{"mtu": "9100"}
+		fields = map[string]string{"mtu": strconv.Itoa(spec.DefaultPortMTU)}
 	case "speed":
 		fields = map[string]string{"speed": ""}
 	case "admin-status", "admin_status":
-		fields = map[string]string{"admin_status": "up"}
+		fields = map[string]string{"admin_status": spec.DefaultPortAdminStatus}
 	case "description":
 		fields = map[string]string{"description": ""}
 	}

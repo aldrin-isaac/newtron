@@ -388,6 +388,23 @@ func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
+// handlePlatformPorts returns the default TopologyNode.Ports authoring template
+// for a platform (port name → default PortConfig; #301) — what an authoring
+// client drops into a device's ports without embedding SONiC conventions. A
+// non-nil empty map for a host / HWSKU-less platform; 404 for an unknown one.
+func (s *Server) handlePlatformPorts(w http.ResponseWriter, r *http.Request) {
+	ne := s.requireNetwork(w, r)
+	if ne == nil {
+		return
+	}
+	ports, err := ne.net.PlatformPortDefaults(r.PathValue("name"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, ports)
+}
+
 func (s *Server) handleListRoutePolicies(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
