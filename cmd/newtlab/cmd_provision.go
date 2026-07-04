@@ -35,6 +35,12 @@ delivering the resulting CONFIG_DB projection to the device. Equivalent to the
 				lab.DeviceFilter = []string{device}
 			}
 
+			// Stream per-device progress to stdout — the same OnProgress
+			// mechanism the API server wires to the SSE broker (#373).
+			lab.OnProgress = func(phase, detail string) {
+				fmt.Printf("  [%s] %s\n", phase, detail)
+			}
+
 			fmt.Println("Provisioning devices...")
 			if err := lab.Provision(cmd.Context(), parallel); err != nil {
 				return err

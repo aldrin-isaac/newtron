@@ -7,8 +7,8 @@ import (
 )
 
 func TestRegistryAcquireReleaseRoundTrip(t *testing.T) {
-	r := NewDeployRegistry()
-	ctx, release, err := r.Acquire(context.Background(), "topo1")
+	r := NewLabOpRegistry()
+	ctx, release, err := r.Acquire(context.Background(), "topo1", "deploy")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -18,35 +18,40 @@ func TestRegistryAcquireReleaseRoundTrip(t *testing.T) {
 	release()
 }
 
-func TestRegistryRejectsConcurrentDeployOfSameTopology(t *testing.T) {
-	r := NewDeployRegistry()
-	_, release, err := r.Acquire(context.Background(), "topo1")
+func TestRegistryRejectsConcurrentOpOnSameLab(t *testing.T) {
+	r := NewLabOpRegistry()
+	// A deploy holds the slot; a provision on the same lab must be rejected,
+	// and the rejection must name the operation actually in flight (deploy).
+	_, release, err := r.Acquire(context.Background(), "topo1", "deploy")
 	if err != nil {
 		t.Fatalf("first Acquire: %v", err)
 	}
 	defer release()
 
-	_, _, err = r.Acquire(context.Background(), "topo1")
+	_, _, err = r.Acquire(context.Background(), "topo1", "provision")
 	if err == nil {
-		t.Fatal("second Acquire on same lab should fail")
+		t.Fatal("second op on same lab should fail")
 	}
-	var already *AlreadyDeployingError
-	if !errors.As(err, &already) {
-		t.Errorf("err type = %T, want *AlreadyDeployingError", err)
+	var busy *LabBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("err type = %T, want *LabBusyError", err)
 	}
-	if already.Lab != "topo1" {
-		t.Errorf("Lab = %q, want %q", already.Lab, "topo1")
+	if busy.Lab != "topo1" {
+		t.Errorf("Lab = %q, want %q", busy.Lab, "topo1")
+	}
+	if busy.Op != "deploy" {
+		t.Errorf("Op = %q, want the in-flight op %q (not the rejected caller's)", busy.Op, "deploy")
 	}
 }
 
 func TestRegistryAllowsConcurrentDeploysOfDifferentTopologies(t *testing.T) {
-	r := NewDeployRegistry()
-	_, r1, err := r.Acquire(context.Background(), "topo-a")
+	r := NewLabOpRegistry()
+	_, r1, err := r.Acquire(context.Background(), "topo-a", "deploy")
 	if err != nil {
 		t.Fatalf("Acquire topo-a: %v", err)
 	}
 	defer r1()
-	_, r2, err := r.Acquire(context.Background(), "topo-b")
+	_, r2, err := r.Acquire(context.Background(), "topo-b", "deploy")
 	if err != nil {
 		t.Fatalf("Acquire topo-b: %v", err)
 	}
@@ -54,8 +59,8 @@ func TestRegistryAllowsConcurrentDeploysOfDifferentTopologies(t *testing.T) {
 }
 
 func TestRegistryReleaseTwiceIsSafe(t *testing.T) {
-	r := NewDeployRegistry()
-	_, release, err := r.Acquire(context.Background(), "topo1")
+	r := NewLabOpRegistry()
+	_, release, err := r.Acquire(context.Background(), "topo1", "deploy")
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
@@ -64,12 +69,12 @@ func TestRegistryReleaseTwiceIsSafe(t *testing.T) {
 }
 
 func TestRegistryCancelAllSignalsAllInFlightContexts(t *testing.T) {
-	r := NewDeployRegistry()
-	ctxA, _, err := r.Acquire(context.Background(), "topo-a")
+	r := NewLabOpRegistry()
+	ctxA, _, err := r.Acquire(context.Background(), "topo-a", "deploy")
 	if err != nil {
 		t.Fatalf("Acquire topo-a: %v", err)
 	}
-	ctxB, _, err := r.Acquire(context.Background(), "topo-b")
+	ctxB, _, err := r.Acquire(context.Background(), "topo-b", "deploy")
 	if err != nil {
 		t.Fatalf("Acquire topo-b: %v", err)
 	}

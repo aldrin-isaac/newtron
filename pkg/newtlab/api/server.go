@@ -58,7 +58,7 @@ type Server struct {
 	cfg        Config
 	logger     *log.Logger
 	broker     *httputil.Broker[Event]
-	registry   *DeployRegistry
+	registry   *LabOpRegistry
 	statsStore *BridgeStatsStore
 	// tokenFor returns the per-lab telemetry token used to authenticate a
 	// newtlink BridgeStats push (handlePushBridgeStats). Defaults to the
@@ -80,7 +80,7 @@ func NewServer(cfg Config) *Server {
 		cfg:        cfg,
 		logger:     cfg.Logger,
 		broker:     httputil.NewBroker[Event](),
-		registry:   NewDeployRegistry(),
+		registry:   NewLabOpRegistry(),
 		statsStore: NewBridgeStatsStore(),
 		tokenFor:   defaultTelemetryTokenLookup,
 	}

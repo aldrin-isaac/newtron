@@ -7,66 +7,71 @@ import (
 	"time"
 )
 
-// DeployRegistry tracks in-flight deploy operations, one per lab name.
-// Concurrent deploy requests for the same lab are rejected with
-// AlreadyDeployingError (mapped to 409 Conflict). Different labs deploy
-// concurrently.
+// LabOpRegistry tracks the one in-flight long-running operation per lab —
+// deploy or provision. A second long-running op on the same lab (from any
+// caller — every HTTP endpoint is reachable by anyone) is rejected with
+// LabBusyError (mapped to 409 Conflict); different labs run concurrently.
+// Sharing one slot across deploy and provision is what prevents a provision
+// from racing a deploy on the same lab.
 //
-// The registry only tracks the async Deploy operation — synchronous
-// operations (status, start, stop, destroy, provision) bypass it. This
-// matches newtrun-server's RunRegistry pattern: only the long-running
-// thing needs registry-level mutual exclusion.
-//
-// `destroy` is treated as synchronous: it runs short enough (seconds to
-// tens of seconds) that operators expect to block on the response. If
-// that assumption breaks, destroy can move to async with its own
-// registry slot in a follow-up.
-type DeployRegistry struct {
+// Only the long-running, progress-streamed operations take the slot. Short
+// synchronous operations (status, start, stop, destroy, resync) bypass it and
+// block on the response; destroy runs short enough (seconds to tens of seconds)
+// that operators expect to block. If a short op ever needs to exclude against
+// an in-flight deploy/provision, it can take the slot too — the mechanism is
+// already general.
+type LabOpRegistry struct {
 	mu      sync.Mutex
-	entries map[string]*deployEntry
+	entries map[string]*labOpEntry
 }
 
-type deployEntry struct {
+type labOpEntry struct {
 	Lab     string
+	Op      string // "deploy" | "provision" — the operation holding the slot
 	Started time.Time
 	cancel  context.CancelFunc
 }
 
-// AlreadyDeployingError is returned by Acquire when another deploy is
-// already in flight for the lab. Handlers map it to 409 Conflict.
-type AlreadyDeployingError struct {
+// LabBusyError is returned by Acquire when a long-running operation is already
+// in flight for the lab. Op names what is running so the 409 is accurate for
+// whichever operation holds the slot. Handlers map it to 409 Conflict.
+type LabBusyError struct {
 	Lab     string
+	Op      string
 	Started time.Time
 }
 
-func (e *AlreadyDeployingError) Error() string {
-	return fmt.Sprintf("deploy of %q is already in flight (started %s ago)",
-		e.Lab, time.Since(e.Started).Round(time.Second))
+func (e *LabBusyError) Error() string {
+	return fmt.Sprintf("lab %q is busy: %s in flight (started %s ago)",
+		e.Lab, e.Op, time.Since(e.Started).Round(time.Second))
 }
 
-// NewDeployRegistry constructs an empty registry.
-func NewDeployRegistry() *DeployRegistry {
-	return &DeployRegistry{
-		entries: make(map[string]*deployEntry),
+// NewLabOpRegistry constructs an empty registry.
+func NewLabOpRegistry() *LabOpRegistry {
+	return &LabOpRegistry{
+		entries: make(map[string]*labOpEntry),
 	}
 }
 
 // Acquire registers a deploy for the lab. Returns the per-deploy
 // context (cancellable by the registry) and an unregister function the
-// caller invokes on completion. Returns AlreadyDeployingError if the
-// lab already has an in-flight deploy.
-func (r *DeployRegistry) Acquire(ctx context.Context, lab string) (context.Context, func(), error) {
+// caller invokes on completion. Returns LabBusyError if the lab already has
+// an in-flight long-running operation. op names this operation ("deploy" /
+// "provision") so a rejection reports what is actually running.
+func (r *LabOpRegistry) Acquire(ctx context.Context, lab, op string) (context.Context, func(), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if existing, ok := r.entries[lab]; ok {
-		return nil, nil, &AlreadyDeployingError{
+		return nil, nil, &LabBusyError{
 			Lab:     lab,
+			Op:      existing.Op,
 			Started: existing.Started,
 		}
 	}
-	deployCtx, cancel := context.WithCancel(ctx)
-	entry := &deployEntry{
+	opCtx, cancel := context.WithCancel(ctx)
+	entry := &labOpEntry{
 		Lab:     lab,
+		Op:      op,
 		Started: time.Now(),
 		cancel:  cancel,
 	}
@@ -79,12 +84,12 @@ func (r *DeployRegistry) Acquire(ctx context.Context, lab string) (context.Conte
 		}
 		cancel()
 	}
-	return deployCtx, release, nil
+	return opCtx, release, nil
 }
 
-// CancelAll cancels every in-flight deploy and waits up to maxWait for
+// CancelAll cancels every in-flight operation and waits up to maxWait for
 // the goroutines to drain. Called on server shutdown.
-func (r *DeployRegistry) CancelAll(maxWait time.Duration) {
+func (r *LabOpRegistry) CancelAll(maxWait time.Duration) {
 	r.mu.Lock()
 	for _, entry := range r.entries {
 		entry.cancel()

@@ -54,8 +54,8 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 // /api/labs/{name}/events, and terminal state lands in state.json
 // (visible via GET /status).
 //
-// Concurrency: one active deploy per lab. The second concurrent
-// request returns 409 Conflict.
+// Concurrency: one long-running operation (deploy or provision) per lab —
+// runLabOp holds the slot, so a concurrent deploy or provision returns 409.
 func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -92,14 +92,41 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if req.Host != "" {
 		lab.FilterHost(req.Host)
 	}
+	parallel := req.Parallel
+	if parallel <= 0 {
+		parallel = 1
+	}
 
-	// Acquire the per-lab slot. context.Background() because the
-	// deploy outlives this HTTP request.
-	deployCtx, release, err := s.registry.Acquire(context.Background(), name)
+	s.runLabOp(w, r, lab, "deploy", func(ctx context.Context) error {
+		if err := lab.Deploy(ctx); err != nil {
+			return err
+		}
+		if req.Provision {
+			if err := lab.Provision(ctx, parallel); err != nil {
+				return fmt.Errorf("provision: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+// runLabOp is the one mechanism every long-running, progress-streaming lab
+// operation uses (deploy, provision) — the async counterpart to the short
+// synchronous handlers. It acquires the lab's operation slot (409 LabBusyError
+// if another op is already in flight, from any caller), wires the lab's
+// OnProgress to the per-lab SSE broker, runs fn in a goroutine that outlives
+// this request (context.Background), and publishes a terminal complete/error
+// event. Returns 202 Accepted; subscribers of GET .../labs/{networkID}/events
+// see phase events plus the terminal event. Extracting this keeps deploy and
+// provision on one code path rather than duplicating the scaffolding (§27, §28).
+func (s *Server) runLabOp(w http.ResponseWriter, r *http.Request, lab *newtlab.Lab, op string, fn func(context.Context) error) {
+	name := lab.NetworkID
+	// context.Background() because the operation outlives this HTTP request.
+	opCtx, release, err := s.registry.Acquire(context.Background(), name, op)
 	if err != nil {
-		var already *AlreadyDeployingError
-		if errors.As(err, &already) {
-			httputil.WriteError(w, http.StatusConflict, already)
+		var busy *LabBusyError
+		if errors.As(err, &busy) {
+			httputil.WriteError(w, http.StatusConflict, busy)
 			return
 		}
 		httputil.WriteError(w, http.StatusInternalServerError, err)
@@ -118,34 +145,21 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer release()
-		if err := lab.Deploy(deployCtx); err != nil {
+		if err := fn(opCtx); err != nil {
 			s.broker.Publish(name, Event{
 				Type:    EventError,
 				Payload: ErrorPayload{Message: err.Error()},
 			})
-			s.logger.Printf("deploy %s: %v", name, err)
+			s.logger.Printf("%s %s: %v", op, name, err)
 			return
-		}
-		if req.Provision {
-			parallel := req.Parallel
-			if parallel <= 0 {
-				parallel = 1
-			}
-			if err := lab.Provision(deployCtx, parallel); err != nil {
-				s.broker.Publish(name, Event{
-					Type:    EventError,
-					Payload: ErrorPayload{Message: fmt.Sprintf("provision: %s", err)},
-				})
-				s.logger.Printf("provision %s: %v", name, err)
-				return
-			}
 		}
 		s.broker.Publish(name, Event{Type: EventComplete, Payload: nil})
 	}()
 
-	httputil.WriteJSON(w, http.StatusAccepted, DeployResponse{
-		Lab:     name,
-		Started: started.Format(time.RFC3339),
+	httputil.WriteJSON(w, http.StatusAccepted, LabOpResponse{
+		Op:        op,
+		NetworkID: name,
+		Started:   started.Format(time.RFC3339),
 	})
 }
 
@@ -195,8 +209,11 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleProvision runs newtlab's post-deploy provisioning pass on an
-// already-deployed lab. Synchronous; operators that want to deploy +
-// provision atomically should use POST /deploy?provision=true.
+// already-deployed lab. Asynchronous like deploy (#373): returns 202 and
+// streams per-device progress to /events with a terminal complete/error;
+// takes the lab's operation slot, so it 409s if a deploy or another provision
+// is already in flight. Operators wanting deploy + provision in one shot use
+// POST /deploy?provision=true.
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -214,11 +231,9 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusNotFound, err)
 		return
 	}
-	if err := lab.Provision(r.Context(), parallel); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("provision %s: %w", name, err))
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"lab": name, "status": "provisioned"})
+	s.runLabOp(w, r, lab, "provision", func(ctx context.Context) error {
+		return lab.Provision(ctx, parallel)
+	})
 }
 
 // openLab resolves a lab name to a *newtlab.Lab. Spec data is consumed

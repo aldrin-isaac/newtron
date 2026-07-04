@@ -53,13 +53,15 @@ type DeployRequest struct {
 	Parallel int `json:"parallel,omitempty"`
 }
 
-// DeployResponse is returned by POST /api/labs/{name}/deploy with HTTP
-// 202. The deploy runs asynchronously; subscribe to
-// /api/labs/{name}/events for phase events, or poll
-// /api/labs/{name}/status to observe terminal state.
-type DeployResponse struct {
-	Lab     string `json:"lab"`
-	Started string `json:"started"` // RFC3339
+// LabOpResponse is the HTTP 202 Accepted ack for an async long-running lab
+// operation (deploy, provision). The operation runs asynchronously; subscribe
+// to /api/labs/{networkID}/events for phase events plus a terminal
+// complete/error, or poll /api/labs/{networkID}/status. Op names what was
+// accepted; the lab is addressed by its network-id (#396).
+type LabOpResponse struct {
+	Op        string `json:"op"`         // "deploy" | "provision"
+	NetworkID string `json:"network_id"`
+	Started   string `json:"started"` // RFC3339
 }
 
 // StatusResponse mirrors newtlab.LabState directly. Returning the
@@ -70,24 +72,24 @@ type StatusResponse struct {
 }
 
 // EventType identifies the SSE event kind emitted on
-// /api/labs/{name}/events. The set mirrors the `phase, detail` pairs
-// newtlab.Lab.OnProgress emits during Deploy and Destroy. Unknown
-// phases pass through as EventPhase with the raw phase string in the
-// payload, so SSE consumers never miss a tick even if newtlab adds a
-// new phase tomorrow.
+// /api/labs/{networkID}/events. The set mirrors the `phase, detail` pairs
+// newtlab.Lab.OnProgress emits during the long-running operations (deploy,
+// provision). Unknown phases pass through as EventPhase with the raw phase
+// string in the payload, so SSE consumers never miss a tick even if newtlab
+// adds a new phase tomorrow.
 type EventType string
 
 const (
-	// EventPhase is the generic deploy / destroy progress event. The
-	// payload carries the phase name and free-form detail. Newtcon
-	// renders these as a rolling status line during deploy.
+	// EventPhase is the generic progress event for a long-running lab
+	// operation (deploy, provision). The payload carries the phase name and
+	// free-form detail; newtcon renders these as a rolling status line.
 	EventPhase EventType = "phase"
 
-	// EventComplete is emitted by the deploy goroutine when the
-	// operation finishes successfully. Payload is empty.
+	// EventComplete is emitted by runLabOp's goroutine when the operation
+	// finishes successfully. Payload is empty.
 	EventComplete EventType = "complete"
 
-	// EventError is emitted by the deploy goroutine when the operation
+	// EventError is emitted by runLabOp's goroutine when the operation
 	// fails. Payload carries the error message.
 	EventError EventType = "error"
 )
@@ -116,8 +118,8 @@ type PhasePayload struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// ErrorPayload is the payload for EventError. The deploy / destroy
-// goroutine sets Message to the returned error's Error() string.
+// ErrorPayload is the payload for EventError. runLabOp's goroutine sets
+// Message to the failed operation's Error() string.
 type ErrorPayload struct {
 	Message string `json:"message"`
 }

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -88,7 +89,11 @@ type Lab struct {
 	// it (§27). Set by NewLab; not mutable after construction.
 	newtronClient NewtronClient
 
-	// OnProgress is an optional callback for reporting deploy/destroy progress.
+	// OnProgress is an optional callback for progress on the long-running lab
+	// operations (deploy, provision). Called from the operation's goroutines —
+	// including parallel per-device provision — so an implementation must be
+	// safe for concurrent calls. The API server wires it to the per-lab SSE
+	// broker; the CLI wires it to stdout.
 	OnProgress func(phase, detail string)
 }
 
@@ -1227,16 +1232,25 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 		}
 	}
 
-	sem := make(chan struct{}, parallel)
-	var mu sync.Mutex
-	var errs []error
-
-	var wg sync.WaitGroup
+	// Switches only — host/host-vm devices have no SONiC CONFIG_DB to provision.
+	// Collected up front so per-device progress can report "k/total".
+	var switches []string
 	for name := range state.Nodes {
-		// Skip host/host-vm devices — they have no SONiC CONFIG_DB to provision
 		if ns := state.Nodes[name]; ns != nil && (ns.DeviceType == "host" || ns.DeviceType == "host-vm") {
 			continue
 		}
+		switches = append(switches, name)
+	}
+	total := len(switches)
+	l.progress("provision", fmt.Sprintf("reconciling %d device(s)", total))
+
+	sem := make(chan struct{}, parallel)
+	var mu sync.Mutex
+	var errs []error
+	var done int64 // atomic — completed device count for progress
+
+	var wg sync.WaitGroup
+	for _, name := range switches {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
@@ -1252,7 +1266,10 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("provision %s: %w", name, err))
 				mu.Unlock()
+				l.progress("provision", fmt.Sprintf("failed %s", name))
+				return
 			}
+			l.progress("provision", fmt.Sprintf("reconciled %s (%d/%d)", name, atomic.AddInt64(&done, 1), total))
 		}(name)
 	}
 	wg.Wait()
@@ -1266,6 +1283,7 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 	// device's ApplyFRRDefaults runs before all peers are ready, so routes
 	// may remain un-advertised until the next timer cycle (120s). A single
 	// soft clear pass after all devices are provisioned resolves this.
+	l.progress("bgp-refresh", "refreshing BGP to converge routes")
 	l.refreshBGP(state)
 
 	return nil
@@ -1282,8 +1300,8 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 // credentials or dial here.
 //
 // bgpRefreshDelay is the wait after provisioning before the clear, to let the
-// last device's BGP session initialize.
-const bgpRefreshDelay = 5 * time.Second
+// last device's BGP session initialize. A var (not const) so tests can zero it.
+var bgpRefreshDelay = 5 * time.Second
 
 func (l *Lab) refreshBGP(state *LabState) {
 	// Brief delay for the last-provisioned device's BGP to start.
