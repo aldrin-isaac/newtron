@@ -1542,6 +1542,17 @@ bin/newtlab destroy <topology>     # tears down VMs, removes overlay disks, clea
 
 Once the lab is reusable, retry. If the image is missing, see [§1 Prerequisites & Build](#1-prerequisites--build) for the SONiC image download.
 
+### 14.10 Suite fails immediately: "topology interface pre-flight failed"
+
+Before deploying, the Runner validates every interface a topology link references
+against that node's platform inventory (`GET /nodes/{node}/interfaces` — the same
+`ports[]` authority newtlab enforces at deploy). A mistyped or out-of-inventory
+interface — `host1:eth9` on a host whose platform declares `eth0..eth7`, or
+`switch1:Ethernet3` on a stride-4 platform — fails here, before any VM starts,
+with one aggregated message naming each offender. Fix the topology's link
+endpoints (or the platform's `ports[]` inventory) and retry. A network with no
+topology links (a config-only loopback suite) has nothing to validate and passes.
+
 ### 14.10 Provisioning fails on a specific device
 
 A `topology-reconcile` or `setup-device` step on one device returned an error but the rest of the run kept going. Open the run state — `scenarios[].steps[].details[]` lists per-device messages — to find which device failed.
