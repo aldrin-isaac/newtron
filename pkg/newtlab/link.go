@@ -55,6 +55,7 @@ type VMLabConfig struct {
 type HostMapping struct {
 	VMName  string
 	NICBase int
+	Ports   []spec.PortSpec // the host's platform port inventory, for name → NIC resolution
 }
 
 // AllocateLinks resolves topology links into LinkConfig entries with
@@ -98,20 +99,20 @@ func AllocateLinks(
 		aResolved, zResolved := false, false
 
 		if mapping, ok := hostMap[aDevice]; ok {
-			ethIdx := parseLinuxEthIndex(aIface)
-			if ethIdx < 0 {
-				return nil, fmt.Errorf("newtlab: allocate links: link %d A: invalid host interface %q", i, aIface)
+			ord, err := ResolveNICIndex(mapping.Ports, aIface)
+			if err != nil {
+				return nil, fmt.Errorf("newtlab: allocate links: link %d A (host %q): %w", i, aDevice, err)
 			}
-			aNIC = mapping.NICBase + ethIdx
+			aNIC = mapping.NICBase + (ord - 1)
 			aDevice = mapping.VMName
 			aResolved = true
 		}
 		if mapping, ok := hostMap[zDevice]; ok {
-			ethIdx := parseLinuxEthIndex(zIface)
-			if ethIdx < 0 {
-				return nil, fmt.Errorf("newtlab: allocate links: link %d Z: invalid host interface %q", i, zIface)
+			ord, err := ResolveNICIndex(mapping.Ports, zIface)
+			if err != nil {
+				return nil, fmt.Errorf("newtlab: allocate links: link %d Z (host %q): %w", i, zDevice, err)
 			}
-			zNIC = mapping.NICBase + ethIdx
+			zNIC = mapping.NICBase + (ord - 1)
 			zDevice = mapping.VMName
 			zResolved = true
 		}

@@ -19,8 +19,9 @@ type NodeConfig struct {
 	NICDriver  string // resolved: platform > "e1000"
 	// Ports is the platform's explicit port inventory (name → NIC slot),
 	// copied from PlatformSpec.Ports. AllocateLinks resolves a topology
-	// interface name to its NIC slot by looking it up here. Empty for coalesced
-	// host VMs, which resolve via NICBase + parseLinuxEthIndex instead.
+	// interface name to its NIC slot by looking it up here — for switches and
+	// hosts alike. For a coalesced host, ResolveNICIndex yields the per-host
+	// ordinal and AllocateLinks adds the shared VM's NICBase.
 	Ports         []spec.PortSpec
 	CPUFeatures   string // resolved: platform > ""
 	SSHUser       string // resolved: profile ssh_user > "admin"

@@ -48,9 +48,10 @@ type NewtronClient interface {
 
 // HostVMGroup represents virtual hosts coalesced into one VM.
 type HostVMGroup struct {
-	VMName  string         // synthetic VM name (e.g., "hostvm-0")
-	Hosts   []string       // sorted logical host names
-	NICBase map[string]int // host name → base NIC index on VM
+	VMName  string                     // synthetic VM name (e.g., "hostvm-0")
+	Hosts   []string                   // sorted logical host names
+	NICBase map[string]int             // host name → base NIC index on VM
+	Ports   map[string][]spec.PortSpec // host name → its platform port inventory
 }
 
 // Lab is the top-level newtlab orchestrator. It consumes newtron specs
@@ -311,24 +312,38 @@ func (l *Lab) coalesceHostVMs() {
 			VMName:  vmName,
 			Hosts:   make([]string, 0, len(groupHosts)),
 			NICBase: make(map[string]int),
+			Ports:   make(map[string][]spec.PortSpec),
 		}
 
-		// Compute NIC base per host: count links from topology, allocate sequential ranges
-		nicIdx := 1 // NIC 0 = mgmt
+		// Assign each host a contiguous NIC range in the shared VM. A host
+		// interface resolves to NICBase + (nic_index-1), so the range must span
+		// the host's highest-used interface ordinal. Sizing it from the ports[]
+		// authority (not a link count) keeps the layout deterministic even when a
+		// host wires non-contiguous interfaces — e.g. eth0 and eth3 need four
+		// slots, not two. NIC 0 is mgmt, so data ranges start at 1.
+		nicIdx := 1
 		for _, h := range groupHosts {
 			group.Hosts = append(group.Hosts, h.name)
 			group.NICBase[h.name] = nicIdx
+			ports := l.Nodes[h.name].Ports
+			group.Ports[h.name] = ports
 
-			// Count how many links this host has
-			linkCount := 0
+			maxOrdinal := 0
 			for _, link := range l.Topology.Links {
-				aDevice, _, _ := splitLinkEndpoint(link.A)
-				zDevice, _, _ := splitLinkEndpoint(link.Z)
-				if aDevice == h.name || zDevice == h.name {
-					linkCount++
+				for _, ep := range []string{link.A, link.Z} {
+					dev, iface, _ := splitLinkEndpoint(ep)
+					if dev != h.name {
+						continue
+					}
+					// Resolve against the same inventory AllocateLinks uses;
+					// unresolvable names are AllocateLinks' error to report, not
+					// this sizing pass's — skip them here.
+					if ord, err := ResolveNICIndex(ports, iface); err == nil && ord > maxOrdinal {
+						maxOrdinal = ord
+					}
 				}
 			}
-			nicIdx += linkCount
+			nicIdx += maxOrdinal
 		}
 
 		// Remove individual host NodeConfigs, add VM NodeConfig
@@ -349,6 +364,7 @@ func (l *Lab) buildHostMap() map[string]HostMapping {
 			hostMap[hostName] = HostMapping{
 				VMName:  group.VMName,
 				NICBase: group.NICBase[hostName],
+				Ports:   group.Ports[hostName],
 			}
 		}
 	}
