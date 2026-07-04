@@ -56,16 +56,16 @@ steps:
     expect_failure: true
 
   # Topology mutations — exercises the network.go gates (separate from
-  # spec_ops.go gates the original suite hits). Note the device-name
-  # populates Context.Device on the gate, distinct from Context.Resource.
-  - name: mallory-add-topology-device-denied
+  # spec_ops.go gates the original suite hits). The device name in the URL
+  # path populates Context.Device on the gate, distinct from Context.Resource.
+  # (Node placement follows the node definition since #393, so the gate is
+  # hit via the topology-update endpoint rather than a standalone create-node.)
+  - name: mallory-update-topology-device-denied
     action: newtron
-    method: POST
-    url: /topology/create-node
+    method: PUT
+    url: /topology/nodes/mallory-switch
     params:
-      name: mallory-switch
-      device:
-        ports: {Ethernet0: {admin_status: "up"}}
+      ports: {Ethernet0: {admin_status: "up"}}
     expect_failure: true
 
 ---

@@ -156,7 +156,6 @@ func TestAPICompleteness(t *testing.T) {
 			"HasTopology":          true,
 			"GetTopology":          true, // #14: GET /networks/{netID}/topology (raw spec read; backs internal use + tests)
 			"TopologyView":         true, // #14: GET /networks/{netID}/topology — served, provenance-enriched view
-			"AddTopologyDevice":    true, // #15: POST /networks/{netID}/topology/create-node
 			"DeleteTopologyDevice": true, // #15: DELETE /networks/{netID}/topology/nodes/{name}
 			"UpdateTopologyDevice": true, // #15: PUT /networks/{netID}/topology/nodes/{name}
 			"AddTopologyLink":      true, // #16: POST /networks/{netID}/topology/create-link
@@ -267,6 +266,7 @@ func TestAPICompleteness(t *testing.T) {
 	// excludedMethods lists methods intentionally NOT exposed via HTTP.
 	excludedMethods := map[string]map[string]string{
 		"Network": {
+			"AddTopologyDevice":      "engine placement primitive — create-node auto-places the node's topology entry (#393), so there is no standalone topology create-node endpoint; retained as the internal seam CreateNodeSpec calls and the topology-invariant test fixture",
 			"EnableAuthorization":    "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
 			"SetAuditLogger":         "server-internal initialization — api.Server hands each network its per-network audit logger on RegisterNetwork/ReloadNetwork (auth-design.md L1); not a request-handled action",
 			"Authorize":              "server-internal permission gate — invoked by api.Server for the write-control reservation handlers (control.request/control.takeover); not itself a request-handled action",
@@ -360,7 +360,6 @@ func TestAPICompleteness(t *testing.T) {
 			"UpdateNodeSpec":        auth.PermSpecAuthor,
 			"UpdateZone":            auth.PermSpecAuthor,
 
-			"AddTopologyDevice":    auth.PermSpecAuthor,
 			"DeleteTopologyDevice": auth.PermSpecAuthor,
 			"UpdateTopologyDevice": auth.PermSpecAuthor,
 			"AddTopologyLink":      auth.PermSpecAuthor,
@@ -1328,18 +1327,25 @@ func TestTopologyCRUD_DeleteNodeSpec_CascadeSymmetry(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddTopologyDevice: %v", err)
 	}
+	// A LINK is an independent reference (§393): it blocks delete-node without
+	// force, since deleting the node would silently drop the operator's link.
+	if err := net.AddTopologyLink(context.Background(), &spec.TopologyLink{
+		A: "switch1:Ethernet0", Z: "switch2:Ethernet0",
+	}); err != nil {
+		t.Fatalf("AddTopologyLink: %v", err)
+	}
 
-	// Refuses without force.
+	// Refuses without force while a link wires to the device.
 	err = net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, false)
 	if err == nil {
-		t.Fatal("expected conflict on nodeSpec-delete-with-topology-device, got nil")
+		t.Fatal("expected conflict on delete-node with referring link, got nil")
 	}
 	var conflict *newtron.ConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("expected *ConflictError, got %T: %v", err, err)
 	}
 
-	// Force cascade.
+	// Force cascades the link, the placement, and the spec.
 	if err := net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
 		t.Fatalf("force-delete nodeSpec: %v", err)
 	}
@@ -1347,6 +1353,58 @@ func TestTopologyCRUD_DeleteNodeSpec_CascadeSymmetry(t *testing.T) {
 	if topo.Nodes["switch2"] != nil {
 		t.Error("switch2 topology device still present after force-delete-node cascade")
 	}
+	if len(topo.Links) != 0 {
+		t.Errorf("links still present after force-delete-node cascade: %v", topo.Links)
+	}
+}
+
+// TestCreateNodeSpec_AutoPlacesTopology pins #393: create-node scaffolds the
+// node's /setup-device placement, and delete-node removes both the bare
+// placement and the spec without force (no link ⇒ no independent reference).
+func TestCreateNodeSpec_AutoPlacesTopology(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	net, err := newtron.LoadNetwork(specDir, "", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	if err := net.CreateNodeSpec(context.Background(), newtron.CreateNodeSpecRequest{
+		Name: "switch2", MgmtIP: "127.0.0.1", LoopbackIP: "10.0.0.2",
+		Zone: "amer", Platform: "sonic-vs", UnderlayASN: 65002,
+	}, newtron.ExecOpts{Execute: true}); err != nil {
+		t.Fatalf("CreateNodeSpec: %v", err)
+	}
+
+	// The topology placement exists with a /setup-device bring-up step — the
+	// node did not need a second (topology) authoring call.
+	topo := net.GetTopology()
+	dev := topo.Nodes["switch2"]
+	if dev == nil {
+		t.Fatal("create-node did not auto-place switch2 in topology")
+	}
+	if len(dev.Steps) != 1 || dev.Steps[0].URL != "/setup-device" {
+		t.Fatalf("want a single /setup-device step, got %+v", dev.Steps)
+	}
+
+	// delete-node removes the bare placement and the spec without force.
+	if err := net.DeleteNodeSpec(context.Background(), "switch2", newtron.ExecOpts{Execute: true}, false); err != nil {
+		t.Fatalf("delete-node (bare placement, no force): %v", err)
+	}
+	if net.GetTopology().Nodes["switch2"] != nil {
+		t.Error("switch2 still placed after delete-node")
+	}
+	if names := net.ListNodeSpecs(); slicesContains(names, "switch2") {
+		t.Error("switch2 spec still present after delete-node")
+	}
+}
+
+// slicesContains is a local helper (avoids a slices import churn in this file).
+func slicesContains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 // mapKeys returns the keys of a map[string]any for error reporting.

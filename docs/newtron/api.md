@@ -77,8 +77,8 @@ All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables
 | POST | `/networks/{n}/update-service` | Replace service in place — full-replacement (also: update-ipvpn, update-macvpn, update-qos-policy, update-filter, update-prefix-list, update-route-policy, update-node, update-zone) |
 | POST | `/networks/{n}/set-ssh-credentials` | Set the device SSH login at a scope (`{scope, scope_instance, ssh_user, ssh_pass}`) — scalar scope-write, upsert; ssh_pass may be a `${secret:KEY}` ref |
 | POST | `/networks/{n}/clear-ssh-credentials` | Clear the device SSH login override at a scope (`{scope, scope_instance}`) — the reverse of set |
-| POST | `/networks/{n}/create-node` | Create node spec |
-| POST | `/networks/{n}/delete-node` | Delete node spec |
+| POST | `/networks/{n}/create-node` | Create node spec (auto-places its topology entry) |
+| POST | `/networks/{n}/delete-node` | Delete node spec (removes its topology placement) |
 | POST | `/networks/{n}/create-zone` | Create zone |
 | POST | `/networks/{n}/delete-zone` | Delete zone |
 | POST | `/networks/{n}/create-platform` | Create platform definition |
@@ -1479,23 +1479,15 @@ spec_kind?, spec_name? }`), and `links` (array; omitted when empty).
 
 _Lands newtron#14 (Cluster C — topology spec substrate, §46)._
 
-#### POST /newtron/v1/networks/{netID}/topology/create-node
+#### Topology membership follows the node definition
 
-Adds a device entry to `topology.json`. the matching node-spec file
-(`nodes/{name}.json`) must already exist; if absent, the call returns 400
-with the resolution path included.
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Topology device name; must match a node-spec filename. |
-| `device` | TopologyNode | yes | Typed entry: `ports` (map of port name → `PortConfig`: `admin_status`/`mtu`/`speed`/`description` — form at `GET /schema/PortConfig`) and optional `steps[]` (intent operations to replay when the node is built). May be empty for a bare declaration; subsequent operations + `intent save --topology` populate `steps[]`. |
-
-**Response (201):** the persisted `TopologyNode`.
-
-**Errors:** 409 with `*ConflictError` if a device with this name already
-exists; 400 if the node-spec file is missing or the body is invalid.
+There is no standalone endpoint to create a topology entry. Topology placement
+follows the node definition: `POST .../create-node` (see below) auto-scaffolds
+the node's topology entry — a single `/setup-device` bring-up step derived from
+the spec (hostname, HWSKU, underlay ASN) — so a node is provision-ready the
+moment it is defined, and `POST .../delete-node` removes the placement with the
+spec. The endpoints below **edit** an already-placed node (steps/ports) and
+manage links; they do not create the entry.
 
 #### DELETE /newtron/v1/networks/{netID}/topology/nodes/{name}
 
@@ -1801,9 +1793,11 @@ them (§15):
 - `delete-zone` is refused (**409**) while a profile is assigned to the zone
   (`zone` field) or the zone still holds spec overrides; the response lists every
   dependant. Remove them first.
-- `delete-node` is refused (**409**) while the profile holds node-scope spec
-  overrides (or, as before, while a topology device references it). `force=true`
-  proceeds — the overrides live in the profile file and are removed with it.
+- `delete-node` removes the node's auto-placed topology entry along with the
+  spec, and is refused (**409**) only while a **link** still wires to the device
+  or the node holds node-scope spec overrides. `force=true` cascades the links
+  and removes the overrides with the file (#393; the bare placement itself does
+  not block — it is part of the node's identity).
 
 #### Scoped reads (viewing a specific override)
 
@@ -2505,7 +2499,12 @@ platform, EVPN peering).
 
 #### POST /newtron/v1/networks/{netID}/create-node
 
-Create a new node spec.
+Create a new node spec **and auto-place its topology entry** (#393). Along with
+`nodes/{name}.json`, a topology device is scaffolded in `topology.json` with a
+single `/setup-device` bring-up step derived from the spec (hostname, HWSKU from
+the platform, underlay ASN) — so the node is provision-ready without a second
+authoring step. Creation is atomic: if the placement fails, the spec is rolled
+back. `delete-node` removes the placement together with the spec.
 
 **Query parameters:** `dry_run`
 
@@ -2537,15 +2536,21 @@ time, never authored on the node spec.)
 
 #### POST /newtron/v1/networks/{netID}/delete-node
 
-Delete a node spec.
+Delete a node spec together with its topology placement. The bare
+`/setup-device` placement `create-node` auto-created is part of the node's
+identity, so it is removed without `force`. The call is **refused (409)** only
+when a **link** still wires to the device (an independent reference), or when
+the node spec still holds node-scope spec overrides; `force=true` cascades the
+referring links (and drops the overrides with the file) — DESIGN_PRINCIPLES §15,
+cascade is explicit.
 
-**Query parameters:** `dry_run`
+**Query parameters:** `dry_run`, `force`
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Profile name to delete |
+| `name` | string | yes | Node name to delete |
 
 **Response (200):**
 
@@ -2553,7 +2558,8 @@ Delete a node spec.
 {"data": {"status": "deleted"}}
 ```
 
-**Status codes:** 200 success, 404 not found
+**Status codes:** 200 success, 404 not found, 409 `*ConflictError` (referring
+links / node-scope overrides remain and `force` is absent)
 
 ### Zones
 

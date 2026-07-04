@@ -90,6 +90,25 @@ func postAs(t *testing.T, s *Server, caller, path string, body any) *httptest.Re
 	return w
 }
 
+// putAs is postAs for PUT — used where the mutation addresses its subject via
+// the URL path (e.g. topology-node update, whose device name is in the path).
+func putAs(t *testing.T, s *Server, caller, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			t.Fatalf("encode body: %v", err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPut, path, &buf)
+	if caller != "" {
+		req.Header.Set("X-Newtron-Caller", caller)
+	}
+	w := httptest.NewRecorder()
+	s.HTTPServer().Handler.ServeHTTP(w, req)
+	return w
+}
+
 // gatedEndpoint names one spec-mutation surface the L3 enforcement
 // touches, along with a minimal request body it accepts. The slice
 // is the punch list that TestAuthorizationActuallyEnforces walks:
@@ -503,10 +522,13 @@ func scaffoldWithGrants(t *testing.T, permissionsJSON string) string {
 // reference edge-* devices; bob (spine-team) can do the same for
 // spine-*. The grants table is the typed [{groups, where}] form.
 //
-// The test exercises the topology-mutation surface because it
-// gates with spec.author and accepts a device-named resource via
-// the create-node body; the Context.Resource gets the device name,
-// which the where-clause matches.
+// The test exercises the topology-update surface (PUT topology/nodes/{name}):
+// it gates with spec.author and carries the device name in the URL path, so
+// Context.Device gets the device name, which the where-clause matches. (Node
+// placement itself now follows the node definition — #393 — so the topology
+// create-node endpoint is gone; the update endpoint carries the same
+// device-scoped gate.) Allowed callers get past auth and then hit 404 for the
+// not-yet-existing device — the test asserts only the 403-vs-not-403 outcome.
 func TestAuthorizationL5_PerDeviceScoping(t *testing.T) {
 	grants := `{
     "spec.author": [
@@ -524,37 +546,37 @@ func TestAuthorizationL5_PerDeviceScoping(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
 
-	// alice (edge-team) creates edge-1 — should pass.
-	w := postAs(t, s, "alice",
-		"/newtron/v1/networks/default/topology/create-node",
-		map[string]any{"name": "edge-1", "device": map[string]any{}})
+	// alice (edge-team) updates edge-1 — auth should pass (then 404, not 403).
+	w := putAs(t, s, "alice",
+		"/newtron/v1/networks/default/topology/nodes/edge-1",
+		map[string]any{})
 	if w.Code == http.StatusForbidden {
-		t.Errorf("alice creating edge-1 was denied: %s", w.Body.String())
+		t.Errorf("alice updating edge-1 was denied: %s", w.Body.String())
 	}
 
-	// alice creating a spine-* should be denied — her where clause
+	// alice touching a spine-* should be denied — her where clause
 	// scopes her to edge-*.
-	w = postAs(t, s, "alice",
-		"/newtron/v1/networks/default/topology/create-node",
-		map[string]any{"name": "spine-1", "device": map[string]any{}})
+	w = putAs(t, s, "alice",
+		"/newtron/v1/networks/default/topology/nodes/spine-1",
+		map[string]any{})
 	if w.Code != http.StatusForbidden {
-		t.Errorf("alice creating spine-1 should be 403, got %d: %s", w.Code, w.Body.String())
+		t.Errorf("alice updating spine-1 should be 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// bob (spine-team) creating spine-1 — should pass.
-	w = postAs(t, s, "bob",
-		"/newtron/v1/networks/default/topology/create-node",
-		map[string]any{"name": "spine-1", "device": map[string]any{}})
+	// bob (spine-team) updating spine-1 — auth should pass.
+	w = putAs(t, s, "bob",
+		"/newtron/v1/networks/default/topology/nodes/spine-1",
+		map[string]any{})
 	if w.Code == http.StatusForbidden {
-		t.Errorf("bob creating spine-1 was denied: %s", w.Body.String())
+		t.Errorf("bob updating spine-1 was denied: %s", w.Body.String())
 	}
 
-	// bob creating an edge-* should be denied.
-	w = postAs(t, s, "bob",
-		"/newtron/v1/networks/default/topology/create-node",
-		map[string]any{"name": "edge-2", "device": map[string]any{}})
+	// bob touching an edge-* should be denied.
+	w = putAs(t, s, "bob",
+		"/newtron/v1/networks/default/topology/nodes/edge-2",
+		map[string]any{})
 	if w.Code != http.StatusForbidden {
-		t.Errorf("bob creating edge-2 should be 403, got %d: %s", w.Code, w.Body.String())
+		t.Errorf("bob updating edge-2 should be 403, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

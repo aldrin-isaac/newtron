@@ -1,19 +1,15 @@
 name: topology-crud-roundtrip
 description: |
-  newtron#15 + #16 (Phase 5): topology node + link CRUD round-trip.
+  newtron#393: topology membership follows the node definition. Creating a node
+  spec auto-places its topology entry (a /setup-device bring-up step); deleting
+  the node spec removes the placement. A link is the only independent reference
+  that blocks delete — the reference-aware reverse (DESIGN_PRINCIPLES §15).
 
-  Creates node spec + topology entry + link for a fictional switch2, then
-  reverses through delete-link → topology-node delete → delete-node (spec) via the
-  cascade-refusal pattern (refuse before force=true) to confirm Q1 default
-  works end-to-end. Pure spec mutation — no device interaction.
-
-  Notes on cleanup ordering, matching the cascade-refusal pattern from
-  DESIGN_PRINCIPLES §15:
-    1. Delete the link first (refusing-delete on the node would otherwise
-       block).
-    2. Delete the topology device (now unblocked).
-    3. Delete the node spec.
-  Each step in order maps 1:1 with what an operator would do by hand.
+  Round-trip for a fictional switch2:
+    1. create-node — spec + auto-placed /setup-device entry, in one call.
+    2. a link to switch1 blocks delete-node until the link is removed first.
+    3. delete-link, then delete-node — placement and spec go together.
+  Pure spec mutation — no device interaction.
 
 steps:
   - name: create-switch2-node-spec
@@ -26,31 +22,16 @@ steps:
       loopback_ip: "10.0.0.2"
       zone: amer
       platform: sonic-vs
-      ssh_user: admin
-      ssh_pass: x
-      ssh_port: 13001
       underlay_asn: 65002
 
-  - name: create-switch2-topology-entry
-    action: newtron
-    method: POST
-    url: /topology/create-node
-    params:
-      name: switch2
-      device:
-        ports:
-          Ethernet0:
-            admin_status: up
-            mtu: 9100
-    expect:
-      jq: '.ports.Ethernet0.admin_status == "up"'
-
-  - name: verify-switch2-in-topology-list
+  - name: verify-switch2-auto-placed
     action: newtron
     method: GET
     url: /topology
     expect:
-      jq: '.nodes.switch2 != null and .nodes.switch2.ports.Ethernet0.mtu == 9100'
+      # create-node placed switch2 with a single /setup-device bring-up step —
+      # no separate topology authoring call was needed (#393).
+      jq: '.nodes.switch2 != null and .nodes.switch2.steps[0].url == "/setup-device"'
 
   - name: create-link-sw1-sw2
     action: newtron
@@ -64,8 +45,10 @@ steps:
 
   - name: link-prevents-node-delete
     action: newtron
-    method: DELETE
-    url: /topology/nodes/switch2
+    method: POST
+    url: /delete-node
+    params:
+      name: switch2
     expect_failure: true
     expect:
       contains: "has 1 reference"
@@ -77,23 +60,19 @@ steps:
     expect:
       jq: '.deleted == "switch1:Ethernet0"'
 
-  - name: delete-switch2-now-unblocked
-    action: newtron
-    method: DELETE
-    url: /topology/nodes/switch2
-    expect:
-      jq: '.deleted == "switch2"'
-
-  - name: verify-switch2-removed
-    action: newtron
-    method: GET
-    url: /topology
-    expect:
-      jq: '(.nodes.switch2 // null) == null and (.links // [] | length) == 0'
-
   - name: delete-switch2-node-spec
     action: newtron
     method: POST
     url: /delete-node
     params:
       name: switch2
+    expect:
+      jq: '.status == "deleted"'
+
+  - name: verify-switch2-removed
+    action: newtron
+    method: GET
+    url: /topology
+    expect:
+      # placement and spec both gone; the link went with the first delete.
+      jq: '(.nodes.switch2 // null) == null and (.links // [] | length) == 0'

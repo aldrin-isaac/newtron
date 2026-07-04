@@ -1184,14 +1184,13 @@ declared in the schema (`scope` enum + scope-conditional `scope_instance` ref vi
 | POST | `.../add-route-policy-rule` | `AddRoutePolicyRuleRequest` |
 | POST | `.../update-route-policy-rule` | `UpdateRoutePolicyRuleRequest` — atomic per-rule mutation; optional `new_seq` renumbers (#210) |
 | POST | `.../remove-route-policy-rule` | `{policy, seq}` |
-| POST | `.../create-node` | `CreateDeviceProfileRequest` |
-| POST | `.../update-node` | `CreateDeviceProfileRequest` (full-replacement; #152) |
-| POST | `.../delete-node` | `{name, force}` — `force=true` cascades through topology devices referencing the profile (§15 cascade-refusal pattern); default refuses with 409 `ConflictError` |
+| POST | `.../create-node` | `CreateNodeSpecRequest` — creates the node spec **and auto-places its topology entry** (a scaffolded `/setup-device` step; #393) |
+| POST | `.../update-node` | `CreateNodeSpecRequest` (full-replacement; #152) |
+| POST | `.../delete-node` | `{name, force}` — removes the node spec and its topology placement; `force=true` cascades referring links (and node-scope overrides); default refuses with 409 `ConflictError` only while a link or override remains (#393, §15) |
 | POST | `.../create-zone` | `CreateZoneRequest` |
 | POST | `.../update-zone` | `CreateZoneRequest` (full-replacement; #152) |
 | POST | `.../delete-zone` | `{name}` |
-| POST | `.../topology/create-node` | `TopologyNodeCreateRequest` — creates topology device (auto-creates matching profile by filename) |
-| DELETE | `.../topology/nodes/{name}` | `?force=true` to cascade-delete the matching profile + remove links wired to this device; default refuses if links remain (409) |
+| DELETE | `.../topology/nodes/{name}` | `?force=true` to remove links wired to this device; default refuses if links remain (409). (No standalone topology create-node — placement follows the node definition; #393.) |
 | PUT | `.../topology/nodes/{name}` | `TopologyNode` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
 | POST | `.../topology/create-link` | `*TopologyLink` body — adds link to topology |
 | DELETE | `.../topology/links/{node}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |

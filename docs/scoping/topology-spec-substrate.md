@@ -147,6 +147,14 @@ applied alongside (DeleteProfile gets `?force=true` parameter that cascades
 through the matching topology device); NodeActor cache cleared on both
 delete-node and update-node._
 
+> **Superseded in part by newtron#393 (topology membership follows the node
+> definition).** The standalone `POST .../topology/create-node` endpoint is gone:
+> `create-node` now auto-places the node's topology entry (a scaffolded
+> `/setup-device` step) and `delete-node` removes it, so placement is no longer a
+> separate authoring act. `AddTopologyDevice` remains the internal engine
+> primitive `CreateNodeSpec` calls; `DeleteTopologyDevice`, `UpdateTopologyDevice`,
+> and the link verbs below are unchanged.
+
 ### Principle check
 
 **§46 (load-bearing):** the typed `TopologyNode` is canonical
