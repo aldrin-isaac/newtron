@@ -1601,12 +1601,15 @@ Get the features that cause a given feature to be unsupported.
 #### GET /newtron/v1/networks/{netID}/platforms/{name}/ports
 
 Return the **default topology-port authoring template** for a platform: every
-front-panel port the platform defines, keyed by device-native name, carrying
-newtron's default port-config convention (`admin_status: "up"`, `mtu: 9100`;
-speed omitted so it inherits the platform `default_speed`). The value shape is
-`map[name → PortConfig]` — directly assignable to a topology node's `ports`, so
-an authoring client fills a device's ports without embedding SONiC conventions
-(#301).
+interface the platform defines, keyed by device-native name, carrying the
+platform-appropriate default port-config convention. The default starts at the
+platform file and a node overlays it — `admin_status: "up"` for all, `mtu: 9100`
+(the SONiC jumbo default) for a switch and `mtu: 1500` (standard Ethernet) for a
+host; speed omitted so it inherits the platform `default_speed`. Every platform
+with a port inventory answers, host and switch alike (#301, #403). The value
+shape is `map[name → PortConfig]` — directly assignable to a topology node's
+`ports`, so an authoring client fills a device's ports without embedding
+conventions.
 
 This is distinct from `GET .../platforms/{name}` (which returns the full
 `PlatformSpec`, including the port **inventory** `ports[]` — name → NIC slot,

@@ -389,9 +389,11 @@ func (s *Server) handleShowPlatform(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePlatformPorts returns the default TopologyNode.Ports authoring template
-// for a platform (port name → default PortConfig; #301) — what an authoring
-// client drops into a device's ports without embedding SONiC conventions. A
-// non-nil empty map for a host / HWSKU-less platform; 404 for an unknown one.
+// for a platform (interface name → default PortConfig; #301, #403) — what an
+// authoring client drops into a device's ports without embedding conventions.
+// Every platform with a port inventory answers, host and switch alike, with
+// platform-appropriate defaults (a host's interfaces default to standard-Ethernet
+// MTU, a switch's to the SONiC jumbo default); 404 for an unknown platform.
 func (s *Server) handlePlatformPorts(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
