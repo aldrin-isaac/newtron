@@ -68,6 +68,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/filters/{name}", s.handleShowFilter)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/platforms", s.handleListPlatforms)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/platforms/{name}", s.handleShowPlatform)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/platforms/{name}/ports", s.handlePlatformPorts)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/route-policies", s.handleListRoutePolicies)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/route-policies/{name}", s.handleShowRoutePolicy)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/prefix-lists", s.handleListPrefixLists)

@@ -95,6 +95,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ShowFilter":              true,
 			"ListPlatforms":           true,
 			"ShowPlatform":            true,
+			"PlatformPortDefaults":           true, // #301: GET /platforms/{name}/ports
 			"ListRoutePolicies":       true,
 			"ListPrefixLists":         true,
 			"ShowPrefixList":          true,
@@ -440,6 +441,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ShowFilter":              "spec read",
 			"ListPlatforms":           "spec read",
 			"ShowPlatform":            "spec read",
+			"PlatformPortDefaults":           "spec read — default port-config authoring template (#301)",
 			"ListRoutePolicies":       "spec read",
 			"ListPrefixLists":         "spec read",
 			"ShowPrefixList":          "spec read",
@@ -1423,4 +1425,45 @@ func mapKeys2(m map[string]map[string]map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestPlatformPorts_AuthoringTemplate exercises GET /platforms/{name}/ports
+// (#301): the default TopologyNode.Ports template for a real platform (each
+// front-panel port with the default admin_status/mtu convention), and 404 for
+// an unknown platform.
+func TestPlatformPorts_AuthoringTemplate(t *testing.T) {
+	platforms, err := spec.LoadPlatformsFromDir(filepath.Join(repoRoot(t), "platforms"))
+	if err != nil {
+		t.Fatalf("load platforms: %v", err)
+	}
+	s := NewServer(Config{Platforms: platforms})
+	if err := s.RegisterNetwork("default", filepath.Join(repoRoot(t), "networks", "1node-vs")); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+
+	w := httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/platforms/Force10-S6000_vs/ports")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET .../ports = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data map[string]*spec.PortConfig `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Force10-S6000_vs has a 32-port inventory; the template carries the default
+	// convention on each, ready to drop into a TopologyNode's Ports.
+	if len(env.Data) != 32 {
+		t.Errorf("got %d ports, want 32", len(env.Data))
+	}
+	pc := env.Data["Ethernet0"]
+	if pc == nil || pc.AdminStatus != "up" || pc.MTU != 9100 {
+		t.Errorf("Ethernet0 = %+v, want {admin up, mtu 9100}", pc)
+	}
+
+	w = httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/platforms/nonesuch/ports")
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unknown platform = %d, want 404: %s", w.Code, w.Body.String())
+	}
 }

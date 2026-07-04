@@ -58,3 +58,45 @@ func TestPortConfig_SchemaRegistered(t *testing.T) {
 		t.Errorf("PortConfig not registered as a schema kind; got %v", ListSchemaKinds())
 	}
 }
+
+// TestDefaultPortConfig pins the #301 authoring template: one PortConfig per
+// platform inventory port, carrying the default admin_status/mtu convention and
+// leaving speed unset (inherits the platform default). The result is keyed by
+// port name so it drops straight into a TopologyNode's Ports.
+func TestDefaultPortConfig(t *testing.T) {
+	p := &PlatformSpec{
+		Name:  "Force10-S6000",
+		HWSKU: "Force10-S6000",
+		Ports: []PortSpec{
+			{Name: "Ethernet0", NICIndex: 1, Speed: "40G"},
+			{Name: "Ethernet4", NICIndex: 2, Speed: "40G"},
+		},
+	}
+	got := DefaultPortConfig(p)
+	if len(got) != 2 {
+		t.Fatalf("want 2 ports, got %d: %v", len(got), got)
+	}
+	pc, ok := got["Ethernet0"]
+	if !ok {
+		t.Fatalf("Ethernet0 missing from %v", got)
+	}
+	if pc.AdminStatus != "up" || pc.MTU != 9100 {
+		t.Errorf("Ethernet0 = %+v, want {admin up, mtu 9100}", pc)
+	}
+	// Speed is left unset so the port inherits the platform default_speed.
+	if pc.Speed != "" {
+		t.Errorf("Ethernet0 speed = %q, want unset (inherits platform default)", pc.Speed)
+	}
+}
+
+// TestDefaultPortConfig_NoInventory: a host / HWSKU-less platform (no Ports) and
+// a nil platform both yield a non-nil empty map, so callers can assign it
+// unconditionally.
+func TestDefaultPortConfig_NoInventory(t *testing.T) {
+	if got := DefaultPortConfig(&PlatformSpec{Name: "host", DeviceType: "host"}); got == nil || len(got) != 0 {
+		t.Errorf("host platform = %v, want non-nil empty map", got)
+	}
+	if got := DefaultPortConfig(nil); got == nil || len(got) != 0 {
+		t.Errorf("nil platform = %v, want non-nil empty map", got)
+	}
+}

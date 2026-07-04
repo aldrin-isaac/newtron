@@ -677,6 +677,41 @@ func (p *PortConfig) Fields() map[string]string {
 	return f
 }
 
+// Default port property values — the single owner (§27) of "what a port defaults
+// to." Two consumers rely on these agreeing: DefaultPortConfig (the convention
+// newtron authors onto a freshly-placed switch port; #301) and the interface
+// clear-to-default path (the value a cleared mtu/admin_status override reverts
+// to). They MUST be equal — if authoring set a value the clear path didn't
+// revert to, clearing an override would silently change the port. Speed is not
+// here: a freshly-authored port leaves speed unset (inherits the platform
+// default_speed), matching the authored topology files.
+const (
+	DefaultPortAdminStatus = "up"
+	DefaultPortMTU         = 9100
+)
+
+// DefaultPortConfig builds the default TopologyNode.Ports authoring template for
+// a platform: one PortConfig per front-panel port in the platform's inventory
+// (PlatformSpec.Ports), carrying the default admin_status/mtu convention. Keyed
+// by device-native port name, so the result is directly assignable to a
+// TopologyNode's Ports. Returns a non-nil empty map for a platform with no port
+// inventory (host / HWSKU-less), and for a nil platform.
+//
+// This is the authoring counterpart to PlatformSpec.Ports: the inventory says
+// which ports exist (name → NIC slot, consumed by newtlab); this says how a
+// freshly-authored port is configured (name → CONFIG_DB config, consumed by
+// newtron). Same port set, different concern (§13).
+func DefaultPortConfig(p *PlatformSpec) map[string]*PortConfig {
+	if p == nil {
+		return map[string]*PortConfig{}
+	}
+	ports := make(map[string]*PortConfig, len(p.Ports))
+	for _, ps := range p.Ports {
+		ports[ps.Name] = &PortConfig{AdminStatus: DefaultPortAdminStatus, MTU: DefaultPortMTU}
+	}
+	return ports
+}
+
 // TopologyStep is a single provisioning operation in the topology.
 // URL identifies the operation (last segment = verb, e.g., "/configure-bgp").
 // Interface-scoped operations include the interface name in the URL

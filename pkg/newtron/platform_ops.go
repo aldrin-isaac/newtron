@@ -28,6 +28,22 @@ func (net *Network) ShowPlatform(name string) (*spec.PlatformSpec, error) {
 	return p, nil
 }
 
+// PlatformPortDefaults returns the default TopologyNode.Ports authoring
+// template for a platform — every front-panel port in the platform inventory,
+// keyed by name, carrying newtron's default port-config convention (§27:
+// newtron owns the convention so an authoring client fills a device's ports
+// without embedding SONiC knowledge; #301). Directly assignable to a
+// TopologyNode's Ports. Returns *NotFoundError → 404 for an unknown platform,
+// and a non-nil empty map for a platform with no port inventory (host /
+// HWSKU-less).
+func (net *Network) PlatformPortDefaults(name string) (map[string]*spec.PortConfig, error) {
+	p, err := net.ShowPlatform(name)
+	if err != nil {
+		return nil, err
+	}
+	return spec.DefaultPortConfig(p), nil
+}
+
 // GetAllFeatures returns all known feature names from the dependency map.
 func (net *Network) GetAllFeatures() []string {
 	return spec.GetAllFeatures()

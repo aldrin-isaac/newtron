@@ -2167,9 +2167,10 @@ newtron leaf1 intent drift
 ```bash
 newtron platform list
 newtron platform show accton-as7726-32x
+newtron platform ports Force10-S6000_vs
 ```
 
-Shows HWSKU, port count, default speed, supported/unsupported features, and dependency impact.
+`show` displays HWSKU, port count, default speed, supported/unsupported features, and dependency impact. `ports` prints the default topology port-config template (every front-panel port with the default `admin_status`/`mtu`) — the map an operator drops into a topology node's `ports` when placing a switch (#301).
 
 ### 16.3 Audit Logs
 
