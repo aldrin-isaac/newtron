@@ -1241,7 +1241,10 @@ clauses. New constants: `PermACLCreate`, `PermACLDelete`,
 mutation methods (`AddTopologyDevice`, `DeleteTopologyDevice`,
 `UpdateTopologyDevice`, `AddTopologyLink`, `DeleteTopologyLink`)
 were L3 gaps that L4 closes — they live in `network.go` not
-`spec_ops.go`, so L3's spec-ops sweep missed them. `TestAPI-
+`spec_ops.go`, so L3's spec-ops sweep missed them. (Since #393
+`AddTopologyDevice` is internal-only — `create-node` auto-places,
+so it has no route — and is classified `excluded` rather than
+`authorized`; the other four remain HTTP-exposed and gated.) `TestAPI-
 Completeness` grows a new dimension: every HTTP-exposed method
 must appear in either `authorizedMethods` (with a Permission
 constant) or `readOnlyMethods` (with a documented reason); the

@@ -904,7 +904,36 @@ func (n *Network) CreateZone(name string, zone *spec.ZoneSpec) error {
 // spec.Loader.CreateNodeSpec which holds Loader's RWMutex across the
 // existence check and the file write.
 func (n *Network) CreateNodeSpec(name string, nodeSpec *spec.NodeSpec) error {
-	return n.loader.CreateNodeSpec(name, nodeSpec)
+	if err := n.loader.CreateNodeSpec(name, nodeSpec); err != nil {
+		return err
+	}
+	// Topology membership follows the node definition (#393): scaffold the
+	// node's /setup-device placement so it is provision-ready the moment it is
+	// defined, with no second authoring step. The bare placement is part of the
+	// node's identity — DeleteNodeSpec removes it (§15 reverse). Create is
+	// atomic: a placement failure rolls back the spec so we never leave a node
+	// defined-but-unplaced.
+	device := spec.ScaffoldTopologyNode(name, nodeSpec, n.resolvePlatformHWSKU(nodeSpec.Platform))
+	if err := n.AddTopologyDevice(name, device); err != nil {
+		_ = n.loader.DeleteNodeSpec(name)
+		return fmt.Errorf("placing topology device %s: %w", name, err)
+	}
+	return nil
+}
+
+// resolvePlatformHWSKU returns the HWSKU the given platform declares, or "" when
+// the node has no platform, the platform is unknown, or it declares no HWSKU —
+// in which case the scaffold omits the setup-device hwsku field and the device
+// infers a default. A missing HWSKU is not fatal to node creation.
+func (n *Network) resolvePlatformHWSKU(platform string) string {
+	if platform == "" {
+		return ""
+	}
+	p, err := n.GetPlatform(platform)
+	if err != nil || p == nil {
+		return ""
+	}
+	return p.HWSKU
 }
 
 // ============================================================================
@@ -1569,8 +1598,14 @@ func (n *Network) DeleteNodeSpec(name string, force bool) error {
 		}
 	}
 
-	// A nodeSpec and a topology device share their name 1:1 — the nodeSpec
-	// "reference" from topology is the matching name in topology.Devices.
+	// Remove the node's topology placement. CreateNodeSpec auto-creates a bare
+	// /setup-device entry (#393), so a placement always exists for a node
+	// created through the API — removing it is undoing that placement, not an
+	// independent teardown, so it needs no force. DeleteTopologyDevice is
+	// reference-aware: it refuses (unless force) only when LINKS still wire to
+	// the device; the bare placement (no links) removes freely. Passing force
+	// through preserves the link-cascade path (§15 reference-aware reverse; §27
+	// DeleteTopologyDevice is the sole owner of the refusal rule).
 	topoMu := n.locks.lock(keyTopology)
 	topoMu.RLock()
 	topo := n.loader.GetTopology()
@@ -1578,19 +1613,8 @@ func (n *Network) DeleteNodeSpec(name string, force bool) error {
 	topoMu.RUnlock()
 
 	if hasTopoDevice {
-		if !force {
-			return &util.ConflictError{
-				Resource:   "nodeSpec",
-				Name:       name,
-				References: []string{"topology device '" + name + "'"},
-				Force:      true,
-			}
-		}
-		// Cascade: delete the topology device (which itself cascades to any
-		// links wired to that device's endpoints) before removing the
-		// nodeSpec file. force=true is propagated.
-		if err := n.DeleteTopologyDevice(name, true); err != nil {
-			return fmt.Errorf("cascade deleting topology device %s: %w", name, err)
+		if err := n.DeleteTopologyDevice(name, force); err != nil {
+			return err
 		}
 	}
 

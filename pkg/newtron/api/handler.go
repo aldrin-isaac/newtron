@@ -75,7 +75,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/spec-instances", s.handleSpecInstances)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/topology", s.handleTopology)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/topology/nodes", s.handleTopologyDeviceNames)
-	mux.HandleFunc("POST /newtron/v1/networks/{netID}/topology/create-node", s.handleCreateTopologyNode)
+	// Node placement in topology follows the node definition (#393):
+	// create-node auto-scaffolds the /setup-device entry and delete-node
+	// removes it, so there is no standalone topology create-node endpoint.
+	// PUT edits a placed node's steps/ports; DELETE removes a placement.
 	mux.HandleFunc("DELETE /newtron/v1/networks/{netID}/topology/nodes/{name}", s.handleDeleteTopologyNode)
 	mux.HandleFunc("PUT /newtron/v1/networks/{netID}/topology/nodes/{name}", s.handleUpdateTopologyNode)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/topology/create-link", s.handleCreateTopologyLink)

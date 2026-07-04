@@ -64,10 +64,12 @@ func (net *Network) CreateNodeSpec(ctx context.Context, req CreateNodeSpecReques
 	return net.internal.CreateNodeSpec(req.Name, nodeSpec)
 }
 
-// DeleteNodeSpec removes a node spec. force=true cascade-deletes any
-// topology device that references this nodeSpec (which itself cascade-deletes
-// any links wired to that device). Without force, the call returns a
-// *ConflictError listing the referring topology devices.
+// DeleteNodeSpec removes a node spec together with its topology placement.
+// The bare /setup-device placement CreateNodeSpec auto-creates (#393) is part
+// of the node's identity, so it is removed without force. Without force the
+// call returns a *ConflictError only when LINKS still wire to the device (or
+// the nodeSpec still holds node-scope overrides); force=true cascade-deletes
+// those referring links (and drops the overrides with the file).
 func (net *Network) DeleteNodeSpec(ctx context.Context, name string, opts ExecOpts, force bool) error {
 	if _, err := net.internal.GetNodeSpec(name); err != nil {
 		return err

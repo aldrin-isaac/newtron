@@ -435,30 +435,6 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 // Topology CRUD handlers — newtron#15 + #16 (Phase 5)
 // ============================================================================
 
-// handleCreateTopologyNode adds a device entry to topology.json. Body is
-// {name, device: TopologyNode}. 409 on duplicate name; 400 on missing
-// nodeSpec / invalid body.
-func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request) {
-	ne := s.requireNetwork(w, r)
-	if ne == nil {
-		return
-	}
-	var req TopologyNodeCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	if req.Name == "" || req.Device == nil {
-		writeError(w, &newtron.ValidationError{Message: "name and device required"})
-		return
-	}
-	if err := ne.net.AddTopologyDevice(r.Context(), req.Name, req.Device); err != nil {
-		writeError(w, err)
-		return
-	}
-	httputil.WriteJSON(w, http.StatusCreated, req.Device)
-}
-
 // handleDeleteTopologyNode removes a device entry from topology.json. URL
 // path carries the name. Query param ?force=true cascade-deletes referring
 // links. 409 (ConflictError) when references remain and force is absent.
