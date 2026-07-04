@@ -201,12 +201,12 @@ func (n *Node) UpdateBGPEVPNPeer(ctx context.Context, neighborIP string, asn int
 		ActivateEVPN: evpn,
 	})
 
-	// CONFIG_DB: DEL+ADD same (default, neighbor_ip) key. The neighbor
-	// IP is the row's identity (§47); a re-IP is remove + add via
-	// separate verbs. DEL must precede ADD.
+	// In-place replace of the same (default, neighbor_ip) key — the neighbor IP
+	// is the row's identity (§47), and the update is delivered without ever
+	// DELeting the key so the EVPN session is not torn down and MACs are not
+	// re-withdrawn (§48).
 	cs := NewChangeSet(n.name, "device."+sonic.OpUpdateBGPEVPNPeer)
-	cs.Deletes(DeleteBGPNeighborConfig("default", neighborIP))
-	cs.Adds(config)
+	cs.Replace(n, DeleteBGPNeighborConfig("default", neighborIP), config)
 
 	intentParams := map[string]string{
 		sonic.FieldNeighborIP:  neighborIP,

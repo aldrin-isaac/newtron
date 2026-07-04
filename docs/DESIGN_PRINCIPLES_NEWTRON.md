@@ -981,20 +981,20 @@ whether to roll back the first is the orchestrator's responsibility.
 newtron provides the mechanism (each ChangeSet can be reversed through
 domain operations); the orchestrator decides the policy.
 
-### Replace semantics require DEL+HSET
+### Replace semantics: teardown-replace uses DEL+HSET
 
 Redis `HSET` merges fields into an existing hash — it does not remove
-old fields. Any operation that replaces a key's content
-(`RefreshService`, re-provisioning) must `DEL` the key first, then
-`HSET` the new fields. Without the `DEL`, stale fields from the
-previous state persist as ghost data. For example, if a service binding
-previously had `qos_policy=gold` and the new service definition drops
-QoS, an `HSET` leaves the old `qos_policy` field intact — only
-`DEL`+`HSET` gives a clean replacement.
+old fields. A **teardown-replace** (`RefreshService`, re-provisioning)
+therefore `DEL`s the key first, then `HSET`s the new fields: without the
+`DEL`, stale fields persist as ghost data — a service binding that drops
+`qos_policy=gold` keeps the field under a bare `HSET` — and the daemon
+never sees the removal it needs to clean up its internal state. Apply
+preserves the delete+add order; verification checks final state only (a
+key deleted then re-added is verified as "should exist with new fields").
 
-Apply must preserve delete+add sequences in order. Verification checks
-final state only — a key that was deleted then re-added is verified as
-"should exist with new fields."
+That is teardown, not editing. An **in-place update** (`update-X`) is the
+opposite intent — it keeps the key present and is delivered as a field
+diff, never a `DEL`+`ADD` of the same key (§48).
 
 ---
 
@@ -2833,8 +2833,9 @@ audit log says "update" when the device experienced "remove + add."
 The principle is small. Three rules:
 
 1. **`update-X` preserves the key.** The request body carries the
-   full composite key as identification. It modifies only fields. Key
-   components are immutable through `update-X`.
+   full composite key as identification. It modifies only fields —
+   and is delivered in place, not as a delete-and-recreate of the same
+   key (§48). Key components are immutable through `update-X`.
 
 2. **Key changes are remove + add.** Renaming, renumbering,
    relocating, re-IP'ing — all of these change identity. Package them
@@ -2854,6 +2855,58 @@ model. New verbs read it before claiming what's mutable.
 
 **The CONFIG_DB key is the identity. An update verb that changes it
 isn't updating — it's deleting one row and creating another.**
+
+---
+
+## 48. In-Place Update Is Delivered In Place
+
+When a consumer reacts to every state transition — not only to the final
+state — an operation is defined by the states it makes observable, not just
+where it lands. Two operations that reach the same final state through
+different intermediate states are different operations. An **in-place edit**
+keeps the object present and changes some of its fields. A **remove-then-add**
+takes the object away, then brings it back. Their final states are identical;
+to a consumer that tears down on "gone" and rebuilds on "present," their
+behavior is opposite — one is hitless, the other a teardown cycle.
+
+§47 makes the API honest about identity: `update-X` preserves the composite
+key. But preserving the key in the *request* is not enough — the *delivery*
+must preserve the key's **presence**. A SONiC daemon re-reads a key on every
+keyspace notification, so a whole-row `DEL`+`HSET` of the same key makes it
+briefly absent, and a daemon that reads it in that window tears down: a BGP
+session flap, a FIB gap, an ACL leak — though only a field changed and the key
+never moved. The final CONFIG_DB row is correct; the device took a hit
+reaching it.
+
+Teardown is the opposite, and legitimate, intent. `RefreshService` removes
+then re-adds *so that* the daemon sees the delete and drops its internal state
+before the rebuild (§11); stripping that delete strands the old state. Same
+final row, opposite required sequence — so the two cannot share one delivery.
+The vocabulary names them: `cs.Replace`, an in-place field diff (`HSET` the
+changed fields, `HDEL` the removed ones, never `DEL` the key), for `update-X`;
+`cs.Deletes`+`cs.Adds`, an observable teardown, for `RefreshService`. No
+apply-layer heuristic may collapse them: "make every `DEL`+`ADD` atomic"
+silently makes `RefreshService` hitless and strands daemon state; "leave every
+`DEL`+`ADD` observable" flaps every `update-X`. A delivery that infers intent
+from the mechanism is wrong for half of them.
+
+The principle is small. Three rules:
+
+1. **`update-X` is delivered in place.** A field diff against the current row —
+   `HSET` the changed fields, `HDEL` the removed ones. The key is never
+   deleted. The daemon observes an edit, not a departure.
+
+2. **Teardown is delivered observably.** `RefreshService` and
+   `remove-X`+`add-X` keep `DEL`+`ADD`. The daemon must see the delete to clean
+   up — that is the point, not an accident of the mechanism.
+
+3. **The caller declares the intent, not the apply layer.** `cs.Replace` vs
+   `cs.Deletes`+`cs.Adds`. No global rule recovers an intent the caller never
+   expressed.
+
+**The same final state can be reached by an edit or by a teardown. To a daemon
+that reacts to each transition they are different operations — and the caller,
+not the delivery mechanism, must say which one it meant.**
 
 ---
 
@@ -3022,3 +3075,4 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 45 | Multi-parent rendering | A child with multiple parents renders as a leaf under each parent; query the child directly to see its full subtree | C | — |
 | 46 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C | §41 |
 | 47 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C | §42 |
+| 48 | In-place update is delivered in place | To a daemon that re-reads on each notification, an edit and a remove+add differ; `update-X` uses a field diff (never DEL the key), teardown keeps DEL+ADD; the caller declares which | C | §43 |

@@ -836,12 +836,26 @@ func (n *Node) render(cs *ChangeSet) error {
 				c.From = maps.Clone(from)
 			}
 		}
-		if c.Type == sonic.ChangeTypeDelete {
+		switch c.Type {
+		case sonic.ChangeTypeDelete:
 			n.configDB.DeleteEntry(c.Table, c.Key)
 			if capture && prior[c.Table] != nil {
 				delete(prior[c.Table], c.Key)
 			}
-		} else {
+		case sonic.ChangeTypeReplace:
+			// In-place replace (§48): the projection row becomes EXACTLY
+			// c.Fields — the fields the new row drops must disappear, mirroring
+			// the device HSET+HDEL, not the HSET merge an add/modify does. Delete
+			// then apply yields the exact row.
+			n.configDB.DeleteEntry(c.Table, c.Key)
+			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
+			if capture {
+				if prior[c.Table] == nil {
+					prior[c.Table] = map[string]map[string]string{}
+				}
+				prior[c.Table][c.Key] = maps.Clone(c.Fields)
+			}
+		default: // add / modify — HSET merge
 			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
 			if capture {
 				if prior[c.Table] == nil {

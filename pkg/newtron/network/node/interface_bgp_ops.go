@@ -158,13 +158,12 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) 
 		ActivateIPv4: true,
 	})
 
-	// CONFIG_DB: DEL+ADD same (vrf, neighbor_ip) key. The neighbor IP
-	// is the row's identity (§47); a re-IP would be remove + add via
-	// separate verbs. DEL must precede ADD so Redis processes the
-	// delete first.
+	// In-place replace of the same (vrf, neighbor_ip) key — the neighbor IP is
+	// the row's identity (§47), and the update is delivered without ever
+	// DELeting the key so frrcfgd never issues `no neighbor` and the session
+	// does not flap (§48; measured in RCA-048).
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpUpdateBGPPeer)
-	cs.Deletes(DeleteBGPNeighborConfig(vrf, neighborIP))
-	cs.Adds(newConfig)
+	cs.Replace(n, DeleteBGPNeighborConfig(vrf, neighborIP), newConfig)
 
 	intentParams := map[string]string{
 		sonic.FieldNeighborIP: neighborIP,

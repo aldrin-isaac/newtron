@@ -24,7 +24,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | Code Review | `docs/code-review.md` | Procedural rules for diff-review tasks — angles, false-positive filter, confidence rubric |
 | Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
 
-When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.
+When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 44 documented pitfalls with root causes and solutions.
 
 ## First-Run Setup
 
@@ -272,27 +272,36 @@ unavoidable, tag the call site:
 Before adding any `session.Run()` or `ExecCommand()`: check Redis first, use the
 Redis path if available, tag the CLI path if not.
 
-## CONFIG_DB Replace Semantics (DEL+HSET)
+## CONFIG_DB Replace Semantics — Teardown vs In-Place
 
-Redis `HSET` merges fields into an existing hash — it does NOT remove old fields.
-Any operation that replaces a key's content (RefreshService, re-provisioning) MUST
-`DEL` the key first, then `HSET` the new fields. Without the `DEL`, stale fields
-from the previous state persist as ghost data.
+*Principle: `DESIGN_PRINCIPLES_NEWTRON.md` §48 (In-Place Update Is Delivered In
+Place). This section adds the mechanics.*
 
-This has two consequences:
+A CONFIG_DB row-replace is one of two **opposite intents**, and the delivery
+must match the intent (§48) — a SONiC daemon re-reads the key on each keyspace
+notification, so whether it ever observes the key **absent** determines whether
+state is torn down.
 
-- **Apply must preserve delete+add sequences.** When a ChangeSet contains both a
-  delete and a subsequent add for the same key (e.g., RefreshService = remove + apply),
-  both operations must be sent to Redis in order. SONiC daemons see the delete
-  notification (tear down old state), then the add notification (create new state).
-  Stripping the intermediate delete — as the former `DeduplicateRefresh` did — leaves
-  stale fields and prevents daemons from cleaning up internal state.
+- **Teardown-replace** (`RefreshService`, re-provisioning) uses `DEL`+`HSET`:
+  Redis `HSET` merges into an existing hash and does not remove old fields, so
+  the `DEL` is required both to clear ghost fields AND so the daemon **sees the
+  removal** and cleans up its internal state. Stripping the delete — as the
+  former `DeduplicateRefresh` did — leaves ghosts and strands daemon state. Apply
+  preserves the delete+add order.
 
-- **Verification checks final state only.** When verifying a merged ChangeSet,
-  `verifyConfigChanges` computes the last operation per key. A key that was deleted
-  then re-added is verified as "should exist with new fields" — not as "should be
-  deleted". The apply sequence handles intermediate state; the verifier only cares
-  about the end result.
+- **In-place update** (`update-*`) uses `cs.Replace` — a **field diff** against
+  the current row (`HSET` changed fields, `HDEL` removed fields, **never `DEL`
+  the key**). The key is never absent, so the daemon observes an edit, not a
+  remove+add: no BGP session flap, no FIB gap (measured — see `docs/rca/048`).
+  Do NOT "fix" this by making `ChangeSet.Apply` batch same-key DEL+ADD atomically
+  — that would silently make teardown-replace hitless and strand daemon state.
+  The intent lives in the caller's verb (`cs.Replace` vs `cs.Deletes`+`cs.Adds`),
+  not in an apply-layer heuristic.
+
+- **Verification checks final state only.** `verifyConfigChanges` computes the
+  last operation per key; a key deleted then re-added is verified as "should
+  exist with new fields," not "should be deleted." (A `cs.Replace` field diff
+  verifies the same way — the row should exist with the new fields.)
 
 ## CONFIG_DB Schema Validation (YANG-Derived)
 

@@ -165,10 +165,12 @@ func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, op
 		return nil, err
 	}
 
-	// CONFIG_DB: DEL+ADD same key. The rule_name is the row's identity
-	// (§47); a rename would be remove + add via separate verbs.
-	cs.Deletes(deleteAclRuleConfig(tableName, ruleName))
-	cs.Adds(createAclRuleConfig(tableName, ruleName, opts))
+	// In-place replace of the same rule key — the rule_name is the row's
+	// identity (§47), and the update is delivered without ever DELeting the key
+	// so aclorch never sees a leak/deny window (§48).
+	cs.Replace(n,
+		deleteAclRuleConfig(tableName, ruleName),
+		createAclRuleConfig(tableName, ruleName, opts))
 
 	intentParams := map[string]string{
 		sonic.FieldName: ruleName,

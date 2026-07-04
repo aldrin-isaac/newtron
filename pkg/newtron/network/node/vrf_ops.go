@@ -293,10 +293,12 @@ func (n *Node) UpdateStaticRoute(ctx context.Context, vrfName, prefix, nextHop s
 		return nil, err
 	}
 
-	// CONFIG_DB: DEL+ADD same (vrf, prefix) key. The prefix is the row's
-	// identity (§47); a prefix change would be remove + add via separate verbs.
-	cs.Deletes(deleteStaticRouteConfig(vrfName, prefix))
-	cs.Adds(createStaticRouteConfig(vrfName, prefix, nextHop, metric))
+	// In-place replace of the same (vrf, prefix) key — the prefix is the row's
+	// identity (§47), and the update is delivered without ever DELeting the key
+	// so fpmsyncd never sees a FIB gap (§48).
+	cs.Replace(n,
+		deleteStaticRouteConfig(vrfName, prefix),
+		createStaticRouteConfig(vrfName, prefix, nextHop, metric))
 
 	intentParams := map[string]string{
 		sonic.FieldVRF:     vrfName,

@@ -1,0 +1,73 @@
+name: dataplane-update-bgp-peer
+description: |
+  #235 dataplane/control-plane continuity check for update-bgp-peer.
+
+  The loopback substrate scenario (1node-vs-config/38) proves the verb writes a
+  single in-place Replace ChangeSet (no DELete of the key). This one proves the
+  "closes the session blip" claim on an actuated device: an in-place field change
+  (description) must NOT reset the ESTABLISHED underlay eBGP session.
+
+  Method (race-free — no sampling): capture the peer's uptime BEFORE the update,
+  issue update-bgp-peer, then assert the session is still Established AND its
+  uptime is GREATER than before (it kept climbing → it never went down). A flap
+  would reset uptime to ~0, so after < before.
+
+  Guarantee (RCA-048, fixed 2026-07-04): update-bgp-peer now delivers a
+  field-level diff via cs.Replace (§48) — HSET the changed fields, HDEL only the
+  removed ones, never DEL the BGP_NEIGHBOR key. There is no delete window for a
+  daemon to observe, so this is a structural guarantee, not a race. This scenario
+  is the continuity check that flips if that regresses back to a whole-row DEL+ADD.
+
+  vtysh JSON is parsed defensively for the RCA-042 dual format
+  (`.ipv4Unicast.peers // .peers`).
+requires: [bgp-underlay]
+
+steps:
+  # Let the freshly-established session settle past initial AFI/SAFI
+  # negotiation before testing an in-place update. Even though cs.Replace no
+  # longer opens a delete window (RCA-048 fixed), the claim under test is "does
+  # not flap an ESTABLISHED, steady-state session," so settle first.
+  - name: settle-session
+    action: wait
+    duration: 30s
+
+  # Capture runs only on the network-scoped call path (no {{device}} template),
+  # so the device is hardcoded here rather than templated.
+  - name: capture-uptime-before
+    action: newtron
+    method: POST
+    url: /nodes/switch1/ssh-command
+    params: {command: "sudo vtysh -c 'show bgp summary json'"}
+    capture:
+      up_before: '.output | fromjson | (.ipv4Unicast.peers // .peers) | .["10.1.0.1"].peerUptimeMsec'
+    expect:
+      jq: '.output | fromjson | (.ipv4Unicast.peers // .peers) | .["10.1.0.1"].state == "Established"'
+
+  - name: issue-update-bgp-peer
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet0/update-bgp-peer
+    params: {remote_as: 65002, description: "dataplane-235-check"}
+
+  - name: settle
+    action: wait
+    duration: 6s
+
+  - name: assert-session-did-not-flap
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show bgp summary json'"}
+    expect:
+      jq: >
+        (.output | fromjson | (.ipv4Unicast.peers // .peers) | .["10.1.0.1"]) as $p
+        | ($p.state == "Established") and (($p.peerUptimeMsec | tonumber) > ({{captured.up_before}} | tonumber))
+
+  - name: verify-description-took-effect
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/bgp/status
+    expect:
+      jq: '.neighbors[] | select(.address == "10.1.0.1") | .description == "dataplane-235-check"'
