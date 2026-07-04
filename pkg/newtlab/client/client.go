@@ -153,8 +153,29 @@ func (c *Client) Deploy(ctx context.Context, lab string, opts api.DeployRequest)
 		return fmt.Errorf("newtlab: lab is required")
 	}
 	deployPath := "/newtlab/v1/labs/" + url.PathEscape(lab) + "/deploy"
-	var resp api.DeployResponse
+	var resp api.LabOpResponse
 	if err := c.doPost(ctx, deployPath, opts, &resp); err != nil {
+		return err
+	}
+	return c.waitForTerminalEvent(ctx, lab)
+}
+
+// Provision submits an async provision of the lab and blocks until it reaches a
+// terminal event (complete / error) — the same subscribe-and-wait contract as
+// Deploy, so a caller sees a synchronous outcome while the server streams
+// per-device progress to /events. parallel bounds device concurrency (<=0 uses
+// the server default). Returns ConflictError (409) when a deploy or provision
+// is already in flight for the lab.
+func (c *Client) Provision(ctx context.Context, lab string, parallel int) error {
+	if lab == "" {
+		return fmt.Errorf("newtlab: lab is required")
+	}
+	path := "/newtlab/v1/labs/" + url.PathEscape(lab) + "/provision"
+	if parallel > 0 {
+		path += fmt.Sprintf("?parallel=%d", parallel)
+	}
+	var resp api.LabOpResponse
+	if err := c.doPost(ctx, path, nil, &resp); err != nil {
 		return err
 	}
 	return c.waitForTerminalEvent(ctx, lab)

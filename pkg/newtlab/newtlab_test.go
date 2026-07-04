@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -1026,5 +1028,90 @@ func TestQEMUCommand_RelativePaths(t *testing.T) {
 	}
 	if !strings.Contains(args, "qemu/spine1.mon") {
 		t.Errorf("expected relative monitor path, got args: %s", args)
+	}
+}
+
+// fakeNewtronClient satisfies NewtronClient for Provision tests — every
+// Reconcile succeeds and records the device (concurrency-safe).
+type fakeNewtronClient struct {
+	mu         sync.Mutex
+	reconciled []string
+}
+
+func (f *fakeNewtronClient) GetTopology() (*spec.TopologySpecFile, error) {
+	return &spec.TopologySpecFile{}, nil
+}
+func (f *fakeNewtronClient) ListPlatforms() (map[string]*spec.PlatformSpec, error) {
+	return map[string]*spec.PlatformSpec{}, nil
+}
+func (f *fakeNewtronClient) ShowNodeSpec(string) (*spec.NodeSpec, error) {
+	return &spec.NodeSpec{}, nil
+}
+func (f *fakeNewtronClient) NetworkID() string { return "t373" }
+func (f *fakeNewtronClient) Reconcile(device, _, _ string, _ newtron.ExecOpts) (*newtron.ReconcileResult, error) {
+	f.mu.Lock()
+	f.reconciled = append(f.reconciled, device)
+	f.mu.Unlock()
+	return &newtron.ReconcileResult{}, nil
+}
+func (f *fakeNewtronClient) RefreshBGP(string) error { return nil }
+
+// TestProvision_EmitsProgress pins #373: Provision reports per-device progress
+// through OnProgress (the same callback the API server streams to /events) —
+// a start line, one per reconciled device with a k/N counter, and a BGP-refresh
+// line. Host devices are excluded from the device count.
+func TestProvision_EmitsProgress(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	resetHomeDir()
+	t.Cleanup(resetHomeDir)
+	// Skip the post-provision BGP settle wait so the test is fast.
+	old := bgpRefreshDelay
+	bgpRefreshDelay = 0
+	t.Cleanup(func() { bgpRefreshDelay = old })
+
+	if err := SaveState(&LabState{
+		NetworkID: "t373",
+		Nodes: map[string]*NodeState{
+			"switch1": {Status: "running"},
+			"switch2": {Status: "running"},
+			"host1":   {Status: "running", DeviceType: "host"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	lab := &Lab{NetworkID: "t373", newtronClient: &fakeNewtronClient{}}
+	var mu sync.Mutex
+	var phases, details []string
+	lab.OnProgress = func(phase, detail string) {
+		mu.Lock()
+		phases = append(phases, phase)
+		details = append(details, detail)
+		mu.Unlock()
+	}
+
+	if err := lab.Provision(context.Background(), 2); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	joined := strings.Join(details, "\n")
+	if !strings.Contains(joined, "reconciling 2 device(s)") {
+		t.Errorf("missing start line; details:\n%s", joined)
+	}
+	if n := strings.Count(joined, "reconciled switch"); n != 2 {
+		t.Errorf("got %d per-device lines, want 2 (host excluded); details:\n%s", n, joined)
+	}
+	if !strings.Contains(joined, "(2/2)") {
+		t.Errorf("missing final k/N counter (2/2); details:\n%s", joined)
+	}
+	hasBGP := false
+	for _, p := range phases {
+		if p == "bgp-refresh" {
+			hasBGP = true
+		}
+	}
+	if !hasBGP {
+		t.Errorf("missing bgp-refresh phase; phases: %v", phases)
 	}
 }

@@ -120,7 +120,7 @@ Returns server status. No authentication, no side effects.
 | `POST` | `/newtlab/v1/labs/{name}/deploy` | 202 / 404 / 409 | Start an async deploy |
 | `POST` | `/newtlab/v1/labs/{name}/destroy` | 200 / 404 | Tear down VMs (synchronous) |
 | `POST` | `/newtlab/v1/labs/{name}/resync` | 200 / 404 / 500 | Re-establish link telemetry: SIGHUP newtlink to hot-reload its token (VMs untouched) |
-| `POST` | `/newtlab/v1/labs/{name}/provision` | 200 / 404 | Run the post-deploy provisioning pass |
+| `POST` | `/newtlab/v1/labs/{name}/provision` | 202 / 404 / 409 | Run the post-deploy provisioning pass (async; streams to `/events`) |
 | `GET` | `/newtlab/v1/labs/{name}/events` | 200 (SSE) | Subscribe to deploy phase events |
 | `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | 204 / 400 / 401 | newtlink pushes `BridgeStats` here every 5s (Bearer = per-lab telemetry token) |
 | `GET` | `/newtlab/v1/labs/{lab}/bridges/stats` | 200 | Aggregate per-host bridge telemetry |
@@ -188,15 +188,16 @@ All four are also accepted as query parameters (`?provision=true&force=true`) so
 ```json
 {
   "data": {
-    "lab": "1node-vs",
+    "op": "deploy",
+    "network_id": "1node-vs",
     "started": "2026-05-31T08:55:41-07:00"
   }
 }
 ```
 
 **Errors:**
-- 404 — no `topology.json` under `<networks-base>/<name>/specs/`.
-- 409 — another deploy of `{name}` is already in flight. The error message includes the in-flight start time.
+- 404 — no `topology.json` under `<networks-base>/<network-id>/specs/`.
+- 409 — a long-running operation (deploy or provision) is already in flight for the lab. The error names the in-flight operation and its start time.
 
 ### `POST /newtlab/v1/labs/{name}/destroy`
 
@@ -212,10 +213,21 @@ Re-establishes link telemetry for an already-running lab **without touching its 
 
 ### `POST /newtlab/v1/labs/{name}/provision`
 
-Runs the post-deploy provisioning pass on an already-deployed lab. Synchronous.
+Runs the post-deploy provisioning pass on an already-deployed lab. **Asynchronous,
+exactly like deploy (#373):** returns **202** immediately and streams per-device
+progress (`reconciling N device(s)` → `reconciled <device> (k/N)` → `refreshing
+BGP`) to `/events`, with a terminal `complete`/`error`. It takes the lab's
+operation slot, so it returns **409** if a deploy or another provision is already
+in flight.
 
 **Query parameters:**
 - `parallel` (int, default 1) — number of devices to provision concurrently.
+
+**Response (202):** `{ "data": { "op": "provision", "network_id": "<id>", "started": "<RFC3339>" } }`
+
+**Errors:**
+- 404 — the lab is not deployed.
+- 409 — a deploy or provision is already in flight for the lab (the error names it).
 
 ---
 

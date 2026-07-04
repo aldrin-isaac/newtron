@@ -16,7 +16,7 @@ import (
 // composes into its own Server struct. It owns the *http.Server, the
 // shared listen log line, the lifecycle (Start / Stop), and the
 // pre-shutdown hook each engine uses to cancel its in-flight work
-// (newtrun's RunRegistry.CancelAll, newtlab's DeployRegistry.CancelAll).
+// (newtrun's RunRegistry.CancelAll, newtlab's LabOpRegistry.CancelAll).
 //
 // Engine-specific Server types embed *httputil.Server and pass the
 // fully-composed http.Handler (mux + middleware chain) at construction
@@ -26,7 +26,7 @@ import (
 //	    *httputil.Server
 //	    cfg Config
 //	    broker *httputil.Broker[Event]
-//	    registry *DeployRegistry
+//	    registry *LabOpRegistry
 //	}
 //
 //	func NewServer(cfg Config) *Server {
@@ -113,7 +113,7 @@ func WriteTimeout(d time.Duration) ServerOption {
 
 // OnShutdown registers a function to run before the HTTP listener
 // shuts down. Engines use it to cancel in-flight goroutines they own
-// (RunRegistry.CancelAll, DeployRegistry.CancelAll). Multiple hooks
+// (RunRegistry.CancelAll, LabOpRegistry.CancelAll). Multiple hooks
 // run in registration order. The HTTP listener then takes whatever
 // time remains in the context to drain.
 func OnShutdown(fn func()) ServerOption {

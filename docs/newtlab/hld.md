@@ -883,7 +883,7 @@ The newtlab engine (`pkg/newtlab/api/`) is a thin HTTP wrapper around the same `
 | `POST` | `/newtlab/v1/labs/{lab}/bridges/{host}/stats` | newtlink push of `BridgeStats` (5s cadence) |
 | `GET` | `/newtlab/v1/labs/{lab}/bridges/stats` | Aggregate of every host's latest snapshot |
 
-Concurrency: one async deploy per lab at a time (second concurrent request returns 409). Destroy / start / stop / provision are synchronous. See [`api.md`](api.md) for endpoint-level reference.
+Concurrency: the long-running, progress-streamed operations — **deploy and provision** — each take the lab's single operation slot (`LabOpRegistry`), so a second such operation on the same lab returns 409 (`LabBusyError`, naming the in-flight op). Both run through one shared async runner (`runLabOp`): acquire the slot, wire the lab's `OnProgress` to the per-lab SSE broker, run in a goroutine that outlives the request, and publish a terminal `complete`/`error` — so `/events` carries deploy and provision progress identically. The short operations (destroy / start / stop / resync) stay synchronous and bypass the slot. See [`api.md`](api.md) for endpoint-level reference.
 
 ---
 
