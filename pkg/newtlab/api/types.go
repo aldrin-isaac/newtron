@@ -22,11 +22,12 @@ type HealthResponse struct {
 }
 
 // LabListItem is one entry in GET /api/labs. The list comes from
-// newtlab.ListLabs() — names of every lab with a state directory,
-// running or not. Use GET /api/labs/{name}/status to determine whether
-// the lab is currently up.
+// newtlab.ListLabs() — the network-id of every lab with a state directory,
+// running or not (a lab is identified by the newtron network it realizes,
+// #396). Use GET /api/labs/{networkID}/status to determine whether the lab
+// is currently up.
 type LabListItem struct {
-	Name string `json:"name"`
+	NetworkID string `json:"network_id"`
 }
 
 // DeployRequest is the optional POST /api/labs/{name}/deploy body. All

@@ -36,7 +36,6 @@ var (
 	verbose       bool
 	newtronServer string
 	newtlabServer string
-	netID         string
 )
 
 func main() {
@@ -78,7 +77,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&newtronServer, "newtron-server", httputil.DefaultServerURL, "newtron-server URL (newtlab consumes specs via /newtron/v1)")
 	rootCmd.PersistentFlags().StringVar(&newtlabServer, "newtlab-server", "", "newtlab-server URL — the orchestrator URL newtlink pushes BridgeStats to (#118) and the read path for `newtlab status` link telemetry. Defaults to --newtron-server (same listener in the aggregated newt-server); set explicitly only for multi-host labs where remote workers reach the server at a different, publicly-reachable address. Env: NEWTLAB_SERVER")
-	rootCmd.PersistentFlags().StringVar(&netID, "net-id", "", "newtron network ID (default: derived from the lab name, so concurrent labs get separate registration slots — issue #116)")
 
 	rootCmd.AddCommand(
 		newListCmd(),
@@ -141,17 +139,15 @@ func prepareLab(ctx context.Context, args []string) (*newtlab.Lab, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Resolve the newtron network id: an explicit --net-id wins; else the network
-	// the lab was deployed against (persisted in LabState); else the lab name, so
-	// concurrent labs get separate registration slots on newtron (issue #116).
-	// Single owner of this precedence (§27) — shared with the server's openLab —
-	// so a lab deployed under a distinct id also provisions against it.
-	effectiveNetID := newtlab.ResolveLabNetworkID(name, netID)
+	// A lab's identity is the newtron network it realizes (#396): the resolved
+	// name IS the network-id. Concurrent labs get separate registration slots
+	// because each realizes a distinct network (issue #116); there is no
+	// separate network-id to reconcile.
 	// Identity (per-user session cache / NEWTRON_BEARER) and TLS posture
 	// (NEWTRON_TLS_CERT/KEY/CA) both come from the single owner of the newtron
 	// CLI client build (§27) — one `newtron auth login` carries through every
 	// CLI invocation.
-	client, err := newtronclient.NewCLIClient(newtronServer, effectiveNetID)
+	client, err := newtronclient.NewCLIClient(newtronServer, name)
 	if err != nil {
 		return nil, err
 	}

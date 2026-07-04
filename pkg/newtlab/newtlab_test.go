@@ -370,7 +370,7 @@ func TestSaveAndLoadState(t *testing.T) {
 	t.Cleanup(resetHomeDir)
 
 	state := &LabState{
-		Name: "test-lab",
+		NetworkID: "test-lab",
 		Dir:  "/tmp/specs",
 		Nodes: map[string]*NodeState{
 			"spine1": {PID: 1234, Status: "running", SSHPort: 40000, ConsolePort: 30000},
@@ -399,8 +399,8 @@ func TestSaveAndLoadState(t *testing.T) {
 		t.Fatalf("LoadState error: %v", err)
 	}
 
-	if loaded.Name != "test-lab" {
-		t.Errorf("Name = %q, want test-lab", loaded.Name)
+	if loaded.NetworkID != "test-lab" {
+		t.Errorf("Name = %q, want test-lab", loaded.NetworkID)
 	}
 	if loaded.Dir != "/tmp/specs" {
 		t.Errorf("Dir = %q, want /tmp/specs", loaded.Dir)
@@ -437,6 +437,37 @@ func TestLoadState_NotFound(t *testing.T) {
 	_, err := LoadState("nonexistent")
 	if err == nil {
 		t.Error("LoadState should error for nonexistent lab")
+	}
+}
+
+// TestLoadState_IdentityIsAddress pins the #396 invariant: a lab's identity is
+// its state directory (the network-id), so LoadState stamps NetworkID from the
+// directory it read — even when the persisted JSON carries a different id or
+// the pre-#396 "name" key. This is why the collapse needs no migration shim.
+func TestLoadState_IdentityIsAddress(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	resetHomeDir()
+	t.Cleanup(resetHomeDir)
+
+	// Write a state.json under the "2node-vs" directory whose body carries a
+	// stale/foreign id — mimicking an older file or a hand-edited one.
+	dir := LabDir("2node-vs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := `{"network_id":"stale-different-id","created":"2026-01-01T00:00:00Z","nodes":{}}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	loaded, err := LoadState("2node-vs")
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	// The address wins: identity is the directory, not the file's stale field.
+	if loaded.NetworkID != "2node-vs" {
+		t.Errorf("NetworkID = %q, want the directory-derived id 2node-vs", loaded.NetworkID)
 	}
 }
 
@@ -880,8 +911,8 @@ func waitForBridgeStats(t *testing.T, bridge *Bridge, wantAtoZ, wantZtoA int64, 
 // that push to nowhere.
 func TestSetupBridgesRequiresOrchestratorURL(t *testing.T) {
 	lab := &Lab{
-		Name:  "guard-test",
-		State: &LabState{Name: "guard-test"},
+		NetworkID:  "guard-test",
+		State: &LabState{NetworkID: "guard-test"},
 		Links: []*LinkConfig{
 			{
 				A:     LinkEndpoint{Device: "spine1", Interface: "Ethernet0"},

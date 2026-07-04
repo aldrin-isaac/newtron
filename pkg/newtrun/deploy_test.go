@@ -82,7 +82,7 @@ func TestEnsureTopology_ReusesRunningLab(t *testing.T) {
 	fake := &fakeLabClient{
 		statusFn: func(ctx context.Context, lab string) (*newtlab.LabState, error) {
 			return &newtlab.LabState{
-				Name: lab,
+				NetworkID: lab,
 				Nodes: map[string]*newtlab.NodeState{
 					"n1": {Status: "running"},
 					"n2": {Status: "running"},
@@ -116,7 +116,7 @@ func TestEnsureTopology_RedeploysWhenPartialOrMissing(t *testing.T) {
 			name: "partial",
 			statusFn: func(ctx context.Context, lab string) (*newtlab.LabState, error) {
 				return &newtlab.LabState{
-					Name: lab,
+					NetworkID: lab,
 					Nodes: map[string]*newtlab.NodeState{
 						"n1": {Status: "running"},
 						"n2": {Status: "stopped"},

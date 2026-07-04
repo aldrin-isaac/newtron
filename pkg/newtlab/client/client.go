@@ -123,7 +123,7 @@ func (c *Client) LabStatus(ctx context.Context, lab string) (*newtlab.LabState, 
 	return &state, nil
 }
 
-// ListLabs returns the names of every lab newtlab knows about. Calls
+// ListLabs returns the network-id of every lab newtlab knows about. Calls
 // GET /newtlab/v1/labs. Running and stopped labs are both included;
 // per-node state requires LabStatus per lab.
 func (c *Client) ListLabs(ctx context.Context) ([]string, error) {
@@ -131,11 +131,11 @@ func (c *Client) ListLabs(ctx context.Context) ([]string, error) {
 	if err := c.doGet(ctx, "/newtlab/v1/labs", &items); err != nil {
 		return nil, err
 	}
-	names := make([]string, len(items))
+	ids := make([]string, len(items))
 	for i, it := range items {
-		names[i] = it.Name
+		ids[i] = it.NetworkID
 	}
-	return names, nil
+	return ids, nil
 }
 
 // Deploy submits an async deploy of the named lab to newtlab-server and

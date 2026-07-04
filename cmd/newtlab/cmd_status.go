@@ -100,7 +100,7 @@ func showAllLabs() error {
 }
 
 func showLabDetail(labName string) error {
-	lab := &newtlab.Lab{Name: labName}
+	lab := &newtlab.Lab{NetworkID: labName}
 	state, err := lab.Status()
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func showLabDetail(labName string) error {
 		return json.NewEncoder(os.Stdout).Encode(state)
 	}
 
-	fmt.Printf("Lab: %s (deployed %s)\n", state.Name, state.Created.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Lab: %s (deployed %s)\n", state.NetworkID, state.Created.Format("2006-01-02 15:04:05"))
 	fmt.Printf("Spec dir: %s\n\n", state.Dir)
 
 	// Detect if any node is on a remote host
@@ -348,7 +348,7 @@ func monitorAllLabs() error {
 // all nodes are running with no phase, or all have reached a terminal state
 // (stopped/error).
 func labDeployFinished(labName string) bool {
-	lab := &newtlab.Lab{Name: labName}
+	lab := &newtlab.Lab{NetworkID: labName}
 	state, err := lab.Status()
 	if err != nil || len(state.Nodes) == 0 {
 		return false
