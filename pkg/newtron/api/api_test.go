@@ -1528,6 +1528,25 @@ func TestPlatformPorts_AuthoringTemplate(t *testing.T) {
 		t.Errorf("Ethernet0 = %+v, want {admin up, mtu 9100}", pc)
 	}
 
+	// A host platform answers too (#403), with platform-appropriate defaults: its
+	// eth0..ethN inventory at standard-Ethernet MTU, not the switch jumbo default.
+	w = httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/platforms/alpine-host/ports")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET host .../ports = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	env = struct {
+		Data map[string]*spec.PortConfig `json:"data"`
+	}{}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode host ports: %v", err)
+	}
+	if len(env.Data) != 8 {
+		t.Errorf("alpine-host got %d ports, want 8", len(env.Data))
+	}
+	if pc := env.Data["eth0"]; pc == nil || pc.AdminStatus != "up" || pc.MTU != spec.DefaultHostPortMTU {
+		t.Errorf("host eth0 = %+v, want {admin up, mtu %d}", pc, spec.DefaultHostPortMTU)
+	}
+
 	w = httpDo(t, s, http.MethodGet, "/newtron/v1/networks/default/platforms/nonesuch/ports")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("unknown platform = %d, want 404: %s", w.Code, w.Body.String())

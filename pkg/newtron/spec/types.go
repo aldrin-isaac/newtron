@@ -698,27 +698,35 @@ func (p *PortConfig) Fields() map[string]string {
 // default_speed), matching the authored topology files.
 const (
 	DefaultPortAdminStatus = "up"
-	DefaultPortMTU         = 9100
+	DefaultPortMTU         = 9100 // SONiC switch jumbo default
+	DefaultHostPortMTU     = 1500 // standard Ethernet — a host is not a jumbo-frame switch
 )
 
 // DefaultPortConfig builds the default TopologyNode.Ports authoring template for
-// a platform: one PortConfig per front-panel port in the platform's inventory
-// (PlatformSpec.Ports), carrying the default admin_status/mtu convention. Keyed
-// by device-native port name, so the result is directly assignable to a
-// TopologyNode's Ports. Returns a non-nil empty map for a platform with no port
-// inventory (host / HWSKU-less), and for a nil platform.
+// a platform: one PortConfig per interface in the platform's inventory
+// (PlatformSpec.Ports), carrying the platform-appropriate default convention.
+// Keyed by device-native interface name, so the result is directly assignable to
+// a TopologyNode's Ports. Returns a non-nil empty map for a platform with no
+// port inventory, and for a nil platform.
 //
-// This is the authoring counterpart to PlatformSpec.Ports: the inventory says
-// which ports exist (name → NIC slot, consumed by newtlab); this says how a
-// freshly-authored port is configured (name → CONFIG_DB config, consumed by
-// newtron). Same port set, different concern (§13).
+// The default is the platform's, not a global constant — capability starts at
+// the platform file and a node overlays it (a switch's ports default to the
+// SONiC jumbo MTU; a host's default to standard Ethernet). This is the authoring
+// counterpart to PlatformSpec.Ports: the inventory says which interfaces exist
+// (name → NIC slot, consumed by newtlab); this says how a freshly-authored one
+// is configured (name → config a node overlays). Same interface set, different
+// concern (§13).
 func DefaultPortConfig(p *PlatformSpec) map[string]*PortConfig {
 	if p == nil {
 		return map[string]*PortConfig{}
 	}
+	mtu := DefaultPortMTU
+	if p.IsHost() {
+		mtu = DefaultHostPortMTU
+	}
 	ports := make(map[string]*PortConfig, len(p.Ports))
 	for _, ps := range p.Ports {
-		ports[ps.Name] = &PortConfig{AdminStatus: DefaultPortAdminStatus, MTU: DefaultPortMTU}
+		ports[ps.Name] = &PortConfig{AdminStatus: DefaultPortAdminStatus, MTU: mtu}
 	}
 	return ports
 }
