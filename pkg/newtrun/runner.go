@@ -229,6 +229,13 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 			suite.Name, suite.Network, r.Network)
 	}
 
+	// Pre-flight: every interface a topology link references must exist in that
+	// node's platform inventory (#403). Fail fast — before deploy — against the
+	// same ports[] authority newtlab enforces.
+	if err := r.preflightInterfaces(); err != nil {
+		return nil, err
+	}
+
 	r.progress(func(p ProgressReporter) { p.SuiteStart(suite.Network, suite.Platform, scenarios) })
 	suiteStart := time.Now()
 
