@@ -97,7 +97,7 @@ steps:
     url: /create-service
     params:
       name: test-routed-svc
-      type: routed
+      service_type: routed
       description: "Routed service with import policy"
       routing:
         protocol: bgp
