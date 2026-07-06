@@ -229,6 +229,29 @@ func TestValidateEntry_BGP_NEIGHBOR_InvalidIP(t *testing.T) {
 	}
 }
 
+// Route reflector fields (sonic-bgp-global.yang): rr_cluster_id string,
+// load_balance_mp_relax boolean. Written by ConfigureRouteReflector; their
+// absence from the schema made every route_reflector topology unprovisionable
+// (found by TestOpRoundTrip).
+func TestValidateEntry_BGP_GLOBALS_RouteReflector_Valid(t *testing.T) {
+	err := Schema["BGP_GLOBALS"].ValidateEntry("BGP_GLOBALS", "default", map[string]string{
+		"rr_cluster_id":         "1.1.1.1",
+		"load_balance_mp_relax": "true",
+	})
+	if err != nil {
+		t.Errorf("valid RR fields: %v", err)
+	}
+}
+
+func TestValidateEntry_BGP_GLOBALS_RouteReflector_InvalidBool(t *testing.T) {
+	err := Schema["BGP_GLOBALS"].ValidateEntry("BGP_GLOBALS", "default", map[string]string{
+		"load_balance_mp_relax": "yes",
+	})
+	if err == nil {
+		t.Error("non-boolean load_balance_mp_relax should fail")
+	}
+}
+
 func TestValidateEntry_ACL_RULE_Valid(t *testing.T) {
 	err := Schema["ACL_RULE"].ValidateEntry("ACL_RULE", "myacl|RULE_10", map[string]string{
 		"PRIORITY":      "9990",

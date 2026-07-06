@@ -219,6 +219,8 @@ var Schema = map[string]TableSchema{
 			"ebgp_requires_policy":  {Type: FieldBool},
 			"suppress_fib_pending":  {Type: FieldBool},
 			"log_neighbor_changes":  {Type: FieldBool},                                 // YANG: log_nbr_state_changes
+			"rr_cluster_id":         {Type: FieldString},                               // YANG: string — route reflector cluster ID
+			"load_balance_mp_relax": {Type: FieldBool},                                 // YANG: boolean — multipath across differing AS paths
 		},
 	},
 

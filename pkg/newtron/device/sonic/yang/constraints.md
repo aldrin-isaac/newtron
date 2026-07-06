@@ -49,6 +49,8 @@ newtron uses — the YANG models define additional fields not shown here.
 - `local_asn`: uint32, range 1..4294967295
 - `router_id`: inet:ipv4-address
 - `log_nbr_state_changes`: boolean
+- `rr_cluster_id`: string — route reflector cluster ID
+- `load_balance_mp_relax`: boolean — multipath across differing AS paths
 - (many more optional boolean/int fields)
 
 ## BGP_GLOBALS_AF (sonic-bgp-global.yang)
