@@ -2,5 +2,39 @@
   "version": "1.0",
   "super_users": null,
   "user_groups": null,
-  "permissions": null
+  "permissions": null,
+  "services": {
+    "transit": {
+      "description": "Transit interface (global routing table, no VPN)",
+      "service_type": "routed",
+      "routing": {
+        "protocol": "bgp",
+        "peer_as": "request"
+      }
+    }
+  },
+  "macvpns": {
+    "servers-vlan100": {
+      "description": "Server VLAN 100",
+      "vlan_id": 100,
+      "vni": 10100,
+      "anycast_ip": "10.1.100.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "route_targets": [
+        "100:100"
+      ],
+      "arp_suppression": true
+    },
+    "storage-vlan200": {
+      "description": "Storage VLAN 200",
+      "vlan_id": 200,
+      "vni": 10200,
+      "anycast_ip": "10.1.200.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "route_targets": [
+        "200:200"
+      ],
+      "arp_suppression": true
+    }
+  }
 }

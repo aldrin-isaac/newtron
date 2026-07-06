@@ -67,7 +67,7 @@ func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error
 		}
 	}
 
-	// Source 3: Underlay peers (interface|{name}|bgp-peer)
+	// Source 3: Underlay peers (interface|{name}|bgp-peer) from AddBGPPeer.
 	for resource, intent := range n.IntentsByPrefix("interface|") {
 		if strings.Contains(resource, "|bgp-peer") && intent.Params["neighbor_ip"] != "" {
 			vrf := "default"
@@ -76,6 +76,26 @@ func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error
 			}
 			expected[vrf] = append(expected[vrf], intent.Params["neighbor_ip"])
 		}
+	}
+
+	// Source 4: Peers established by a routed service (apply-service). The service
+	// records its neighbor on the interface|{name} service intent as bgp_neighbor
+	// (service_ops.go) — not a standalone bgp-peer intent, so Source 3 misses it.
+	// A pure-underlay fabric (transit service, no EVPN overlay) has its peers only
+	// here.
+	for resource, intent := range n.IntentsByPrefix("interface|") {
+		if strings.Contains(resource, "|bgp-peer") {
+			continue // standalone peers — Source 3
+		}
+		nbr := intent.Params["bgp_neighbor"]
+		if nbr == "" || seenOverlay[nbr] {
+			continue
+		}
+		vrf := "default"
+		if v := intent.Params["vrf"]; v != "" {
+			vrf = v
+		}
+		expected[vrf] = append(expected[vrf], nbr)
 	}
 
 	if len(expected) == 0 {
