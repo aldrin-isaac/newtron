@@ -121,42 +121,16 @@ func testDevice() *Node {
 			Zone:        "us-east",
 		},
 		interfaces: map[string]*Interface{},
-		configDB: &sonic.ConfigDB{
-			DeviceMetadata:    map[string]map[string]string{},
-			Port:              map[string]sonic.PortEntry{"Ethernet0": {}, "Ethernet4": {}},
-			VLAN:              map[string]sonic.VLANEntry{},
-			VLANMember:        map[string]sonic.VLANMemberEntry{},
-			VLANInterface:     map[string]map[string]string{},
-			Interface:         map[string]sonic.InterfaceEntry{},
-			PortChannel:       map[string]sonic.PortChannelEntry{},
-			PortChannelMember: map[string]map[string]string{},
-			LoopbackInterface: map[string]map[string]string{},
-			VRF:               map[string]sonic.VRFEntry{},
-			VXLANTunnel:       map[string]sonic.VXLANTunnelEntry{},
-			VXLANTunnelMap:    map[string]sonic.VXLANMapEntry{},
-			VXLANEVPNNVO:      map[string]sonic.EVPNNVOEntry{},
-			SuppressVLANNeigh: map[string]map[string]string{},
-			SAG:               map[string]map[string]string{},
-			SAGGlobal:         map[string]map[string]string{},
-			BGPNeighbor:       map[string]sonic.BGPNeighborEntry{},
-			BGPNeighborAF:     map[string]sonic.BGPNeighborAFEntry{},
-			BGPGlobals:        map[string]sonic.BGPGlobalsEntry{},
-			BGPGlobalsAF:      map[string]sonic.BGPGlobalsAFEntry{},
-			BGPEVPNVNI:        map[string]sonic.BGPEVPNVNIEntry{},
-			RouteTable:        map[string]sonic.StaticRouteEntry{},
-			ACLTable:          map[string]sonic.ACLTableEntry{},
-			ACLRule:           map[string]sonic.ACLRuleEntry{},
-			RouteRedistribute: map[string]sonic.RouteRedistributeEntry{},
-			NewtronIntent: map[string]map[string]string{
-				"device": {"operation": "setup-device", "state": "actuated"},
-			},
-			BGPGlobalsEVPNRT: map[string]sonic.BGPGlobalsEVPNRTEntry{},
-			BGPPeerGroup:     map[string]sonic.BGPPeerGroupEntry{},
-			BGPPeerGroupAF:   map[string]sonic.BGPPeerGroupAFEntry{},
-			RouteMap:         map[string]sonic.RouteMapEntry{},
-			PrefixSet:        map[string]sonic.PrefixSetEntry{},
-			CommunitySet:     map[string]sonic.CommunitySetEntry{},
-		},
+		// NewConfigDB initializes every map field via reflection — the same
+		// constructor production uses. A hand-written literal here drifts the
+		// moment a table is added to the struct: the missed map panics the
+		// hydrator on first write (found by TestOpRoundTrip on STATIC_ROUTE).
+		configDB: sonic.NewConfigDB(),
+	}
+	n.configDB.Port["Ethernet0"] = sonic.PortEntry{}
+	n.configDB.Port["Ethernet4"] = sonic.PortEntry{}
+	n.configDB.NewtronIntent["device"] = map[string]string{
+		"operation": "setup-device", "state": "actuated",
 	}
 	// Populate interfaces map from Port entries (mirrors RegisterPort behavior).
 	// InterfaceExists checks n.interfaces for physical ports.
