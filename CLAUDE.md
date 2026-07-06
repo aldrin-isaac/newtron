@@ -91,28 +91,24 @@ Key implications:
 ## Intent Round-Trip Completeness
 
 *Principle: `DESIGN_PRINCIPLES_NEWTRON.md` §20 (On-Device Intent Is Sufficient for
-Reconstruction). This section adds the mechanical verification procedure.*
+Reconstruction). Enforcement is machine-checked — this section says where.*
 
-Every param that affects CONFIG_DB output must complete the full round-trip:
+Every caller param that affects CONFIG_DB must survive the round-trip
+(writeIntent → IntentsToSteps → ReplayStep); values re-resolved from specs at
+replay time are re-derived, not stored. This is no longer a manual checklist:
 
-1. **writeIntent** stores it in the intent record
-2. **intentParamsToStepParams** exports it to the topology step
-3. **ReplayStep** passes it back to the same method
+- **The manifest** lives in `pkg/newtron/network/node/op_registry.go` — one
+  `OpSpec` per operation declares its params (caller vs recorded), inverse
+  verb, scope, replay, and export. The registry is the single owner of
+  operation-level knowledge; there is no ReplayStep switch to keep in sync.
+- **The enforcement** is `TestOpRoundTrip` (node package): drives every
+  registered op with all caller params non-default, exports, replays onto a
+  fresh node, and requires exact intent-DB + projection equality, manifest
+  conformance, and export idempotence.
 
-When adding or modifying a `writeIntent` call:
-
-1. List every argument and option field the method uses in CONFIG_DB writes
-2. For each one from caller arguments (not profile/spec resolution), verify it
-   is stored in the intent params
-3. Verify the corresponding `ReplayStep` case reads it and passes it to the method
-4. Verify `intentParamsToStepParams` exports it (or the default pass-through handles it)
-
-Values re-resolved from specs or profiles at replay time do NOT need to be stored —
-they are re-derived. But values from caller arguments (opts, config structs) MUST be
-stored because they are the only source at reconstruction time.
-
-**This is not a guideline — it is a mechanical check. If a param affects CONFIG_DB and
-isn't in the intent, that's a bug.**
+When adding an operation: write the op method (with `writeIntent`), add its
+`OpSpec` to the registry, and add it to the round-trip sequence — the coverage
+guard fails until you do, and a dropped param fails as a field-level diff.
 
 ## Platform Patching Principle
 

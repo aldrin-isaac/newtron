@@ -186,7 +186,7 @@ func TestReplaySteps_SkipsOrphanedIntent(t *testing.T) {
 		// A still-present service that references an IP-VPN which has since
 		// been removed. apply-service resolves the (missing) IP-VPN and the
 		// typed spec.NotFoundError must survive the wrapping chain
-		// (ApplyService → replayInterfaceStep → ReplayStep) to replaySteps.
+		// (ApplyService → the registry Replay func → ReplayStep) to replaySteps.
 		n.SpecProvider.(*testSpecProvider).services["OVERLAY"] = &spec.ServiceSpec{
 			ServiceType: spec.ServiceTypeEVPNIRB,
 			IPVPN:       "GONE",
