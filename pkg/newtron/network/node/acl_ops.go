@@ -97,7 +97,7 @@ func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts 
 	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
 		func() []sonic.Entry { return createAclRuleConfig(tableName, ruleName, opts) },
-		"device.delete-acl-rule")
+		"device.remove-acl-rule")
 	if err != nil {
 		return nil, err
 	}

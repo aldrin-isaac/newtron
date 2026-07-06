@@ -244,7 +244,7 @@ var opRegistry = map[string]*OpSpec{
 	},
 
 	sonic.OpAddACLRule: {
-		Op: sonic.OpAddACLRule, Scope: ScopeNode, Inverse: "device.delete-acl-rule",
+		Op: sonic.OpAddACLRule, Scope: ScopeNode, Inverse: "device.remove-acl-rule",
 		Params: []ParamSpec{
 			required(sonic.FieldName), required("acl"),
 			caller("priority"), caller("action"), caller("src_ip"), caller("dst_ip"),
@@ -609,3 +609,8 @@ func exportCreatePortChannel(intent *sonic.Intent) map[string]any {
 	}
 	return result
 }
+
+// RegisteredOps exposes the registry to conformance sweeps (pkg/conformance)
+// and orchestration that dispatches by verb. Callers treat it as read-only —
+// the table is assembled once at init and never mutated.
+func RegisteredOps() map[string]*OpSpec { return opRegistry }
