@@ -59,7 +59,8 @@ pkg/newtron/network/node/             # Node internals — all operations live h
 
     # --- Intent lifecycle ---
     intent_ops.go                     # writeIntent, deleteIntent, renderIntent
-    reconstruct.go                    # IntentsToSteps, ReplayStep
+    op_registry.go                    # OpSpec registry — the operation plane's schema
+    reconstruct.go                    # IntentsToSteps, ReplayStep (registry-driven)
 
     # --- Operations (intent-wrapping methods that call config generators) ---
     service_ops.go                    # ApplyService, RemoveService, RefreshService
@@ -1639,40 +1640,52 @@ Bidirectional consistency, referential integrity, and orphan absence are
 all implicit consequences of `writeIntent`/`deleteIntent`'s discipline
 about registering children on both sides and refusing dangling references.
 
-### 6.6 Reconstruct: IntentsToSteps and ReplayStep
+### 6.6 Reconstruct: the Operation Registry, IntentsToSteps, and ReplayStep
 
-These two functions are the bridge between intent records and config methods. They are used by `RebuildProjection` (every operation) and `InitFromDeviceIntent` (first connection in actuated mode).
+Reconstruction is driven by the **operation registry** (`op_registry.go`) —
+one `OpSpec` per operation, the single owner of operation-level knowledge:
 
-**`IntentsToSteps(intents) []TopologyStep`** — Converts the flat NEWTRON_INTENT map into an ordered slice of topology steps using Kahn's topological sort on the `_parents`/`_children` DAG. Filters out `interface-init` and `deploy-service` intents (auto-created as side effects). Ties broken alphabetically for determinism.
+```go
+type OpSpec struct {
+    Op         string      // wire verb — URL segment and intent operation value
+    Scope      OpScope     // node | interface (dispatch target and URL form)
+    Inverse    string      // §15 reverse verb; "reconcile" for baseline composites
+    SideEffect bool        // intent re-created by its parent's replay; never exported
+    OpenParams bool        // params include an open field map (setup-device)
+    Params     []ParamSpec // round-trip manifest: caller vs recorded, required
+    Replay     ReplayFunc  // re-invoke the op from step params
+    Export     ExportFunc  // intent -> step params; nil = pass-through
+}
+```
 
-**`ReplayStep(ctx, n, step) error`** — Dispatches a single topology step to the appropriate Node or Interface method. Parses the step URL:
+The registry is authoritative — the per-op dispatch, manifest, and export
+codecs are read from it, not listed here. `TestOpRoundTrip` (node package)
+walks a sequence covering every entry and enforces: exact intent-DB and
+projection equality across export -> replay, manifest conformance of every
+stored intent, export idempotence, and coverage (an op added without a
+registry entry and a sequence step fails the test).
 
-| URL pattern | Dispatch |
-|-------------|----------|
-| `/setup-device` | `n.SetupDevice(ctx, opts)` |
-| `/create-vlan` | `n.CreateVLAN(ctx, id, opts)` |
-| `/create-vrf` | `n.CreateVRF(ctx, name, opts)` |
-| `/bind-ipvpn` | `n.BindIPVPN(ctx, vrf, ipvpn)` |
-| `/bind-macvpn` | `n.BindMACVPN(ctx, vlan, macvpn)` |
-| `/create-portchannel` | `n.CreatePortChannel(ctx, config)` |
-| `/add-pc-member` | `n.AddPortChannelMember(ctx, pc, member)` |
-| `/create-acl` | `n.CreateACL(ctx, config)` |
-| `/add-acl-rule` | `n.AddACLRule(ctx, config)` |
-| `/configure-irb` | `n.ConfigureIRB(ctx, config)` |
-| `/add-bgp-evpn-peer` | `n.AddBGPEVPNPeer(ctx, peer)` |
-| `/add-static-route` | `n.AddStaticRoute(ctx, vrf, prefix, nexthop)` |
-| `/interfaces/{name}/apply-service` | `iface.ApplyService(ctx, service, opts)` |
-| `/interfaces/{name}/configure-interface` | `iface.ConfigureInterface(ctx, config)` |
-| `/interfaces/{name}/add-bgp-peer` | `iface.AddBGPPeer(ctx, config)` |
-| `/interfaces/{name}/set-property` | `iface.SetProperty(ctx, prop, value)` |
-| `/interfaces/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
-| `/interfaces/{name}/bind-qos` | `iface.BindQoS(ctx, policy, spec)` |
+**`ReplayStep(ctx, n, step) error`** — Parses the step URL
+(`/op` or `/interfaces/{name}/op`), looks the verb up in the registry, and
+invokes `OpSpec.Replay` on the Node or the named Interface per `Scope`.
+Unregistered verbs fail loudly.
+
+**`IntentsToSteps(intents) []TopologyStep`** — Converts the flat
+NEWTRON_INTENT map into an ordered step slice using Kahn's topological sort
+on the `_parents`/`_children` DAG. Skips non-actuated intents and registry
+`SideEffect` entries (`interface-init`, `deploy-service` — re-created by
+their parents' replay). Ties broken alphabetically for determinism.
+
+**`IntentToStep(resource, fields) TopologyStep`** — Converts a single intent
+record back to a step: URL form from `OpSpec.Scope`, params via
+`OpSpec.Export` when the step format diverges from the flat map
+(`setup-device` nested fields + RR object, `apply-service` caller-param
+selection and renames, `create-portchannel` member CSV -> slice), default
+pass-through otherwise.
 
 `RebuildProjection` (in `node.go`) and `InitFromDeviceIntent` (in
 `node_actuated.go`) call `IntentsToSteps + ReplayStep` directly against
-the Node's own configDB — that is the live "intent → projection" path.
-
-**`IntentToStep(resource, fields) TopologyStep`** — Converts a single intent record back to a step. Uses `intentParamsToStepParams` to map flat intent field names back to structured step params (handles special cases: `setup-device` RR params, `apply-service` field renames, `create-portchannel` member list serialization).
+the Node's own configDB — that is the live "intent -> projection" path.
 
 ### 6.7 Node Execute Lifecycle
 

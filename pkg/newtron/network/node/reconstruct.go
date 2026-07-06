@@ -8,277 +8,35 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
-	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
-// ReplayStep dispatches a topology step to the appropriate Node or Interface method.
-// The step URL identifies the operation; interface-scoped operations include the
-// interface name in the URL (e.g., "/interfaces/Ethernet0/apply-service").
+// ReplayStep dispatches a topology step to the operation registry
+// (op_registry.go). The step URL identifies the operation; interface-scoped
+// operations include the interface name in the URL
+// (e.g., "/interfaces/Ethernet0/apply-service").
 //
 // Used by the topology provisioner to replay pre-computed steps against an
 // abstract Node, and by reconstruct paths to replay intent records.
 func ReplayStep(ctx context.Context, n *Node, step spec.TopologyStep) error {
 	op, ifaceName := parseStepURL(step.URL)
-	p := step.Params
 
-	// Interface-scoped operations
-	if ifaceName != "" {
+	opSpec := opRegistry[op]
+	if opSpec == nil || opSpec.Replay == nil {
+		return fmt.Errorf("unknown operation: %s", op)
+	}
+
+	switch opSpec.Scope {
+	case ScopeInterface:
+		if ifaceName == "" {
+			return fmt.Errorf("%s: interface-scoped operation without interface in URL %q", op, step.URL)
+		}
 		iface, err := n.GetInterface(ifaceName)
 		if err != nil {
 			return fmt.Errorf("interface %s: %w", ifaceName, err)
 		}
-		return replayInterfaceStep(ctx, iface, op, p)
-	}
-
-	// Node-scoped operations
-	return replayNodeStep(ctx, n, op, p)
-}
-
-// replayNodeStep dispatches a node-level operation.
-func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) error {
-	switch op {
-	case "setup-device":
-		opts := SetupDeviceOpts{
-			Fields:   paramStringMap(p, "fields"),
-			SourceIP: paramString(p, "source_ip"),
-		}
-		if rrParams, ok := p["route_reflector"]; ok {
-			if rrMap, ok := rrParams.(map[string]any); ok {
-				rrOpts, err := parseRouteReflectorOpts(rrMap)
-				if err != nil {
-					return fmt.Errorf("setup-device route_reflector: %w", err)
-				}
-				opts.RR = &rrOpts
-			}
-		}
-		_, err := n.SetupDevice(ctx, opts)
-		return err
-
-	case "add-bgp-evpn-peer":
-		ip := paramString(p, "neighbor_ip")
-		asn := paramInt(p, "asn")
-		desc := paramString(p, "description")
-		evpn := paramBool(p, "evpn")
-		if ip == "" || asn == 0 {
-			return fmt.Errorf("add-bgp-evpn-peer: requires neighbor_ip and asn")
-		}
-		_, err := n.AddBGPEVPNPeer(ctx, ip, asn, desc, evpn)
-		return err
-
-	case "create-vrf":
-		name := paramString(p, "name")
-		if name == "" {
-			return fmt.Errorf("create-vrf: missing 'name' param")
-		}
-		_, err := n.CreateVRF(ctx, name, VRFConfig{})
-		return err
-
-	case "create-vlan":
-		vlanID := paramInt(p, "vlan_id")
-		if vlanID == 0 {
-			return fmt.Errorf("create-vlan: missing 'vlan_id' param")
-		}
-		_, err := n.CreateVLAN(ctx, vlanID, VLANConfig{
-			Description: paramString(p, "description"),
-			L2VNI:       paramInt(p, "vni"),
-		})
-		return err
-
-	case "bind-macvpn":
-		vlanID := paramInt(p, "vlan_id")
-		macvpnName := paramString(p, "macvpn")
-		if vlanID == 0 || macvpnName == "" {
-			return fmt.Errorf("bind-macvpn: requires vlan_id and macvpn")
-		}
-		_, err := n.BindMACVPN(ctx, vlanID, macvpnName)
-		return err
-
-	case "create-portchannel":
-		name := paramString(p, "name")
-		if name == "" {
-			return fmt.Errorf("create-portchannel: missing 'name' param")
-		}
-		_, err := n.CreatePortChannel(ctx, name, PortChannelConfig{
-			Members:  paramStringSlice(p, "members"),
-			MTU:      paramInt(p, "mtu"),
-			MinLinks: paramInt(p, "min_links"),
-			Fallback: paramBool(p, "fallback"),
-			FastRate: paramBool(p, "fast_rate"),
-		})
-		return err
-
-	case "add-pc-member":
-		pcName := paramString(p, "portchannel")
-		member := paramString(p, "name")
-		if pcName == "" || member == "" {
-			return fmt.Errorf("add-pc-member: missing 'portchannel' or 'name' param")
-		}
-		_, err := n.AddPortChannelMember(ctx, pcName, member)
-		return err
-
-	case "create-acl":
-		name := paramString(p, "name")
-		if name == "" {
-			return fmt.Errorf("create-acl: missing 'name' param")
-		}
-		_, err := n.CreateACL(ctx, name, ACLConfig{
-			Type:        paramString(p, "type"),
-			Stage:       paramString(p, "stage"),
-			Ports:       paramString(p, "ports"),
-			Description: paramString(p, "description"),
-		})
-		return err
-
-	case "add-acl-rule":
-		aclName := paramString(p, "acl")
-		ruleName := paramString(p, "name")
-		if aclName == "" || ruleName == "" {
-			return fmt.Errorf("add-acl-rule: missing 'acl' or 'name' param")
-		}
-		_, err := n.AddACLRule(ctx, aclName, ruleName, ACLRuleConfig{
-			Priority: paramInt(p, "priority"),
-			Action:   paramString(p, "action"),
-			SrcIP:    paramString(p, "src_ip"),
-			DstIP:    paramString(p, "dst_ip"),
-			Protocol: paramString(p, "protocol"),
-			SrcPort:  paramString(p, "src_port"),
-			DstPort:  paramString(p, "dst_port"),
-		})
-		return err
-
-	case "configure-irb":
-		vlanID := paramInt(p, "vlan_id")
-		if vlanID == 0 {
-			return fmt.Errorf("configure-irb: missing 'vlan_id' param")
-		}
-		_, err := n.ConfigureIRB(ctx, vlanID, IRBConfig{
-			VRF:        paramString(p, "vrf"),
-			IPAddress:  paramString(p, "ip_address"),
-			AnycastMAC: paramString(p, "anycast_mac"),
-		})
-		return err
-
-	case "bind-ipvpn":
-		// The intent records the IP-VPN spec name in "ipvpn"; BindIPVPN
-		// derives the on-device VRF name from it (util.DeriveVRFNameForIPVPN).
-		ipvpnName := paramString(p, "ipvpn")
-		if ipvpnName == "" {
-			return fmt.Errorf("bind-ipvpn: requires 'ipvpn' param")
-		}
-		_, err := n.BindIPVPN(ctx, ipvpnName)
-		return err
-
-	case "add-static-route":
-		vrfName := paramString(p, "vrf")
-		prefix := paramString(p, "prefix")
-		nextHop := paramString(p, "next_hop")
-		metric := paramInt(p, "metric")
-		if prefix == "" || nextHop == "" {
-			return fmt.Errorf("add-static-route: requires 'prefix' and 'next_hop' params")
-		}
-		_, err := n.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)
-		return err
-
+		return opSpec.Replay(ctx, n, iface, step.Params)
 	default:
-		return fmt.Errorf("unknown node operation: %s", op)
-	}
-}
-
-// replayInterfaceStep dispatches an interface-level operation.
-func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map[string]any) error {
-	switch op {
-	case "apply-service":
-		serviceName := paramString(p, "service")
-		if serviceName == "" {
-			return fmt.Errorf("apply-service: missing 'service' param")
-		}
-		// Normalize service name (topology files may use lowercase with hyphens)
-		serviceName = util.NormalizeName(serviceName)
-		opts := ApplyServiceOpts{
-			IPAddress: paramString(p, "ip_address"),
-			PeerAS:    paramInt(p, "peer_as"),
-			VLAN:      paramInt(p, "vlan_id"),
-		}
-		// Topology BGP attributes (route_reflector_client, next_hop_self) flow
-		// through Params to ApplyService for correct BGP neighbor configuration.
-		if rrc := paramString(p, "route_reflector_client"); rrc != "" {
-			if opts.Params == nil {
-				opts.Params = make(map[string]string)
-			}
-			opts.Params["route_reflector_client"] = rrc
-		}
-		if nhs := paramString(p, "next_hop_self"); nhs != "" {
-			if opts.Params == nil {
-				opts.Params = make(map[string]string)
-			}
-			opts.Params["next_hop_self"] = nhs
-		}
-		_, err := iface.ApplyService(ctx, serviceName, opts)
-		return err
-
-	case "configure-interface":
-		_, err := iface.ConfigureInterface(ctx, InterfaceConfig{
-			VRF:    paramString(p, "vrf"),
-			IP:     paramString(p, "ip"),
-			VLAN:   paramInt(p, "vlan_id"),
-			Tagged: paramBool(p, "tagged"),
-		})
-		return err
-
-	case sonic.OpAddTrunkVLAN:
-		vlanID := paramInt(p, "vlan_id")
-		if vlanID == 0 {
-			return fmt.Errorf("add-trunk-vlan: missing 'vlan_id' param")
-		}
-		_, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: vlanID, Tagged: true})
-		return err
-
-	case "add-bgp-peer":
-		asn := paramInt(p, "remote_as")
-		if asn == 0 {
-			return fmt.Errorf("add-bgp-peer: missing 'remote_as' param")
-		}
-		_, err := iface.AddBGPPeer(ctx, DirectBGPPeerConfig{
-			NeighborIP:  paramString(p, "neighbor_ip"),
-			RemoteAS:    asn,
-			Description: paramString(p, "description"),
-			Multihop:    paramInt(p, "multihop"),
-		})
-		return err
-
-	case "set-property":
-		property := paramString(p, "property")
-		value := paramString(p, "value")
-		if property == "" {
-			return fmt.Errorf("set-property: missing 'property' param")
-		}
-		_, err := iface.SetProperty(ctx, property, value)
-		return err
-
-	case "bind-acl":
-		aclName := paramString(p, "acl_name")
-		direction := paramString(p, "direction")
-		if aclName == "" {
-			return fmt.Errorf("bind-acl: missing 'acl_name' param")
-		}
-		_, err := iface.BindACL(ctx, aclName, direction)
-		return err
-
-	case "bind-qos":
-		policyName := paramString(p, "policy")
-		if policyName == "" {
-			return fmt.Errorf("bind-qos: missing 'policy' param")
-		}
-		n := iface.Node()
-		policy, err := n.GetQoSPolicy(util.NormalizeName(policyName))
-		if err != nil {
-			return fmt.Errorf("bind-qos: %w", err)
-		}
-		_, err = iface.BindQoS(ctx, util.NormalizeName(policyName), policy)
-		return err
-
-	default:
-		return fmt.Errorf("unknown interface operation: %s", op)
+		return opSpec.Replay(ctx, n, nil, step.Params)
 	}
 }
 
@@ -327,15 +85,13 @@ func IntentToStep(resource string, fields map[string]string) spec.TopologyStep {
 	return step
 }
 
-// intentInterface returns the interface name if the operation is interface-scoped,
-// or "" for node-scoped operations.
+// intentInterface returns the interface name for interface-scoped operations,
+// or "" for node-scoped ones. Scope comes from the registry: some node-scoped
+// operations (configure-irb) use interface| resource keys because the created
+// resource IS an interface, but the operation is dispatched at node level.
 // Kind-prefixed keys: "interface|Ethernet0", "interface|Ethernet0|acl|ingress".
-// Some node-scoped operations (create-portchannel, configure-irb) use interface|
-// keys because the created resource IS an interface, but the operation itself is
-// dispatched at node level.
 func intentInterface(op, resource string) string {
-	switch op {
-	case sonic.OpConfigureIRB, "unconfigure-irb":
+	if opSpec := opRegistry[op]; opSpec != nil && opSpec.Scope == ScopeNode {
 		return ""
 	}
 	if strings.HasPrefix(resource, "interface|") {
@@ -347,98 +103,23 @@ func intentInterface(op, resource string) string {
 	return ""
 }
 
-// intentParamsToStepParams converts flat intent fields to structured step params.
-// Most params pass through directly. Some need mapping between intent field names
-// and step param names (the two serialization formats diverge for certain operations).
-// The Intent.Name identity field is re-injected for operations that accept a "name" param.
+// intentParamsToStepParams converts flat intent fields to structured step
+// params. Operations whose step format diverges from the flat map declare an
+// Export func in the registry; everything else passes through directly. The
+// Intent.Name identity field is re-injected as "name" for operations that
+// accept it — NewIntent strips "name" from Params into Intent.Name, and step
+// replay expects it back.
 func intentParamsToStepParams(op string, intent *sonic.Intent) map[string]any {
-	params := intent.Params
-	result := make(map[string]any, len(params)+1)
-
-	switch op {
-	case sonic.OpSetupDevice:
-		// Device metadata fields are nested under "fields" in step format.
-		// RR params (rr_*) are reconstructed into a "route_reflector" sub-object.
-		fields := make(map[string]any)
-		rrParams := make(map[string]any)
-		for k, v := range params {
-			switch {
-			case k == sonic.FieldSourceIP:
-				result[sonic.FieldSourceIP] = v
-			case k == "rr_cluster_id":
-				rrParams["cluster_id"] = v
-			case k == "rr_local_asn":
-				rrParams["local_asn"] = v
-			case k == "rr_router_id":
-				rrParams["router_id"] = v
-			case k == "rr_local_addr":
-				rrParams["local_addr"] = v
-			case k == "rr_clients":
-				rrParams["clients"] = deserializeRRPeers(v)
-			case k == "rr_peers":
-				rrParams["peers"] = deserializeRRPeers(v)
-			default:
-				fields[k] = v
-			}
-		}
-		if len(fields) > 0 {
-			result["fields"] = fields
-		}
-		if len(rrParams) > 0 {
-			result["route_reflector"] = rrParams
-		}
-
-	case sonic.OpApplyService:
-		// Step format uses "service", intent stores "service_name".
-		// Step uses "peer_as", intent stores "bgp_peer_as".
-		// Only export user-facing params needed for replay, not resolved state.
-		if v := params[sonic.FieldServiceName]; v != "" {
-			result["service"] = v
-		}
-		if v := params[sonic.FieldIPAddress]; v != "" {
-			result[sonic.FieldIPAddress] = v
-		}
-		if v := params[sonic.FieldBGPPeerAS]; v != "" {
-			result["peer_as"] = v
-		}
-		// VLAN ID for local service types (irb, bridged) where the VLAN
-		// comes from opts, not from a macvpn spec.
-		if v := params[sonic.FieldVLANID]; v != "" {
-			result[sonic.FieldVLANID] = v
-		}
-		// Topology BGP attributes stored in intent for self-sufficiency.
-		// These flow into ApplyServiceOpts.Params for reconstruction.
-		if v := params["route_reflector_client"]; v != "" {
-			result["route_reflector_client"] = v
-		}
-		if v := params["next_hop_self"]; v != "" {
-			result["next_hop_self"] = v
-		}
-
-	case sonic.OpCreatePortChannel:
-		// Members are stored as comma-separated string in intent; replay expects []any.
-		for k, v := range params {
-			if k == sonic.FieldMembers && v != "" {
-				parts := strings.Split(v, ",")
-				slice := make([]any, len(parts))
-				for i, p := range parts {
-					slice[i] = p
-				}
-				result[k] = slice
-			} else {
-				result[k] = v
-			}
-		}
-
-	default:
-		// Direct pass-through for most operations.
-		for k, v := range params {
+	var result map[string]any
+	if opSpec := opRegistry[op]; opSpec != nil && opSpec.Export != nil {
+		result = opSpec.Export(intent)
+	} else {
+		result = make(map[string]any, len(intent.Params)+1)
+		for k, v := range intent.Params {
 			result[k] = v
 		}
 	}
 
-	// Re-inject the Name identity field as "name" param for operations that need it.
-	// NewIntent strips "name" from Params into Intent.Name — step replay expects it back.
 	if intent.Name != "" {
 		if _, exists := result["name"]; !exists {
 			result["name"] = intent.Name
@@ -448,20 +129,15 @@ func intentParamsToStepParams(op string, intent *sonic.Intent) map[string]any {
 	return result
 }
 
-// skipInReconstruct lists operations whose intents are re-created as side effects
-// of their parent operation during replay. These are skipped in IntentsToSteps
-// because replaying the parent re-creates the child intents automatically.
-var skipInReconstruct = map[string]bool{
-	sonic.OpInterfaceInit: true,  // Auto-created by sub-resource ops (SetProperty, BindACL, BindQoS)
-	sonic.OpDeployService: true,  // Auto-created by first ApplyService for a service
-}
-
 // IntentsToSteps converts a map of NEWTRON_INTENT records to an ordered
 // slice of topology steps. Steps are ordered by topological sort using
 // _parents/_children from the intent DAG (Kahn's algorithm). Ties are
 // broken by resource key for determinism.
+//
+// Side-effect intents (registry SideEffect: interface-init, deploy-service)
+// are skipped: replaying their parent operation re-creates them.
 func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
-	// Build intent objects, filtering non-actuated and skip-listed operations
+	// Build intent objects, filtering non-actuated and side-effect operations
 	type node struct {
 		resource string
 		fields   map[string]string
@@ -475,7 +151,7 @@ func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
 		if !intent.IsActuated() {
 			continue
 		}
-		if skipInReconstruct[intent.Operation] {
+		if opSpec := opRegistry[intent.Operation]; opSpec != nil && opSpec.SideEffect {
 			continue
 		}
 		nodes[resource] = &node{resource, fields, intent}
@@ -512,7 +188,7 @@ func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
 		var ready []string
 		for _, child := range n.intent.Children {
 			if _, ok := nodes[child]; !ok {
-				continue // child not in node set (skipped or non-actuated)
+				continue // child not in node set (side-effect or non-actuated)
 			}
 			inDegree[child]--
 			if inDegree[child] == 0 {

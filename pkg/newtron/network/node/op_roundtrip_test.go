@@ -353,6 +353,38 @@ func TestOpRoundTrip(t *testing.T) {
 		}
 	}
 
+	// Manifest check — every stored intent param must be declared in its
+	// operation's registry manifest (undeclared = the scattered-knowledge bug
+	// class returning), and every Required param must be present. Meta fields
+	// (operation, state, DAG links) are the intent envelope, not params.
+	metaFields := map[string]bool{"operation": true, "state": true, "_parents": true, "_children": true}
+	for resource, fields := range nA.configDB.NewtronIntent {
+		op := fields["operation"]
+		opSpec := opRegistry[op]
+		if opSpec == nil {
+			t.Errorf("intent %q: operation %q is not in the registry", resource, op)
+			continue
+		}
+		declared := map[string]bool{}
+		for _, ps := range opSpec.Params {
+			declared[ps.Key] = true
+		}
+		if !opSpec.OpenParams {
+			for k := range fields {
+				if !metaFields[k] && !declared[k] {
+					t.Errorf("intent %q (op %s): stored param %q is not declared in the registry manifest", resource, op, k)
+				}
+			}
+		}
+		for _, ps := range opSpec.Params {
+			if ps.Required {
+				if _, ok := fields[ps.Key]; !ok {
+					t.Errorf("intent %q (op %s): required param %q missing", resource, op, ps.Key)
+				}
+			}
+		}
+	}
+
 	// Export: intent DB → ordered steps.
 	steps := IntentsToSteps(nA.configDB.NewtronIntent)
 	if len(steps) == 0 {
@@ -422,6 +454,33 @@ func TestOpRoundTrip(t *testing.T) {
 			if i < len(stepsB) && !reflect.DeepEqual(steps[i], stepsB[i]) {
 				t.Errorf("  step %d: %s %v  →  %s %v", i, steps[i].URL, steps[i].Params, stepsB[i].URL, stepsB[i].Params)
 			}
+		}
+	}
+}
+
+// TestOpRegistrySanity checks the registry's internal invariants statically:
+// map keys match entry names, every replayable entry has a Replay func and a
+// declared §15 inverse, side-effect entries have neither a Replay nor an
+// export path of their own.
+func TestOpRegistrySanity(t *testing.T) {
+	for key, opSpec := range opRegistry {
+		if opSpec.Op != key {
+			t.Errorf("registry key %q != entry Op %q", key, opSpec.Op)
+		}
+		if opSpec.SideEffect {
+			if opSpec.Replay != nil {
+				t.Errorf("%s: side-effect op must not have a Replay func", key)
+			}
+			continue
+		}
+		if opSpec.Replay == nil {
+			t.Errorf("%s: replayable op missing Replay func", key)
+		}
+		if opSpec.Inverse == "" {
+			t.Errorf("%s: missing §15 inverse declaration", key)
+		}
+		if len(opSpec.Params) == 0 && !opSpec.OpenParams {
+			t.Errorf("%s: no params declared and not OpenParams — an op with no manifest cannot be checked", key)
 		}
 	}
 }
