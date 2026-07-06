@@ -2860,53 +2860,44 @@ isn't updating — it's deleting one row and creating another.**
 
 ## 48. In-Place Update Is Delivered In Place
 
-When a consumer reacts to every state transition — not only to the final
-state — an operation is defined by the states it makes observable, not just
-where it lands. Two operations that reach the same final state through
-different intermediate states are different operations. An **in-place edit**
-keeps the object present and changes some of its fields. A **remove-then-add**
-takes the object away, then brings it back. Their final states are identical;
-to a consumer that tears down on "gone" and rebuilds on "present," their
-behavior is opposite — one is hitless, the other a teardown cycle.
+The concept is `DESIGN_PRINCIPLES.md` §43: to a consumer that reacts to every
+state transition, an in-place edit and a remove-then-add are different
+operations even when their final states are identical, so the caller — not
+the delivery layer — declares which one it means. In newtron the consumers
+are SONiC daemons, and the transition they watch is **key presence**: a
+daemon re-reads a CONFIG_DB key on every keyspace notification and tears
+down when the key is absent.
 
-§47 makes the API honest about identity: `update-X` preserves the composite
-key. But preserving the key in the *request* is not enough — the *delivery*
-must preserve the key's **presence**. A SONiC daemon re-reads a key on every
-keyspace notification, so a whole-row `DEL`+`HSET` of the same key makes it
-briefly absent, and a daemon that reads it in that window tears down: a BGP
-session flap, a FIB gap, an ACL leak — though only a field changed and the key
-never moved. The final CONFIG_DB row is correct; the device took a hit
-reaching it.
+§47 makes `update-*` preserve the composite key in the request; this
+principle makes the delivery preserve it on the wire. A whole-row
+`DEL`+`HSET` of the same key leaves a window where the key is gone, and a
+daemon that reads in that window tears down: frrcfgd issues `no neighbor`
+(a BGP session flap), fpmsyncd opens a FIB gap, aclorch a filter window —
+though only a field changed. RCA-048 measured it: hitless on an idle device,
+a reliable flap on a fresh session — a race, not a guarantee.
 
-Teardown is the opposite, and legitimate, intent. `RefreshService` removes
-then re-adds *so that* the daemon sees the delete and drops its internal state
-before the rebuild (§11); stripping that delete strands the old state. Same
-final row, opposite required sequence — so the two cannot share one delivery.
-The vocabulary names them: `cs.Replace`, an in-place field diff (`HSET` the
-changed fields, `HDEL` the removed ones, never `DEL` the key), for `update-X`;
-`cs.Deletes`+`cs.Adds`, an observable teardown, for `RefreshService`. No
-apply-layer heuristic may collapse them: "make every `DEL`+`ADD` atomic"
-silently makes `RefreshService` hitless and strands daemon state; "leave every
-`DEL`+`ADD` observable" flaps every `update-X`. A delivery that infers intent
-from the mechanism is wrong for half of them.
+The two deliveries, by intent:
 
-The principle is small. Three rules:
+1. **`update-*` delivers via `cs.Replace`** — a field diff against the
+   projection's current row: `HSET` the changed/added fields, `HDEL` the
+   removed ones, never `DEL` the key. No delete window exists, so
+   hitlessness is structural. The diff also leaves unchanged sibling rows
+   (e.g. `BGP_NEIGHBOR_AF`) untouched — a full re-create resets AFI/SAFI
+   negotiation even when delivered atomically.
 
-1. **`update-X` is delivered in place.** A field diff against the current row —
-   `HSET` the changed fields, `HDEL` the removed ones. The key is never
-   deleted. The daemon observes an edit, not a departure.
+2. **`RefreshService` keeps `cs.Deletes`+`cs.Adds`** — the daemon must
+   observe the DELETE to drop its internal state before the rebuild (§11's
+   teardown-replace). Stripping that delete strands daemon state.
 
-2. **Teardown is delivered observably.** `RefreshService` and
-   `remove-X`+`add-X` keep `DEL`+`ADD`. The daemon must see the delete to clean
-   up — that is the point, not an accident of the mechanism.
+3. **No apply-layer heuristic may collapse them.** Batching every same-key
+   `DEL`+`ADD` into `MULTI`/`EXEC` closes the window but silently makes
+   `RefreshService` hitless — the delete the daemon needed to see is never
+   observable. The intent lives in the caller's verb, `cs.Replace` versus
+   `cs.Deletes`+`cs.Adds`, not in the mechanism.
 
-3. **The caller declares the intent, not the apply layer.** `cs.Replace` vs
-   `cs.Deletes`+`cs.Adds`. No global rule recovers an intent the caller never
-   expressed.
-
-**The same final state can be reached by an edit or by a teardown. To a daemon
-that reacts to each transition they are different operations — and the caller,
-not the delivery mechanism, must say which one it meant.**
+Litmus: if an `update-*` ever emits a `DEL` of the key it is updating, it
+has become a teardown — deliver it with `cs.Replace`, or rename it
+remove + add.
 
 ---
 

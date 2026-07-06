@@ -2729,42 +2729,39 @@ behavior is opposite — one is hitless, the other a teardown cycle.
 
 §42 makes the API honest about identity: `update-X` preserves the composite
 key. But preserving the key in the *request* is not enough — the *delivery*
-must preserve the key's **presence**. A SONiC daemon re-reads a key on every
-keyspace notification, so a whole-row `DEL`+`HSET` of the same key makes it
-briefly absent, and a daemon that reads it in that window tears down: a BGP
-session flap, a FIB gap, an ACL leak — though only a field changed and the key
-never moved. The final CONFIG_DB row is correct; the device took a hit
-reaching it.
+must preserve the object's **presence**. A consumer that re-reads the object
+on every change notification, and tears down derived state when the object is
+missing, turns a brief delete window into an outage — a session reset, a
+forwarding gap, a filter that stops filtering — though only a field changed
+and the identity never moved. The final state is correct; the consumer took
+the intermediate state seriously.
 
-Teardown is the opposite, and legitimate, intent. `RefreshService` removes
-then re-adds *so that* the daemon sees the delete and drops its internal state
-before the rebuild (§11); stripping that delete strands the old state. Same
-final row, opposite required sequence — so the two cannot share one delivery.
-The vocabulary names them: `cs.Replace`, an in-place field diff (`HSET` the
-changed fields, `HDEL` the removed ones, never `DEL` the key), for `update-X`;
-`cs.Deletes`+`cs.Adds`, an observable teardown, for `RefreshService`. No
-apply-layer heuristic may collapse them: "make every `DEL`+`ADD` atomic"
-silently makes `RefreshService` hitless and strands daemon state; "leave every
-`DEL`+`ADD` observable" flaps every `update-X`. A delivery that infers intent
-from the mechanism is wrong for half of them.
+Observable teardown is the opposite, and legitimate, intent. A replacement
+that removes then re-adds does so *so that* the consumer sees the removal and
+drops the state it derived from the old object (§11); stripping that removal
+strands the derived state. Same final object, opposite required sequence — so
+the two intents cannot share one delivery, and no delivery-layer heuristic can
+collapse them: making every remove+add atomic silently converts teardown into
+an edit and strands consumer state; keeping every remove+add observable
+converts every edit into an outage. The state delta is identical for both;
+the delta does not carry the intent.
 
 The principle is small. Three rules:
 
-1. **`update-X` is delivered in place.** A field diff against the current row —
-   `HSET` the changed fields, `HDEL` the removed ones. The key is never
-   deleted. The daemon observes an edit, not a departure.
+1. **An update is delivered in place.** A field-level difference against the
+   current object — write the changed fields, remove the dropped ones. The
+   object is never absent. The consumer observes an edit, not a departure.
 
-2. **Teardown is delivered observably.** `RefreshService` and
-   `remove-X`+`add-X` keep `DEL`+`ADD`. The daemon must see the delete to clean
-   up — that is the point, not an accident of the mechanism.
+2. **A replacement is delivered observably.** The removal is the message —
+   it is how the consumer knows to drop derived state before the rebuild.
 
-3. **The caller declares the intent, not the apply layer.** `cs.Replace` vs
-   `cs.Deletes`+`cs.Adds`. No global rule recovers an intent the caller never
-   expressed.
+3. **The caller declares the intent; the delivery layer never infers it.**
+   Edit and replacement are distinct primitives the caller chooses between.
+   No global rule can recover an intent the caller never expressed.
 
-**The same final state can be reached by an edit or by a teardown. To a daemon
-that reacts to each transition they are different operations — and the caller,
-not the delivery mechanism, must say which one it meant.**
+**The same final state can be reached by an edit or by a teardown. To a
+consumer that reacts to each transition they are different operations — and
+the caller, not the delivery mechanism, must say which.**
 
 ---
 
@@ -2928,4 +2925,4 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 40 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
 | 41 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
 | 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C |
-| 43 | In-place update is delivered in place | To a daemon that re-reads on each notification, an edit and a remove+add differ; `update-X` uses a field diff (never DEL the key), teardown keeps DEL+ADD; the caller declares which | C |
+| 43 | In-place update is delivered in place | To a consumer that re-reads on each notification, an edit and a remove+add differ; updates are field diffs that never remove the object, teardown stays observable; the caller declares which | C |
