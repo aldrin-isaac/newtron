@@ -71,6 +71,15 @@ are established engineering practices that the system subscribes to
 and enforces rigorously. A few are style preferences where reasonable
 alternatives exist. The summary table at the end marks which is which.
 
+This document also has an applied twin. `DESIGN_PRINCIPLES_NEWTRON.md`
+takes each concept here and applies it in newtron's terms — SONiC
+mechanics, named types, code anchors. This document owns the concept
+and its rationale, independent of any one implementation; the newtron
+document owns the application, and deliberately does not restate this
+one. The crosswalk lives in the newtron document's summary table
+(**Universal §** column) and is enforced by `pkg/conformance`: every
+concept here must be claimed by at least one applied principle there.
+
 One more thing. These principles were arrived at through years of
 building, testing, failing, and rebuilding. Each one exists because a
 previous approach failed in a way that demanded a better answer. They
