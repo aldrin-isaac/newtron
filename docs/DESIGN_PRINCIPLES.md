@@ -980,20 +980,20 @@ whether to roll back the first is the orchestrator's responsibility.
 The system provides the mechanism (each ChangeSet can be reversed
 through domain operations); the orchestrator decides the policy.
 
-### Replace semantics require DEL+HSET
+### Replace semantics: teardown-replace uses DEL+HSET
 
 Redis `HSET` merges fields into an existing hash — it does not remove
-old fields. Any operation that replaces a key's content
-(`RefreshService`, re-provisioning) must `DEL` the key first, then
-`HSET` the new fields. Without the `DEL`, stale fields from the
-previous state persist as ghost data. For example, if a service binding
-previously had `qos_policy=gold` and the new service definition drops
-QoS, an `HSET` leaves the old `qos_policy` field intact — only
-`DEL`+`HSET` gives a clean replacement.
+old fields. A **teardown-replace** (`RefreshService`, re-provisioning)
+therefore `DEL`s the key first, then `HSET`s the new fields: without the
+`DEL`, stale fields persist as ghost data — a service binding that drops
+`qos_policy=gold` keeps the field under a bare `HSET` — and the daemon
+never sees the removal it needs to clean up its internal state. Apply
+preserves the delete+add order; verification checks final state only (a
+key deleted then re-added is verified as "should exist with new fields").
 
-Apply must preserve delete+add sequences in order. Verification checks
-final state only — a key that was deleted then re-added is verified as
-"should exist with new fields."
+That is teardown, not editing. An **in-place update** (`update-X`) is the
+opposite intent — it keeps the key present and is delivered as a field
+diff, never a `DEL`+`ADD` of the same key (§43).
 
 ---
 
@@ -2691,8 +2691,9 @@ audit log says "update" when the device experienced "remove + add."
 The principle is small. Three rules:
 
 1. **`update-X` preserves the key.** The request body carries the
-   full composite key as identification. It modifies only fields. Key
-   components are immutable through `update-X`.
+   full composite key as identification. It modifies only fields —
+   and is delivered in place, not as a delete-and-recreate of the same
+   key (§43). Key components are immutable through `update-X`.
 
 2. **Key changes are remove + add.** Renaming, renumbering,
    relocating, re-IP'ing — all of these change identity. Package them
@@ -2712,6 +2713,55 @@ model. New verbs read it before claiming what's mutable.
 
 **The CONFIG_DB key is the identity. An update verb that changes it
 isn't updating — it's deleting one row and creating another.**
+
+---
+
+## 43. In-Place Update Is Delivered In Place
+
+When a consumer reacts to every state transition — not only to the final
+state — an operation is defined by the states it makes observable, not just
+where it lands. Two operations that reach the same final state through
+different intermediate states are different operations. An **in-place edit**
+keeps the object present and changes some of its fields. A **remove-then-add**
+takes the object away, then brings it back. Their final states are identical;
+to a consumer that tears down on "gone" and rebuilds on "present," their
+behavior is opposite — one is hitless, the other a teardown cycle.
+
+§42 makes the API honest about identity: `update-X` preserves the composite
+key. But preserving the key in the *request* is not enough — the *delivery*
+must preserve the object's **presence**. A consumer that re-reads the object
+on every change notification, and tears down derived state when the object is
+missing, turns a brief delete window into an outage — a session reset, a
+forwarding gap, a filter that stops filtering — though only a field changed
+and the identity never moved. The final state is correct; the consumer took
+the intermediate state seriously.
+
+Observable teardown is the opposite, and legitimate, intent. A replacement
+that removes then re-adds does so *so that* the consumer sees the removal and
+drops the state it derived from the old object (§11); stripping that removal
+strands the derived state. Same final object, opposite required sequence — so
+the two intents cannot share one delivery, and no delivery-layer heuristic can
+collapse them: making every remove+add atomic silently converts teardown into
+an edit and strands consumer state; keeping every remove+add observable
+converts every edit into an outage. The state delta is identical for both;
+the delta does not carry the intent.
+
+The principle is small. Three rules:
+
+1. **An update is delivered in place.** A field-level difference against the
+   current object — write the changed fields, remove the dropped ones. The
+   object is never absent. The consumer observes an edit, not a departure.
+
+2. **A replacement is delivered observably.** The removal is the message —
+   it is how the consumer knows to drop derived state before the rebuild.
+
+3. **The caller declares the intent; the delivery layer never infers it.**
+   Edit and replacement are distinct primitives the caller chooses between.
+   No global rule can recover an intent the caller never expressed.
+
+**The same final state can be reached by an edit or by a teardown. To a
+consumer that reacts to each transition they are different operations — and
+the caller, not the delivery mechanism, must say which.**
 
 ---
 
@@ -2875,3 +2925,4 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 40 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
 | 41 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
 | 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C |
+| 43 | In-place update is delivered in place | To a consumer that re-reads on each notification, an edit and a remove+add differ; updates are field diffs that never remove the object, teardown stays observable; the caller declares which | C |

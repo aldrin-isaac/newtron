@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -43,9 +44,10 @@ type ChangeType = sonic.ChangeType
 
 // Re-export sonic.ChangeType constants so existing code compiles without changes.
 const (
-	ChangeAdd    = sonic.ChangeTypeAdd
-	ChangeModify = sonic.ChangeTypeModify
-	ChangeDelete = sonic.ChangeTypeDelete
+	ChangeAdd     = sonic.ChangeTypeAdd
+	ChangeModify  = sonic.ChangeTypeModify
+	ChangeDelete  = sonic.ChangeTypeDelete
+	ChangeReplace = sonic.ChangeTypeReplace
 )
 
 // Change is an alias for sonic.ConfigChange. All external references to
@@ -135,6 +137,61 @@ func (cs *ChangeSet) Deletes(entries []sonic.Entry) {
 	}
 }
 
+// Replace records an in-place row replace for an entity, the delivery an
+// `update-X` verb uses instead of Deletes(old)+Adds(new) (DESIGN_PRINCIPLES
+// §48). Each key in newEntries is updated to exactly its new fields — HSET the
+// changed/added fields, HDEL the ones the new row drops — and any key present
+// in oldEntries but not newEntries is deleted. No key is ever DELeted-then-
+// re-added, so a SONiC daemon never observes a key absent and does not tear
+// down (no BGP session flap, no FIB gap). Callers pass the same old/new entry
+// sets they would have passed to Deletes/Adds.
+//
+// The pre-change row (needed for the field diff and to compute the HDEL set) is
+// read from the node's projection, which still holds the old state at build
+// time — render() updates the projection only after the ChangeSet is built.
+func (cs *ChangeSet) Replace(n *Node, oldEntries, newEntries []sonic.Entry) {
+	proj := n.Projection()
+	newKeys := make(map[string]bool, len(newEntries)) // "table|key"
+	for _, e := range newEntries {
+		newKeys[e.Table+"|"+e.Key] = true
+		var from map[string]string
+		if proj[e.Table] != nil {
+			from = maps.Clone(proj[e.Table][e.Key])
+		}
+		cs.Changes = append(cs.Changes, Change{
+			Table:  e.Table,
+			Key:    e.Key,
+			Type:   ChangeReplace,
+			Fields: e.Fields,
+			From:   from,
+		})
+	}
+	// Keys the entity no longer has are removed. Only emit a delete for a key
+	// that actually exists — a no-op delete of an absent key adds churn without
+	// changing anything.
+	for _, e := range oldEntries {
+		if newKeys[e.Table+"|"+e.Key] {
+			continue
+		}
+		if proj[e.Table] != nil && proj[e.Table][e.Key] != nil {
+			cs.Delete(e.Table, e.Key)
+		}
+	}
+}
+
+// removedFields returns the field names present in the old row (from) that the
+// new row (fields) no longer has — the set an in-place replace must HDEL so it
+// leaves no ghost fields behind.
+func removedFields(from, fields map[string]string) []string {
+	var removed []string
+	for name := range from {
+		if _, keep := fields[name]; !keep {
+			removed = append(removed, name)
+		}
+	}
+	return removed
+}
+
 // Prepend inserts a change at the beginning of the ChangeSet.
 // Used by writeIntent to ensure the intent entry is always first,
 // regardless of when intent recording is called.
@@ -219,6 +276,8 @@ func (cs *ChangeSet) String() string {
 			typeStr = "[ADD]"
 		case ChangeModify:
 			typeStr = "[MOD]"
+		case ChangeReplace:
+			typeStr = "[REP]"
 		case ChangeDelete:
 			typeStr = "[DEL]"
 		}
@@ -285,6 +344,17 @@ func (cs *ChangeSet) Apply(n *Node) error {
 		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
 			kind = sonic.DeviceOpsKindRedisWrite
 			reply, err = client.SetWithReply(change.Table, change.Key, change.Fields)
+		case sonic.ChangeTypeReplace:
+			// In-place row replace (§48): HSET the new fields, then HDEL the
+			// fields the old row (From) had that the new row drops. The key is
+			// never DELeted, so the daemon never observes it absent — no flap.
+			kind = sonic.DeviceOpsKindRedisWrite
+			reply, err = client.SetWithReply(change.Table, change.Key, change.Fields)
+			if err == nil {
+				if removed := removedFields(change.From, change.Fields); len(removed) > 0 {
+					_, err = client.HDelWithReply(change.Table, change.Key, removed)
+				}
+			}
 		case sonic.ChangeTypeDelete:
 			kind = sonic.DeviceOpsKindRedisDelete
 			reply, err = client.DeleteWithReply(change.Table, change.Key)
@@ -427,7 +497,7 @@ func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange, seqSt
 
 	for _, change := range sorted {
 		switch change.Type {
-		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
+		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify, sonic.ChangeTypeReplace:
 			actual, err := reader.Get(change.Table, change.Key)
 			if err != nil {
 				return nil, nil, fmt.Errorf("reading %s|%s: %w", change.Table, change.Key, err)

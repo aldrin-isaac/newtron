@@ -1,5 +1,16 @@
 # RCA-045: sonic-vs frrcfgd Runtime Notification Failure and Template Gaps
 
+> **Re-verification note (2026-07-04):** On the currently deployed 2node-vs image
+> (202505 stable, Force10-S6000), runtime CONFIG_DB **field updates to an existing
+> BGP_NEIGHBOR** *were* processed by frrcfgd and reached FRR **without a restart** —
+> 20+ `update-bgp-peer` description changes each appeared in `show running-config`
+> live (see RCA-048). This partially contradicts Issue 1's "silently dropped." The
+> write-before-restart workaround guards runtime **neighbor creation**, which was
+> *not* re-tested here, so the workaround stays in place — but Issue 1 warrants
+> re-verification (it may be image-dependent or fixed for the field-update path).
+> frrcfgd installs handlers only for SIGTERM/SIGINT (no SIGHUP): a SIGHUP just
+> terminates it (supervisord then restarts it, re-running startup replay).
+
 ## Summary
 
 Community sonic-vs (202505 stable, Force10-S6000 HWSKU) has two frrcfgd issues

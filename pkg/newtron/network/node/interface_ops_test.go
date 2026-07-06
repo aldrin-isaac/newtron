@@ -625,9 +625,10 @@ func TestUpdateBGPPeer_InPlaceASChange(t *testing.T) {
 		t.Fatalf("UpdateBGPPeer: %v", err)
 	}
 
-	// CONFIG_DB: old BGP_NEIGHBOR row deleted, new one added at same key.
-	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeDelete)
-	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeAdd)
+	// CONFIG_DB: BGP_NEIGHBOR row replaced in place (§48) — a single Replace,
+	// never a DELete of the key, so frrcfgd does not tear the session down.
+	assertNoChangeOfType(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeDelete)
+	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.1.0.1", ChangeReplace)
 	assertField(t, c, "asn", "65099")
 
 	intent := d.GetIntent("interface|Ethernet0|bgp-peer")

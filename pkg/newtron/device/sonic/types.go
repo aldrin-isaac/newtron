@@ -51,6 +51,11 @@ const (
 	ChangeTypeAdd    ChangeType = "add"
 	ChangeTypeModify ChangeType = "modify"
 	ChangeTypeDelete ChangeType = "delete"
+	// ChangeTypeReplace is an in-place row replace: HSET the new Fields and
+	// HDEL the fields present in From but absent from Fields — the key is
+	// never DELeted, so a SONiC daemon never observes it absent (hitless
+	// update; DESIGN_PRINCIPLES §48). From carries the pre-change row.
+	ChangeTypeReplace ChangeType = "replace"
 )
 
 // ============================================================================

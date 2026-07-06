@@ -81,24 +81,24 @@ const (
 	OpBindMACVPN         = "bind-macvpn"
 	OpCreateACL          = "create-acl"
 	OpAddBGPEVPNPeer    = "add-bgp-evpn-peer"
-	OpUpdateBGPEVPNPeer = "update-bgp-evpn-peer" // atomic per-overlay-peer mutation (#227)
+	OpUpdateBGPEVPNPeer = "update-bgp-evpn-peer" // in-place per-overlay-peer mutation (#227, §48)
 	OpCreatePortChannel  = "create-portchannel"
 	OpConfigureIRB       = "configure-irb"
 	OpAddStaticRoute     = "add-static-route"
-	OpUpdateStaticRoute  = "update-static-route" // atomic per-route mutation (#227)
+	OpUpdateStaticRoute  = "update-static-route" // in-place per-route mutation (#227, §48)
 	OpSetProperty        = "set-property"
 	OpClearProperty      = "clear-property"
 	OpConfigureInterface = "configure-interface"
 	OpAddTrunkVLAN       = "add-trunk-vlan"    // per-VLAN intent record op (#224)
 	OpRemoveTrunkVLAN    = "remove-trunk-vlan" // wire verb tag; no intent (#224)
 	OpAddBGPPeer         = "add-bgp-peer"
-	OpUpdateBGPPeer      = "update-bgp-peer" // atomic per-peer mutation (#227)
+	OpUpdateBGPPeer      = "update-bgp-peer" // in-place per-peer mutation (#227, §48)
 	OpApplyService       = "apply-service"
 	OpBindACL            = "bind-acl"
 	OpBindQoS               = "bind-qos"
 	OpUnbindQoS             = "unbind-qos"
 	OpAddACLRule            = "add-acl-rule"
-	OpUpdateACLRule         = "update-acl-rule" // atomic per-rule mutation (#227)
+	OpUpdateACLRule         = "update-acl-rule" // in-place per-rule mutation (#227, §48)
 	OpAddPortChannelMember  = "add-pc-member"
 	OpInterfaceInit         = "interface-init"
 	OpDeployService         = "deploy-service"
@@ -1035,6 +1035,20 @@ func (c *ConfigDBClient) SetWithReply(table, key string, fields map[string]strin
 func (c *ConfigDBClient) DeleteWithReply(table, key string) (int64, error) {
 	redisKey := fmt.Sprintf("%s|%s", table, key)
 	return c.client.Del(c.ctx, redisKey).Result()
+}
+
+// HDelWithReply removes specific fields from a CONFIG_DB hash without deleting
+// the key — the field-level counterpart to DeleteWithReply. Used by an in-place
+// row replace (ChangeTypeReplace) to drop fields the new row no longer has,
+// while the key stays present so no daemon observes it absent (§48). Returns
+// the Redis-protocol reply (number of fields removed). A no-op for an empty
+// field list.
+func (c *ConfigDBClient) HDelWithReply(table, key string, fields []string) (int64, error) {
+	if len(fields) == 0 {
+		return 0, nil
+	}
+	redisKey := fmt.Sprintf("%s|%s", table, key)
+	return c.client.HDel(c.ctx, redisKey, fields...).Result()
 }
 
 

@@ -190,6 +190,18 @@ func assertNoChange(t *testing.T, cs *ChangeSet, table, key string) {
 	}
 }
 
+// assertNoChangeOfType verifies no change of a specific type exists for the key —
+// used to prove an in-place update never DELetes the key (§48 hitlessness),
+// while a Replace change for the same key is expected.
+func assertNoChangeOfType(t *testing.T, cs *ChangeSet, table, key string, ct ChangeType) {
+	t.Helper()
+	for _, c := range cs.Changes {
+		if c.Table == table && c.Key == key && c.Type == ct {
+			t.Fatalf("unexpected change [%s] %s|%s found (in-place update must not %s the key)", ct, table, key, ct)
+		}
+	}
+}
+
 // assertField checks that a change's Fields contains the expected field/value pair.
 func assertField(t *testing.T, c *Change, field, value string) {
 	t.Helper()
@@ -554,9 +566,10 @@ func TestUpdateACLRule_InPlace(t *testing.T) {
 		t.Fatalf("UpdateACLRule: %v", err)
 	}
 
-	// CONFIG_DB: prior ACL_RULE entry deleted, new one added at same key.
-	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
-	c := assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeAdd)
+	// CONFIG_DB: ACL_RULE replaced in place (§48) — no DELete of the key, so
+	// aclorch never opens a leak/deny window for the rule.
+	assertNoChangeOfType(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
+	c := assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeReplace)
 	assertField(t, c, "PRIORITY", "5000")
 	assertField(t, c, "SRC_IP", "192.168.0.0/16")
 
@@ -954,8 +967,10 @@ func TestUpdateBGPEVPNPeer_InPlaceASChange(t *testing.T) {
 		t.Fatalf("UpdateBGPEVPNPeer: %v", err)
 	}
 
-	assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeDelete)
-	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeAdd)
+	// Replaced in place (§48) — no DELete of the key, so the EVPN session is
+	// not torn down and MACs are not re-withdrawn.
+	assertNoChangeOfType(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeDelete)
+	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeReplace)
 	assertField(t, c, "asn", "65099")
 
 	intent := n.GetIntent("evpn-peer|10.0.0.2")
@@ -1063,8 +1078,10 @@ func TestUpdateStaticRoute_NextHopSwap(t *testing.T) {
 		t.Fatalf("UpdateStaticRoute next-hop swap: %v", err)
 	}
 
-	assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeDelete)
-	c := assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeAdd)
+	// Replaced in place (§48) — no DELete of the key, so fpmsyncd never opens a
+	// FIB gap for the prefix.
+	assertNoChangeOfType(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeDelete)
+	c := assertChange(t, cs, "STATIC_ROUTE", "Vrf_CUST1|10.0.0.0/24", ChangeReplace)
 	assertField(t, c, "nexthop", "10.1.0.2")
 
 	intent := n.GetIntent("route|Vrf_CUST1|10.0.0.0/24")
