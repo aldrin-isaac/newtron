@@ -3056,7 +3056,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C | prose | §4 |
 | 5 | Specs are intent; intent DB is authority | The intent DB is the primary state after application; the projection (from intent replay) is the expected CONFIG_DB; newtron requires its baseline | C | construction | §5 |
 | 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C | prose | §6 |
-| 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C | machine: validate.go | §7 |
+| 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C | machine: loader.go | §7 |
 | 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C | prose | §8 |
 | 9 | The opinion is in the pattern | newtron constrains the building blocks, not the building | C | prose | §9 |
 | 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C | construction | §10 |
@@ -3071,9 +3071,9 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 19 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C | construction | §19 |
 | 20 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C | machine: TestOpRoundTrip | §20 |
 | 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C | construction | §21 |
-| 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C | machine: TestOpRoundTrip | §22 |
+| 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C | machine: TestOpRoundTrip, TestRecordedParamsClaimed | §22 |
 | 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C | prose | §23 |
-| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C | machine: TestRecordedParamsClaimed | §24 |
+| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C | prose | §24 |
 | 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C | construction | §25 |
 | 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C | construction | §26 |
 | 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P | prose | §27 |
