@@ -2765,6 +2765,50 @@ the caller, not the delivery mechanism, must say which.**
 
 ---
 
+## 44. An Invariant Declares Its Enforcement
+
+A rule is only as strong as whatever enforces it. Systems accumulate
+invariants faster than they accumulate enforcement, and the gap between the
+two is where conformant-looking code rots: the rule is written down, agreed
+to, followed for a while — and then violated by a change that looked
+reasonable, in a file nobody re-read, composed from parts that were each
+individually correct.
+
+Enforcement comes in three classes, and they fail differently:
+
+- **By construction** — the violation is inexpressible. Once names are
+  normalized at the boundary, downstream code cannot mis-normalize; once
+  ordering is structural, there is no sleep to forget. This class cannot rot.
+- **By machine** — a gate rejects the violation: a schema that fails closed,
+  a completeness test that walks a registry. This class fails loudly, at the
+  gate, on the change that introduced the violation.
+- **By prose** — a document instructs a future reader. This class fails
+  silently, later, somewhere else: review is diff-scoped, and a violation
+  composed from individually-conformant changes appears in no diff at all.
+  Dormant code drifts from the rules exactly the way an unmonitored device
+  drifts from intent — and for the same reason: write-time discipline with
+  no read path.
+
+The principle is small. Three rules:
+
+1. **Every invariant names its enforcement class.** An invariant that cannot
+   say what enforces it is enforced by hope.
+
+2. **Prose enforcement is debt.** Acceptable when incurred knowingly, tracked
+   visibly, and repaid when the invariant matters — never the resting state
+   for a rule whose violation is expensive.
+
+3. **A checklist appearing twice is a registry not yet built.** When two
+   rules instruct readers to keep N places in sync, the N places are one
+   table that hasn't been written down as data. Build the table; walk it
+   with a test; delete the checklists.
+
+**The statement of a rule and the enforcement of a rule are different
+artifacts. A system that tracks only the first will comply with its
+principles at exactly the rate that its contributors re-read them.**
+
+---
+
 # Tensions and Resolutions
 
 A coherent system of principles is not a system without tensions.
@@ -2926,3 +2970,4 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 41 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
 | 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C |
 | 43 | In-place update is delivered in place | To a consumer that re-reads on each notification, an edit and a remove+add differ; updates are field diffs that never remove the object, teardown stays observable; the caller declares which | C |
+| 44 | An invariant declares its enforcement | Enforcement is by construction, machine, or prose; prose is debt, and a checklist appearing twice is a registry not yet built | C |
