@@ -71,6 +71,19 @@ newtron subscribes to and enforces rigorously. A few are style
 preferences where reasonable alternatives exist. The summary table at
 the end marks which is which.
 
+This document also has a universal twin. `DESIGN_PRINCIPLES.md` states
+each concept independently of newtron — the principle as it applies to
+any automation system on an open network. This document applies those
+concepts in newtron's terms: SONiC mechanics, named types, code
+anchors. The two are deliberately not copies — the universal document
+owns the concept and its rationale; this one owns the application. A
+principle restated verbatim in both is one of them failing its job.
+The mapping between them lives in exactly one place, the **Universal §**
+column of the summary table at the end, and `pkg/conformance` enforces
+it: adding, removing, or renumbering a principle in either document
+without updating the crosswalk fails `go test`. Rows marked **—** are
+newtron-implementation concerns with no universal counterpart.
+
 One more thing. These principles were arrived at through years of
 building, testing, failing, and rebuilding. The architecture, the
 code, and this document itself were rewritten multiple times. Each
@@ -2960,52 +2973,52 @@ writes land safely, not that the internal architecture is elegant.
 
 Legend: **C** = conviction (specific to this project) · **P** = established practice (newtron subscribes) · **S** = style preference
 
-| # | Principle | One-Line Rule | |
-|---|-----------|---------------|-|
-| 1 | The Node — intent and reality in one object | Intent and reality are the same type viewed from different starting points; the Node is that type | C |
-| 2 | Three properties of one code path | Delivery, offline provisioning, and drift detection are structural consequences, not independent features | C |
-| 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | C |
-| 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C |
-| 5 | Specs are intent; intent DB is authority | The intent DB is the primary state after application; the projection (from intent replay) is the expected CONFIG_DB; newtron requires its baseline | C |
-| 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C |
-| 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C |
-| 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C |
-| 9 | The opinion is in the pattern | newtron constrains the building blocks, not the building | C |
-| 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C |
-| 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C |
-| 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C |
-| 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C |
-| 14 | Verify writes, observe the rest | Assert what you know (your own writes); observe what you don't (the network); return data, not judgments | C |
-| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (lock + intent) over heuristic detection (staleness timers) | C |
-| 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C |
-| 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C |
-| 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C |
-| 19 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C |
-| 20 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C |
-| 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
-| 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C |
-| 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
-| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C |
-| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C |
-| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C |
-| 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P |
-| 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S |
-| 29 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P |
-| 30 | Respect abstraction boundaries | An abstraction that exists but is not used is worse than no abstraction at all | P |
-| 31 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | C |
-| 32 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S |
-| 33 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P |
-| 34 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S |
-| 35 | Import direction, interface state, projection rebuild | Three principles that each prevent a specific class of silent bug | P |
-| 36 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
-| 37 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
-| 38 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
-| 39 | DRY across programs | Every capability exists in exactly one place, even across program boundaries | P |
-| 40 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
-| 41 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
-| 42 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
-| 43 | Intent DAG — structural dependencies replace scanning | Declare parents at creation; the DAG enforces ordering, prevents premature deletion, and sorts reconstruction — without scanning | C |
-| 44 | Kind-prefixed intent keys | Every intent key starts with its kind (`vlan\|100`, `interface\|Ethernet0`); no heuristics, no special cases | C |
-| 45 | Multi-parent rendering | A child with multiple parents renders as a leaf under each parent; query the child directly to see its full subtree | C |
-| 46 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
-| 47 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C |
+| # | Principle | One-Line Rule | | Universal § |
+|---|-----------|---------------|-|-------------|
+| 1 | The Node — intent and reality in one object | Intent and reality are the same type viewed from different starting points; the Node is that type | C | §1 |
+| 2 | Three properties of one code path | Delivery, offline provisioning, and drift detection are structural consequences, not independent features | C | §2 |
+| 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | C | §3 |
+| 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C | §4 |
+| 5 | Specs are intent; intent DB is authority | The intent DB is the primary state after application; the projection (from intent replay) is the expected CONFIG_DB; newtron requires its baseline | C | §5 |
+| 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C | §6 |
+| 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C | §7 |
+| 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C | §8 |
+| 9 | The opinion is in the pattern | newtron constrains the building blocks, not the building | C | §9 |
+| 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C | §10 |
+| 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C | §11 |
+| 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C | §12 |
+| 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C | §13 |
+| 14 | Verify writes, observe the rest | Assert what you know (your own writes); observe what you don't (the network); return data, not judgments | C | §14 |
+| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (lock + intent) over heuristic detection (staleness timers) | C | §15 |
+| 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C | §16 |
+| 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C | §17 |
+| 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C | §18 |
+| 19 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C | §19 |
+| 20 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C | §20 |
+| 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C | §21 |
+| 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C | §22 |
+| 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C | §23 |
+| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C | §24 |
+| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C | §25 |
+| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C | §26 |
+| 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P | §27 |
+| 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S | §28 |
+| 29 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P | §29 |
+| 30 | Respect abstraction boundaries | An abstraction that exists but is not used is worse than no abstraction at all | P | §30 |
+| 31 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | C | §31 |
+| 32 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S | §32 |
+| 33 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P | §33 |
+| 34 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S | §34 |
+| 35 | Import direction, interface state, projection rebuild | Three principles that each prevent a specific class of silent bug | P | §34 |
+| 36 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P | §35 |
+| 37 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C | §36 |
+| 38 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C | §37 |
+| 39 | DRY across programs | Every capability exists in exactly one place, even across program boundaries | P | §34 |
+| 40 | Greenfield | Write code for the system as it is today, not as it was yesterday | C | §38 |
+| 41 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C | §39 |
+| 42 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C | §40 |
+| 43 | Intent DAG — structural dependencies replace scanning | Declare parents at creation; the DAG enforces ordering, prevents premature deletion, and sorts reconstruction — without scanning | C | — |
+| 44 | Kind-prefixed intent keys | Every intent key starts with its kind (`vlan\|100`, `interface\|Ethernet0`); no heuristics, no special cases | C | — |
+| 45 | Multi-parent rendering | A child with multiple parents renders as a leaf under each parent; query the child directly to see its full subtree | C | — |
+| 46 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C | §41 |
+| 47 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C | §42 |
