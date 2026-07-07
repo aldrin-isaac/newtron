@@ -484,3 +484,34 @@ func TestOpRegistrySanity(t *testing.T) {
 		}
 	}
 }
+
+// TestReplace_SkipsUnchangedRows pins §48's "unchanged sibling rows stay
+// untouched": an update whose regenerated sibling row (BGP_NEIGHBOR_AF) is
+// identical to the projection must emit NO change for that row — an
+// identical-fields HSET still fires a keyspace notification, and sonic-vs
+// frrcfgd's runtime AF handling deactivates the address family on reprocess
+// (RCA-049; caught on the wire by the evpn continuity check).
+func TestReplace_SkipsUnchangedRows(t *testing.T) {
+	ctx := context.Background()
+	n := testDevice()
+
+	// Establish the peer: BGP_NEIGHBOR + identical-forever AF row.
+	if _, err := n.SetupDevice(ctx, SetupDeviceOpts{
+		Fields: map[string]string{"hostname": "t", "bgp_asn": "65001"}, SourceIP: "10.255.0.1",
+	}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if _, err := n.AddBGPEVPNPeer(ctx, "10.9.9.2", 65002, "before", true); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	// Description-only update: BGP_NEIGHBOR changes, the AF row does not.
+	cs, err := n.UpdateBGPEVPNPeer(ctx, "10.9.9.2", 65002, "after", true)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	c := assertChange(t, cs, "BGP_NEIGHBOR", "default|10.9.9.2", ChangeReplace)
+	assertField(t, c, "name", "after")
+	assertNoChangeOfType(t, cs, "BGP_NEIGHBOR_AF", "default|10.9.9.2|l2vpn_evpn", ChangeReplace)
+	assertNoChangeOfType(t, cs, "BGP_NEIGHBOR_AF", "default|10.9.9.2|l2vpn_evpn", ChangeDelete)
+}
