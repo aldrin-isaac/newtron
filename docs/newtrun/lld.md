@@ -940,9 +940,11 @@ If the command includes `--json` and `step.Expect.JQ` is set, the executor parse
 
 ### 10.3 hostExecExecutor
 
-Action: `host-exec`. Runs `step.Command` over SSH on the named host devices. Per-device parallelism (each device's SSH call runs in its own goroutine; results collected and merged).
+Action: `host-exec`. Runs `step.Command` over SSH inside the host device's network namespace (`ip netns exec <device>`). Exactly **one** device per step (parser-enforced `singleDevice` — see the validation table in [§4.3](#43-validation-rules)).
 
-Honors `step.Expect.SuccessRate` for ping commands: parses the "N% packet loss" line and asserts the success rate is at least the configured threshold.
+Expectations, evaluated by `evaluateHostExpect` (shared by the one-shot and poll paths so both judge an attempt identically): `success_rate` parses the ping "N% packet loss" line; `contains` substring-matches combined stdout+stderr; with no `expect`, a zero exit passes.
+
+With `poll:`, the command re-executes every `interval` until the expectations pass or `timeout` expires — the host-side twin of the newtron action's polling. Dataplane readiness is asynchronous (route install, ARP resolution, ACL programming land after the CONFIG_DB write); poll instead of embedding fixed waits.
 
 ### 10.4 provisionExecutor
 
