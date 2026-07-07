@@ -720,6 +720,36 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 		}
 	}
 
+	// Cleanup steps run once, after all iterations and repeats, PASS or
+	// FAIL — see the Cleanup field doc on Scenario for the semantics
+	// (best-effort, results recorded, a cleanup failure fails the
+	// scenario). Expansion uses a nil target binding (validated at parse
+	// time: no {{target.X}}) and whatever the last iteration captured.
+	for i, step := range scenario.Cleanup {
+		stepToRun, expandErr := ExpandStep(step, nil, effectiveParams, r.captured)
+		if expandErr != nil {
+			result.Steps = append(result.Steps, StepResult{
+				Name:    "cleanup/" + step.Name,
+				Action:  step.Action,
+				Status:  StepStatusError,
+				Message: fmt.Sprintf("template expansion: %v", expandErr),
+			})
+			continue // best-effort: later cleanup steps still run
+		}
+
+		stepCopy := stepToRun
+		r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Cleanup)) })
+
+		output := r.executeStep(ctx, &stepToRun, i, len(scenario.Cleanup), opts)
+
+		sr := *output.Result
+		sr.Name = "cleanup/" + sr.Name
+		result.Steps = append(result.Steps, sr)
+
+		srCopy := sr
+		r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, i, len(scenario.Cleanup)) })
+	}
+
 	result.Status = computeOverallStatus(result.Steps)
 }
 

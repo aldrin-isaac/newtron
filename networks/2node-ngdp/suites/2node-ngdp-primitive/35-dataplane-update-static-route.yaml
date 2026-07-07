@@ -61,27 +61,15 @@ steps:
     expect:
       jq: '.nexthop == "10.1.0.1" and .distance == "50"'
 
-  # Prove the path before soaking. host-exec does not poll, so the
-  # route-install wait (staticd → zebra → fpmsyncd) polls from the switch
-  # side; the host
-  # then confirms end-to-end in one shot. `|| true` keeps a failing ping from
-  # aborting the poll with a 500.
-  - name: wait-route-installed
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/ssh-command
-    params: {command: "sudo ping -c 1 -W 2 10.99.99.10 || true"}
-    poll:
-      timeout: 120s
-      interval: 5s
-    expect:
-      jq: '.output | contains("1 received")'
-
+  # Prove the path end-to-end before soaking — polled from the host,
+  # because route install (staticd → zebra → fpmsyncd) is asynchronous.
   - name: precheck-path
     action: host-exec
     devices: [host1]
     command: "ping -c 3 -W 2 10.99.99.10"
+    poll:
+      timeout: 120s
+      interval: 5s
     expect:
       success_rate: 1.0
 
@@ -127,7 +115,10 @@ steps:
     expect:
       success_rate: 1.0
 
-  # --- Symmetric teardown (§15): remove everything this scenario added.
+# Symmetric teardown (§15): remove everything this scenario added. Lives in
+# cleanup: so a failing check cannot strand routes or the host secondary IP
+# into the downstream scenarios.
+cleanup:
   - name: remove-sw1-static
     action: newtron
     devices: [switch1]

@@ -183,6 +183,7 @@ type Scenario struct {
     After            []string `yaml:"after,omitempty"`
     RequiresFeatures []string `yaml:"requires_features,omitempty"`
     Repeat           int      `yaml:"repeat,omitempty"`
+    Cleanup          []Step   `yaml:"cleanup,omitempty"`
     Steps            []Step   `yaml:"steps"`
 }
 ```
@@ -249,7 +250,7 @@ type Step struct {
 | `params` | newtron, batch | Request body (any JSON-serializable map). Template tokens in string values are substituted; a value that is ENTIRELY one token preserves the parameter's typed Go value (int stays an int through `json.Marshal`). |
 | `duration` | wait | Sleep duration. |
 | `expect` | newtron, newtron-cli, host-exec | Response assertions. See [§2.7](#27-expectblock). |
-| `poll` | newtron | Polling spec. See [§2.8](#28-pollblock). |
+| `poll` | newtron, host-exec | Polling spec — re-execute until expectations pass or timeout. Both `timeout` and `interval` are required (> 0). See [§2.8](#28-pollblock). |
 | `batch` | newtron | Multiple calls grouped per device. See [§2.9](#29-batchcall). |
 | `expect_failure` | newtron | When true, inverts pass/fail — assert that the call fails. |
 
@@ -409,7 +410,7 @@ Per-action requirements enforced by `validateStepFields` (the `stepValidations` 
 |--------|----------------------|-------|
 | `newtron` | `url` or `batch` (custom check; mutually exclusive with each other in practice) | Devices, method, body are unconstrained at parse time. |
 | `newtron-cli` | — | Not in `stepValidations`; `command` is unchecked at parse time and fails at the executor if missing. |
-| `host-exec` | `command`; exactly **one** device (`singleDevice: true`) | Multi-device steps are rejected with "host-exec requires exactly one device". |
+| `host-exec` | `command`; exactly **one** device (`singleDevice: true`) | Multi-device steps are rejected with "host-exec requires exactly one device". Supports `poll:` — the command re-executes until `expect` passes or the timeout expires. |
 | `wait` | `duration` (custom check) | |
 | `topology-reconcile` | `devices` (`needsDevices: true`) | |
 | `verify-topology` | `devices` (`needsDevices: true`) | |
@@ -641,6 +642,8 @@ func (r *Runner) runScenarioSteps(
 ```
 
 Executes the steps of a scenario, recording per-step results into `result.Steps`. Honors `sc.Repeat` (run the step list N times). A step's failure stops the scenario at that step — subsequent steps are not run. When `Repeat > 1`, `result.FailedIteration` is set to the iteration number that failed, and outer iterations are not run.
+
+After all iterations and repeats, the scenario's `cleanup:` steps run — **regardless of pass/fail**. Cleanup semantics: best-effort (every cleanup step runs even if an earlier one fails); results are recorded like main steps under a `cleanup/` name prefix; a cleanup failure fails an otherwise-passing scenario (a dirty fabric is a real failure). Cleanup steps expand with a nil target binding — `{{target.X}}` references are rejected at parse time — and see whatever the last iteration captured. The motivating incident: a failed continuity-check scenario stranded an interface IP that cascaded into the portchannel scenario; teardown-as-ordinary-steps never runs when the scenario aborts earlier.
 
 ### 6.6 Dispatcher
 

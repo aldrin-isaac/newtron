@@ -40,6 +40,20 @@ type Scenario struct {
 	RequiresParams   []string `yaml:"requires_params,omitempty"`   // Suite-level parameters that must be set to a non-empty/non-zero value at run time; otherwise the scenario is skipped with a descriptive reason
 	Repeat           int      `yaml:"repeat,omitempty"`
 
+	// Cleanup steps run once per scenario, AFTER all iterations and repeats,
+	// regardless of pass/fail — fabric-state teardown must not depend on the
+	// scenario's outcome (a failed scenario that strands device state
+	// cascades into unrelated downstream failures; the §48 evpn continuity
+	// check stranding an interface IP into the portchannel scenario is the
+	// motivating incident). Semantics:
+	//   - best-effort: every cleanup step runs even if an earlier one fails
+	//     (no fail-fast — partial teardown is worse than reported failures)
+	//   - results are recorded like main steps; a cleanup failure fails an
+	//     otherwise-passing scenario (a dirty fabric is a real failure)
+	//   - no {{target.X}} references (validated at parse time) — cleanup is
+	//     not iterated per binding
+	Cleanup []Step `yaml:"cleanup,omitempty"`
+
 	// As names the cached-session user whose Bearer the runner
 	// attaches to every outbound newtron call this scenario makes
 	// (auth-design.md §L2c "Identity forwarding through engines").
