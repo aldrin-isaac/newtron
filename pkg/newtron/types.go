@@ -1323,7 +1323,10 @@ type ACLCreateRequest struct {
 }
 
 // ACLRuleAddRequest is the request body for adding a rule to an ACL table.
+// It is the single owner of the wire shape — the client sends it verbatim
+// and the handler decodes it verbatim (§25: no per-site field copies).
 type ACLRuleAddRequest struct {
+	ACL      string `json:"acl"`
 	RuleName string `json:"rule_name"`
 	Priority int    `json:"priority"`
 	Action   string `json:"action"`
@@ -1334,11 +1337,30 @@ type ACLRuleAddRequest struct {
 	DstPort  string `json:"dst_port,omitempty"`
 }
 
+// Config converts the wire request to the domain config the Node API takes
+// (§33 boundary translation). The single conversion site for this family —
+// a handler that copies fields by hand re-creates the silent-drop boundary
+// RCA-049 documented.
+func (r ACLRuleAddRequest) Config() ACLRuleConfig {
+	return ACLRuleConfig{
+		ACLName:  r.ACL,
+		RuleName: r.RuleName,
+		Priority: r.Priority,
+		Action:   r.Action,
+		SrcIP:    r.SrcIP,
+		DstIP:    r.DstIP,
+		Protocol: r.Protocol,
+		SrcPort:  r.SrcPort,
+		DstPort:  r.DstPort,
+	}
+}
+
 // ACLRuleUpdateRequest is the request body for atomically updating an ACL
 // rule's fields under the per-device intent lock. The composite key
 // (table + rule_name) is the row's identity (§47) and is not mutable
 // through this verb — rename via remove-acl-rule + add-acl-rule. #227.
 type ACLRuleUpdateRequest struct {
+	ACL      string `json:"acl"`
 	RuleName string `json:"rule_name"`
 	Priority int    `json:"priority"`
 	Action   string `json:"action"`
@@ -1347,6 +1369,22 @@ type ACLRuleUpdateRequest struct {
 	Protocol string `json:"protocol,omitempty"`
 	SrcPort  string `json:"src_port,omitempty"`
 	DstPort  string `json:"dst_port,omitempty"`
+}
+
+// Config converts the wire request to the domain config — see
+// ACLRuleAddRequest.Config.
+func (r ACLRuleUpdateRequest) Config() ACLRuleConfig {
+	return ACLRuleConfig{
+		ACLName:  r.ACL,
+		RuleName: r.RuleName,
+		Priority: r.Priority,
+		Action:   r.Action,
+		SrcIP:    r.SrcIP,
+		DstIP:    r.DstIP,
+		Protocol: r.Protocol,
+		SrcPort:  r.SrcPort,
+		DstPort:  r.DstPort,
+	}
 }
 
 // PortChannelCreateRequest is the request body for creating a port channel.

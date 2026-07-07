@@ -505,6 +505,7 @@ var (
 	evpnPeerRemoteAS    int
 	evpnPeerMultihop    int
 	evpnPeerDescription string
+	evpnPeerEVPN        bool
 )
 
 var evpnAddPeerCmd = &cobra.Command{
@@ -538,6 +539,7 @@ Examples:
 			RemoteAS:    evpnPeerRemoteAS,
 			Multihop:    evpnPeerMultihop,
 			Description: evpnPeerDescription,
+			EVPN:        evpnPeerEVPN,
 		}, execOpts()))
 	},
 }
@@ -572,6 +574,7 @@ Examples:
 			NeighborIP:  evpnPeerNeighbor,
 			RemoteAS:    evpnPeerRemoteAS,
 			Description: evpnPeerDescription,
+			EVPN:        evpnPeerEVPN,
 		}, execOpts()))
 	},
 }
@@ -626,9 +629,11 @@ func init() {
 	evpnAddPeerCmd.Flags().IntVar(&evpnPeerRemoteAS, "remote-as", 0, "Remote AS number (required)")
 	evpnAddPeerCmd.Flags().IntVar(&evpnPeerMultihop, "multihop", 0, "eBGP multihop TTL")
 	evpnAddPeerCmd.Flags().StringVar(&evpnPeerDescription, "description", "", "Peer description")
+	evpnAddPeerCmd.Flags().BoolVar(&evpnPeerEVPN, "evpn", true, "Activate the l2vpn evpn address family (the verb's purpose; disable only for staged bring-up)")
 	evpnUpdatePeerCmd.Flags().StringVar(&evpnPeerNeighbor, "neighbor", "", "Existing neighbor IP (required)")
 	evpnUpdatePeerCmd.Flags().IntVar(&evpnPeerRemoteAS, "remote-as", 0, "New remote AS number (required)")
 	evpnUpdatePeerCmd.Flags().StringVar(&evpnPeerDescription, "description", "", "New peer description")
+	evpnUpdatePeerCmd.Flags().BoolVar(&evpnPeerEVPN, "evpn", true, "Keep the l2vpn evpn address family active (an update replaces the peer's caller params — false deactivates the AF)")
 
 	// evpn subcommands
 	evpnCmd.AddCommand(evpnStatusCmd)

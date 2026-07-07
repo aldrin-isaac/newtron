@@ -3557,6 +3557,7 @@ L2VPN EVPN address family exchange.
 | `remote_as` | integer | yes | Remote AS number |
 | `description` | string | no | Neighbor description |
 | `multihop` | integer | no | eBGP multihop TTL |
+| `evpn` | boolean | no | Activate the l2vpn evpn address family on the neighbor — the flag this verb exists for. Omitted/false leaves the session with no per-neighbor AF activation. |
 
 **Response (201):** `WriteResult`
 
@@ -3582,6 +3583,7 @@ different real-world endpoint. 404 if no peer exists at `neighbor_ip`.
 | `neighbor_ip` | string | yes | Existing peer's neighbor IP |
 | `remote_as` | integer | yes | New remote AS |
 | `description` | string | no | New description |
+| `evpn` | boolean | no | Keep the l2vpn evpn address family active. The update replaces the peer's caller params — omitting this on a peer added with `evpn: true` DEACTIVATES the address family and drops the session (RCA-049). |
 
 **Response (200):** `WriteResult`
 

@@ -276,16 +276,8 @@ func (c *Client) AddBGPEVPNPeer(device string, config newtron.BGPNeighborConfig,
 // fields. The composite key (default + neighbor_ip) is the row's
 // identity (§47); a re-IP is remove + add via separate verbs. #227.
 func (c *Client) UpdateBGPEVPNPeer(device, neighborIP string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := struct {
-		NeighborIP  string `json:"neighbor_ip"`
-		RemoteAS    int    `json:"remote_as"`
-		Description string `json:"description,omitempty"`
-	}{
-		NeighborIP:  neighborIP,
-		RemoteAS:    config.RemoteAS,
-		Description: config.Description,
-	}
-	return c.nodeWrite(device, "update-bgp-evpn-peer", body, opts)
+	config.NeighborIP = neighborIP
+	return c.nodeWrite(device, "update-bgp-evpn-peer", config, opts)
 }
 
 // RemoveBGPEVPNPeer removes an EVPN BGP neighbor by IP.
@@ -405,31 +397,12 @@ func (c *Client) DeleteACL(device, name string, opts newtron.ExecOpts) (*newtron
 	return c.nodeWrite(device, "delete-acl", body, opts)
 }
 
-// AddACLRule adds a rule to an ACL.
+// AddACLRule adds a rule to an ACL. The acl parameter takes precedence
+// over any ACL value already set on config — one authority for the target
+// table per call.
 func (c *Client) AddACLRule(device, acl string, config newtron.ACLRuleAddRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	// The handler expects acl in the body alongside the rule fields.
-	body := struct {
-		ACL      string `json:"acl"`
-		RuleName string `json:"rule_name"`
-		Priority int    `json:"priority"`
-		Action   string `json:"action"`
-		SrcIP    string `json:"src_ip"`
-		DstIP    string `json:"dst_ip"`
-		Protocol string `json:"protocol"`
-		SrcPort  string `json:"src_port"`
-		DstPort  string `json:"dst_port"`
-	}{
-		ACL:      acl,
-		RuleName: config.RuleName,
-		Priority: config.Priority,
-		Action:   config.Action,
-		SrcIP:    config.SrcIP,
-		DstIP:    config.DstIP,
-		Protocol: config.Protocol,
-		SrcPort:  config.SrcPort,
-		DstPort:  config.DstPort,
-	}
-	return c.nodeWrite(device, "add-acl-rule", body, opts)
+	config.ACL = acl
+	return c.nodeWrite(device, "add-acl-rule", config, opts)
 }
 
 // UpdateACLRule atomically mutates fields on an ACL rule under the
@@ -437,28 +410,8 @@ func (c *Client) AddACLRule(device, acl string, config newtron.ACLRuleAddRequest
 // immutable. Closes the packet-leak window remove + add exposes
 // today (#227).
 func (c *Client) UpdateACLRule(device, acl string, config newtron.ACLRuleUpdateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := struct {
-		ACL      string `json:"acl"`
-		RuleName string `json:"rule_name"`
-		Priority int    `json:"priority"`
-		Action   string `json:"action"`
-		SrcIP    string `json:"src_ip"`
-		DstIP    string `json:"dst_ip"`
-		Protocol string `json:"protocol"`
-		SrcPort  string `json:"src_port"`
-		DstPort  string `json:"dst_port"`
-	}{
-		ACL:      acl,
-		RuleName: config.RuleName,
-		Priority: config.Priority,
-		Action:   config.Action,
-		SrcIP:    config.SrcIP,
-		DstIP:    config.DstIP,
-		Protocol: config.Protocol,
-		SrcPort:  config.SrcPort,
-		DstPort:  config.DstPort,
-	}
-	return c.nodeWrite(device, "update-acl-rule", body, opts)
+	config.ACL = acl
+	return c.nodeWrite(device, "update-acl-rule", config, opts)
 }
 
 // RemoveACLRule removes a rule from an ACL.

@@ -61,18 +61,7 @@ func (c *Client) InterfaceAddBGPPeer(device, iface string, config newtron.BGPNei
 // an interface. The composite key (vrf + neighbor_ip) is the row's
 // identity (§47); a re-IP is remove + add via separate verbs. #227.
 func (c *Client) InterfaceUpdateBGPPeer(device, iface string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := struct {
-		NeighborIP  string `json:"neighbor_ip"`
-		RemoteAS    int    `json:"remote_as"`
-		Description string `json:"description,omitempty"`
-		Multihop    int    `json:"multihop,omitempty"`
-	}{
-		NeighborIP:  config.NeighborIP,
-		RemoteAS:    config.RemoteAS,
-		Description: config.Description,
-		Multihop:    config.Multihop,
-	}
-	return c.interfaceWrite(device, iface, "update-bgp-peer", body, opts)
+	return c.interfaceWrite(device, iface, "update-bgp-peer", config, opts)
 }
 
 // InterfaceRemoveBGPPeer removes a BGP peer from an interface.

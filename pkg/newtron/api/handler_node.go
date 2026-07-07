@@ -562,32 +562,14 @@ func (s *Server) handleAddACLRule(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	var req struct {
-		ACL      string `json:"acl"`
-		RuleName string `json:"rule_name"`
-		Priority int    `json:"priority"`
-		Action   string `json:"action"`
-		SrcIP    string `json:"src_ip"`
-		DstIP    string `json:"dst_ip"`
-		Protocol string `json:"protocol"`
-		SrcPort  string `json:"src_port"`
-		DstPort  string `json:"dst_port"`
-	}
+	var req newtron.ACLRuleAddRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddACLRule(ctx, req.ACL, req.RuleName, newtron.ACLRuleConfig{
-			Priority: req.Priority,
-			Action:   req.Action,
-			SrcIP:    req.SrcIP,
-			DstIP:    req.DstIP,
-			Protocol: req.Protocol,
-			SrcPort:  req.SrcPort,
-			DstPort:  req.DstPort,
-		})
+		return n.AddACLRule(ctx, req.ACL, req.RuleName, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)
@@ -601,32 +583,14 @@ func (s *Server) handleUpdateACLRule(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	var req struct {
-		ACL      string `json:"acl"`
-		RuleName string `json:"rule_name"`
-		Priority int    `json:"priority"`
-		Action   string `json:"action"`
-		SrcIP    string `json:"src_ip"`
-		DstIP    string `json:"dst_ip"`
-		Protocol string `json:"protocol"`
-		SrcPort  string `json:"src_port"`
-		DstPort  string `json:"dst_port"`
-	}
+	var req newtron.ACLRuleUpdateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.UpdateACLRule(ctx, req.ACL, req.RuleName, newtron.ACLRuleConfig{
-			Priority: req.Priority,
-			Action:   req.Action,
-			SrcIP:    req.SrcIP,
-			DstIP:    req.DstIP,
-			Protocol: req.Protocol,
-			SrcPort:  req.SrcPort,
-			DstPort:  req.DstPort,
-		})
+		return n.UpdateACLRule(ctx, req.ACL, req.RuleName, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)
