@@ -1,0 +1,155 @@
+name: dataplane-update-static-route
+description: |
+  #235 dataplane continuity check for update-static-route (§48 in-place
+  delivery). The substrate proves the verb emits a single Replace and never
+  DELetes the STATIC_ROUTE key; this proves it on the wire: an in-place
+  metric change on a route that live traffic depends on must not open a FIB
+  gap.
+
+  Method (drop-budget): host1 pings a prefix reachable ONLY via a static
+  route on switch1 (10.99.99.0/24 → switch2 → host4 secondary IP), at 10pps
+  for 12 seconds; mid-soak the route's metric is updated in place; the soak
+  must finish with zero loss. A regression to whole-row DEL+ADD withdraws the
+  route for the daemon-processing window and drops packets. Honest limit: a
+  sub-interval gap can slip between probes — sustained regressions caught
+  reliably, brief ones probabilistically.
+
+  This check lives in the CiscoVS suite deliberately: split-mode bgpcfgd's
+  StaticRouteMgr handles runtime STATIC_ROUTE writes natively. On sonic-vs
+  (unified frrcfgd) runtime creation needs a restart-replay (RCA-044), and a
+  second mid-suite BGP restart destabilizes bgp.service (crash-loop minutes
+  later) — the platform cannot host this check safely (RCA-049 family).
+
+  Builds on cross-switch state (host1=10.20.0.0/31 via sw1:E4, host4=
+  10.20.1.0/31 via sw2:E4, BGP return paths proven). Cleans up everything it
+  adds.
+requires: [cross-switch]
+
+steps:
+  # --- Path construction: 10.99.99.0/24 lives on host4 as a secondary IP;
+  #     switch1 reaches it via the static route under test; switch2 via its
+  #     own static toward host4.
+  - name: host4-add-secondary-ip
+    action: host-exec
+    devices: [host4]
+    command: "ip addr add 10.99.99.10/24 dev eth0 2>/dev/null || true"
+
+  - name: sw2-static-to-host4
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/add-static-route
+    params:
+      prefix: "10.99.99.0/24"
+      nexthop: "10.20.1.0"
+
+  # The route under test — metric set so the in-place update has a field to change.
+  - name: sw1-static-under-test
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-static-route
+    params:
+      prefix: "10.99.99.0/24"
+      nexthop: "10.1.0.1"
+      metric: 50
+
+  - name: verify-route-installed
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/10.99.99.0%2F24
+    expect:
+      jq: '.nexthop == "10.1.0.1" and .distance == "50"'
+
+  # Prove the path before soaking. host-exec does not poll, so the
+  # route-install wait (staticd → zebra → fpmsyncd) polls from the switch
+  # side; the host
+  # then confirms end-to-end in one shot. `|| true` keeps a failing ping from
+  # aborting the poll with a 500.
+  - name: wait-route-installed
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 10.99.99.10 || true"}
+    poll:
+      timeout: 120s
+      interval: 5s
+    expect:
+      jq: '.output | contains("1 received")'
+
+  - name: precheck-path
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.99.99.10"
+    expect:
+      success_rate: 1.0
+
+  # --- The soak: 120 probes at 10pps (12s), backgrounded so the update lands
+  #     mid-stream.
+  - name: start-soak
+    action: host-exec
+    devices: [host1]
+    command: "rm -f /tmp/soak-static.txt; nohup sh -c 'ping -i 0.1 -c 120 -W 1 10.99.99.10 > /tmp/soak-static.txt 2>&1' >/dev/null 2>&1 & echo soak-started"
+
+  - name: soak-reaches-steady-state
+    action: wait
+    duration: 3s
+
+  # The in-place update: metric 50 → 60, same prefix, same nexthop. cs.Replace
+  # HSETs distance only; the key is never absent (§48).
+  - name: update-static-route-in-place
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-static-route
+    params:
+      prefix: "10.99.99.0/24"
+      nexthop: "10.1.0.1"
+      metric: 60
+
+  - name: verify-metric-updated
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/10.99.99.0%2F24
+    expect:
+      jq: '.nexthop == "10.1.0.1" and .distance == "60"'
+
+  - name: wait-soak-complete
+    action: wait
+    duration: 12s
+
+  # Drop budget: zero. 120/120 received or the check fails.
+  - name: collect-soak-zero-loss
+    action: host-exec
+    devices: [host1]
+    command: "cat /tmp/soak-static.txt"
+    expect:
+      success_rate: 1.0
+
+  # --- Symmetric teardown (§15): remove everything this scenario added.
+  - name: remove-sw1-static
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-static-route
+    params: {prefix: "10.99.99.0/24"}
+
+  - name: remove-sw2-static
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/remove-static-route
+    params: {prefix: "10.99.99.0/24"}
+
+  - name: verify-sw1-route-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/STATIC_ROUTE/10.99.99.0%2F24/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: host4-remove-secondary-ip
+    action: host-exec
+    devices: [host4]
+    command: "ip addr del 10.99.99.10/24 dev eth0 2>/dev/null || true; rm -f /tmp/soak-static.txt"
