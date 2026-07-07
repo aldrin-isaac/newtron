@@ -11,6 +11,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
 var vlanCmd = &cobra.Command{
@@ -180,6 +181,7 @@ Examples:
 
 var (
 	vlanDescription string
+	vlanL2VNI       int
 )
 
 var vlanCreateCmd = &cobra.Command{
@@ -200,7 +202,11 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.CreateVLAN(app.deviceName, vlanID, vlanDescription, execOpts()))
+		return displayWriteResult(app.client.CreateVLAN(app.deviceName, api.VLANCreateRequest{
+			ID:          vlanID,
+			Description: vlanDescription,
+			L2VNI:       vlanL2VNI,
+		}, execOpts()))
 	},
 }
 
@@ -363,6 +369,7 @@ Examples:
 
 func init() {
 	vlanCreateCmd.Flags().StringVar(&vlanDescription, "description", "", "VLAN description")
+	vlanCreateCmd.Flags().IntVar(&vlanL2VNI, "l2-vni", 0, "Map the VLAN to this L2VNI at creation (the create-vlan operation's vni param; bind-macvpn is the spec-driven path)")
 
 	vlanConfigureIRBCmd.Flags().StringVar(&sviVRF, "vrf", "", "VRF to bind the IRB to")
 	vlanConfigureIRBCmd.Flags().StringVar(&sviIP, "ip", "", "IP address with prefix (e.g., 10.1.100.1/24)")

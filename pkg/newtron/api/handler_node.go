@@ -407,7 +407,7 @@ func (s *Server) handleCreateVLAN(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.CreateVLAN(ctx, req.ID, newtron.VLANConfig{Description: req.Description})
+		return n.CreateVLAN(ctx, req.ID, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)
@@ -451,11 +451,7 @@ func (s *Server) handleConfigureIRB(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.ConfigureIRB(ctx, req.VlanID, newtron.IRBConfig{
-			VRF:        req.VRF,
-			IPAddress:  req.IPAddress,
-			AnycastMAC: req.AnycastMAC,
-		})
+		return n.ConfigureIRB(ctx, req.VlanID, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)
@@ -476,7 +472,7 @@ func (s *Server) handleCreateVRF(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.CreateVRF(ctx, req.Name, newtron.VRFConfig{Name: req.Name})
+		return n.CreateVRF(ctx, req.Name, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)
@@ -520,12 +516,7 @@ func (s *Server) handleCreateACL(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.CreateACL(ctx, req.Name, newtron.ACLConfig{
-			Type:        req.Type,
-			Stage:       req.Stage,
-			Ports:       req.Ports,
-			Description: req.Description,
-		})
+		return n.CreateACL(ctx, req.Name, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)
@@ -635,14 +626,7 @@ func (s *Server) handleCreatePortChannel(w http.ResponseWriter, r *http.Request)
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.CreatePortChannel(ctx, req.Name, newtron.PortChannelConfig{
-			Name:     req.Name,
-			Members:  req.Members,
-			MinLinks: req.MinLinks,
-			FastRate: req.FastRate,
-			Fallback: req.Fallback,
-			MTU:      req.MTU,
-		})
+		return n.CreatePortChannel(ctx, req.Name, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)

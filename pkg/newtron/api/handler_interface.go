@@ -368,9 +368,7 @@ func (s *Server) handleConfigureInterface(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
-		return iface.ConfigureInterface(ctx, newtron.InterfaceConfig{
-			VRF: req.VRF, IP: req.IP, VLAN: req.VLAN, Tagged: req.Tagged,
-		})
+		return iface.ConfigureInterface(ctx, req.Config())
 	})
 	if err != nil {
 		writeError(w, err)

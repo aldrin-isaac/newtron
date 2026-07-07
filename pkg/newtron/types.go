@@ -1313,6 +1313,18 @@ type IRBConfigureRequest struct {
 	AnycastMAC string `json:"anycast_mac,omitempty"`
 }
 
+// Config converts the wire request to the domain config the Node API takes
+// (§33 boundary translation) — see ACLRuleAddRequest.Config for why the
+// conversion has exactly one site.
+func (r IRBConfigureRequest) Config() IRBConfig {
+	return IRBConfig{
+		VlanID:     r.VlanID,
+		VRF:        r.VRF,
+		IPAddress:  r.IPAddress,
+		AnycastMAC: r.AnycastMAC,
+	}
+}
+
 // ACLCreateRequest is the request body for creating an ACL table.
 type ACLCreateRequest struct {
 	Name        string `json:"name"`
@@ -1320,6 +1332,18 @@ type ACLCreateRequest struct {
 	Stage       string `json:"stage"`
 	Ports       string `json:"ports,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+// Config converts the wire request to the domain config — see
+// ACLRuleAddRequest.Config.
+func (r ACLCreateRequest) Config() ACLConfig {
+	return ACLConfig{
+		Name:        r.Name,
+		Type:        r.Type,
+		Stage:       r.Stage,
+		Ports:       r.Ports,
+		Description: r.Description,
+	}
 }
 
 // ACLRuleAddRequest is the request body for adding a rule to an ACL table.
@@ -1340,7 +1364,7 @@ type ACLRuleAddRequest struct {
 // Config converts the wire request to the domain config the Node API takes
 // (§33 boundary translation). The single conversion site for this family —
 // a handler that copies fields by hand re-creates the silent-drop boundary
-// RCA-049 documented.
+// RCA-049 documented. Enforced by TestHandlersUseConfigConverters.
 func (r ACLRuleAddRequest) Config() ACLRuleConfig {
 	return ACLRuleConfig{
 		ACLName:  r.ACL,
@@ -1395,4 +1419,16 @@ type PortChannelCreateRequest struct {
 	FastRate bool     `json:"fast_rate,omitempty"`
 	Fallback bool     `json:"fallback,omitempty"`
 	MTU      int      `json:"mtu,omitempty"`
+}
+// Config converts the wire request to the domain config — see
+// ACLRuleAddRequest.Config.
+func (r PortChannelCreateRequest) Config() PortChannelConfig {
+	return PortChannelConfig{
+		Name:     r.Name,
+		Members:  r.Members,
+		MinLinks: r.MinLinks,
+		FastRate: r.FastRate,
+		Fallback: r.Fallback,
+		MTU:      r.MTU,
+	}
 }

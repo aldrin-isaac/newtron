@@ -127,6 +127,17 @@ type ConfigureInterfaceRequest struct {
 	Tagged bool   `json:"tagged,omitempty"`
 }
 
+// Config converts the wire request to the domain config — see
+// VLANCreateRequest.Config.
+func (r ConfigureInterfaceRequest) Config() newtron.InterfaceConfig {
+	return newtron.InterfaceConfig{
+		VRF:    r.VRF,
+		IP:     r.IP,
+		VLAN:   r.VLAN,
+		Tagged: r.Tagged,
+	}
+}
+
 // RemoveTrunkVLANRequest is the body for POST .../remove-trunk-vlan.
 // The interface name comes from the URL; vlan_id identifies which trunk
 // membership to strip. Atomic — other VLANs and the rest of the interface
@@ -218,9 +229,26 @@ type NodeStatus struct {
 // ============================================================================
 
 // VLANCreateRequest is the body for POST .../create-vlan.
+//
+// l2_vni closes a wire gap: `vni` is a declared caller param of the
+// create-vlan operation (op_registry.go manifest — recorded in the intent,
+// replayed from topology steps), but the wire could not express it, so a
+// topology file could author what an HTTP caller could not.
 type VLANCreateRequest struct {
 	ID          int    `json:"id"`
 	Description string `json:"description,omitempty"`
+	L2VNI       int    `json:"l2_vni,omitempty"`
+}
+
+// Config converts the wire request to the domain config the Node API takes
+// (§33 boundary translation; see newtron.ACLRuleAddRequest.Config for why
+// the conversion has exactly one site).
+func (r VLANCreateRequest) Config() newtron.VLANConfig {
+	return newtron.VLANConfig{
+		VlanID:      r.ID,
+		Description: r.Description,
+		L2VNI:       r.L2VNI,
+	}
 }
 
 // IRBConfigureRequest is the body for POST .../configure-irb.
@@ -229,6 +257,12 @@ type IRBConfigureRequest = newtron.IRBConfigureRequest
 // VRFCreateRequest is the body for POST .../create-vrf.
 type VRFCreateRequest struct {
 	Name string `json:"name"`
+}
+
+// Config converts the wire request to the domain config — see
+// VLANCreateRequest.Config.
+func (r VRFCreateRequest) Config() newtron.VRFConfig {
+	return newtron.VRFConfig{Name: r.Name}
 }
 
 // ACLCreateRequest is the body for POST .../create-acl.
