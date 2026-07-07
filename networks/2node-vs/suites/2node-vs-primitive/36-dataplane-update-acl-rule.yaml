@@ -64,16 +64,15 @@ steps:
     url: /nodes/{{device}}/interfaces/Ethernet4/bind-acl
     params: {acl: CONT_EDGE, direction: ingress}
 
-  # Let aclorch program the rules (host-exec cannot poll), then prove the
-  # FORWARD rule wins before soaking.
-  - name: wait-aclorch-settle
-    action: wait
-    duration: 8s
-
+  # Prove the FORWARD rule wins before soaking — polled, because aclorch
+  # programs the rules asynchronously after the CONFIG_DB write.
   - name: precheck-forward-wins
     action: host-exec
     devices: [host1]
     command: "ping -c 3 -W 2 10.20.1.0"
+    poll:
+      timeout: 60s
+      interval: 5s
     expect:
       success_rate: 1.0
 
@@ -119,7 +118,10 @@ steps:
     expect:
       success_rate: 1.0
 
-  # --- Symmetric teardown (§15): unbind, rules, table — reverse order.
+# Symmetric teardown (§15): unbind, rules, table — reverse order. Lives in
+# cleanup: so a failing check cannot strand a bound ACL on Ethernet4 into
+# the downstream scenarios.
+cleanup:
   - name: unbind-acl
     action: newtron
     devices: [switch1]

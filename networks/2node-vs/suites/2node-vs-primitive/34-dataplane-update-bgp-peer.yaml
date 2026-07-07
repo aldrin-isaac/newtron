@@ -31,12 +31,11 @@ steps:
     action: wait
     duration: 30s
 
-  # Capture runs only on the network-scoped call path (no {{device}} template),
-  # so the device is hardcoded here rather than templated.
   - name: capture-uptime-before
     action: newtron
+    devices: [switch1]
     method: POST
-    url: /nodes/switch1/ssh-command
+    url: /nodes/{{device}}/ssh-command
     params: {command: "sudo vtysh -c 'show bgp summary json'"}
     capture:
       up_before: '.output | fromjson | (.ipv4Unicast.peers // .peers) | .["10.1.0.1"].peerUptimeMsec'
