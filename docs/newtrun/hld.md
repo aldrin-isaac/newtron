@@ -553,7 +553,7 @@ The flow:
 
 Inside a Runner, scenarios execute in dependency order (topologically sorted from `requires` / `after`). Scenarios with failed requirements skip. At every scenario boundary, the Runner checks two signals: the context (cancellation from server shutdown or stop request) and the file-based pause flag (`CheckPausing` reads the state file).
 
-Each scenario iterates its steps sequentially. Steps with `devices: all` or a device list fan out to per-device execution; per-device results aggregate into one StepResult.
+Each scenario iterates its steps sequentially. Steps with `devices: all` or a device list fan out to per-device execution; per-device results aggregate into one StepResult. A step failure stops the scenario's remaining main steps; the scenario's `cleanup:` steps then run regardless of outcome, so a failed scenario cannot strand device state into the scenarios after it. A cleanup failure fails an otherwise-passing scenario — a dirty fabric is a real failure.
 
 ### 8.3 The reporter chain
 

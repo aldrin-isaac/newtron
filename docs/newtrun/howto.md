@@ -571,8 +571,9 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 | `params` | newtron, batch | Request body (a YAML/JSON map). |
 | `duration` | wait | Sleep duration (e.g., `30s`, `2m`). |
 | `expect` | newtron, newtron-cli, host-exec | Response assertions. See [§10.3](#103-expect-assertions). |
-| `poll` | newtron | Polling — retry until expect passes or timeout expires. |
+| `poll` | newtron, host-exec | Polling — retry until expect passes or timeout expires. Both `timeout` and `interval` required (> 0). |
 | `batch` | newtron | Multiple HTTP calls grouped per device. |
+| `capture` | newtron | Save values from the response body for later steps (`{{captured.NAME}}`). Single-call steps only — including a `{{device}}`-templated step with exactly one device. See the response-capture notes in [§11.8](#118-common-operations). |
 | `headers` | newtron | Per-step HTTP headers (e.g. `X-Newtron-Caller: alice` to forge a caller identity for auth testing). Applies uniformly across the step including batched sub-calls — one step = one identity. See [§11.5 Per-step headers](#per-step-headers-auth-identity). |
 | `expect_failure` | newtron | Invert pass/fail — assert the call fails. |
 
