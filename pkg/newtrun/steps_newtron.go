@@ -36,8 +36,37 @@ func (e *newtronExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 		return e.executePoll(ctx, r, step, method)
 	}
 
-	// One-shot mode: per-device parallel execution.
+	// One-shot mode: per-device parallel execution. With capture: the parser
+	// guarantees exactly one device, so the step degenerates to a single call
+	// — same shape as the network-scoped path below, just device-expanded —
+	// and the one response body is a valid capture source.
 	if hasDeviceTemplate(step.URL) {
+		if len(step.Capture) > 0 {
+			names := r.resolveDevices(step)
+			if len(names) != 1 { // defense-in-depth; the parser already rejects this
+				return &StepOutput{Result: &StepResult{
+					Status:  StepStatusError,
+					Message: fmt.Sprintf("capture on a device-templated step requires exactly one device, resolved %d", len(names)),
+				}}
+			}
+			msg, raw, err := e.doCall(r, step, method, step.URL, step.Params, names[0], step.Headers, step.Expect)
+			if err != nil {
+				return &StepOutput{Result: &StepResult{
+					Status:  StepStatusFailed,
+					Message: fmt.Sprintf("%s: %s", names[0], err),
+				}}
+			}
+			if err := applyCaptures(r.captured, step.Capture, raw); err != nil {
+				return &StepOutput{Result: &StepResult{
+					Status:  StepStatusFailed,
+					Message: fmt.Sprintf("response-capture: %s", err),
+				}}
+			}
+			return &StepOutput{Result: &StepResult{
+				Status:  StepStatusPassed,
+				Message: msg,
+			}}
+		}
 		return r.executeForDevices(step, func(name string) (string, error) {
 			msg, _, err := e.doCall(r, step, method, step.URL, step.Params, name, step.Headers, step.Expect)
 			return msg, err
@@ -52,11 +81,12 @@ func (e *newtronExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 			Message: err.Error(),
 		}}
 	}
-	// Response-capture runs only on the single-call path. Batch and
-	// poll modes don't expose a single response shape (batch =
+	// Response-capture on the network-scoped single-call path. Batch
+	// and poll modes don't expose a single response shape (batch =
 	// multiple calls; poll = the assertion result, not the final
-	// body); the parser rejects capture: on those step shapes so
-	// this is the only place capture extraction is wired.
+	// body); the parser rejects capture: on those step shapes. The
+	// other capture site is the single-device path above — same
+	// single-response property, device-expanded.
 	if len(step.Capture) > 0 {
 		if err := applyCaptures(r.captured, step.Capture, raw); err != nil {
 			return &StepOutput{Result: &StepResult{

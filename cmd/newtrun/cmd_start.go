@@ -386,6 +386,12 @@ func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
 			fmt.Fprintf(os.Stderr, "          [%d/%d] %s %s (%s)\n",
 				p.Index+1, p.Total, p.Result.Name, p.Result.Status, p.Result.Duration)
 		}
+		// A failing step's message streams too — the live summary must be
+		// diagnosable without re-running with --junit (the message is the
+		// same one the junit report carries).
+		if !verboseFlag && (string(p.Result.Status) == "FAIL" || string(p.Result.Status) == "ERROR") {
+			fmt.Fprintf(os.Stderr, "          ✗ %s: %s\n", p.Result.Name, firstLines(p.Result.Message, 3))
+		}
 
 	case api.EventScenarioEnd:
 		var p api.ScenarioEndPayload
@@ -418,4 +424,17 @@ func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
 		fmt.Fprintf(os.Stderr, "newtrun: %d scenarios — %d passed, %d failed, %d errored, %d skipped (%s)\n",
 			len(p.Results), passed, failed, errored, skipped, p.Duration)
 	}
+}
+
+// firstLines returns at most n lines of s (trailing whitespace trimmed),
+// continuation lines indented to align under the step name, appending an
+// ellipsis marker when truncated — failure messages can carry multi-page
+// command output; the live stream wants the head, the junit report keeps
+// the whole thing.
+func firstLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = append(lines[:n], "[…]")
+	}
+	return strings.Join(lines, "\n            ")
 }

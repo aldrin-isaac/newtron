@@ -68,6 +68,9 @@ func ParseScenarioBytes(data []byte) (*Scenario, error) {
 			return nil, fmt.Errorf("validating scenario: %w", err)
 		}
 	}
+	if err := validateCleanupSteps(&s); err != nil {
+		return nil, fmt.Errorf("validating scenario: %w", err)
+	}
 	return &s, nil
 }
 
@@ -135,6 +138,9 @@ func parseScenarioFile(path string) ([]*Scenario, error) {
 				return nil, fmt.Errorf("%s: validating scenario: %w", path, err)
 			}
 		}
+		if err := validateCleanupSteps(&s); err != nil {
+			return nil, fmt.Errorf("%s: validating scenario: %w", path, err)
+		}
 		out = append(out, &s)
 	}
 	if len(out) == 0 {
@@ -201,6 +207,13 @@ var stepValidations = map[StepAction]stepValidation{
 			if step.Poll != nil {
 				return fmt.Errorf("%s: capture is not supported on poll steps (no single response body)", prefix)
 			}
+			// A {{device}}-templated step fans out per device — N responses,
+			// no canonical body. With exactly one explicit device there IS a
+			// single response, so capture composes (the step runs on the
+			// single-call path, not the fan-out path).
+			if strings.Contains(step.URL, "{{device}}") && (step.Devices.All || len(step.Devices.Devices) != 1) {
+				return fmt.Errorf("%s: capture on a {{device}}-templated step requires exactly one device in devices: — multiple devices produce multiple responses with no single body to extract from", prefix)
+			}
 			for name, expr := range step.Capture {
 				if name == "" {
 					return fmt.Errorf("%s: capture has an entry with empty variable name (each entry must have a non-empty name to reference as {{captured.NAME}})", prefix)
@@ -256,6 +269,12 @@ func validateStepFields(scenario string, index int, step *Step) error {
 	// extractor can read.
 	if step.Action != ActionNewtron && len(step.Capture) > 0 {
 		return fmt.Errorf("%s: 'capture' is only valid for action newtron (got action %q)", prefix, step.Action)
+	}
+
+	// Poll needs both knobs — pollUntil has no defaults, and a zero
+	// timeout silently degenerates to a single attempt.
+	if step.Poll != nil && (step.Poll.Timeout <= 0 || step.Poll.Interval <= 0) {
+		return fmt.Errorf("%s: poll requires timeout and interval (both > 0)", prefix)
 	}
 
 	v, ok := stepValidations[step.Action]
@@ -446,4 +465,20 @@ func ComputeTargetChain(scenarios []*Scenario, target string) ([]*Scenario, erro
 // applyDefaults sets default values for steps.
 func applyDefaults(s *Scenario) {
 	// No defaults needed for the remaining 5 actions.
+}
+
+// validateCleanupSteps validates a scenario's cleanup: block. Cleanup steps
+// use the same per-action validation as main steps, plus one restriction:
+// no {{target.X}} references — cleanup runs once per scenario (after all
+// target iterations), so there is no binding to expand against.
+func validateCleanupSteps(s *Scenario) error {
+	for i, step := range s.Cleanup {
+		if err := validateStepFields(s.Name+" cleanup", i, &step); err != nil {
+			return err
+		}
+		if stepText, _ := yaml.Marshal(step); strings.Contains(string(stepText), "{{target.") {
+			return fmt.Errorf("scenario %q cleanup step %d (%s): cleanup steps cannot reference {{target.X}} — cleanup runs once per scenario, after all target iterations", s.Name, i, step.Name)
+		}
+	}
+	return nil
 }
