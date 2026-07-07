@@ -1,0 +1,161 @@
+name: dataplane-update-acl-rule
+description: |
+  #235 dataplane continuity check for update-acl-rule (§48 in-place delivery).
+  The substrate proves the verb emits a single Replace and never DELetes the
+  ACL_RULE key; this proves it on the wire: an in-place priority change on a
+  FORWARD rule that live traffic depends on must not open a deny window.
+
+  Method (drop-budget with a deny backstop): an ACL on switch1's host1-facing
+  interface holds a high-priority FORWARD rule for host1's traffic and a
+  low-priority DROP-all — so if the FORWARD rule is ever absent, the DROP
+  catches the packets and the soak records loss. host1 pings host4 at 10pps
+  for 12 seconds while the FORWARD rule's priority is updated in place
+  (9000 → 8000, still above the DROP); zero loss required. A regression to
+  whole-row DEL+ADD makes the DROP rule match during the aclorch window.
+  Same honest limit as the static-route check: brief gaps are caught
+  probabilistically, sustained ones reliably.
+
+  Builds on cross-switch state (host1 ↔ host4 routed path). Cleans up
+  everything it adds, leaving Ethernet4 unbound.
+requires: [cross-switch]
+
+steps:
+  - name: create-acl-table
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-acl
+    params:
+      name: CONT_EDGE
+      type: L3
+      stage: ingress
+
+  # The rule under test: FORWARD host1's subnet, priority 9000.
+  - name: add-forward-rule
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-acl-rule
+    params:
+      acl: CONT_EDGE
+      rule_name: RULE_FWD
+      action: FORWARD
+      priority: 9000
+      src_ip: "10.20.0.0/31"
+
+  # The backstop: DROP the same traffic at priority 10 — only reachable if
+  # RULE_FWD is absent. This is what converts a delete window into packet loss.
+  - name: add-drop-backstop
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/add-acl-rule
+    params:
+      acl: CONT_EDGE
+      rule_name: RULE_DROP
+      action: DROP
+      priority: 10
+      src_ip: "10.20.0.0/31"
+
+  - name: bind-acl-host1-facing
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet4/bind-acl
+    params: {acl: CONT_EDGE, direction: ingress}
+
+  # Let aclorch program the rules (host-exec cannot poll), then prove the
+  # FORWARD rule wins before soaking.
+  - name: wait-aclorch-settle
+    action: wait
+    duration: 8s
+
+  - name: precheck-forward-wins
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.20.1.0"
+    expect:
+      success_rate: 1.0
+
+  - name: start-soak
+    action: host-exec
+    devices: [host1]
+    command: "rm -f /tmp/soak-acl.txt; nohup sh -c 'ping -i 0.1 -c 120 -W 1 10.20.1.0 > /tmp/soak-acl.txt 2>&1' >/dev/null 2>&1 & echo soak-started"
+
+  - name: soak-reaches-steady-state
+    action: wait
+    duration: 3s
+
+  # The in-place update: priority 9000 → 8000, same match, same action —
+  # still outranks the DROP backstop. cs.Replace HSETs PRIORITY only (§48).
+  - name: update-forward-rule-in-place
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-acl-rule
+    params:
+      acl: CONT_EDGE
+      rule_name: RULE_FWD
+      action: FORWARD
+      priority: 8000
+      src_ip: "10.20.0.0/31"
+
+  - name: verify-priority-updated
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/CONT_EDGE%7CRULE_FWD
+    expect:
+      jq: '.PRIORITY == "8000"'
+
+  - name: wait-soak-complete
+    action: wait
+    duration: 12s
+
+  # Drop budget: zero — the DROP backstop never matched.
+  - name: collect-soak-zero-loss
+    action: host-exec
+    devices: [host1]
+    command: "cat /tmp/soak-acl.txt"
+    expect:
+      success_rate: 1.0
+
+  # --- Symmetric teardown (§15): unbind, rules, table — reverse order.
+  - name: unbind-acl
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet4/unbind-acl
+    params: {acl: CONT_EDGE}
+
+  - name: remove-drop-rule
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-acl-rule
+    params: {acl: CONT_EDGE, rule: RULE_DROP}
+
+  - name: remove-forward-rule
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/remove-acl-rule
+    params: {acl: CONT_EDGE, rule: RULE_FWD}
+
+  - name: delete-acl-table
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-acl
+    params: {name: CONT_EDGE}
+
+  - name: verify-acl-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_TABLE/CONT_EDGE/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: cleanup-soak-file
+    action: host-exec
+    devices: [host1]
+    command: "rm -f /tmp/soak-acl.txt"

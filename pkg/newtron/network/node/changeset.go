@@ -149,6 +149,15 @@ func (cs *ChangeSet) Deletes(entries []sonic.Entry) {
 // The pre-change row (needed for the field diff and to compute the HDEL set) is
 // read from the node's projection, which still holds the old state at build
 // time — render() updates the projection only after the ChangeSet is built.
+//
+// Rows whose new fields equal the projection's current fields are SKIPPED —
+// no write, no keyspace notification. This is §48's "unchanged sibling rows
+// stay untouched" made literal: an identical-fields HSET is not a no-op to a
+// daemon that reprocesses the row on every notification. Found on the wire by
+// the evpn continuity check: a description-only update-bgp-evpn-peer rewrote
+// the identical BGP_NEIGHBOR_AF row, and sonic-vs frrcfgd's runtime AF
+// handling deactivated the address family — tearing down the session the
+// in-place delivery exists to preserve (RCA-049).
 func (cs *ChangeSet) Replace(n *Node, oldEntries, newEntries []sonic.Entry) {
 	proj := n.Projection()
 	newKeys := make(map[string]bool, len(newEntries)) // "table|key"
@@ -157,6 +166,9 @@ func (cs *ChangeSet) Replace(n *Node, oldEntries, newEntries []sonic.Entry) {
 		var from map[string]string
 		if proj[e.Table] != nil {
 			from = maps.Clone(proj[e.Table][e.Key])
+		}
+		if maps.Equal(from, e.Fields) {
+			continue // unchanged row — nothing to deliver, nothing to notify
 		}
 		cs.Changes = append(cs.Changes, Change{
 			Table:  e.Table,
