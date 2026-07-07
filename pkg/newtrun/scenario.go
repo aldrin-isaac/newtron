@@ -196,7 +196,7 @@ func (ds *deviceSelector) Resolve(allDevices []string) []string {
 	return ds.Devices
 }
 
-// PollBlock configures polling for the generic newtron action.
+// PollBlock configures polling for the newtron and host-exec actions.
 type PollBlock struct {
 	Timeout  time.Duration `yaml:"timeout"`
 	Interval time.Duration `yaml:"interval"`
