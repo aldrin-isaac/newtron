@@ -27,6 +27,12 @@ import (
 // told apart from shadows by tags alone. The floor is honest, not safe:
 // a true two-field shadow of a three-field type would pass. Every shadow
 // found in the wild carried 3+ fields.
+//
+// Out of scope, documented honestly: named→named field copies (a handler
+// translating a request type into a domain config inline) drop new fields
+// the same way but are single-sited and adjacent to their decode; the
+// Config() converter convention (types.go) is the fix where the copy
+// count or distance grows.
 func TestNoWireShadowStructs(t *testing.T) {
 	root := repoRoot(t)
 
