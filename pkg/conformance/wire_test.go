@@ -173,3 +173,59 @@ func jsonTags(st *ast.StructType) map[string]bool {
 	}
 	return tags
 }
+
+// TestHandlersUseConfigConverters enforces the Config() convention: an HTTP
+// handler must not translate a wire request into a domain config inline —
+// a composite literal of a newtron *Config type inside a handler file is a
+// field-by-field copy that silently drops any field the request type grows
+// (the same failure mode as the anonymous shadows, one layer deeper; six
+// such copies existed when this sweep was written). The one sanctioned
+// site per request type is its Config() method, next to the type in
+// types.go — which is why the types files are not scanned here.
+func TestHandlersUseConfigConverters(t *testing.T) {
+	root := repoRoot(t)
+	dir := filepath.Join(root, "pkg/newtron/api")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+
+	var violations []string
+	scanned := 0
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "handler_") || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		scanned++
+		path := filepath.Join(dir, e.Name())
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", path, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			cl, ok := n.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			sel, ok := cl.Type.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "newtron" || !strings.HasSuffix(sel.Sel.Name, "Config") {
+				return true
+			}
+			pos := fset.Position(cl.Pos())
+			violations = append(violations, pos.String()+": inline newtron."+sel.Sel.Name+" literal — use the request type's Config() converter")
+			return true
+		})
+	}
+	if scanned < 3 {
+		t.Fatalf("scanned only %d handler files — glob broke, sweep would be vacuous", scanned)
+	}
+	if len(violations) > 0 {
+		t.Errorf("inline wire→domain translations found (the Config() convention owns that copy):\n  %s",
+			strings.Join(violations, "\n  "))
+	}
+}
