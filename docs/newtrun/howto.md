@@ -554,6 +554,7 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 | `requires_features` | no | Platform feature flags. Scenario is SKIPPED if the platform doesn't declare them (e.g., `evpn-vxlan` on a platform without overlay support). |
 | `repeat` | no | Run the step list N times in sequence. Used for soak/stability tests. |
 | `steps` | yes | Ordered list of [Step](#step-fields) records. |
+| `cleanup` | no | Steps that run once, after all iterations and repeats, **regardless of pass/fail**. Put fabric-state teardown here, not at the tail of `steps:` — tail steps never run when an earlier step fails, and the stranded state cascades into downstream scenarios. Best-effort (every cleanup step runs even if one fails); results recorded under a `cleanup/` name prefix; a cleanup failure fails an otherwise-passing scenario. No `{{target.X}}` references (cleanup is not iterated per binding). |
 
 `network` and `platform` are **suite-level** — declared in `suite.yaml`, not in individual scenarios. `LoadSuite` rejects any scenario that sets them.
 
@@ -832,6 +833,7 @@ Runs a command inside a host device's network namespace via direct SSH. The name
 | `command` | yes | Shell command. Compound commands (semicolons, pipes) work — the executor wraps in `sh -c`. |
 | `expect.success_rate` | no | Parse ping output for packet loss. `0.8` = 80% of pings must succeed. |
 | `expect.contains` | no | String match on combined stdout+stderr. |
+| `poll` | no | Re-execute the command until `expect` passes or `timeout` expires (`timeout` + `interval`, both required). Dataplane readiness is asynchronous — route install, ARP resolution, ACL programming land some time after the CONFIG_DB write; poll instead of embedding a fixed `wait`. |
 
 Without `expect`, the step passes when the subprocess exits 0; a non-zero exit fails the step with the captured output as the message.
 
@@ -1257,7 +1259,7 @@ A `newtron` step's `capture:` map binds variable names to JQ expressions that ru
 Rules and limits:
 
 - The captured map is **iteration-scoped**: a fresh empty map at the start of every iteration of a parameterized scenario; cross-scenario carry is not supported. A scenario that needs write-then-read on the same value puts both steps in itself.
-- Capture runs only on **successful single-call** newtron steps. The parser rejects `capture:` on `batch:` and `poll:` steps (no single response body to extract from) and on non-`newtron` actions.
+- Capture runs only on **successful single-call** newtron steps. The parser rejects `capture:` on `batch:` and `poll:` steps (no single response body to extract from) and on non-`newtron` actions. A `{{device}}`-templated step may capture when `devices:` names **exactly one device** — one device, one response, one valid capture source; multi-device and `devices: all` steps are rejected at parse time.
 - A `{{captured.NAME}}` reference whose key has not been written yet fails the step with an "undefined captured reference" error — surface ordering bugs at the call site rather than silently substituting an empty string.
 
 ---
