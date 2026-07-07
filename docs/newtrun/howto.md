@@ -1362,6 +1362,10 @@ The split between 1 and 2 matters for CI: code 1 means "the tests caught somethi
 
 ### 13.2 JUnit XML
 
+A failing step's name and message (first lines) stream in the live terminal
+summary as the run executes — most failures are diagnosable without any
+report artifact. The JUnit report carries the full untruncated messages.
+
 Pass `--junit <path>` to write a JUnit XML report after the run finishes:
 
 ```bash

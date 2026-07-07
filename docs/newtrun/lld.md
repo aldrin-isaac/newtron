@@ -297,7 +297,7 @@ type PollBlock struct {
 }
 ```
 
-A step with `poll` repeats its action+expect every `Interval` until the expect succeeds or `Timeout` elapses. Used for convergence checks (BGP sessions, route propagation).
+A step with `poll` repeats its action+expect every `Interval` until the expect succeeds or `Timeout` elapses. Valid on `newtron` and `host-exec` steps; both fields are required (> 0) — `pollUntil` has no defaults, and a zero timeout degenerates to a single attempt. Used for convergence checks (BGP sessions, route propagation, host-side dataplane readiness).
 
 ### 2.9 BatchCall
 
