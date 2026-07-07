@@ -45,8 +45,17 @@ func (n *Node) RemoveLegacyBGPEntries(ctx context.Context) (int, error) {
 }
 
 // BGPNeighborExists checks if a BGP neighbor exists.
-// Checks overlay peers (evpn-peer|IP intents) and underlay peers
-// (interface|*|bgp-peer intents with matching neighbor_ip).
+// Checks overlay peers (evpn-peer|IP intents), underlay peers
+// (interface|*|bgp-peer intents with matching neighbor_ip), and the
+// projection's BGP_NEIGHBOR table — which catches profile-owned overlay
+// peers created by ConfigureBGPOverlay as a sub-operation of the device
+// intent. Those have no discrete intent record, but the projection is
+// derived from intent replay, so a row there IS intent-owned state.
+// Without this leg, AddBGPEVPNPeer silently double-owned a fabric peer's
+// row and RemoveBGPEVPNPeer then amputated it — leaving phantom drift the
+// guard blocked every subsequent write on (RCA-049 addendum; found by the
+// §48 evpn continuity witness on 3node-ngdp, whose fabric overlay is
+// leaf1↔leaf2 by design).
 func (n *Node) BGPNeighborExists(neighborIP string) bool {
 	// Overlay peers: evpn-peer|{ip}
 	if n.GetIntent("evpn-peer|"+neighborIP) != nil {
@@ -55,6 +64,13 @@ func (n *Node) BGPNeighborExists(neighborIP string) bool {
 	// Underlay peers: interface|{name}|bgp-peer with neighbor_ip param
 	for _, intent := range n.IntentsByPrefix("interface|") {
 		if intent.Operation == "add-bgp-peer" && intent.Params["neighbor_ip"] == neighborIP {
+			return true
+		}
+	}
+	// Profile-owned peers: any projection row, any VRF (rows are keyed
+	// "vrf|ip"; the sub-operation owner is the device intent).
+	for key := range n.configDB.BGPNeighbor {
+		if strings.HasSuffix(key, "|"+neighborIP) {
 			return true
 		}
 	}

@@ -515,3 +515,30 @@ func TestReplace_SkipsUnchangedRows(t *testing.T) {
 	assertNoChangeOfType(t, cs, "BGP_NEIGHBOR_AF", "default|10.9.9.2|l2vpn_evpn", ChangeReplace)
 	assertNoChangeOfType(t, cs, "BGP_NEIGHBOR_AF", "default|10.9.9.2|l2vpn_evpn", ChangeDelete)
 }
+
+// TestAddBGPEVPNPeer_RefusesProfileOwnedRow pins the §27 single-owner leg of
+// BGPNeighborExists: a BGP_NEIGHBOR row created by a device-intent
+// sub-operation (profile-driven overlay — no discrete evpn-peer| intent)
+// must refuse a second owner. Without it, add silently merged onto the
+// fabric's row and remove then amputated it, leaving phantom drift
+// (RCA-049 addendum).
+func TestAddBGPEVPNPeer_RefusesProfileOwnedRow(t *testing.T) {
+	ctx := context.Background()
+	n := testDevice()
+	if _, err := n.SetupDevice(ctx, SetupDeviceOpts{
+		Fields: map[string]string{"hostname": "t", "bgp_asn": "65001"}, SourceIP: "10.255.0.1",
+	}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Simulate a profile-owned overlay peer: a projection row with no
+	// discrete evpn-peer| intent — exactly what ConfigureBGPOverlay's
+	// sub-operation leaves behind.
+	n.configDB.BGPNeighbor["default|10.0.0.99"] = sonic.BGPNeighborEntry{ASN: "65099"}
+
+	if _, err := n.AddBGPEVPNPeer(ctx, "10.0.0.99", 65099, "dup", true); err == nil {
+		t.Fatal("AddBGPEVPNPeer over a profile-owned row must be refused")
+	} else if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("want already-exists refusal, got: %v", err)
+	}
+}
