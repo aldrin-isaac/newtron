@@ -306,9 +306,8 @@ func (c *Client) NodeUnbindMACVPN(device string, vlanID int, opts newtron.ExecOp
 }
 
 // CreateVLAN creates a VLAN.
-func (c *Client) CreateVLAN(device string, id int, description string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.VLANCreateRequest{ID: id, Description: description}
-	return c.nodeWrite(device, "create-vlan", body, opts)
+func (c *Client) CreateVLAN(device string, config api.VLANCreateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "create-vlan", config, opts)
 }
 
 // DeleteVLAN deletes a VLAN.

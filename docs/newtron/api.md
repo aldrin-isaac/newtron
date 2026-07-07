@@ -3153,6 +3153,7 @@ Create a VLAN on the device.
 |-------|------|----------|-------------|
 | `id` | integer | yes | VLAN ID (1-4094) |
 | `description` | string | no | VLAN description |
+| `l2_vni` | integer | no | Map the VLAN to this L2VNI at creation. Same param the topology `create-vlan` step records as `vni`; before this field the wire could not express what a topology file could. |
 
 **Response (201):** `WriteResult`
 
