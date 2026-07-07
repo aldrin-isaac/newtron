@@ -851,22 +851,20 @@ func (s *Server) handleUpdateBGPEVPNPeer(w http.ResponseWriter, r *http.Request)
 	if nodeActor == nil {
 		return
 	}
-	var req struct {
-		NeighborIP  string `json:"neighbor_ip"`
-		RemoteAS    int    `json:"remote_as"`
-		Description string `json:"description,omitempty"`
-	}
+	// Decode into the canonical config struct (§25 single owner) — a
+	// hand-built request struct here silently dropped the evpn flag: the
+	// regenerated entry set lost the BGP_NEIGHBOR_AF row, cs.Replace
+	// delivered that as a row DELETE, and frrcfgd faithfully deactivated
+	// the l2vpn AF — killing the session the in-place update exists to
+	// preserve (RCA-049, redis-MONITOR evidence).
+	var req newtron.BGPNeighborConfig
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.UpdateBGPEVPNPeer(ctx, req.NeighborIP, newtron.BGPNeighborConfig{
-			NeighborIP:  req.NeighborIP,
-			RemoteAS:    req.RemoteAS,
-			Description: req.Description,
-		})
+		return n.UpdateBGPEVPNPeer(ctx, req.NeighborIP, req)
 	})
 	if err != nil {
 		writeError(w, err)

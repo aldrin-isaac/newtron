@@ -194,12 +194,11 @@ func (s *Server) handleUpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ifName := interfaceName(r)
-	var req struct {
-		NeighborIP  string `json:"neighbor_ip"`
-		RemoteAS    int    `json:"remote_as"`
-		Description string `json:"description,omitempty"`
-		Multihop    int    `json:"multihop,omitempty"`
-	}
+	// Decode into the canonical config struct (§25 single owner) — an
+	// anonymous shadow of BGPNeighborConfig silently diverges the moment
+	// the canonical struct grows a field; the evpn-peer twin of this
+	// handler dropped the evpn flag exactly that way (RCA-049).
+	var req newtron.BGPNeighborConfig
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
@@ -210,12 +209,7 @@ func (s *Server) handleUpdateBGPPeer(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return iface.UpdateBGPPeer(ctx, newtron.BGPNeighborConfig{
-			NeighborIP:  req.NeighborIP,
-			RemoteAS:    req.RemoteAS,
-			Description: req.Description,
-			Multihop:    req.Multihop,
-		})
+		return iface.UpdateBGPPeer(ctx, req)
 	})
 	if err != nil {
 		writeError(w, err)
