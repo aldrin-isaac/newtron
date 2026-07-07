@@ -1,101 +1,137 @@
-# RCA-049: sonic-vs frrcfgd deactivates the l2vpn evpn AF when a BGP_NEIGHBOR_AF row is rewritten at runtime — identical-fields HSET is not a no-op
+# RCA-049: runtime EVPN-peer updates killed the session — the wire dropped the evpn flag twice, and newtron deleted its own AF row
 
-**Severity**: High for any runtime mutation of an EVPN peer — the session drops and stays Idle.
-**Platform**: sonic-vs (Force10-S6000, 202505 stable, unified frrcfgd) — measured. Split-mode bgpcfgd (CiscoVS) not separately measured.
-**Status**: **Fixed in newtron** (2026-07-06) — `cs.Replace` now skips rows whose new fields equal the projection's, so an in-place update never rewrites an unchanged sibling row and never triggers this path. The frrcfgd behavior itself remains a platform pitfall.
+**Severity**: High for any runtime mutation of an EVPN peer — the session dropped and stayed Idle.
+**Platform**: reproduced identically on sonic-vs (Force10-S6000, 202505, unified frrcfgd) and CiscoVS (cisco-p200, unified frrcfgd). Platform-independent — the defect was newtron's.
+**Status**: **Fixed** (2026-07-06, three layers): `BGPNeighborConfig` gained the `EVPN` field and both public wrappers pass it (PR #415); the `update-bgp-evpn-peer` HTTP handler decodes the canonical struct instead of an anonymous shadow that silently dropped the flag (this RCA's root cause); `cs.Replace` skips rows whose fields are unchanged (§48's "unchanged sibling rows stay untouched" made literal).
 
 ## Summary
 
-A description-only `update-bgp-evpn-peer` regenerated the peer's full entry
-set — `BGP_NEIGHBOR` (changed: `name`) and `BGP_NEIGHBOR_AF default|<ip>|l2vpn_evpn`
-(identical: `admin_status: "true"`) — and `cs.Replace` emitted a Replace for
-both, including an **identical-fields HSET** on the AF row. frrcfgd's runtime
-handling of that AF-row notification emitted `no neighbor <ip> activate` under
-`address-family l2vpn evpn` (visible in `show running-config`), FRR sent a
-NOTIFICATION to the peer, and the l2vpn-only session went **Idle permanently**.
+A description-only `update-bgp-evpn-peer` with `evpn: true` on the wire killed
+the l2vpn evpn session on every platform tried. `show running-config` showed
+`no neighbor <ip> activate` under `address-family l2vpn evpn`; the peer went
+`Idle` (`lastResetDueTo: "BGP Notification send"`) and never recovered.
 
-The same daemon handles the identical row correctly during **startup replay**
-(the session establishes fine after `restart-bgp`) — the deactivation happens
-only on the **runtime** reprocess path. This is the same replay-vs-runtime
-asymmetry family as RCA-044/RCA-045.
+`redis-cli MONITOR` during a live update produced the decisive evidence — the
+delete came from **newtron itself**:
 
-## Symptom
+```
+"hset" "BGP_NEIGHBOR|default|10.0.0.12" "admin_status" "up" "asn" "65012" "name" ... "peer_group_name" "EVPN"
+"del"  "BGP_NEIGHBOR_AF|default|10.0.0.12|l2vpn_evpn"        ← the kill
+```
 
-- `show bgp l2vpn evpn summary`: peer vanishes from the AF summary.
-- `show bgp neighbors <ip> json`: `bgpState: Idle`, `lastResetDueTo: "BGP Notification send"`.
-- `show running-config`: `no neighbor <ip> activate` under `address-family l2vpn evpn`,
-  while the neighbor's other stanzas (remote-as, peer-group, the updated
-  description) are correct — proving frrcfgd processed the runtime writes.
+## Root cause — the evpn flag was dropped at TWO wire layers
 
-## Root cause (newtron side)
+The internal `UpdateBGPEVPNPeer(ctx, ip, asn, description, evpn bool)` needs
+the flag to regenerate the peer's entry set (with `evpn=true` the set includes
+the `BGP_NEIGHBOR_AF ... l2vpn_evpn` row). Two independent boundary defects
+starved it:
 
-`ChangeSet.Replace` emitted a `ChangeReplace` for **every** entry the update
-verb regenerated, even entries identical to the projection. An HSET that
-changes nothing still fires a keyspace notification, and a daemon that
-re-reads-and-reapplies on notification treats it as an event. §48's own text
-promised "the diff leaves unchanged sibling rows (e.g. `BGP_NEIGHBOR_AF`)
-untouched" — the implementation did not deliver the promise until now.
+1. **The public wrappers hardcoded `evpn=false`** — `BGPNeighborConfig` had no
+   field to carry it (fixed in PR #415).
+2. **The HTTP handler used an anonymous shadow struct** —
+   `{neighbor_ip, remote_as, description}` — so even after (1), the wire's
+   `evpn: true` was silently discarded before it reached the (fixed) wrapper.
 
-## Fix
+With `evpn=false`, the regenerated entry set lacks the AF row. `cs.Replace`
+then does exactly what §48 specifies for a key the entity no longer has: it
+**deletes** `BGP_NEIGHBOR_AF|<vrf>|<ip>|l2vpn_evpn`. The delivery layer was
+correct; it was told the truth about the wrong entry set.
 
-`cs.Replace` skips entries whose new fields equal the projection's current
-fields (`maps.Equal`): no write, no notification, no daemon reprocess. A
-description-only peer update now touches exactly one row, `BGP_NEIGHBOR` —
-whose runtime field handling is demonstrably safe (the `update-bgp-peer`
-continuity check has held across every run). Pinned by
-`TestReplace_SkipsUnchangedRows` (node package) and on the wire by the
-`dataplane-update-evpn-peer` continuity check.
+## frrcfgd is vindicated
 
-## Finding 2 — the trigger is the BGP_NEIGHBOR row itself; the verb is unusable at runtime on this platform
+Both earlier drafts of this RCA blamed the platform daemon ("destructive
+runtime reprocess of the BGP_NEIGHBOR row"). The frrcfgd source
+(`sonic-frr-mgmt-framework/frrcfgd/frrcfgd.py`, 202505) refutes that: the
+runtime handler is **incremental** (commands generated only for changed
+fields) and **read-only against CONFIG_DB**; `no neighbor X activate` is
+emitted only when `admin_status` goes false or the AF row is **deleted**
+(OP_DELETE renders every mapped command in its `no` form). frrcfgd faithfully
+translated the delete newtron sent. Raw redis pokes on the BGP_NEIGHBOR row
+(single-field and full-row HSETs) confirm: no AF deactivation.
 
-With the `cs.Replace` skip in place (the AF row genuinely untouched on a
-description-only update), the session STILL went Idle with the same
-`no neighbor <ip> activate`: unified frrcfgd's runtime handler for a
-**BGP_NEIGHBOR row change** rebuilds the neighbor stanza destructively for an
-EVPN peer-group member — deactivating the l2vpn AF it cannot see on its
-runtime path. Contrast: the same rewrite on a plain (group-less, ipv4)
-neighbor is handled incrementally — the update-bgp-peer continuity check
-(34-) passes on every run.
+## What each fix layer contributes
 
-Consequence: **update-bgp-evpn-peer cannot be used at runtime on sonic-vs**,
-no matter how newtron delivers it. The newtron-side skip fix remains correct
-and necessary on its own terms (§48's unchanged-sibling-rows clause), but it
-cannot rescue this platform path.
+- **Handler decodes `newtron.BGPNeighborConfig`** (root cause): the flag
+  reaches the internal method; the regenerated entry set keeps the AF row;
+  no delete is emitted. The interface `update-bgp-peer` handler had the same
+  anonymous-shadow pattern and was de-twinned in the same commit (§25: a
+  shadow of a canonical struct diverges silently the moment the canonical
+  grows a field).
+- **`cs.Replace` skips unchanged rows**: with the handler fixed, the AF row
+  regenerates identical to the projection — the skip means a description-only
+  update touches exactly one row (`BGP_NEIGHBOR`), delivering §48's
+  "unchanged sibling rows stay untouched" clause literally. Pinned by
+  `TestReplace_SkipsUnchangedRows`.
+- **`BGPNeighborConfig.EVPN` + wrappers**: the flag exists on the wire at all.
 
-## Finding 3 — interface-IP EVPN peers cannot establish anywhere: the peer group's update-source is the design speaking
+## Findings that stand
 
-Relocating the continuity check to CiscoVS (split bgpcfgd, runtime-capable)
-with a synthetic session on a spare inter-switch /31 also failed — both sides
-stuck in `Connect` with correct l2vpn AF and working ICMP. Cause: EVPN peers
-join the `EVPN` peer group, which sets `update-source <loopback>` — so the
-TCP SYN leaves sourced from the loopback while the far side expects the
-interface IP. This is not a bug: §26/§ BGP architecture defines overlay peers
-as **loopback-to-loopback**; an interface-IP EVPN peer contradicts the
-design, and the group's update-source enforces it.
+- **Interface-IP EVPN peers cannot establish** (both sides stuck `Connect`,
+  ICMP fine): EVPN peers join the `EVPN` peer group, whose
+  `update-source <loopback>` sources the TCP SYN from the loopback while the
+  far side expects the interface IP. Not a bug — §26 defines overlay peers as
+  loopback-to-loopback and the group enforces it. The valid continuity-witness
+  construction is a **new loopback pair** (3node-ngdp leaf1↔leaf2 — the
+  fabric only peers leaves to the spine). Validated: the leaf1↔leaf2 session
+  establishes and holds.
+- **sonic-vs runtime neighbor CREATION still needs the RCA-044
+  write-before-restart replay**, and repeated mid-suite BGP restarts
+  destabilize `bgp.service` (observed crash-loop after a second restart) —
+  which is why the witness lives in the 3node CiscoVS suite rather than
+  2node-vs, independent of this RCA's (refuted) daemon-blame.
 
-The valid construction for the continuity witness is a NEW loopback pair —
-possible only in a fabric with a third loopback: on 3node-ngdp, leaf1↔leaf2
-(the fabric only peers leaves to the spine, so that session is genuinely new
-and intent-backed, reachable via spine underlay). Follow-up: author the check
-in `3node-ngdp-dataplane` with that construction (verify the EVPN group's
-multihop/TTL admits the 2-hop loopback path).
+## Addendum — the witness's own construction error, and the §27 gap it exposed
 
-Until then: update-bgp-peer (34-) proves the §48 delivery on BGP_NEIGHBOR
-rows end-to-end; update-bgp-evpn-peer shares that delivery path and is
-covered at the substrate level (TestOpRoundTrip, TestReplace_SkipsUnchangedRows,
-device_ops_test ChangeReplace assertions).
+With the handler fixed, the 3node witness PASSED (session Established through
+the in-place update, uptime monotonic) — the §48 delivery for
+update-bgp-evpn-peer is wire-proven. But the pass itself was unsound: the
+3node fabric's overlay is **leaf1↔leaf2 by design** (`nodes/leaf1.json
+evpn.peers: [leaf2]`; the spine is underlay-only transit with no VTEP), so
+the "new loopback pair" was actually the fabric's own profile-created
+session — run 1's captured uptime (111s, predating the add) was the tell,
+read too late. The witness's add silently double-owned the fabric's
+BGP_NEIGHBOR row, and its cleanup remove then **amputated the fabric's
+overlay peer** — the projection (which re-derives the peer from the profile
+on every rebuild) expected rows the device no longer had, and the drift
+guard correctly blocked every subsequent write.
 
-## Found by
+Root cause of the double-ownership: `BGPNeighborExists` checked discrete
+intents only (`evpn-peer|`, interface `bgp-peer`) — profile-owned overlay
+peers are a device-intent **sub-operation** with no discrete intent record,
+invisible to the check. Fixed: the check now also consults the projection's
+BGP_NEIGHBOR table (the projection is derived from intent replay, so a row
+there IS intent-owned). Pinned by `TestAddBGPEVPNPeer_RefusesProfileOwnedRow`.
 
-The §48 evpn continuity check (`46-dataplane-update-evpn-peer.yaml`) on its
-first live execution — the check exists to catch exactly this: a delivery
-that is in-place at the CONFIG_DB layer but session-affecting after daemon
-translation.
+Witness disposition: **withdrawn from the suites.** With the refusal in
+place, no fabric in this repository can host it — every loopback belongs to
+a profile-designed overlay (2node: switch1↔switch2; 3node: leaf1↔leaf2;
+spine has no loopback), and adopting a profile-owned session is exactly what
+the fix forbids. The one-shot wire proof stands (recorded in the PR); the
+repeatable regression gates are the loopback wire test
+(`1node-vs-config/39` — the AF row must survive the update) and the
+substrate tests. A future fabric with an operator-added overlay peer (one
+outside the profile design) is the natural permanent home.
+
+## Process lesson
+
+Two layers of the same boundary (wrapper, handler) dropped the same flag, and
+two RCA drafts blamed the platform before `redis MONITOR` + a daemon-source
+read produced the truth. The §38 protocol (read the daemon source before
+concluding platform behavior) applied to a *config* daemon, not just SAI.
+Then the corrected witness passed against the wrong session — captured
+uptime larger than the session's age was sitting in the first run's
+evidence, unread. Verify the fixture is yours before celebrating the
+mechanism.
+Follow-up filed: a conformance sweep asserting every handler request struct
+covers the canonical params of the op it fronts — the wire-decode layer is
+round-trip surface, and TestOpRoundTrip does not see it.
 
 ## Related
 
-- RCA-044/RCA-045 — unified frrcfgd replay-vs-runtime asymmetries (neighbor
-  creation requires write-before-restart; field updates reach FRR at runtime).
-- DESIGN_PRINCIPLES_NEWTRON §48 — the in-place delivery principle whose
-  "unchanged sibling rows" clause this fix makes literal.
-- `pkg/newtron/network/node/changeset.go` (`Replace`).
+- RCA-044/RCA-045 — unified frrcfgd replay-vs-runtime asymmetries (these
+  remain true; they were the *first two* suspects here and are not the cause).
+- DESIGN_PRINCIPLES_NEWTRON §48 — in-place delivery; §26 — EVPN peer groups;
+  §25 (ai-instructions) — single owner, no shadow structs.
+- `pkg/newtron/network/node/changeset.go` (`Replace`),
+  `pkg/newtron/api/handler_node.go` (`handleUpdateBGPEVPNPeer`),
+  `pkg/newtron/api/handler_interface.go` (`handleUpdateBGPPeer`).
