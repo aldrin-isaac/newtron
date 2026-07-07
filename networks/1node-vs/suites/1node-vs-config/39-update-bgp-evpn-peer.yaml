@@ -11,9 +11,15 @@ description: |
   place only.
 
   Verifies:
-    - In-place AS / description change writes a single DEL+ADD pair for
-      the BGP_NEIGHBOR row at the same key; intent record's params
-      reflect new values; neighbor_ip unchanged.
+    - In-place AS / description change delivers a single Replace of the
+      BGP_NEIGHBOR row at the same key (§48 — never a DEL); intent
+      record's params reflect new values; neighbor_ip unchanged.
+    - The evpn flag crosses the wire on BOTH verbs: the l2vpn evpn AF row
+      exists after the add AND survives the update. RCA-049's root cause
+      was this flag dropping at the wire (wrapper, then handler) — the
+      update regenerated an entry set without the AF row and cs.Replace
+      delivered that as a row DELETE, killing the session on the deployed
+      fabric. This is the fast loopback regression gate for that boundary.
 
   Loopback mode — pure HTTP.
 
@@ -43,6 +49,7 @@ steps:
       neighbor_ip: "10.227.2.2"
       remote_as: 65002
       description: "old-overlay-peer"
+      evpn: true
 
   - name: verify-original-bgp-neighbor
     action: newtron
@@ -50,6 +57,13 @@ steps:
     url: /nodes/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.227.2.2?mode=loopback
     expect:
       jq: '.asn == "65002"'
+
+  - name: verify-evpn-af-created
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR_AF/default%7C10.227.2.2%7Cl2vpn_evpn?mode=loopback
+    expect:
+      jq: '.admin_status == "true"'
 
   # In-place change
   - name: update-evpn-peer-in-place
@@ -61,6 +75,15 @@ steps:
       neighbor_ip: "10.227.2.2"
       remote_as: 65099
       description: "new-overlay-peer"
+      evpn: true
+
+  # The AF row must SURVIVE the update — the RCA-049 regression deleted it.
+  - name: verify-evpn-af-survives-update
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/BGP_NEIGHBOR_AF/default%7C10.227.2.2%7Cl2vpn_evpn?mode=loopback
+    expect:
+      jq: '.admin_status == "true"'
 
   - name: verify-asn-updated
     action: newtron
