@@ -518,7 +518,7 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) err
 	if err := n.gate(ctx, auth.PermEVPNPeer, config.NeighborIP); err != nil {
 		return err
 	}
-	cs, err := n.internal.AddBGPEVPNPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
+	cs, err := n.internal.AddBGPEVPNPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, config.EVPN)
 	n.appendPending(cs)
 	return err
 }
@@ -532,7 +532,7 @@ func (n *Node) UpdateBGPEVPNPeer(ctx context.Context, neighborIP string, config 
 	if err := n.gate(ctx, auth.PermEVPNPeer, neighborIP); err != nil {
 		return err
 	}
-	cs, err := n.internal.UpdateBGPEVPNPeer(ctx, neighborIP, config.RemoteAS, config.Description, false)
+	cs, err := n.internal.UpdateBGPEVPNPeer(ctx, neighborIP, config.RemoteAS, config.Description, config.EVPN)
 	n.appendPending(cs)
 	return err
 }

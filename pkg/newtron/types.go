@@ -231,6 +231,11 @@ type BGPNeighborConfig struct {
 	NeighborIP  string `json:"neighbor_ip,omitempty"`
 	Description string `json:"description,omitempty"`
 	Multihop    int    `json:"multihop,omitempty"`
+	// EVPN activates the l2vpn evpn address family on the neighbor — the flag
+	// add/update-bgp-evpn-peer exist to set. The wire previously dropped it
+	// (wrappers hardcoded false), so no wire-created overlay peer could
+	// activate the AF; found while authoring the §48 evpn continuity check.
+	EVPN bool `json:"evpn,omitempty"`
 }
 
 // ACLConfig holds parameters for creating an ACL table.
