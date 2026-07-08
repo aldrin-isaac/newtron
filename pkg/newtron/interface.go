@@ -70,12 +70,7 @@ func (i *Interface) ApplyService(ctx context.Context, service string, opts Apply
 	if err := i.gateService(ctx, auth.PermServiceApply, service); err != nil {
 		return err
 	}
-	cs, err := i.internal.ApplyService(ctx, service, node.ApplyServiceOpts{
-		IPAddress: opts.IPAddress,
-		PeerAS:    opts.PeerAS,
-		VLAN:      opts.VLAN,
-		Params:    opts.Params,
-	})
+	cs, err := i.internal.ApplyService(ctx, service, opts.internal())
 	if err != nil {
 		return err
 	}
@@ -152,12 +147,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 	if err := i.gate(ctx, auth.PermBGPPeer, config.NeighborIP); err != nil {
 		return err
 	}
-	cs, err := i.internal.AddBGPPeer(ctx, node.DirectBGPPeerConfig{
-		NeighborIP:  config.NeighborIP,
-		RemoteAS:    config.RemoteAS,
-		Description: config.Description,
-		Multihop:    config.Multihop,
-	})
+	cs, err := i.internal.AddBGPPeer(ctx, config.directPeer())
 	if err != nil {
 		return err
 	}
@@ -174,12 +164,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, config BGPNeighborConfig)
 	if err := i.gate(ctx, auth.PermBGPPeer, peerIP); err != nil {
 		return err
 	}
-	cs, err := i.internal.UpdateBGPPeer(ctx, node.DirectBGPPeerConfig{
-		NeighborIP:  config.NeighborIP,
-		RemoteAS:    config.RemoteAS,
-		Description: config.Description,
-		Multihop:    config.Multihop,
-	})
+	cs, err := i.internal.UpdateBGPPeer(ctx, config.directPeer())
 	if err != nil {
 		return err
 	}
@@ -228,9 +213,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	if err := i.gate(ctx, auth.PermInterfaceModify, ""); err != nil {
 		return err
 	}
-	cs, err := i.internal.ConfigureInterface(ctx, node.InterfaceConfig{
-		VRF: cfg.VRF, IP: cfg.IP, VLAN: cfg.VLAN, Tagged: cfg.Tagged,
-	})
+	cs, err := i.internal.ConfigureInterface(ctx, cfg.internal())
 	if err != nil {
 		return err
 	}

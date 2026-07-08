@@ -795,20 +795,23 @@ type Intent struct {
 type IntentState string  // "unrealized", "in-flight", "actuated"
 ```
 
-### 3.7 Config Request Types
+### 3.7 Config Types
 
-Used as request bodies for node write operations (§4.6). Each type captures exactly the parameters the operation needs — no extra fields, no optional-but-ignored fields.
+Attribute payloads for node write operations (§4.6). Identity travels as the
+method argument (one carrier per context — the wire body and the intent
+record are where identity is stored for readers); the config carries only
+the mutable attributes. Each type crosses the public→internal boundary
+through its `internal()` converter in `boundary.go` (§33): field-identical
+pairs convert directly (the conversion stops compiling if either side gains
+a field), divergent pairs get the one hand-written mapping.
 
 ```go
 type VLANConfig struct {
-    VlanID      int
     Description string
     L2VNI       int
 }
 
-type VRFConfig struct {
-    Name string
-}
+type VRFConfig struct{} // empty today; future VRF options land here
 
 type InterfaceConfig struct {
     VRF    string  // routed mode
@@ -840,7 +843,6 @@ type SetupDeviceOpts struct {
 }
 
 type PortChannelConfig struct {
-    Name     string
     Members  []string
     MinLinks int
     FastRate bool
@@ -1548,7 +1550,7 @@ Tracing `POST /newtron/v1/networks/default/node/leaf1/create-vlan` with `{"id": 
 
 ```
 1. HTTP layer (handler_node.go)
-   handleCreateVLAN parses JSON body → VLANConfig{VlanID: 100, Description: "servers"}
+   handleCreateVLAN decodes VLANCreateRequest{ID: 100, Description: "servers"} → req.Config()
    Resolves networkEntity → NodeActor
    Calls connectAndExecute(fn)
 

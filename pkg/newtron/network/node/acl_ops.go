@@ -47,10 +47,10 @@ func (n *Node) aclPortsFromIntents(aclName, direction string) string {
 
 // ACLConfig holds configuration options for CreateACL.
 type ACLConfig struct {
-	Type        string // L3, L3V6
-	Stage       string // ingress, egress
+	Type        string
+	Stage       string
+	Ports       string
 	Description string
-	Ports       string // Comma-separated interface names (maps to CONFIG_DB ACL_TABLE.ports)
 }
 
 // CreateACL creates a new ACL table.

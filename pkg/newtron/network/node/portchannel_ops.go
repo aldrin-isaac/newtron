@@ -16,10 +16,10 @@ import (
 // PortChannelConfig holds configuration options for CreatePortChannel.
 type PortChannelConfig struct {
 	Members  []string
-	MTU      int
 	MinLinks int
-	Fallback bool
 	FastRate bool
+	Fallback bool
+	MTU      int
 }
 
 // CreatePortChannel creates a new LAG/PortChannel.

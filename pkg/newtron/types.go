@@ -203,25 +203,26 @@ func (e *AuthorizationError) Unwrap() error { return e.inner }
 // Config Types for Write Operations
 // ============================================================================
 
-// VLANConfig holds parameters for creating a VLAN.
+// VLANConfig holds parameters for creating a VLAN. Identity (the VLAN ID)
+// travels as the method argument — one carrier per context; the durable
+// trace lives in the intent record the call writes.
 type VLANConfig struct {
-	VlanID      int
 	Description string
 	L2VNI       int
 }
 
 // IRBConfig holds parameters for configuring an IRB (Integrated Routing and Bridging) interface.
+// Identity (the VLAN ID) travels as the method argument.
 type IRBConfig struct {
-	VlanID     int
 	VRF        string
 	IPAddress  string
 	AnycastMAC string
 }
 
-// VRFConfig holds parameters for creating a VRF.
-type VRFConfig struct {
-	Name string
-}
+// VRFConfig holds parameters for creating a VRF. Identity (the VRF name)
+// travels as the method argument; the type is empty today and exists so
+// future VRF options land without a signature change (§33).
+type VRFConfig struct{}
 
 // BGPNeighborConfig holds parameters for adding a BGP neighbor.
 type BGPNeighborConfig struct {
@@ -238,19 +239,19 @@ type BGPNeighborConfig struct {
 	EVPN bool `json:"evpn,omitempty"`
 }
 
-// ACLConfig holds parameters for creating an ACL table.
+// ACLConfig holds parameters for creating an ACL table. Identity (the table
+// name) travels as the method argument.
 type ACLConfig struct {
-	Name        string
 	Type        string
 	Stage       string
 	Ports       string
 	Description string
 }
 
-// ACLRuleConfig holds parameters for adding an ACL rule.
+// ACLRuleConfig holds parameters for adding an ACL rule. Identity (table +
+// rule name) travels as method arguments (§47 — the composite key is not
+// part of the mutable payload).
 type ACLRuleConfig struct {
-	ACLName  string
-	RuleName string
 	Priority int
 	Action   string
 	SrcIP    string
@@ -270,8 +271,8 @@ type InterfaceConfig struct {
 }
 
 // PortChannelConfig holds parameters for creating a LAG/PortChannel.
+// Identity (the PortChannel name) travels as the method argument.
 type PortChannelConfig struct {
-	Name     string
 	Members  []string
 	MinLinks int
 	FastRate bool
@@ -1318,7 +1319,6 @@ type IRBConfigureRequest struct {
 // conversion has exactly one site.
 func (r IRBConfigureRequest) Config() IRBConfig {
 	return IRBConfig{
-		VlanID:     r.VlanID,
 		VRF:        r.VRF,
 		IPAddress:  r.IPAddress,
 		AnycastMAC: r.AnycastMAC,
@@ -1338,7 +1338,6 @@ type ACLCreateRequest struct {
 // ACLRuleAddRequest.Config.
 func (r ACLCreateRequest) Config() ACLConfig {
 	return ACLConfig{
-		Name:        r.Name,
 		Type:        r.Type,
 		Stage:       r.Stage,
 		Ports:       r.Ports,
@@ -1367,8 +1366,6 @@ type ACLRuleAddRequest struct {
 // RCA-049 documented. Enforced by TestHandlersUseConfigConverters.
 func (r ACLRuleAddRequest) Config() ACLRuleConfig {
 	return ACLRuleConfig{
-		ACLName:  r.ACL,
-		RuleName: r.RuleName,
 		Priority: r.Priority,
 		Action:   r.Action,
 		SrcIP:    r.SrcIP,
@@ -1399,8 +1396,6 @@ type ACLRuleUpdateRequest struct {
 // ACLRuleAddRequest.Config.
 func (r ACLRuleUpdateRequest) Config() ACLRuleConfig {
 	return ACLRuleConfig{
-		ACLName:  r.ACL,
-		RuleName: r.RuleName,
 		Priority: r.Priority,
 		Action:   r.Action,
 		SrcIP:    r.SrcIP,
@@ -1424,7 +1419,6 @@ type PortChannelCreateRequest struct {
 // ACLRuleAddRequest.Config.
 func (r PortChannelCreateRequest) Config() PortChannelConfig {
 	return PortChannelConfig{
-		Name:     r.Name,
 		Members:  r.Members,
 		MinLinks: r.MinLinks,
 		FastRate: r.FastRate,

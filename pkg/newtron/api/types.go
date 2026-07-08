@@ -245,7 +245,6 @@ type VLANCreateRequest struct {
 // the conversion has exactly one site).
 func (r VLANCreateRequest) Config() newtron.VLANConfig {
 	return newtron.VLANConfig{
-		VlanID:      r.ID,
 		Description: r.Description,
 		L2VNI:       r.L2VNI,
 	}
@@ -262,7 +261,7 @@ type VRFCreateRequest struct {
 // Config converts the wire request to the domain config — see
 // VLANCreateRequest.Config.
 func (r VRFCreateRequest) Config() newtron.VRFConfig {
-	return newtron.VRFConfig{Name: r.Name}
+	return newtron.VRFConfig{}
 }
 
 // ACLCreateRequest is the body for POST .../create-acl.

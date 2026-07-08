@@ -172,7 +172,7 @@ func (n *Node) Reconcile(ctx context.Context, opts ReconcileOpts) (*ReconcileRes
 	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
 		return nil, err
 	}
-	result, err := n.internal.Reconcile(ctx, node.ReconcileOpts{Mode: opts.Mode})
+	result, err := n.internal.Reconcile(ctx, opts.internal())
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +414,7 @@ func (n *Node) CreateVLAN(ctx context.Context, id int, config VLANConfig) error 
 	if err := n.gate(ctx, auth.PermVLANCreate, fmt.Sprintf("VLAN%d", id)); err != nil {
 		return err
 	}
-	cs, err := n.internal.CreateVLAN(ctx, id, node.VLANConfig{Description: config.Description, L2VNI: config.L2VNI})
+	cs, err := n.internal.CreateVLAN(ctx, id, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -434,11 +434,7 @@ func (n *Node) ConfigureIRB(ctx context.Context, id int, config IRBConfig) error
 	if err := n.gate(ctx, auth.PermVLANModify, fmt.Sprintf("VLAN%d", id)); err != nil {
 		return err
 	}
-	cs, err := n.internal.ConfigureIRB(ctx, id, node.IRBConfig{
-		VRF:        config.VRF,
-		IPAddress:  config.IPAddress,
-		AnycastMAC: config.AnycastMAC,
-	})
+	cs, err := n.internal.ConfigureIRB(ctx, id, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -462,7 +458,7 @@ func (n *Node) CreateVRF(ctx context.Context, name string, config VRFConfig) err
 	if err := n.gate(ctx, auth.PermVRFCreate, name); err != nil {
 		return err
 	}
-	cs, err := n.internal.CreateVRF(ctx, name, node.VRFConfig{})
+	cs, err := n.internal.CreateVRF(ctx, name, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -619,12 +615,7 @@ func (n *Node) CreateACL(ctx context.Context, name string, config ACLConfig) err
 	if err := n.gate(ctx, auth.PermACLCreate, name); err != nil {
 		return err
 	}
-	cs, err := n.internal.CreateACL(ctx, name, node.ACLConfig{
-		Type:        config.Type,
-		Stage:       config.Stage,
-		Ports:       config.Ports,
-		Description: config.Description,
-	})
+	cs, err := n.internal.CreateACL(ctx, name, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -644,15 +635,7 @@ func (n *Node) AddACLRule(ctx context.Context, acl, ruleName string, config ACLR
 	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
 		return err
 	}
-	cs, err := n.internal.AddACLRule(ctx, acl, ruleName, node.ACLRuleConfig{
-		Priority: config.Priority,
-		Action:   config.Action,
-		SrcIP:    config.SrcIP,
-		DstIP:    config.DstIP,
-		Protocol: config.Protocol,
-		SrcPort:  config.SrcPort,
-		DstPort:  config.DstPort,
-	})
+	cs, err := n.internal.AddACLRule(ctx, acl, ruleName, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -665,15 +648,7 @@ func (n *Node) UpdateACLRule(ctx context.Context, acl, ruleName string, config A
 	if err := n.gate(ctx, auth.PermACLModify, acl); err != nil {
 		return err
 	}
-	cs, err := n.internal.UpdateACLRule(ctx, acl, ruleName, node.ACLRuleConfig{
-		Priority: config.Priority,
-		Action:   config.Action,
-		SrcIP:    config.SrcIP,
-		DstIP:    config.DstIP,
-		Protocol: config.Protocol,
-		SrcPort:  config.SrcPort,
-		DstPort:  config.DstPort,
-	})
+	cs, err := n.internal.UpdateACLRule(ctx, acl, ruleName, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -697,13 +672,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, config PortCh
 	if err := n.gate(ctx, auth.PermLAGCreate, name); err != nil {
 		return err
 	}
-	cs, err := n.internal.CreatePortChannel(ctx, name, node.PortChannelConfig{
-		Members:  config.Members,
-		MinLinks: config.MinLinks,
-		FastRate: config.FastRate,
-		Fallback: config.Fallback,
-		MTU:      config.MTU,
-	})
+	cs, err := n.internal.CreatePortChannel(ctx, name, config.internal())
 	n.appendPending(cs)
 	return err
 }
@@ -742,23 +711,6 @@ func (n *Node) RemovePortChannelMember(ctx context.Context, pc, member string) e
 // Device-level write ops — Baseline
 // ============================================================================
 
-// convertRROpts converts a public RouteReflectorOpts to the internal type.
-func convertRROpts(opts RouteReflectorOpts) node.RouteReflectorOpts {
-	result := node.RouteReflectorOpts{
-		ClusterID: opts.ClusterID,
-		LocalASN:  opts.LocalASN,
-		RouterID:  opts.RouterID,
-		LocalAddr: opts.LocalAddr,
-	}
-	for _, c := range opts.Clients {
-		result.Clients = append(result.Clients, node.RouteReflectorPeer{IP: c.IP, ASN: c.ASN})
-	}
-	for _, p := range opts.Peers {
-		result.Peers = append(result.Peers, node.RouteReflectorPeer{IP: p.IP, ASN: p.ASN})
-	}
-	return result
-}
-
 // SetupDevice performs consolidated device initialization: metadata, loopback,
 // BGP, VTEP (optional), and route reflector (optional). Writes a single
 // NEWTRON_INTENT record for the entire setup.
@@ -766,15 +718,7 @@ func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) error {
 	if err := n.gate(ctx, auth.PermDeviceWrite, ""); err != nil {
 		return err
 	}
-	internalOpts := node.SetupDeviceOpts{
-		Fields:   opts.Fields,
-		SourceIP: opts.SourceIP,
-	}
-	if opts.RR != nil {
-		rr := convertRROpts(*opts.RR)
-		internalOpts.RR = &rr
-	}
-	cs, err := n.internal.SetupDevice(ctx, internalOpts)
+	cs, err := n.internal.SetupDevice(ctx, opts.internal())
 	n.appendPending(cs)
 	return err
 }

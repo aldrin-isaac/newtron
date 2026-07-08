@@ -15,7 +15,6 @@ type IRBConfig struct {
 
 // VLANConfig holds configuration options for CreateVLAN.
 type VLANConfig struct {
-	Name        string // VLAN name (alias for Description)
 	Description string
 	L2VNI       int
 }
