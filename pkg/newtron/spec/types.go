@@ -2,8 +2,11 @@
 package spec
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
+
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -664,10 +667,50 @@ type PortConfig struct {
 	Description string `json:"description,omitempty" label:"Description" tooltip:"Operator-facing port description"`
 }
 
+// portSpeedMbps maps the authored speed vocabulary (the schema enum newtcon
+// and other consumers render — "100G") to the Mbps string SONiC's PORT table
+// requires ("100000"). orchagent parsePortSpeed hard-fails on non-numeric
+// values, and on CiscoVS one unparseable port stalls the whole port-init
+// pipeline — every port oper-down after any config reload (RCA-050). The
+// single owner of this translation; validation and rendering both read it.
+var portSpeedMbps = map[string]string{
+	"1G":   "1000",
+	"10G":  "10000",
+	"25G":  "25000",
+	"40G":  "40000",
+	"50G":  "50000",
+	"100G": "100000",
+	"200G": "200000",
+	"400G": "400000",
+}
+
+// ValidateConstraints rejects a port config the renderer could not deliver
+// safely — the writer rejects what the loader rejects, from this one
+// validator (§15).
+func (p *PortConfig) ValidateConstraints(port string) error {
+	v := &util.ValidationBuilder{}
+	if p == nil {
+		return v.Build()
+	}
+	if p.Speed != "" {
+		_, known := portSpeedMbps[p.Speed]
+		v.Add(known, fmt.Sprintf("port %s: speed %q is not a supported value (use one of 1G, 10G, 25G, 40G, 50G, 100G, 200G, 400G)", port, p.Speed))
+	}
+	if p.AdminStatus != "" {
+		v.Add(p.AdminStatus == "up" || p.AdminStatus == "down", fmt.Sprintf("port %s: admin_status %q must be up or down", port, p.AdminStatus))
+	}
+	if p.MTU != 0 {
+		v.Add(p.MTU >= 68 && p.MTU <= 9216, fmt.Sprintf("port %s: mtu %d out of range 68..9216", port, p.MTU))
+	}
+	return v.Build()
+}
+
 // Fields renders the typed config as CONFIG_DB PORT-table string fields,
 // omitting unset values. Normalize-at-the-boundary: the typed spec becomes the
-// string hash SONiC stores (mtu 9100 → "9100"). Returns an empty (non-nil) map
-// when nothing is set.
+// string hash SONiC stores (mtu 9100 → "9100", speed "100G" → "100000").
+// Returns an empty (non-nil) map when nothing is set. An unknown speed is
+// passed through verbatim — ValidateConstraints is the gate that prevents it
+// from ever reaching this point.
 func (p *PortConfig) Fields() map[string]string {
 	f := map[string]string{}
 	if p == nil {
@@ -680,7 +723,11 @@ func (p *PortConfig) Fields() map[string]string {
 		f["mtu"] = strconv.Itoa(p.MTU)
 	}
 	if p.Speed != "" {
-		f["speed"] = p.Speed
+		if mbps, ok := portSpeedMbps[p.Speed]; ok {
+			f["speed"] = mbps
+		} else {
+			f["speed"] = p.Speed
+		}
 	}
 	if p.Description != "" {
 		f["description"] = p.Description

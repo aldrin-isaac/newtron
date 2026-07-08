@@ -691,11 +691,18 @@ func (l *Loader) loadTopologySpec() (*TopologySpecFile, error) {
 func (l *Loader) validateTopology() error {
 	v := &util.ValidationBuilder{}
 
-	for deviceName := range l.topology.Nodes {
+	for deviceName, node := range l.topology.Nodes {
 		// All device names must have nodeSpecs in nodeSpecs/
 		nodeSpecPath := filepath.Join(l.specDir, "nodes", deviceName+".json")
 		if _, err := os.Stat(nodeSpecPath); os.IsNotExist(err) {
 			v.AddErrorf("topology device '%s' has no node spec at %s", deviceName, nodeSpecPath)
+		}
+		// Port configs must be deliverable — same validator the write path
+		// uses (§15: the loader rejects what the writer rejects).
+		for port, pc := range node.Ports {
+			if err := pc.ValidateConstraints(port); err != nil {
+				v.AddErrorf("topology device '%s': %v", deviceName, err)
+			}
 		}
 	}
 

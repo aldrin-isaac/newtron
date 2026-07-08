@@ -92,3 +92,41 @@ func TestCreateEmpty_EmptySpecDir(t *testing.T) {
 		t.Fatalf("expected error for empty dir")
 	}
 }
+
+// TestPortConfig_SpeedBoundary pins RCA-050's spec half: the authored speed
+// vocabulary ("100G" — the schema enum consumers render) is translated to
+// SONiC's Mbps string at the render boundary, and values outside the
+// vocabulary are rejected by the shared validator before they can reach a
+// device (orchagent parsePortSpeed hard-fails on non-numeric speeds and
+// stalls CiscoVS port-init).
+func TestPortConfig_SpeedBoundary(t *testing.T) {
+	pc := &PortConfig{Speed: "100G"}
+	if got := pc.Fields()["speed"]; got != "100000" {
+		t.Errorf("speed 100G rendered as %q, want 100000", got)
+	}
+	if err := pc.ValidateConstraints("Ethernet0"); err != nil {
+		t.Errorf("100G must validate: %v", err)
+	}
+	for _, bad := range []string{"1Gbps", "999", "fast"} {
+		if err := (&PortConfig{Speed: bad}).ValidateConstraints("Ethernet0"); err == nil {
+			t.Errorf("speed %q must be rejected", bad)
+		}
+	}
+	if err := (&PortConfig{AdminStatus: "enabled"}).ValidateConstraints("Ethernet0"); err == nil {
+		t.Error("admin_status 'enabled' must be rejected")
+	}
+}
+
+// TestScaffoldTopologyNode_HostAware pins the host half: a host platform's
+// placement is bare — /setup-device is a SONiC operation and provisioning it
+// against an alpine VM fails.
+func TestScaffoldTopologyNode_HostAware(t *testing.T) {
+	host := ScaffoldTopologyNode("host1", &NodeSpec{Platform: "alpine-host"}, "", true)
+	if len(host.Steps) != 0 {
+		t.Errorf("host placement must have no steps, got %d", len(host.Steps))
+	}
+	sw := ScaffoldTopologyNode("sw1", &NodeSpec{Platform: "cisco"}, "hwsku-x", false)
+	if len(sw.Steps) != 1 || sw.Steps[0].URL != "/setup-device" {
+		t.Errorf("switch placement must scaffold setup-device, got %+v", sw.Steps)
+	}
+}

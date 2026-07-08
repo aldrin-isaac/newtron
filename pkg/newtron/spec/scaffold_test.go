@@ -7,7 +7,7 @@ import "testing"
 // newtcon's former client-side derivation.
 func TestScaffoldTopologyNode_Fields(t *testing.T) {
 	node := &NodeSpec{Platform: "Force10-S6000", UnderlayASN: 65001}
-	dev := ScaffoldTopologyNode("switch1", node, "Force10-S6000")
+	dev := ScaffoldTopologyNode("switch1", node, "Force10-S6000", false)
 
 	if len(dev.Steps) != 1 {
 		t.Fatalf("want 1 step, got %d", len(dev.Steps))
@@ -46,7 +46,7 @@ func TestScaffoldTopologyNode_Fields(t *testing.T) {
 // has no platform HWSKU, and bgp_asn is dropped when UnderlayASN is 0 — the
 // field is absent, not empty (setup-device then infers a default).
 func TestScaffoldTopologyNode_OmitsUnset(t *testing.T) {
-	dev := ScaffoldTopologyNode("host1", &NodeSpec{}, "")
+	dev := ScaffoldTopologyNode("host1", &NodeSpec{}, "", false)
 	fields := dev.Steps[0].Params["fields"].(map[string]any)
 	if _, ok := fields["hwsku"]; ok {
 		t.Errorf("hwsku should be omitted when unresolved, got %v", fields["hwsku"])

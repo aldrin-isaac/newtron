@@ -34,7 +34,14 @@ const (
 // reflector's clients are other nodes, resolvable only against the whole fabric,
 // so that derivation is network-wide and authored separately. What create-node
 // owns is the node-local bring-up.
-func ScaffoldTopologyNode(name string, nodeSpec *NodeSpec, hwsku string) *TopologyNode {
+func ScaffoldTopologyNode(name string, nodeSpec *NodeSpec, hwsku string, isHost bool) *TopologyNode {
+	// Hosts are Linux VMs, not SONiC devices — /setup-device (DEVICE_METADATA,
+	// LeafRouter role, frr config mode) is meaningless and provisioning against
+	// them fails. A host's placement is bare: it exists in the topology so
+	// links can reference it; newtlab wires and provisions it at deploy.
+	if isHost {
+		return &TopologyNode{}
+	}
 	fields := map[string]any{
 		"hostname":                   name,
 		"type":                       setupDeviceRole,
