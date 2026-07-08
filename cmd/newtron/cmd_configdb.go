@@ -118,9 +118,9 @@ consistent snapshot. Unlike 'configdb keys' or 'configdb query', this is one
 atomic read covering all tables — no stitching, no internal inconsistency
 from concurrent device changes mid-read.
 
-By default returns only newtron-owned tables (matching the scope of drift
-detection). Pass --owned-only=false to include every schema-known table on
-the device (factory state, daemon-managed tables, etc.).
+By default returns the device's entire CONFIG_DB. Pass --owned-only to
+restrict to newtron-owned tables (the managed subset the drift guard
+compares) (factory state, daemon-managed tables, etc.).
 
 Requires -D (device) flag and a live device.
 
@@ -185,7 +185,7 @@ Examples:
 }
 
 func init() {
-	configdbSnapshotCmd.Flags().BoolVar(&configdbSnapshotOwnedOnly, "owned-only", true, "Restrict to newtron-owned tables (default: true)")
+	configdbSnapshotCmd.Flags().BoolVar(&configdbSnapshotOwnedOnly, "owned-only", false, "Return only newtron-owned tables (the managed subset) instead of the full device CONFIG_DB")
 
 	configdbCmd.AddCommand(configdbSnapshotCmd)
 	configdbCmd.AddCommand(configdbKeysCmd)

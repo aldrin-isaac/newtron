@@ -978,7 +978,11 @@ func (s *Server) handleConfigDBSnapshot(w http.ResponseWriter, r *http.Request) 
 	if nodeActor == nil {
 		return
 	}
-	ownedOnly := r.URL.Query().Get("owned_only") != "false"
+	// Default is the FULL device CONFIG_DB — the endpoint is named configdb
+	// and must return it (a curated default misled its first consumer twice;
+	// the drift guard's exclusion list is a drift concern, not a read scope).
+	// ?owned_only=true opts into the newtron-managed subset.
+	ownedOnly := r.URL.Query().Get("owned_only") == "true"
 	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
 		return n.ConfigDBSnapshot(r.Context(), ownedOnly)
 	})

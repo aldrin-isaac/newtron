@@ -171,7 +171,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/restart-daemon` | Restart a SONiC daemon |
 | `/refresh-bgp` | Force a BGP soft clear (re-advertise routes) |
 | `/ssh-command` | Execute SSH command |
-| `GET /configdb` | Full CONFIG_DB snapshot (RawConfigDB); `?owned_only=false` for all tables |
+| `GET /configdb` | Full device CONFIG_DB snapshot (RawConfigDB); `?owned_only=true` for the newtron-managed subset |
 | `GET /configdb/{table}` | List CONFIG_DB keys |
 | `GET /configdb/{table}/{key}` | Read CONFIG_DB entry |
 | `GET /configdb/{table}/{key}/exists` | Check CONFIG_DB entry exists |
@@ -3727,9 +3727,17 @@ round-trip per table, so consumers needing a full picture do not stitch
 hundreds of per-key requests and lose internal consistency mid-read.
 
 **Query parameters:**
-- `owned_only` — `true` (default): return only newtron-owned tables; `false`:
-  return every schema-known table on the device (superset, includes factory
-  state and daemon-managed tables).
+- `owned_only` — `false` (default): the device's **entire** CONFIG_DB, every
+  table physically present (schema-known or not — FEATURE, buffer/QoS factory
+  tables, platform extras); `true`: only newtron-owned tables (the same set
+  the drift guard compares — excludes `DEVICE_METADATA`, `PORT`, and the
+  `NEWTRON_*` bookkeeping tables as drift-noisy).
+
+**Invariant:** the default (full) response's table set is a **superset of
+`/intent/projection`'s table set** — every intended table has an observed
+counterpart, so an intended-vs-observed diff is never structurally blind.
+The `owned_only=true` subset does NOT satisfy this invariant (it exists for
+drift-scope symmetry, not for projection comparison).
 
 **Response (200):** `RawConfigDB` map. Tables with zero entries are omitted.
 

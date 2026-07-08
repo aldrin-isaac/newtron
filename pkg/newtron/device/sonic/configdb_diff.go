@@ -256,20 +256,35 @@ func (c *ConfigDBClient) GetRawOwnedTables(ctx context.Context) (RawConfigDB, er
 	return raw, nil
 }
 
-// GetRawAllTables reads every schema-known table from CONFIG_DB as raw data.
-// Superset of GetRawOwnedTables — includes tables excluded from drift detection
-// (factory/platform state, daemon-managed tables). Used by the per-Node
-// CONFIG_DB snapshot endpoint when the caller asks for the full picture.
+// GetRawAllTables reads the device's ENTIRE CONFIG_DB as raw data — every
+// table physically present, whether or not the schema knows it (FEATURE,
+// buffer/QoS factory tables, platform extras). The schema's fail-closed
+// vocabulary governs WRITES (§13); observation returns reality as-is (§4:
+// the device is the source of reality — a reader must not see a curated
+// subset under the name "configdb"). Superset of GetRawOwnedTables and of
+// the projection's table set — the /configdb ⊇ /projection invariant the
+// intended-vs-observed diff depends on. Keys without a "|" separator are
+// skipped (not table rows).
 func (c *ConfigDBClient) GetRawAllTables(ctx context.Context) (RawConfigDB, error) {
+	keys, err := scanKeys(c.ctx, c.client, "*", 100)
+	if err != nil {
+		return nil, fmt.Errorf("scanning CONFIG_DB: %w", err)
+	}
 	raw := make(RawConfigDB)
-	for _, table := range KnownTables() {
-		entries, err := c.GetRawTable(table)
+	for _, redisKey := range keys {
+		parts := strings.SplitN(redisKey, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		table, key := parts[0], parts[1]
+		fields, err := c.client.HGetAll(c.ctx, redisKey).Result()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reading %s: %w", redisKey, err)
 		}
-		if len(entries) > 0 {
-			raw[table] = entries
+		if raw[table] == nil {
+			raw[table] = make(map[string]map[string]string)
 		}
+		raw[table][key] = fields
 	}
 	return raw, nil
 }

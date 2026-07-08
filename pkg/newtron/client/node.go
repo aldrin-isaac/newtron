@@ -503,12 +503,11 @@ func (c *Client) IntentProjection(device string) (sonic.RawConfigDB, error) {
 
 // ConfigDBSnapshot returns the device's actual CONFIG_DB as a single
 // internally-consistent snapshot. ownedOnly=true returns only newtron-owned
-// tables; ownedOnly=false returns every schema-known table on the device.
+// tables; ownedOnly=false returns the device's entire CONFIG_DB. The param
+// is always sent explicitly — the client's behavior must not silently track
+// a server-side default.
 func (c *Client) ConfigDBSnapshot(device string, ownedOnly bool) (sonic.RawConfigDB, error) {
-	path := c.nodePath(device) + "/configdb"
-	if !ownedOnly {
-		path += "?owned_only=false"
-	}
+	path := c.nodePath(device) + fmt.Sprintf("/configdb?owned_only=%t", ownedOnly)
 	var result sonic.RawConfigDB
 	if err := c.doGet(path, &result); err != nil {
 		return nil, err

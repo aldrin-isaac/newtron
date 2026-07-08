@@ -579,8 +579,9 @@ func (n *Node) Projection() sonic.RawConfigDB {
 
 // ConfigDBSnapshot reads the device's actual CONFIG_DB state as a single
 // internally-consistent snapshot. When ownedOnly is true the result covers
-// only newtron-owned tables (matching Drift's scope); when false it covers
-// every schema-known table on the device. Auto-connects transport if needed.
+// only newtron-owned tables (matching Drift's scope); when false it returns
+// the device's entire CONFIG_DB, schema-known or not. Auto-connects
+// transport if needed.
 //
 // See DESIGN_PRINCIPLES_NEWTRON.md §1, §46.
 func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawConfigDB, error) {
