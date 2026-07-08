@@ -87,6 +87,16 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 		if nic.Index == 0 {
 			continue // skip mgmt, already handled
 		}
+		if nic.ConnectAddr == "" {
+			// Filler NIC (normalizeNodeNICs): occupies a position so the
+			// guest's Nth data NIC matches nic_index N; carries no traffic —
+			// the VM-level equivalent of an unwired front-panel port.
+			args = append(args,
+				"-netdev", fmt.Sprintf("user,id=%s,restrict=on", nic.NetdevID),
+				"-device", fmt.Sprintf("%s,netdev=%s,mac=%s,romfile=", q.Node.NICDriver, nic.NetdevID, nic.MAC),
+			)
+			continue
+		}
 		args = append(args,
 			"-netdev", fmt.Sprintf("socket,id=%s,connect=%s", nic.NetdevID, nic.ConnectAddr),
 			"-device", fmt.Sprintf("%s,netdev=%s,mac=%s,romfile=", q.Node.NICDriver, nic.NetdevID, nic.MAC),
