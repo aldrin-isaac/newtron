@@ -229,3 +229,201 @@ func TestHandlersUseConfigConverters(t *testing.T) {
 			strings.Join(violations, "\n  "))
 	}
 }
+
+// TestIdenticalPairsUseDirectConversion closes the guard-strength gap the
+// converter convention left: a hand-mapped converter body over a pair that
+// is field-identical (names, types, order — tags ignored, exactly Go's
+// struct-conversion rule) compiles today and silently drops any field the
+// pair gains tomorrow. Where the language CAN check the copy, the body must
+// let it: `return T(r)`. Hand-mapped bodies stay legitimate only where
+// conversion is illegal — pairs whose fields include package-local named
+// types (SetupDeviceOpts' nested RR) or whose field sets genuinely differ
+// (every wire request that carries identity).
+//
+// Scope: methods named Config / internal / directPeer in the three converter
+// homes. A pair counts as identical only when every field type is composed
+// of builtins — a named struct type prints identically across packages while
+// being a different type, so such pairs are conservatively skipped.
+func TestIdenticalPairsUseDirectConversion(t *testing.T) {
+	root := repoRoot(t)
+
+	// Field shapes for every struct the converters touch.
+	shapes := map[string][]string{}
+	for _, src := range []string{"pkg/newtron/types.go", "pkg/newtron/api/types.go"} {
+		collectShapes(t, filepath.Join(root, src), shapes)
+	}
+	nodeDir := filepath.Join(root, "pkg/newtron/network/node")
+	entries, err := os.ReadDir(nodeDir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", nodeDir, err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
+			collectShapes(t, filepath.Join(nodeDir, e.Name()), shapes)
+		}
+	}
+
+	converterHomes := []string{
+		"pkg/newtron/types.go", "pkg/newtron/api/types.go", "pkg/newtron/boundary.go",
+	}
+	var violations []string
+	checked := 0
+	for _, src := range converterHomes {
+		path := filepath.Join(root, src)
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", path, err)
+		}
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil {
+				continue
+			}
+			name := fd.Name.Name
+			if name != "Config" && name != "internal" && name != "directPeer" {
+				continue
+			}
+			recv, ret := converterEndpoints(fd)
+			if recv == "" || ret == "" {
+				continue
+			}
+			rShape, rOK := shapes[recv]
+			tShape, tOK := shapes[ret]
+			if !rOK || !tOK {
+				continue
+			}
+			checked++
+			if !shapesConvertible(rShape, tShape) {
+				continue // genuinely divergent or non-builtin — hand-mapping is the only option
+			}
+			if !bodyIsDirectConversion(fd) {
+				pos := fset.Position(fd.Pos())
+				violations = append(violations,
+					pos.String()+": "+recv+"."+name+"() hand-maps a field-identical pair — use `return "+ret+"(r)` so the compiler owns the copy")
+			}
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("checked only %d converters — parser broke, sweep would be vacuous", checked)
+	}
+	if len(violations) > 0 {
+		t.Errorf("hand-mapped converters over identical pairs:\n  %s", strings.Join(violations, "\n  "))
+	}
+}
+
+// collectShapes records exported struct field shapes as "name type" strings.
+func collectShapes(t *testing.T, path string, out map[string][]string) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		ts, ok := n.(*ast.TypeSpec)
+		if !ok {
+			return true
+		}
+		st, ok := ts.Type.(*ast.StructType)
+		if !ok {
+			return true
+		}
+		var shape []string
+		for _, field := range st.Fields.List {
+			typ := exprString(field.Type)
+			for _, id := range field.Names {
+				shape = append(shape, id.Name+" "+typ)
+			}
+		}
+		out[ts.Name.Name] = shape
+		return true
+	})
+}
+
+// converterEndpoints returns the receiver type name and the returned type's
+// bare name (package qualifier stripped) for a converter method.
+func converterEndpoints(fd *ast.FuncDecl) (recv, ret string) {
+	if len(fd.Recv.List) == 1 {
+		if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok {
+			recv = id.Name
+		}
+	}
+	if fd.Type.Results != nil && len(fd.Type.Results.List) == 1 {
+		switch rt := fd.Type.Results.List[0].Type.(type) {
+		case *ast.Ident:
+			ret = rt.Name
+		case *ast.SelectorExpr:
+			ret = rt.Sel.Name
+		}
+	}
+	return recv, ret
+}
+
+// shapesConvertible reports whether two shapes are field-identical AND all
+// field types are builtin-composed (a named struct type prints identically
+// across packages while being a different type — conversion would be
+// illegal, so those pairs are skipped, conservatively).
+func shapesConvertible(a, b []string) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+		typ := strings.SplitN(a[i], " ", 2)[1]
+		if !builtinComposed(typ) {
+			return false
+		}
+	}
+	return true
+}
+
+// builtinComposed reports whether a printed type is composed only of
+// builtins and builtin containers.
+func builtinComposed(typ string) bool {
+	stripped := strings.NewReplacer(
+		"[]", "", "map[", "", "]", "", "*", "", "string", "", "int64", "",
+		"int", "", "bool", "", "float64", "", "byte", "", "any", "",
+	).Replace(typ)
+	return strings.TrimSpace(stripped) == ""
+}
+
+// bodyIsDirectConversion reports whether the method body is exactly
+// `return T(r)`.
+func bodyIsDirectConversion(fd *ast.FuncDecl) bool {
+	if fd.Body == nil || len(fd.Body.List) != 1 {
+		return false
+	}
+	ret, ok := fd.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	call, ok := ret.Results[0].(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	_, isIdent := call.Args[0].(*ast.Ident)
+	return isIdent
+}
+
+// exprString renders a type expression compactly (enough for shape
+// comparison — selectors keep only the bare name so cross-package twins
+// compare equal, which builtinComposed then disqualifies).
+func exprString(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		return v.Sel.Name
+	case *ast.StarExpr:
+		return "*" + exprString(v.X)
+	case *ast.ArrayType:
+		return "[]" + exprString(v.Elt)
+	case *ast.MapType:
+		return "map[" + exprString(v.Key) + "]" + exprString(v.Value)
+	default:
+		return "?"
+	}
+}

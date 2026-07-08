@@ -128,14 +128,11 @@ type ConfigureInterfaceRequest struct {
 }
 
 // Config converts the wire request to the domain config — see
-// VLANCreateRequest.Config.
+// VLANCreateRequest.Config. The pair is field-identical, so the body is a
+// direct conversion: it stops compiling if either side gains a field
+// (json tags are ignored by Go struct conversion).
 func (r ConfigureInterfaceRequest) Config() newtron.InterfaceConfig {
-	return newtron.InterfaceConfig{
-		VRF:    r.VRF,
-		IP:     r.IP,
-		VLAN:   r.VLAN,
-		Tagged: r.Tagged,
-	}
+	return newtron.InterfaceConfig(r)
 }
 
 // RemoveTrunkVLANRequest is the body for POST .../remove-trunk-vlan.
