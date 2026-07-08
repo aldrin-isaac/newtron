@@ -83,7 +83,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("DELETE /newtron/v1/networks/{netID}/topology/nodes/{name}", s.handleDeleteTopologyNode)
 	mux.HandleFunc("PUT /newtron/v1/networks/{netID}/topology/nodes/{name}", s.handleUpdateTopologyNode)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/topology/create-link", s.handleCreateTopologyLink)
-	mux.HandleFunc("DELETE /newtron/v1/networks/{netID}/topology/links/{node}/{interface}", s.handleDeleteTopologyLink)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/topology/delete-link", s.handleDeleteTopologyLink)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/host-connection", s.handleHostConnection)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features", s.handleGetAllFeatures)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/features/{name}/dependencies", s.handleGetFeatureDependencies)
@@ -176,7 +176,6 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/evpn/status", s.handleEVPNStatus)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/health", s.handleHealthCheck)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/lags", s.handleListLAGs)
-	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/neighbors", s.handleListNeighbors)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/routes/{vrf}/{prefix...}", s.handleGetRoute)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/routes-asic/{prefix...}", s.handleGetRouteASIC)
 

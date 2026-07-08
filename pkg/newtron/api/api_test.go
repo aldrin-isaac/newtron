@@ -160,7 +160,7 @@ func TestAPICompleteness(t *testing.T) {
 			"DeleteTopologyDevice": true, // #15: DELETE /networks/{netID}/topology/nodes/{name}
 			"UpdateTopologyDevice": true, // #15: PUT /networks/{netID}/topology/nodes/{name}
 			"AddTopologyLink":      true, // #16: POST /networks/{netID}/topology/create-link
-			"DeleteTopologyLink":   true, // #16: DELETE /networks/{netID}/topology/links/{device}/{interface}
+			"DeleteTopologyLink":   true, // #16: POST /networks/{netID}/topology/delete-link
 			"TopologyNodeNames":    true,
 			"IsHostDevice":         true,
 			"GetHostConnection":    true,

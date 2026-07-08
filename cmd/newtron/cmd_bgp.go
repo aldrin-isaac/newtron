@@ -244,7 +244,7 @@ Examples:
 			return err
 		}
 
-		results, err := app.client.ListNeighbors(app.deviceName)
+		results, err := app.client.CheckBGPSessions(app.deviceName)
 		if err != nil {
 			return err
 		}

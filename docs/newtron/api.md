@@ -124,7 +124,6 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/evpn/status` | EVPN overlay status |
 | `/health` | Health report |
 | `/lags`, `/lags/{name}` | LAG list / detail |
-| `/neighbors` | BGP sessions (alias for `/bgp/check`) |
 | `/routes/{vrf}/{prefix...}` | APP_DB route lookup |
 | `/routes-asic/{prefix...}` | ASIC_DB route lookup |
 | `/intent/projection` | Per-Node projection (RawConfigDB) from intent replay |
@@ -195,6 +194,28 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 ## 1. Conventions
 
 Every HTTP interaction with newtron-server follows these conventions.
+
+### Wire Field-Name Conventions
+
+The canonical wire vocabulary is the **operation registry's recorded
+param names** (`op_registry.go` — the same manifest that defines wire
+completeness). Consumers can rely on:
+
+- **BGP peer identity is `neighbor_ip`** — on add/update/remove bodies AND
+  on status/entry reads. `address` appears only inside observation payloads
+  for concepts that are not peer identity (a route's next-hop).
+- **Role-qualified address names stay qualified**: `loopback_ip` (a node's
+  loopback), `ip_address` (a service/IRB CIDR — the persisted intent param),
+  `ip` (a bare interface CIDR on configure-interface), `mgmt_ip`. These are
+  distinct concepts, not spellings of one.
+- **A link endpoint is the colon-joined string `"device:interface"`** —
+  everywhere: topology `a`/`z`, interface-inventory `peer`, delete-link
+  `endpoint`.
+- **Mutations are RPC verbs with the identity in the body** (`create-link`/
+  `delete-link`, `add-bgp-evpn-peer`/`remove-bgp-evpn-peer`); verb pairs
+  follow the §16 vocabulary (create↔delete, add↔remove, bind↔unbind).
+- **Resource identity keys**: networks are keyed `id` (the lab identity);
+  named spec documents are keyed `name`.
 
 ### Response Envelope
 
@@ -1537,13 +1558,17 @@ declared on its device's `Ports` map.
 **Errors:** 409 with `*ConflictError` when an endpoint is already wired;
 400 when an endpoint device or interface is unknown.
 
-#### DELETE /newtron/v1/networks/{netID}/topology/links/{node}/{interface}
+#### POST /newtron/v1/networks/{netID}/topology/delete-link
 
-Removes the link containing the given `{device, interface}` endpoint.
-Single-endpoint identification: a port participates in at most one link, so
-one endpoint uniquely identifies the link.
+Removes the link containing the given endpoint. RPC verb paired with
+`create-link` (create↔delete), identity in the body like every other
+remove-style verb.
 
-**Path params:** `device`, `interface`.
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `endpoint` | string | yes | `"device:interface"` — either end; a port participates in at most one link, so one endpoint uniquely identifies it |
 
 **Response (200):** `{"deleted": "<device>:<interface>"}`.
 
@@ -2921,7 +2946,7 @@ Get BGP status including local AS, router ID, and all neighbors with operational
     "loopback_ip": "10.0.0.1",
     "neighbors": [
       {
-        "address": "10.100.0.1",
+        "neighbor_ip": "10.100.0.1",
         "vrf": "",
         "type": "underlay",
         "remote_as": "65002",
@@ -2997,13 +3022,6 @@ Show a single LAG with full details.
 **Status codes:** 200 success, 404 LAG not found
 
 ### Neighbors
-
-#### GET /newtron/v1/networks/{netID}/nodes/{node}/neighbors
-
-Get BGP session state. This is functionally identical to `bgp/check` -- both
-call `CheckBGPSessions` internally and return `BGPStatusResult`.
-
-**Response (200):** `BGPStatusResult`
 
 ### Routes
 
@@ -3598,7 +3616,7 @@ Remove a BGP EVPN overlay peer.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `ip` | string | yes | Neighbor IP address to remove |
+| `neighbor_ip` | string | yes | Neighbor IP address to remove (same identity vocabulary as add/update) |
 
 **Response (200):** `WriteResult`
 
@@ -4558,7 +4576,7 @@ Returned by `GET .../vrfs/{name}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `address` | string | Neighbor IP address |
+| `neighbor_ip` | string | Neighbor IP address |
 | `asn` | string | Remote ASN |
 | `description` | string | Description |
 
@@ -4606,7 +4624,7 @@ Returned by `GET .../acls/{name}`.
 
 #### BGPStatusResult
 
-Returned by `GET .../bgp/status`, `GET .../bgp/check`, and `GET .../neighbors`.
+Returned by `GET .../bgp/status` and `GET .../bgp/check`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -4620,7 +4638,7 @@ Returned by `GET .../bgp/status`, `GET .../bgp/check`, and `GET .../neighbors`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `address` | string | Neighbor address |
+| `neighbor_ip` | string | Neighbor address |
 | `vrf` | string | VRF (empty for default) |
 | `type` | string | Neighbor type (e.g., `"underlay"`, `"overlay"`) |
 | `remote_as` | string | Remote AS |

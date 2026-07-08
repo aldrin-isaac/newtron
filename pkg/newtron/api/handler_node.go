@@ -235,21 +235,6 @@ func (s *Server) handleListLAGs(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleListNeighbors(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return n.CheckBGPSessions(r.Context())
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, val)
-}
-
 func (s *Server) handleGetRoute(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
@@ -827,7 +812,7 @@ func (s *Server) handleRemoveBGPEVPNPeer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var body struct {
-		IP string `json:"ip"`
+		NeighborIP string `json:"neighbor_ip"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -835,7 +820,7 @@ func (s *Server) handleRemoveBGPEVPNPeer(w http.ResponseWriter, r *http.Request)
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveBGPEVPNPeer(ctx, body.IP)
+		return n.RemoveBGPEVPNPeer(ctx, body.NeighborIP)
 	})
 	if err != nil {
 		writeError(w, err)
