@@ -104,4 +104,4 @@ steps:
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/remove-bgp-evpn-peer?mode=loopback
-    params: {ip: "10.227.2.2"}
+    params: {neighbor_ip: "10.227.2.2"}

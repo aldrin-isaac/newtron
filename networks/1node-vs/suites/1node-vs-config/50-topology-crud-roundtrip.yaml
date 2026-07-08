@@ -55,8 +55,10 @@ steps:
 
   - name: delete-link-by-single-endpoint
     action: newtron
-    method: DELETE
-    url: /topology/links/switch1/Ethernet0
+    method: POST
+    url: /topology/delete-link
+    params:
+      endpoint: "switch1:Ethernet0"
     expect:
       jq: '.deleted == "switch1:Ethernet0"'
 

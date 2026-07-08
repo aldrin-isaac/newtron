@@ -50,15 +50,6 @@ func (c *Client) ShowServiceBinding(device, iface string) (*newtron.ServiceBindi
 	return &result, nil
 }
 
-// ListNeighbors returns BGP neighbor health checks (alias for CheckBGPSessions).
-func (c *Client) ListNeighbors(device string) ([]newtron.HealthCheckResult, error) {
-	var result []newtron.HealthCheckResult
-	if err := c.doGet(c.nodePath(device)+"/neighbors", &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 // ListVLANs returns VLAN status entries.
 func (c *Client) ListVLANs(device string) ([]newtron.VLANStatusEntry, error) {
 	var result []newtron.VLANStatusEntry
@@ -283,8 +274,8 @@ func (c *Client) UpdateBGPEVPNPeer(device, neighborIP string, config newtron.BGP
 // RemoveBGPEVPNPeer removes an EVPN BGP neighbor by IP.
 func (c *Client) RemoveBGPEVPNPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
-		IP string `json:"ip"`
-	}{IP: ip}
+		NeighborIP string `json:"neighbor_ip"`
+	}{NeighborIP: ip}
 	return c.nodeWrite(device, "remove-bgp-evpn-peer", body, opts)
 }
 

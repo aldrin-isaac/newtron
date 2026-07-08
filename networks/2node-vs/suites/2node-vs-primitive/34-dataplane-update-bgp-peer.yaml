@@ -69,4 +69,4 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/bgp/status
     expect:
-      jq: '.neighbors[] | select(.address == "10.1.0.1") | .description == "dataplane-235-check"'
+      jq: '.neighbors[] | select(.neighbor_ip == "10.1.0.1") | .description == "dataplane-235-check"'

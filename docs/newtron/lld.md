@@ -1196,7 +1196,7 @@ declared in the schema (`scope` enum + scope-conditional `scope_instance` ref vi
 | DELETE | `.../topology/nodes/{name}` | `?force=true` to remove links wired to this device; default refuses if links remain (409). (No standalone topology create-node — placement follows the node definition; #393.) |
 | PUT | `.../topology/nodes/{name}` | `TopologyNode` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
 | POST | `.../topology/create-link` | `*TopologyLink` body — adds link to topology |
-| DELETE | `.../topology/links/{node}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |
+| POST | `.../topology/delete-link` | Removes link; body `{"endpoint": "device:interface"}` — single-endpoint identification (a port participates in at most one link) |
 
 All paths above are prefixed with `/networks/{netID}`.
 
@@ -1228,7 +1228,6 @@ Response types from §3.2–3.5. These dispatch via `connectAndRead` — the act
 | GET | `.../nodes/{node}/health` | `HealthReport` |
 | GET | `.../nodes/{node}/lags` | `[]LAGStatusEntry` |
 | GET | `.../nodes/{node}/lags/{name}` | `LAGStatusEntry` |
-| GET | `.../nodes/{node}/neighbors` | `[]NeighEntry` |
 | GET | `.../nodes/{node}/routes/{vrf}/{prefix...}` | `RouteEntry` |
 | GET | `.../nodes/{node}/routes-asic/{prefix...}` | `RouteEntry` |
 | GET | `.../nodes/{node}/configdb` | `sonic.RawConfigDB` — single internally-consistent CONFIG_DB snapshot (one round-trip per table). `?owned_only=false` returns every schema-known table (§46) |

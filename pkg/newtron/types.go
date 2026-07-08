@@ -348,8 +348,11 @@ type InterfaceDetail struct {
 }
 
 // BGPNeighborEntry is a BGP neighbor from CONFIG_DB for VRF show.
+// The wire name follows the intent-param vocabulary (neighbor_ip) — the
+// registry manifest is the canonical wire vocabulary; see api.md
+// "Wire field-name conventions".
 type BGPNeighborEntry struct {
-	Address     string `json:"address"`
+	Address     string `json:"neighbor_ip"`
 	ASN         string `json:"asn"`
 	Description string `json:"description,omitempty"`
 }
@@ -403,7 +406,7 @@ type ACLTableDetail struct {
 
 // BGPNeighborStatus is a BGP neighbor with config + operational state.
 type BGPNeighborStatus struct {
-	Address   string `json:"address"`
+	Address   string `json:"neighbor_ip"`
 	VRF       string `json:"vrf,omitempty"`
 	Type      string `json:"type"`
 	RemoteAS  string `json:"remote_as"`

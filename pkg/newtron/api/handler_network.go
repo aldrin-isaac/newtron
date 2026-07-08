@@ -517,27 +517,34 @@ func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request
 	httputil.WriteJSON(w, http.StatusCreated, &link)
 }
 
-// handleDeleteTopologyLink removes the link containing the given endpoint
-// (URL path: /topology/link/{device}/{interface}). A port participates in at
-// most one link, so a single endpoint uniquely identifies it. 404 when no
-// link contains the endpoint.
+// handleDeleteTopologyLink removes the link containing the given endpoint.
+// Body: {"endpoint": "device:interface"} — the same colon-joined endpoint
+// vocabulary the rest of the link surface speaks (topology a/z, inventory
+// peer). A port participates in at most one link, so a single endpoint
+// uniquely identifies it; 404 when no link contains it. RPC verb pairing
+// with create-link (§16 create↔delete; identity in the body like every
+// other remove-style verb).
 func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request) {
 	ne := s.requireNetwork(w, r)
 	if ne == nil {
 		return
 	}
-	device := r.PathValue("node")
-	iface := r.PathValue("interface")
-	if device == "" || iface == "" {
-		writeError(w, &newtron.ValidationError{Message: "device and interface required in URL"})
+	var req struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	endpoint := device + ":" + iface
-	if err := ne.net.DeleteTopologyLink(r.Context(), endpoint); err != nil {
+	if req.Endpoint == "" {
+		writeError(w, &newtron.ValidationError{Message: `endpoint required ("device:interface")`})
+		return
+	}
+	if err := ne.net.DeleteTopologyLink(r.Context(), req.Endpoint); err != nil {
 		writeError(w, err)
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"deleted": endpoint})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"deleted": req.Endpoint})
 }
 
 func (s *Server) handleHostConnection(w http.ResponseWriter, r *http.Request) {

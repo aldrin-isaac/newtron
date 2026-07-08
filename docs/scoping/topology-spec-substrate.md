@@ -258,7 +258,7 @@ filing a separate gap for it.
 
 _Landed on branch `impl/phase-5-topology-crud` (Phase 5 batch, same commit as
 #15). URL shape: `POST /topology/create-link` (body = TopologyLink) +
-`DELETE /topology/links/{device}/{interface}` (single endpoint uniquely
+`POST /topology/delete-link` (body `{"endpoint"}`; single endpoint uniquely
 identifies the link). Add refuses with `*ConflictError` when either
 endpoint is already wired._
 
