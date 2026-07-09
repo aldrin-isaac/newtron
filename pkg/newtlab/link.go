@@ -44,10 +44,10 @@ type LinkEndpoint struct {
 
 // VMLabConfig mirrors spec.NewtLabConfig with resolved defaults.
 type VMLabConfig struct {
-	LinkPortBase    int               // default: 20000
-	ConsolePortBase int               // default: 30000
-	SSHPortBase     int               // default: 40000
-	Hosts           map[string]string // host name → IP
+	LinkPortBase    int                  // default: 20000
+	ConsolePortBase int                  // default: 30000
+	SSHPortBase     int                  // default: 40000
+	Hosts           map[string]string    // host name → IP
 	Servers         []*spec.ServerConfig // server pool (nil = single-host mode)
 }
 
@@ -197,7 +197,53 @@ func AllocateLinks(
 		})
 	}
 
+	// QEMU attaches NICs in command-line order and the SONiC VM dataplane
+	// (Silicon One sim, VPP) binds front-panel ports to data NICs
+	// POSITIONALLY — the Nth data NIC backs the Nth port, whatever the
+	// netdev id says. The nic_index a platform's ports[] declares is
+	// therefore a POSITION contract: realizing Ethernet4 (nic_index 5)
+	// requires NIC slots 1..5 to exist. Sort each node's NICs by index and
+	// pad interior gaps with disconnected filler NICs; without this, a
+	// sparse topology (links on E0+E4, skipping E1-E3) silently lands its
+	// second link's config on Ethernet4 while the wire lands on Ethernet1
+	// (RCA-050 — found live on a consumer-authored cisco-p200 fabric; every
+	// in-repo topology was accidentally dense, which is why this survived).
+	normalizeNodeNICs(nodes)
+
 	return result, nil
+}
+
+// normalizeNodeNICs sorts each node's data NICs by index and inserts filler
+// NICs (ConnectAddr "" — rendered as an isolated netdev) for interior gaps,
+// so guest enumeration order matches the platform's nic_index contract.
+func normalizeNodeNICs(nodes map[string]*NodeConfig) {
+	for _, node := range nodes {
+		if len(node.NICs) == 0 {
+			continue
+		}
+		sort.Slice(node.NICs, func(i, j int) bool { return node.NICs[i].Index < node.NICs[j].Index })
+		maxIdx := node.NICs[len(node.NICs)-1].Index
+		byIndex := make(map[int]NICConfig, len(node.NICs))
+		for _, nic := range node.NICs {
+			byIndex[nic.Index] = nic
+		}
+		filled := make([]NICConfig, 0, maxIdx+1)
+		if mgmt, ok := byIndex[0]; ok { // mgmt NIC rides in the same slice
+			filled = append(filled, mgmt)
+		}
+		for idx := 1; idx <= maxIdx; idx++ {
+			if nic, ok := byIndex[idx]; ok {
+				filled = append(filled, nic)
+				continue
+			}
+			filled = append(filled, NICConfig{
+				Index:    idx,
+				NetdevID: fmt.Sprintf("eth%d", idx),
+				MAC:      dataNICMAC(node, idx),
+			})
+		}
+		node.NICs = filled
+	}
 }
 
 // connectAddr returns the "IP:PORT" a VM should connect to for its bridge worker.

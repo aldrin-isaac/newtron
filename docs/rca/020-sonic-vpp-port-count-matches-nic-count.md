@@ -34,3 +34,14 @@ Gaps in interface numbering (e.g., Ethernet0 + Ethernet2 with no Ethernet1) will
 
 - RCA-010: QEMU PCI slot offset for data NICs
 - RCA-013: Boot patch port stride mismatch
+
+
+## Amendment (2026-07-08, RCA-050)
+
+The no-gaps constraint is not VPP-specific: **every VM platform in this
+repository binds front-panel ports to data NICs positionally** (Silicon One
+sim included). As of RCA-050, newtlab realizes the constraint itself —
+`normalizeNodeNICs` sorts each node's NICs by `nic_index` and pads interior
+gaps with disconnected filler NICs — so sparse topologies (e.g. links on
+Ethernet0 + Ethernet4 only) now wire correctly instead of silently landing
+config and wire on different ports.

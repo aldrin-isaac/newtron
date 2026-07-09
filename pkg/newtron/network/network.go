@@ -913,7 +913,7 @@ func (n *Network) CreateNodeSpec(name string, nodeSpec *spec.NodeSpec) error {
 	// node's identity — DeleteNodeSpec removes it (§15 reverse). Create is
 	// atomic: a placement failure rolls back the spec so we never leave a node
 	// defined-but-unplaced.
-	device := spec.ScaffoldTopologyNode(name, nodeSpec, n.resolvePlatformHWSKU(nodeSpec.Platform))
+	device := spec.ScaffoldTopologyNode(name, nodeSpec, n.resolvePlatformHWSKU(nodeSpec.Platform), n.platformIsHost(nodeSpec.Platform))
 	if err := n.AddTopologyDevice(name, device); err != nil {
 		_ = n.loader.DeleteNodeSpec(name)
 		return fmt.Errorf("placing topology device %s: %w", name, err)
@@ -925,6 +925,21 @@ func (n *Network) CreateNodeSpec(name string, nodeSpec *spec.NodeSpec) error {
 // the node has no platform, the platform is unknown, or it declares no HWSKU —
 // in which case the scaffold omits the setup-device hwsku field and the device
 // infers a default. A missing HWSKU is not fatal to node creation.
+// platformIsHost reports whether the node's platform is a host (device_type
+// "host"). Unknown/absent platforms count as switches — the historical
+// default, and the safe one: a switch scaffold on a host fails loudly at
+// provision; a missing scaffold on a switch fails silently at deploy.
+func (n *Network) platformIsHost(platform string) bool {
+	if platform == "" {
+		return false
+	}
+	p, err := n.GetPlatform(platform)
+	if err != nil || p == nil {
+		return false
+	}
+	return p.IsHost()
+}
+
 func (n *Network) resolvePlatformHWSKU(platform string) string {
 	if platform == "" {
 		return ""
@@ -1934,6 +1949,12 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) e
 
 	if _, err := n.loader.LoadNodeSpec(name); err != nil {
 		return fmt.Errorf("node spec for topology device %s: %w", name, err)
+	}
+
+	for port, pc := range device.Ports {
+		if err := pc.ValidateConstraints(port); err != nil {
+			return fmt.Errorf("topology device %s: %w", name, err)
+		}
 	}
 
 	working := cloneTopology(topo)

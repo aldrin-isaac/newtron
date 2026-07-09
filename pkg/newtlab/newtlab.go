@@ -569,6 +569,17 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 
 		for hostIdx, hostName := range group.Hosts {
 			nicBase := group.NICBase[hostName]
+			// NICBase is assigned to every host at sizing time, wired or not —
+			// the wired truth is whether the VM actually carries a NIC at this
+			// base (AllocateLinks only creates NICs for real links; the
+			// provisioning below moves exactly eth<nicBase>).
+			wired := false
+			for _, nic := range vmNC.NICs {
+				if nic.Index == nicBase && nic.ConnectAddr != "" {
+					wired = true
+					break
+				}
+			}
 			profile := l.Profiles[hostName]
 
 			var cmds []string
@@ -586,13 +597,22 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 			// Move each data NIC into the namespace
 			// For a host with one link (eth0), NIC = nicBase + 0
 			// The VM sees this as eth<nicBase>
-			ethName := fmt.Sprintf("eth%d", nicBase)
-			cmds = append(cmds,
-				fmt.Sprintf("ip link set %s netns %s", ethName, hostName),
-				fmt.Sprintf("ip netns exec %s ip link set %s name eth0", hostName, ethName),
-				fmt.Sprintf("ip netns exec %s ip link set eth0 up", hostName),
-				fmt.Sprintf("ip netns exec %s ip link set lo up", hostName),
-			)
+			//
+			// An UNWIRED host (defined in the topology, no links yet) has no
+			// entry in NICBase — the zero value would name eth0, the MGMT
+			// NIC, and moving that into the netns strands the whole VM
+			// (RCA-050 debugging: this is how a consumer's linkless hosts
+			// took the host VM to "error"). Such a host gets its namespace
+			// with loopback only — parked, SSH-reachable, wired later.
+			if wired {
+				ethName := fmt.Sprintf("eth%d", nicBase)
+				cmds = append(cmds,
+					fmt.Sprintf("ip link set %s netns %s", ethName, hostName),
+					fmt.Sprintf("ip netns exec %s ip link set %s name eth0", hostName, ethName),
+					fmt.Sprintf("ip netns exec %s ip link set eth0 up", hostName),
+				)
+			}
+			cmds = append(cmds, fmt.Sprintf("ip netns exec %s ip link set lo up", hostName))
 
 			// Assign IP and gateway
 			hostIP, gateway := "", ""
@@ -608,10 +628,10 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 					hostIP = deriveHostIP(switchIP, mask, hostIdx)
 				}
 			}
-			if hostIP != "" {
+			if wired && hostIP != "" {
 				cmds = append(cmds, fmt.Sprintf("ip netns exec %s ip addr add %s dev eth0", hostName, hostIP))
 			}
-			if gateway != "" {
+			if wired && gateway != "" {
 				cmds = append(cmds, fmt.Sprintf("ip netns exec %s ip route add default via %s", hostName, gateway))
 			}
 

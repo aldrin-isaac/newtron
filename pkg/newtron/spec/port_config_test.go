@@ -26,7 +26,9 @@ func TestPortConfig_RoundTrip(t *testing.T) {
 	if got, want := e0.Fields(), (map[string]string{"admin_status": "up", "mtu": "9100"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("Ethernet0.Fields() = %v, want %v", got, want)
 	}
-	if got, want := dev.Ports["Ethernet4"].Fields(), (map[string]string{"admin_status": "down", "speed": "100G"}); !reflect.DeepEqual(got, want) {
+	// speed renders in SONiC's Mbps form — the authored "100G" verbatim was
+	// the RCA-050 defect this test used to pin as correct.
+	if got, want := dev.Ports["Ethernet4"].Fields(), (map[string]string{"admin_status": "down", "speed": "100000"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("Ethernet4.Fields() = %v, want %v", got, want)
 	}
 

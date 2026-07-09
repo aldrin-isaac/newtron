@@ -24,7 +24,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | Code Review | `docs/code-review.md` | Procedural rules for diff-review tasks — angles, false-positive filter, confidence rubric |
 | Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
 
-When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 45 documented pitfalls with root causes and solutions.
+When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 46 documented pitfalls with root causes and solutions.
 
 ## First-Run Setup
 
