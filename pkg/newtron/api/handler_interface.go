@@ -397,3 +397,27 @@ func (s *Server) handleUnbindQoS(w http.ResponseWriter, r *http.Request) {
 	}
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
+
+// handleInterfaceStatus returns the interface's composed live operational
+// picture — link state, counters, rates, resolved neighbors, LLDP far end,
+// optics — one call across STATE_DB, APPL_DB, and COUNTERS_DB (§4: pure
+// observation; the caller judges correctness).
+func (s *Server) handleInterfaceStatus(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	ifName := interfaceName(r)
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		iface, err := n.Interface(ifName)
+		if err != nil {
+			return nil, err
+		}
+		return iface.Status(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}

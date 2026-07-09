@@ -41,6 +41,16 @@ func (c *Client) ShowInterface(device, name string) (*newtron.InterfaceDetail, e
 	return &result, nil
 }
 
+// InterfaceStatus returns the interface's composed live operational picture
+// (link state, counters, rates, resolved neighbors, LLDP far end, optics).
+func (c *Client) InterfaceStatus(device, iface string) (*newtron.InterfaceStatus, error) {
+	var result newtron.InterfaceStatus
+	if err := c.doGet(c.interfacePath(device, iface)+"/status", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // ShowServiceBinding returns the service binding on an interface.
 func (c *Client) ShowServiceBinding(device, iface string) (*newtron.ServiceBindingDetail, error) {
 	var result newtron.ServiceBindingDetail
@@ -235,10 +245,35 @@ func (c *Client) ConfigDBEntryExists(device, table, key string) (bool, error) {
 	return result["exists"], nil
 }
 
-// QueryStateDB reads a STATE_DB hash entry.
-func (c *Client) QueryStateDB(device, table, key string) (map[string]string, error) {
+// OperDBSnapshot reads an entire operational DB (STATE_DB, APPL_DB,
+// COUNTERS_DB, ASIC_DB) as table → key → fields.
+func (c *Client) OperDBSnapshot(device, dbName string) (map[string]map[string]map[string]string, error) {
+	var result map[string]map[string]map[string]string
+	path := fmt.Sprintf("%s/db/%s", c.nodePath(device), url.PathEscape(dbName))
+	if err := c.doGet(path, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OperDBTable reads one table of an operational DB as key → fields. A
+// flat-hash table (e.g. COUNTERS_DB's COUNTERS_PORT_NAME_MAP) comes back as
+// a single "" entry.
+func (c *Client) OperDBTable(device, dbName, table string) (map[string]map[string]string, error) {
+	var result map[string]map[string]string
+	path := fmt.Sprintf("%s/db/%s/%s", c.nodePath(device), url.PathEscape(dbName), url.PathEscape(table))
+	if err := c.doGet(path, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// OperDBEntry reads one entry of an operational DB. The key may embed the
+// DB's separator (APPL_DB "NEIGH_TABLE:Ethernet4:10.255.255.4" → key
+// "Ethernet4:10.255.255.4") — the server routes it as a path wildcard.
+func (c *Client) OperDBEntry(device, dbName, table, key string) (map[string]string, error) {
 	var result map[string]string
-	path := fmt.Sprintf("%s/statedb/%s/%s", c.nodePath(device), url.PathEscape(table), url.PathEscape(key))
+	path := fmt.Sprintf("%s/db/%s/%s/%s", c.nodePath(device), url.PathEscape(dbName), url.PathEscape(table), url.PathEscape(key))
 	if err := c.doGet(path, &result); err != nil {
 		return nil, err
 	}

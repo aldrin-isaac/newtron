@@ -240,7 +240,7 @@ func init() {
 	for _, cmd := range []*cobra.Command{healthCmd, intentCmd} {
 		addOutputFlags(cmd)
 	}
-	for _, cmd := range []*cobra.Command{networkCmd, configdbCmd, statedbCmd, routeCmd, topologyCmd} {
+	for _, cmd := range []*cobra.Command{networkCmd, configdbCmd, dbCmd, routeCmd, topologyCmd} {
 		addOutputFlags(cmd)
 	}
 	addOutputFlags(sshCmd)
@@ -270,7 +270,7 @@ func init() {
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
 		showCmd, healthCmd, initCmd, deviceCmd, intentCmd,
-		configdbCmd, statedbCmd, routeCmd,
+		configdbCmd, dbCmd, routeCmd,
 		sshCmd, reloadConfigCmd, saveConfigCmd, restartDaemonCmd,
 	} {
 		cmd.GroupID = "device"

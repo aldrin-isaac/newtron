@@ -448,6 +448,7 @@ Examples:
 func init() {
 	interfaceCmd.AddCommand(interfaceListCmd)
 	interfaceCmd.AddCommand(interfaceShowCmd)
+	interfaceCmd.AddCommand(interfaceStatusCmd)
 	interfaceCmd.AddCommand(interfaceGetCmd)
 	interfaceCmd.AddCommand(interfaceSetCmd)
 	interfaceCmd.AddCommand(interfaceClearCmd)
@@ -455,4 +456,101 @@ func init() {
 	interfaceCmd.AddCommand(interfaceListAclsCmd)
 	interfaceCmd.AddCommand(interfaceListMembersCmd)
 	interfaceCmd.AddCommand(interfaceRemoveTrunkVlanCmd)
+}
+
+var interfaceStatusCmd = &cobra.Command{
+	Use:   "status <interface>",
+	Short: "Show live operational status (counters, rates, ARP, LLDP, optics)",
+	Long: `Show the interface's composed live operational picture, read across the
+device's STATE_DB, APPL_DB, and COUNTERS_DB in one call: link state, cumulative
+counters, SONiC-computed rates, resolved ARP neighbors, the LLDP far end, and
+transceiver data (physical hardware only).
+
+Neighbors shown are RESOLVED entries — an expected-but-missing neighbor means
+ARP never resolved on this interface.
+
+Requires -D (device) flag and a live device.
+
+Examples:
+  newtron -D leaf1 interface status Ethernet0
+  newtron -D leaf1 interface status Ethernet4 --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		st, err := app.client.InterfaceStatus(app.deviceName, args[0])
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(st)
+		}
+
+		fmt.Printf("Interface: %s\n", bold(st.Name))
+		fmt.Printf("Admin Status: %s\n", formatAdminStatus(st.AdminStatus))
+		fmt.Printf("Oper Status: %s\n", formatOperStatus(st.OperStatus))
+		fmt.Printf("Speed: %s\n", st.Speed)
+		fmt.Printf("MTU: %s\n", st.MTU)
+		if st.FEC != "" {
+			fmt.Printf("FEC: %s\n", st.FEC)
+		}
+		if st.HostTxReady != "" {
+			fmt.Printf("Host TX Ready: %s\n", st.HostTxReady)
+		}
+
+		if st.Counters != nil {
+			c := st.Counters
+			fmt.Println()
+			t := cli.NewTable("", "OCTETS", "UCAST", "NON-UCAST", "DISCARDS", "ERRORS")
+			t.Row("RX", fmt.Sprintf("%d", c.RxOctets), fmt.Sprintf("%d", c.RxUnicastPackets),
+				fmt.Sprintf("%d", c.RxNonUnicastPkts), fmt.Sprintf("%d", c.RxDiscards), fmt.Sprintf("%d", c.RxErrors))
+			t.Row("TX", fmt.Sprintf("%d", c.TxOctets), fmt.Sprintf("%d", c.TxUnicastPackets),
+				fmt.Sprintf("%d", c.TxNonUnicastPkts), fmt.Sprintf("%d", c.TxDiscards), fmt.Sprintf("%d", c.TxErrors))
+			t.Flush()
+		}
+
+		if st.Rates != nil {
+			r := st.Rates
+			fmt.Println()
+			t := cli.NewTable("", "BPS", "PPS")
+			t.Row("RX", fmt.Sprintf("%.1f", r.RxBps), fmt.Sprintf("%.1f", r.RxPps))
+			t.Row("TX", fmt.Sprintf("%.1f", r.TxBps), fmt.Sprintf("%.1f", r.TxPps))
+			t.Flush()
+			if r.FecPreBer != 0 || r.FecPostBer != 0 {
+				fmt.Printf("FEC BER (pre/post): %g / %g\n", r.FecPreBer, r.FecPostBer)
+			}
+		}
+
+		fmt.Println()
+		if len(st.Neighbors) > 0 {
+			t := cli.NewTable("NEIGHBOR", "MAC", "FAMILY")
+			for _, n := range st.Neighbors {
+				t.Row(n.Address, n.MAC, n.Family)
+			}
+			t.Flush()
+		} else {
+			fmt.Println("Neighbors: none resolved")
+		}
+
+		if st.LLDPPeer != nil {
+			fmt.Printf("LLDP Peer: %s port %s", st.LLDPPeer.SystemName, st.LLDPPeer.PortID)
+			if st.LLDPPeer.PortDescription != "" {
+				fmt.Printf(" (%s)", st.LLDPPeer.PortDescription)
+			}
+			fmt.Println()
+		}
+
+		if st.Optics != nil && st.Optics.Present {
+			fmt.Println("\nOptics:")
+			printFieldTable(st.Optics.Info)
+			if len(st.Optics.DOM) > 0 {
+				printFieldTable(st.Optics.DOM)
+			}
+		}
+
+		return nil
+	},
 }

@@ -2829,7 +2829,7 @@ Device-Scoped (requires device name)
 ├── show
 ├── init
 ├── device     setup [--hostname] [--bgp-asn] [--type] [--hwsku] [--vtep-source]
-├── interface  list | show | binding | set | clear
+├── interface  list | show | status | binding | set | clear
 ├── service    apply | remove | refresh
 ├── vlan       list | show | create | delete
 │              configure-irb | unconfigure-irb
@@ -2847,8 +2847,8 @@ Device-Scoped (requires device name)
 ├── bgp        status | check | neighbor
 ├── qos        apply | remove
 ├── health     check
-├── configdb   keys | query | exists
-├── statedb    query
+├── configdb   snapshot | keys | query | exists
+├── db         <DB> [table] [key]      (STATE_DB | APPL_DB | COUNTERS_DB | ASIC_DB)
 ├── route      get | get-asic
 ├── ssh        <command>
 ├── reload-config

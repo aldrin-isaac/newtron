@@ -112,6 +112,7 @@ pkg/newtron/device/sonic/             # SONiC device layer — Redis clients, sc
     statedb_parsers.go                # StateDB table parsers (13 entries)
     appldb.go                         # AppDB client (route reads)
     asicdb.go                         # AsicDB client (SAI object reads)
+    operdb.go                         # Generic operational-DB reads (STATE/APPL/COUNTERS/ASIC)
 ```
 
 ```
@@ -1234,7 +1235,10 @@ Response types from §3.2–3.5. These dispatch via `connectAndRead` — the act
 | GET | `.../nodes/{node}/configdb/{table}` | `[]string` (keys) |
 | GET | `.../nodes/{node}/configdb/{table}/{key}` | `map[string]string` |
 | GET | `.../nodes/{node}/configdb/{table}/{key}/exists` | `{exists: bool}` |
-| GET | `.../nodes/{node}/statedb/{table}/{key}` | `map[string]string` |
+| GET | `.../nodes/{node}/db/{db}` | `table → key → fields` — full operational-DB snapshot (STATE_DB, APPL_DB, COUNTERS_DB, ASIC_DB; fail-closed on the name) |
+| GET | `.../nodes/{node}/db/{db}/{table}` | `key → fields` (flat-hash table → single `""` entry) |
+| GET | `.../nodes/{node}/db/{db}/{table}/{key...}` | `map[string]string` — key may embed the DB separator |
+| GET | `.../nodes/{node}/interfaces/{name}/status` | `InterfaceStatus` — composed link state + counters + rates + ARP + LLDP + optics |
 
 All paths prefixed with `/networks/{netID}`.
 
