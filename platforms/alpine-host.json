@@ -45,5 +45,5 @@
   "user": "root",
   "pass": "root"
  },
- "vm_boot_timeout": 180
+ "vm_boot_timeout": 300
 }
