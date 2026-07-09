@@ -568,7 +568,18 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 		defer client.Close()
 
 		for hostIdx, hostName := range group.Hosts {
-			nicBase, wired := group.NICBase[hostName]
+			nicBase := group.NICBase[hostName]
+			// NICBase is assigned to every host at sizing time, wired or not —
+			// the wired truth is whether the VM actually carries a NIC at this
+			// base (AllocateLinks only creates NICs for real links; the
+			// provisioning below moves exactly eth<nicBase>).
+			wired := false
+			for _, nic := range vmNC.NICs {
+				if nic.Index == nicBase && nic.ConnectAddr != "" {
+					wired = true
+					break
+				}
+			}
 			profile := l.Profiles[hostName]
 
 			var cmds []string
