@@ -1067,7 +1067,20 @@ func (c *ConfigDBClient) Get(table, key string) (map[string]string, error) {
 // Useful for counting entries or iterating a table without loading all values.
 func (c *ConfigDBClient) TableKeys(table string) ([]string, error) {
 	pattern := fmt.Sprintf("%s|*", table)
-	return scanKeys(c.ctx, c.client, pattern, 100)
+	raw, err := scanKeys(c.ctx, c.client, pattern, 100)
+	if err != nil {
+		return nil, err
+	}
+	// Entry keys, not raw Redis keys: strip the table prefix so this path
+	// and the projection path (ConfigDB.TableKeys) return the same thing —
+	// callers were getting prefixed or unprefixed keys depending on
+	// transport state (§25: one behavior, one owner). The documented wire
+	// contract is "without the table prefix".
+	keys := make([]string, 0, len(raw))
+	for _, k := range raw {
+		keys = append(keys, strings.TrimPrefix(k, table+"|"))
+	}
+	return keys, nil
 }
 
 // Exists checks if a key exists
