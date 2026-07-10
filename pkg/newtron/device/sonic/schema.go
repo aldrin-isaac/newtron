@@ -540,7 +540,7 @@ var Schema = map[string]TableSchema{
 				OpBindMACVPN, OpCreateACL, OpAddBGPEVPNPeer,
 				OpCreatePortChannel, OpConfigureIRB, OpAddStaticRoute,
 				OpSetProperty, OpConfigureInterface, OpAddTrunkVLAN, OpAddBGPPeer,
-				OpUpdateStaticRoute, OpUpdateBGPPeer, OpUpdateBGPEVPNPeer,
+				OpUpdateStaticRoute, OpUpdateBGPPeer, OpUpdateBGPEVPNPeer, OpUpdateIRB,
 				OpApplyService, OpBindACL, OpBindQoS,
 				OpAddACLRule, OpUpdateACLRule, OpAddPortChannelMember, OpInterfaceInit, OpDeployService,
 			}},

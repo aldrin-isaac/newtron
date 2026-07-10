@@ -190,6 +190,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/create-vlan", s.handleCreateVLAN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/delete-vlan", s.handleDeleteVLAN)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/configure-irb", s.handleConfigureIRB)
+	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/update-irb", s.handleUpdateIRB)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/unconfigure-irb", s.handleUnconfigureIRB)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/create-vrf", s.handleCreateVRF)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/delete-vrf", s.handleDeleteVRF)

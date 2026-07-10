@@ -314,6 +314,11 @@ func (c *Client) ConfigureIRB(device string, config newtron.IRBConfigureRequest,
 	return c.nodeWrite(device, "configure-irb", config, opts)
 }
 
+// UpdateIRB mutates an existing IRB's identity in place (§48).
+func (c *Client) UpdateIRB(device string, config newtron.IRBConfigureRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "update-irb", config, opts)
+}
+
 // UnconfigureIRB removes an IRB interface.
 func (c *Client) UnconfigureIRB(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.UnconfigureIRBRequest{VlanID: vlanID}

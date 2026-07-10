@@ -439,6 +439,19 @@ func (n *Node) ConfigureIRB(ctx context.Context, id int, config IRBConfig) error
 	return err
 }
 
+// UpdateIRB atomically mutates the IRB identity for a VLAN in place (§48):
+// gateway IP as a keyed-sub-entry move, anycast MAC as a SAG field edit;
+// the SVI base row is never touched. VRF moves are refused (teardown-
+// replace by nature — unconfigure-irb + configure-irb states that intent).
+func (n *Node) UpdateIRB(ctx context.Context, id int, config IRBConfig) error {
+	if err := n.gate(ctx, auth.PermVLANModify, fmt.Sprintf("VLAN%d", id)); err != nil {
+		return err
+	}
+	cs, err := n.internal.UpdateIRB(ctx, id, config.internal())
+	n.appendPending(cs)
+	return err
+}
+
 // UnconfigureIRB removes the IRB configuration from a VLAN.
 func (n *Node) UnconfigureIRB(ctx context.Context, id int) error {
 	if err := n.gate(ctx, auth.PermVLANModify, fmt.Sprintf("VLAN%d", id)); err != nil {

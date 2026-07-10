@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -72,11 +73,34 @@ func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	return cs, nil
 }
 
+// sviServiceOwner returns the name of the irb-type service whose binding
+// owns VLAN vlanID's SVI, or "" when no service owns it. The SVI has two
+// authoring paths (configure-irb and irb-type apply-service) and §27 allows
+// only one owner at a time — both paths consult this before writing.
+func (n *Node) sviServiceOwner(vlanID int) string {
+	want := strconv.Itoa(vlanID)
+	for _, intent := range n.IntentsByOp(sonic.OpApplyService) {
+		if intent.Params[sonic.FieldVLANID] != want {
+			continue
+		}
+		switch intent.Params[sonic.FieldServiceType] {
+		case spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
+			return intent.Params[sonic.FieldServiceName]
+		}
+	}
+	return ""
+}
+
 // ConfigureIRB configures a VLAN's IRB (Integrated Routing and Bridging) interface.
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 // Intent-idempotent: if the IRB intent already exists, returns empty ChangeSet.
+// Refuses when an irb-type service owns the VLAN's SVI (§27: one SVI author
+// at a time — service-owned gateways are updated via the spec + refresh).
 func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*ChangeSet, error) {
+	if owner := n.sviServiceOwner(vlanID); owner != "" {
+		return nil, fmt.Errorf("VLAN %d's IRB is owned by service '%s' — its gateway is updated via the service spec and refresh-service, not configure-irb", vlanID, owner)
+	}
 	if n.GetIntent("interface|"+VLANName(vlanID)) != nil {
 		return NewChangeSet(n.name, "device."+sonic.OpConfigureIRB), nil
 	}
@@ -110,6 +134,93 @@ func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*C
 	return cs, nil
 }
 
+
+// UpdateIRB atomically mutates the operator-authored IRB identity for a
+// VLAN — the §48 in-place path: the VLAN_INTERFACE base row is never
+// touched, so intfmgrd observes an edit to the gateway's sub-entries, not
+// a teardown of the SVI. Two mutable fields:
+//
+//   - Gateway IP: the IP is the sub-entry's key (§47), so a change is
+//     delivered as delete-old-key + add-new-key in one ChangeSet — a move,
+//     never a whole-SVI bounce.
+//   - Anycast MAC: a field edit on the SAG_GLOBAL singleton — refused when
+//     other anycast IRBs share it (device-wide value; changing it through
+//     one VLAN's update would silently retarget every anycast gateway).
+//
+// A VRF move is refused: rebinding an SVI re-originates its routes, which
+// is a teardown-replace by nature — unconfigure-irb + configure-irb states
+// that intent honestly (§48: the delivery must match the intent).
+func (n *Node) UpdateIRB(ctx context.Context, vlanID int, opts IRBConfig) (*ChangeSet, error) {
+	if err := n.precondition(sonic.OpUpdateIRB, vlanResource(vlanID)).Result(); err != nil {
+		return nil, err
+	}
+	intentKey := "interface|" + VLANName(vlanID)
+	intent := n.GetIntent(intentKey)
+	if intent == nil || intent.Operation != sonic.OpConfigureIRB {
+		return nil, fmt.Errorf("no operator-authored IRB for VLAN %d — use configure-irb first", vlanID)
+	}
+
+	oldVRF := intent.Params[sonic.FieldVRF]
+	if opts.VRF != oldVRF {
+		return nil, fmt.Errorf("update-irb cannot move VLAN %d between VRFs (%q → %q): a VRF move re-originates the SVI's routes and is a teardown-replace by nature — use unconfigure-irb then configure-irb", vlanID, oldVRF, opts.VRF)
+	}
+	oldIP := intent.Params[sonic.FieldIPAddress]
+	oldMAC := intent.Params[sonic.FieldAnycastMAC]
+	if opts.IPAddress == oldIP && opts.AnycastMAC == oldMAC {
+		return NewChangeSet(n.name, "device."+sonic.OpUpdateIRB), nil
+	}
+	if opts.IPAddress != "" && !util.IsValidIPv4CIDR(opts.IPAddress) {
+		return nil, fmt.Errorf("invalid IP address: %s", opts.IPAddress)
+	}
+
+	cs := NewChangeSet(n.name, "device."+sonic.OpUpdateIRB)
+
+	if opts.IPAddress != oldIP {
+		if oldIP != "" {
+			cs.Deletes(deleteSviIPConfig(vlanID, oldIP))
+		}
+		if opts.IPAddress != "" {
+			cs.Adds(assignSviIPConfig(vlanID, opts.IPAddress))
+		}
+	}
+
+	if opts.AnycastMAC != oldMAC {
+		// SAG_GLOBAL is one device-wide row. Only this VLAN's IRB may
+		// reference it, or the change silently retargets the others.
+		for resource, other := range n.IntentsByOp(sonic.OpConfigureIRB) {
+			if resource != intentKey && other.Params[sonic.FieldAnycastMAC] != "" {
+				return nil, fmt.Errorf("anycast MAC is the device-wide SAG_GLOBAL value and %s also references it — updating it through VLAN %d would retarget every anycast gateway", resource, vlanID)
+			}
+		}
+		switch {
+		case oldMAC == "":
+			cs.Adds(setSagGwmacConfig(opts.AnycastMAC))
+		case opts.AnycastMAC == "":
+			cs.Deletes(deleteSagGlobalConfig())
+		default:
+			cs.Replace(n, setSagGwmacConfig(oldMAC), setSagGwmacConfig(opts.AnycastMAC))
+		}
+	}
+
+	// Re-record under the creating verb on the same key (the update-verb
+	// convention — see UpdateBGPPeer): replay reproduces the updated state.
+	if err := n.writeIntent(cs, sonic.OpConfigureIRB, intentKey, map[string]string{
+		sonic.FieldVLANID:     strconv.Itoa(vlanID),
+		sonic.FieldVRF:        oldVRF,
+		sonic.FieldIPAddress:  opts.IPAddress,
+		sonic.FieldAnycastMAC: opts.AnycastMAC,
+	}, intent.Parents); err != nil {
+		return nil, err
+	}
+	cs.ReverseOp = "device.unconfigure-irb"
+	cs.OperationParams = map[string]string{"vlan_id": strconv.Itoa(vlanID)}
+
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.name).Infof("Updated IRB for VLAN %d", vlanID)
+	return cs, nil
+}
 
 // UnconfigureIRB removes a VLAN's IRB (Integrated Routing and Bridging) interface configuration.
 // Reads the intent record to determine what was applied (VRF, IP, anycast MAC).

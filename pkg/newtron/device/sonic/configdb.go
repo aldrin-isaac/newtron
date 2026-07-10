@@ -85,6 +85,7 @@ const (
 	OpUpdateBGPEVPNPeer    = "update-bgp-evpn-peer" // in-place per-overlay-peer mutation (#227, §48)
 	OpCreatePortChannel    = "create-portchannel"
 	OpConfigureIRB         = "configure-irb"
+	OpUpdateIRB            = "update-irb" // in-place IRB identity mutation (§48)
 	OpAddStaticRoute       = "add-static-route"
 	OpUpdateStaticRoute    = "update-static-route" // in-place per-route mutation (#227, §48)
 	OpSetProperty          = "set-property"

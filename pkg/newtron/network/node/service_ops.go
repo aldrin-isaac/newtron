@@ -249,6 +249,17 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		return nil, err
 	}
 
+	// SVI single-author guard, service side (§27 — the mirror of
+	// ConfigureIRB's sviServiceOwner check): an irb-type service renders
+	// the VLAN's SVI, so it refuses a VLAN whose IRB an operator already
+	// authored via configure-irb — two writers of one gateway diverge on
+	// the first refresh.
+	if svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeEVPNIRB {
+		if irb := n.GetIntent("interface|" + VLANName(vlanID)); irb != nil && irb.Operation == sonic.OpConfigureIRB {
+			return nil, fmt.Errorf("VLAN %d's IRB is operator-authored (configure-irb) — an irb-type service cannot adopt it; unconfigure-irb first or use a different VLAN", vlanID)
+		}
+	}
+
 	// Track ACL names from generated entries for interface-merging.
 	// ACL names are content-hashed from the filter spec (Principle 35).
 	var ingressACLName, egressACLName string
