@@ -71,6 +71,7 @@ pkg/newtron/network/node/             # Node internals — all operations live h
     acl_ops.go                        # CreateACL, DeleteACL, AddACLRule, DeleteACLRule
     qos_ops.go                        # BindQoS, UnbindQoS (on Interface)
     interface_ops.go                  # ConfigureInterface, UnconfigureInterface, SetProperty, etc.
+    interface_kind.go                 # Interface kinds + capability matrix (op gates)
     interface_bgp_ops.go              # AddBGPPeer, RemoveBGPPeer (on Interface)
     baseline_ops.go                   # SetupDevice, ConfigureLoopback, RemoveLoopback
     portchannel_ops.go                # CreatePortChannel, DeletePortChannel, member management
@@ -100,7 +101,7 @@ pkg/newtron/device/sonic/             # SONiC device layer — Redis clients, sc
 
     # --- CONFIG_DB (projection + delivery) ---
     configdb.go                       # ConfigDB typed structs, ApplyEntries, ExportEntries, ExportRaw
-    configdb_parsers.go               # configTableHydrators registry (33 typed + 9 merge parsers)
+    configdb_parsers.go               # configTableHydrators registry (33 typed + 10 merge parsers)
     configdb_diff.go                  # DiffConfigDB (projection vs actual comparison)
     configdb_order.go                 # CONFIG_DB write ordering (dependency-aware)
     pipeline.go                       # PipelineSet, ReplaceAll (Redis write paths)

@@ -204,8 +204,9 @@ type ConfigDB struct {
     // Core infrastructure
     DeviceMetadata    map[string]map[string]string  // DEVICE_METADATA (e.g., "localhost" → {hostname, bgp_asn, ...})
     Port              map[string]PortEntry           // PORT (e.g., "Ethernet0" → {admin_status, speed, ...})
-    Interface         map[string]InterfaceEntry      // INTERFACE (base + IP sub-entries)
+    Interface         map[string]InterfaceEntry      // INTERFACE (base + IP sub-entries; Ethernet keys only)
     PortChannel       map[string]PortChannelEntry    // PORTCHANNEL
+    PortChannelInterface map[string]map[string]string // PORTCHANNEL_INTERFACE (LAG L3: base + IP sub-entries)
     PortChannelMember map[string]map[string]string   // PORTCHANNEL_MEMBER
     LoopbackInterface map[string]map[string]string   // LOOPBACK_INTERFACE
 
