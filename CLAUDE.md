@@ -499,6 +499,19 @@ Before making any change to `service_ops.go`, `*_ops.go`, or any shared code pat
 
 Tracking what was working (update this as test suites are validated):
 
+**Full-sweep 2026-07-10 (interface-kind Checkpoint 1)**: all 13 suites
+sequentially on feat/interface-kind-scenarios @ post-#432 + the two
+suite-found fixes (TableKeys entry-key contract; binding-gated QoS
+teardown), standard enforced bring-up, identities cached, cold deploys for
+2node-vs-primitive / 2node-ngdp-primitive / 3node-ngdp-dataplane, labs
+destroyed as suites finished. **195 scenarios — 0 failures, 1 by-design
+skip (L2c-round-trip), ~2h1m.** The suite set grew by 4 scenarios since
+the 07-07 sweep (1node-vs-config 25→27: gate refusal pins + update-irb;
+2node-vs-primitive 23→25: irb-bgp-peer + service-on-portchannel). Second
+consecutive all-green sweep; validates the interface-kind gates, the
+PORTCHANNEL_INTERFACE migration (incl. drift suites showing no false
+drift), update-irb, and the SVI single-author guards across every suite.
+
 **Full-sweep 2026-07-07** (referenced by the per-suite records below as "the
 2026-07-07 sweep"): all 13 suites in the repository run sequentially, one at
 a time, against main @ post-#424 (fresh binaries; standard enforced server
