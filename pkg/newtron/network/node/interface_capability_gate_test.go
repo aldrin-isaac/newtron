@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================
@@ -72,10 +70,10 @@ func TestCapabilityGateMatrix(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name    string
-		target  string
-		run     func(*Node, *Interface) error
-		refused bool
+		name     string
+		target   string
+		run      func(*Node, *Interface) error
+		refused  bool
 		redirect string // required substring of a refusal (e.g. the configure-irb pointer)
 	}{
 		// --- bind-acl: ACL binding is PORT ∪ PORTCHANNEL (sonic-acl.yang) ---
@@ -94,11 +92,11 @@ func TestCapabilityGateMatrix(t *testing.T) {
 
 		// --- bind-qos: PORT_QOS_MAP is global|PORT (sonic-port-qos-map.yang) ---
 		{"bind-qos on PortChannel refused", "PortChannel1", func(n *Node, i *Interface) error {
-			_, err := i.BindQoS(ctx, "nosuch", &spec.QoSPolicy{})
+			_, err := i.BindQoS(ctx, "nosuch")
 			return err
 		}, true, "QoS binding"},
 		{"bind-qos on IRB refused", "Vlan100", func(n *Node, i *Interface) error {
-			_, err := i.BindQoS(ctx, "nosuch", &spec.QoSPolicy{})
+			_, err := i.BindQoS(ctx, "nosuch")
 			return err
 		}, true, "QoS binding"},
 

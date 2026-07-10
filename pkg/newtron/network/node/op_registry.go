@@ -474,11 +474,7 @@ func buildOpRegistry() map[string]*OpSpec {
 				if policyName == "" {
 					return fmt.Errorf("bind-qos: missing 'policy' param")
 				}
-				policy, err := n.GetQoSPolicy(util.NormalizeName(policyName))
-				if err != nil {
-					return fmt.Errorf("bind-qos: %w", err)
-				}
-				_, err = i.BindQoS(ctx, util.NormalizeName(policyName), policy)
+				_, err := i.BindQoS(ctx, util.NormalizeName(policyName))
 				return err
 			},
 		},

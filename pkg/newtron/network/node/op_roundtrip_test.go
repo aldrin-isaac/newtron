@@ -243,11 +243,7 @@ var roundTripSequence = []opInvocation{
 		if err != nil {
 			return err
 		}
-		policy, err := n.GetQoSPolicy("GOLD")
-		if err != nil {
-			return err
-		}
-		_, err = i.BindQoS(ctx, "GOLD", policy)
+		_, err = i.BindQoS(ctx, "GOLD")
 		return err
 	}},
 	{"apply-service", func(ctx context.Context, n *Node) error {

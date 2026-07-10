@@ -269,12 +269,7 @@ func (i *Interface) BindQoS(ctx context.Context, policy string) error {
 	if err := i.gate(ctx, auth.PermQoSModify, policy); err != nil {
 		return err
 	}
-	policy = util.NormalizeName(policy)
-	policyDef, err := i.node.internal.GetQoSPolicy(policy)
-	if err != nil {
-		return err
-	}
-	cs, err := i.internal.BindQoS(ctx, policy, policyDef)
+	cs, err := i.internal.BindQoS(ctx, util.NormalizeName(policy))
 	if err != nil {
 		return err
 	}
