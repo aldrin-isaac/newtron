@@ -11,25 +11,25 @@ import (
 
 // InterfaceExists checks if an interface exists.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
-// Three-way check: physical ports from RegisterPort map, PortChannels and VLAN SVIs from intents.
+// Existence is kind-specific: physical ports from the RegisterPort map,
+// PortChannels and VLAN SVIs from intents. Classification and existence
+// share one source (interfaceKindOf) so they cannot diverge — and
+// ListInterfaces enumerates from the same sources, so whatever exists
+// is also listed (§24).
 func (n *Node) InterfaceExists(name string) bool {
 	name = util.NormalizeInterfaceName(name)
-	// Physical ports: populated by RegisterPort
-	if _, ok := n.interfaces[name]; ok {
-		return true
-	}
-	// PortChannels: intent-managed
-	if strings.HasPrefix(name, "PortChannel") && n.GetIntent("portchannel|"+name) != nil {
-		return true
-	}
-	// VLAN SVIs: intent-managed
-	if strings.HasPrefix(name, "Vlan") {
+	switch interfaceKindOf(name) {
+	case KindEthernet:
+		_, ok := n.interfaces[name]
+		return ok
+	case KindPortChannel:
+		return n.GetIntent("portchannel|"+name) != nil
+	case KindIRB:
 		vlanID := strings.TrimPrefix(name, "Vlan")
-		if n.GetIntent("vlan|"+vlanID) != nil {
-			return true
-		}
+		return n.GetIntent("vlan|"+vlanID) != nil
+	default:
+		return false
 	}
-	return false
 }
 
 // ============================================================================
@@ -584,13 +584,7 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		return nil, fmt.Errorf("unknown property: %s (valid: mtu, speed, admin-status, description)", property)
 	}
 
-	// Determine which table to update based on interface type
-	tableName := "PORT"
-	if i.IsPortChannel() {
-		tableName = "PORTCHANNEL"
-	}
-
-	cs.Updates(setPropertyConfig(tableName, i.name, fields))
+	cs.Updates(setPropertyConfig(propertyTable(i.name), i.name, fields))
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
@@ -617,14 +611,9 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpClearProperty)
 
-	tableName := "PORT"
-	if i.IsPortChannel() {
-		tableName = "PORTCHANNEL"
-	}
-
 	switch property {
 	case "mtu", "speed", "admin-status", "admin_status", "description":
-		cs.Updates(clearPropertyConfig(tableName, i.name, property))
+		cs.Updates(clearPropertyConfig(propertyTable(i.name), i.name, property))
 	default:
 		return nil, fmt.Errorf("unknown property: %s", property)
 	}

@@ -130,6 +130,23 @@ standard YANG model. Constraints are derived from newtron usage patterns.
 - `scope`: enum {global, local}
 - `family`: ip-family
 
+## PORTCHANNEL_INTERFACE (sonic-portchannel.yang)
+
+**PORTCHANNEL_INTERFACE_LIST** (base entry)
+- Key: `name` — leafref to PORTCHANNEL
+- `vrf_name`: leafref to VRF
+- `nat_zone`: uint8, range 0..3
+- `mpls`: enum {enable, disable}
+- `ipv6_use_link_local_only`: mode enable/disable
+- `loopback_action`: string
+
+**PORTCHANNEL_INTERFACE_IPPREFIX_LIST** (IP sub-entry)
+- Key: `name|ip-prefix`
+
+Note: the LAG counterpart of INTERFACE. INTERFACE's key is a leafref to
+PORT only — a `PortChannelN` key under INTERFACE is rejected by yang-strict
+validation even though intfmgrd (alias-driven) happens to act on it.
+
 ## LOOPBACK_INTERFACE (sonic-loopback-interface.yang)
 
 **LOOPBACK_INTERFACE_LIST** (base entry)
@@ -322,10 +339,13 @@ Similar pattern to DSCP_TO_TC_MAP. TC values 0..7, queue values 0..7.
 - `scheduler`: leafref to SCHEDULER
 - `wred_profile`: leafref to WRED_PROFILE
 
-### PORT_QOS_MAP
+### PORT_QOS_MAP (sonic-port-qos-map.yang)
 
-Not found in a dedicated YANG file. newtron uses `dscp_to_tc_map` and
-`tc_to_queue_map` fields (bracket-ref strings like `[DSCP_TO_TC_MAP|mapName]`).
+**PORT_QOS_MAP_LIST**
+- Key: `ifname` — union of `"global"` | leafref to PORT. LAGs are NOT legal
+  keys; SONiC QoS maps bind to physical ports (or globally) only.
+- `dscp_to_tc_map`, `tc_to_queue_map`: leafrefs to the map tables
+  (newtron writes bracket-ref strings like `[DSCP_TO_TC_MAP|mapName]`).
 
 ## ROUTE_REDISTRIBUTE
 

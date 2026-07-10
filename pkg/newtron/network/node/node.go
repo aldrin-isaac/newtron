@@ -1286,6 +1286,17 @@ func (n *Node) ListInterfaces() []string {
 		}
 	}
 
+	// VLAN interfaces (IRBs) from intent DB — an SVI exists once its VLAN
+	// does, exactly the InterfaceExists rule; the list and the existence
+	// check enumerate from the same sources (§24: every operable interface
+	// is also listable).
+	for resource := range n.IntentsByPrefix("vlan|") {
+		parts := strings.SplitN(resource, "|", 2)
+		if len(parts) == 2 && !strings.Contains(parts[1], "|") {
+			names = append(names, "Vlan"+parts[1])
+		}
+	}
+
 	return names
 }
 

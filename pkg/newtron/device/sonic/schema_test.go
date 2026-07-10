@@ -577,3 +577,86 @@ func TestSchema_BGP_NEIGHBOR_AF_KeyPattern(t *testing.T) {
 		}
 	}
 }
+
+// The INTERFACE table's key is a leafref to PORT only (sonic-interface.yang)
+// — PortChannel/Vlan/Loopback keys were a schema widening that admitted
+// entries a yang-strict config reload rejects. LAG L3 lives in
+// PORTCHANNEL_INTERFACE, SVI L3 in VLAN_INTERFACE.
+func TestSchema_INTERFACE_KeyPattern_EthernetOnly(t *testing.T) {
+	schema := Schema["INTERFACE"]
+	tests := []struct {
+		key string
+		ok  bool
+	}{
+		{"Ethernet0", true},
+		{"Ethernet0|10.1.0.0/31", true},
+		{"PortChannel1", false},
+		{"PortChannel1|10.30.0.0/31", false},
+		{"Vlan100", false},
+		{"Loopback0", false},
+	}
+	for _, tt := range tests {
+		err := schema.ValidateEntry("INTERFACE", tt.key, map[string]string{})
+		hasKeyErr := err != nil && strings.Contains(err.Error(), "invalid key format")
+		if tt.ok && hasKeyErr {
+			t.Errorf("key %s should be valid: %v", tt.key, err)
+		}
+		if !tt.ok && !hasKeyErr {
+			t.Errorf("key %s should fail key validation", tt.key)
+		}
+	}
+}
+
+func TestSchema_PORTCHANNEL_INTERFACE(t *testing.T) {
+	schema, ok := Schema["PORTCHANNEL_INTERFACE"]
+	if !ok {
+		t.Fatal("PORTCHANNEL_INTERFACE missing from schema — LAG L3 writes would fail closed")
+	}
+	tests := []struct {
+		key string
+		ok  bool
+	}{
+		{"PortChannel1", true},
+		{"PortChannel1|10.30.0.0/31", true},
+		{"Ethernet0", false},
+		{"Vlan100", false},
+	}
+	for _, tt := range tests {
+		err := schema.ValidateEntry("PORTCHANNEL_INTERFACE", tt.key, map[string]string{})
+		hasKeyErr := err != nil && strings.Contains(err.Error(), "invalid key format")
+		if tt.ok && hasKeyErr {
+			t.Errorf("key %s should be valid: %v", tt.key, err)
+		}
+		if !tt.ok && !hasKeyErr {
+			t.Errorf("key %s should fail key validation", tt.key)
+		}
+	}
+	if err := schema.ValidateEntry("PORTCHANNEL_INTERFACE", "PortChannel1", map[string]string{"vrf_name": "Vrf_X"}); err != nil {
+		t.Errorf("vrf_name should be a valid field: %v", err)
+	}
+}
+
+// PORT_QOS_MAP ifname is "global" or a leafref to PORT
+// (sonic-port-qos-map.yang) — LAGs are not legal QoS-map keys.
+func TestSchema_PORT_QOS_MAP_KeyPattern(t *testing.T) {
+	schema := Schema["PORT_QOS_MAP"]
+	tests := []struct {
+		key string
+		ok  bool
+	}{
+		{"Ethernet0", true},
+		{"global", true},
+		{"PortChannel1", false},
+		{"Vlan100", false},
+	}
+	for _, tt := range tests {
+		err := schema.ValidateEntry("PORT_QOS_MAP", tt.key, map[string]string{})
+		hasKeyErr := err != nil && strings.Contains(err.Error(), "invalid key format")
+		if tt.ok && hasKeyErr {
+			t.Errorf("key %s should be valid: %v", tt.key, err)
+		}
+		if !tt.ok && !hasKeyErr {
+			t.Errorf("key %s should fail key validation", tt.key)
+		}
+	}
+}

@@ -142,9 +142,9 @@ var Schema = map[string]TableSchema{
 		// We use 2-4094 (IEEE 802.1Q; VLAN 1 reserved, 4095 reserved)
 		KeyPattern: `^Vlan([2-9]|[1-9]\d{1,2}|[1-3]\d{3}|40[0-8]\d|409[0-4])$`,
 		Fields: map[string]FieldConstraint{
-			"vlanid":      {Type: FieldInt, Range: intRange(2, 4094)},    // YANG: uint16, 2..4094
-			"description": {Type: FieldString},                           // YANG: length 1..255
-			"mtu":         {Type: FieldInt, Range: intRange(1, 9216)},    // YANG: uint16, 1..9216
+			"vlanid":      {Type: FieldInt, Range: intRange(2, 4094)}, // YANG: uint16, 2..4094
+			"description": {Type: FieldString},                        // YANG: length 1..255
+			"mtu":         {Type: FieldInt, Range: intRange(1, 9216)}, // YANG: uint16, 1..9216
 		},
 	},
 
@@ -214,13 +214,13 @@ var Schema = map[string]TableSchema{
 		// YANG: key vrf_name — union("default" | leafref VRF)
 		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*$`,
 		Fields: map[string]FieldConstraint{
-			"local_asn":              {Type: FieldInt, Range: intRange(1, 4294967295)}, // YANG: uint32 1..4294967295
-			"router_id":             {Type: FieldIP},                                   // YANG: inet:ipv4-address
+			"local_asn":             {Type: FieldInt, Range: intRange(1, 4294967295)}, // YANG: uint32 1..4294967295
+			"router_id":             {Type: FieldIP},                                  // YANG: inet:ipv4-address
 			"ebgp_requires_policy":  {Type: FieldBool},
 			"suppress_fib_pending":  {Type: FieldBool},
-			"log_neighbor_changes":  {Type: FieldBool},                                 // YANG: log_nbr_state_changes
-			"rr_cluster_id":         {Type: FieldString},                               // YANG: string — route reflector cluster ID
-			"load_balance_mp_relax": {Type: FieldBool},                                 // YANG: boolean — multipath across differing AS paths
+			"log_neighbor_changes":  {Type: FieldBool},   // YANG: log_nbr_state_changes
+			"rr_cluster_id":         {Type: FieldString}, // YANG: string — route reflector cluster ID
+			"load_balance_mp_relax": {Type: FieldBool},   // YANG: boolean — multipath across differing AS paths
 		},
 	},
 
@@ -228,12 +228,12 @@ var Schema = map[string]TableSchema{
 		// YANG: key vrf_name|neighbor
 		KeyPattern: `^[^|]+\|.+$`,
 		Fields: map[string]FieldConstraint{
-			"asn":              {Type: FieldInt, Range: intRange(1, 4294967295)}, // YANG: uint32, refined >=1 in cmn-neigh
-			"admin_status":     {Type: FieldEnum, Enum: []string{"up", "down"}},
-			"local_addr":       {Type: FieldIP},                                  // YANG: union (IP, port, LAG, loopback, Vlan)
-			"name":             {Type: FieldString},
-			"ebgp_multihop":    {Type: FieldString},                              // YANG: boolean; newtron writes "true"/TTL
-			"peer_group_name":  {Type: FieldString},                              // YANG: leafref → BGP_PEER_GROUP
+			"asn":             {Type: FieldInt, Range: intRange(1, 4294967295)}, // YANG: uint32, refined >=1 in cmn-neigh
+			"admin_status":    {Type: FieldEnum, Enum: []string{"up", "down"}},
+			"local_addr":      {Type: FieldIP}, // YANG: union (IP, port, LAG, loopback, Vlan)
+			"name":            {Type: FieldString},
+			"ebgp_multihop":   {Type: FieldString}, // YANG: boolean; newtron writes "true"/TTL
+			"peer_group_name": {Type: FieldString}, // YANG: leafref → BGP_PEER_GROUP
 		},
 	},
 
@@ -241,12 +241,12 @@ var Schema = map[string]TableSchema{
 		// YANG: key vrf_name|neighbor|afi_safi
 		KeyPattern: `^[^|]+\|[^|]+\|(ipv4_unicast|ipv6_unicast|l2vpn_evpn)$`,
 		Fields: map[string]FieldConstraint{
-			"admin_status":       {Type: FieldBool},
-			"rrclient":           {Type: FieldBool},     // YANG: boolean
-			"nhself":             {Type: FieldBool},      // YANG: boolean
-			"nexthop_unchanged":  {Type: FieldBool},      // YANG: unchanged_nexthop (boolean); newtron uses nexthop_unchanged
-			"route_map_in":       {Type: FieldString},    // YANG: leafref list, max 1
-			"route_map_out":      {Type: FieldString},    // YANG: leafref list, max 1
+			"admin_status":      {Type: FieldBool},
+			"rrclient":          {Type: FieldBool},   // YANG: boolean
+			"nhself":            {Type: FieldBool},   // YANG: boolean
+			"nexthop_unchanged": {Type: FieldBool},   // YANG: unchanged_nexthop (boolean); newtron uses nexthop_unchanged
+			"route_map_in":      {Type: FieldString}, // YANG: leafref list, max 1
+			"route_map_out":     {Type: FieldString}, // YANG: leafref list, max 1
 		},
 	},
 
@@ -256,7 +256,7 @@ var Schema = map[string]TableSchema{
 		Fields: map[string]FieldConstraint{
 			"admin_status":  {Type: FieldEnum, Enum: []string{"up", "down"}},
 			"local_addr":    {Type: FieldIP},     // YANG: union (IP, port, LAG, loopback, Vlan)
-			"ebgp_multihop": {Type: FieldString},  // YANG: boolean; newtron writes "true"/TTL
+			"ebgp_multihop": {Type: FieldString}, // YANG: boolean; newtron writes "true"/TTL
 		},
 	},
 
@@ -264,10 +264,10 @@ var Schema = map[string]TableSchema{
 		// YANG: sonic-bgp-peergroup, key vrf_name|peer_group_name|afi_safi
 		KeyPattern: `^[^|]+\|[^|]+\|(ipv4_unicast|ipv6_unicast|l2vpn_evpn)$`,
 		Fields: map[string]FieldConstraint{
-			"admin_status":       {Type: FieldBool},
-			"route_map_in":       {Type: FieldString},
-			"route_map_out":      {Type: FieldString},
-			"nexthop_unchanged":  {Type: FieldBool}, // YANG: boolean; used by EVPN peer group for eBGP overlay
+			"admin_status":      {Type: FieldBool},
+			"route_map_in":      {Type: FieldString},
+			"route_map_out":     {Type: FieldString},
+			"nexthop_unchanged": {Type: FieldBool}, // YANG: boolean; used by EVPN peer group for eBGP overlay
 		},
 	},
 
@@ -275,10 +275,10 @@ var Schema = map[string]TableSchema{
 		// YANG: key vrf_name|afi_safi
 		KeyPattern: `^[^|]+\|(ipv4_unicast|ipv6_unicast|l2vpn_evpn)$`,
 		Fields: map[string]FieldConstraint{
-			"redistribute_connected":  {Type: FieldBool},
-			"redistribute_static":     {Type: FieldBool},
-			"advertise-ipv4-unicast":  {Type: FieldBool}, // YANG: boolean (hyphenated field name)
-			"advertise-all-vni":       {Type: FieldBool}, // YANG: boolean
+			"redistribute_connected": {Type: FieldBool},
+			"redistribute_static":    {Type: FieldBool},
+			"advertise-ipv4-unicast": {Type: FieldBool}, // YANG: boolean (hyphenated field name)
+			"advertise-all-vni":      {Type: FieldBool}, // YANG: boolean
 		},
 	},
 
@@ -300,13 +300,13 @@ var Schema = map[string]TableSchema{
 		// YANG: sonic-device_metadata.yang — many fields; listing those newtron writes
 		KeyPattern: `^localhost$`,
 		Fields: map[string]FieldConstraint{
-			"bgp_asn":                       {Type: FieldInt, Range: intRange(1, 4294967295), AllowEmpty: true}, // YANG: inet:as-number; "" clears ASN
-			"type":                          {Type: FieldString},                               // YANG: length 1..255
-			"docker_routing_config_mode":    {Type: FieldString},                               // YANG: pattern separated|unified|split|split-unified
-			"frr_mgmt_framework_config":     {Type: FieldBool},                                // YANG: boolean, default false
-			"hostname":                      {Type: FieldString},                               // YANG: hostname type
-			"mac":                           {Type: FieldMAC},                                  // YANG: yang:mac-address
-			"hwsku":                         {Type: FieldString},                               // YANG: stypes:hwsku
+			"bgp_asn":                    {Type: FieldInt, Range: intRange(1, 4294967295), AllowEmpty: true}, // YANG: inet:as-number; "" clears ASN
+			"type":                       {Type: FieldString},                                                // YANG: length 1..255
+			"docker_routing_config_mode": {Type: FieldString},                                                // YANG: pattern separated|unified|split|split-unified
+			"frr_mgmt_framework_config":  {Type: FieldBool},                                                  // YANG: boolean, default false
+			"hostname":                   {Type: FieldString},                                                // YANG: hostname type
+			"mac":                        {Type: FieldMAC},                                                   // YANG: yang:mac-address
+			"hwsku":                      {Type: FieldString},                                                // YANG: stypes:hwsku
 		},
 	},
 
@@ -353,15 +353,33 @@ var Schema = map[string]TableSchema{
 	// ========================================================================
 
 	"INTERFACE": {
-		// YANG: sonic-interface.yang — INTERFACE_LIST + INTERFACE_IPPREFIX_LIST
-		// Key: "IntfName" or "IntfName|IP/mask"
-		KeyPattern: `^(Ethernet\d+|PortChannel\d+|Vlan\d+|Loopback\d+)(\|.+)?$`,
+		// YANG: sonic-interface.yang — INTERFACE_LIST + INTERFACE_IPPREFIX_LIST.
+		// Key: "EthernetN" or "EthernetN|IP/mask". The list key is a leafref
+		// to PORT only — PortChannel L3 lives in PORTCHANNEL_INTERFACE and
+		// SVI L3 in VLAN_INTERFACE; a wider pattern here would admit keys a
+		// yang-strict config reload rejects. Port properties (speed, mtu,
+		// admin_status, description) belong to the PORT/PORTCHANNEL rows,
+		// not the L3 entry.
+		KeyPattern: `^Ethernet\d+(\|.+)?$`,
 		Fields: map[string]FieldConstraint{
-			"vrf_name":     {Type: FieldString},                                                                     // YANG: leafref to VRF
-			"mtu":          {Type: FieldInt, Range: intRange(68, 9216)},                                              // from PORT YANG
-			"speed":        {Type: FieldEnum, Enum: []string{"1G", "10G", "25G", "40G", "50G", "100G", "200G", "400G"}}, // newtron convention
-			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}},
-			"description":  {Type: FieldString},
+			"vrf_name":                 {Type: FieldString}, // YANG: leafref to VRF
+			"nat_zone":                 {Type: FieldString}, // YANG: uint8 0..3
+			"mpls":                     {Type: FieldString}, // YANG: enable/disable
+			"ipv6_use_link_local_only": {Type: FieldString}, // YANG: mode_enable
+		},
+	},
+
+	"PORTCHANNEL_INTERFACE": {
+		// YANG: sonic-portchannel.yang — PORTCHANNEL_INTERFACE_LIST +
+		// PORTCHANNEL_INTERFACE_IPPREFIX_LIST. The LAG counterpart of
+		// INTERFACE: key is a leafref to PORTCHANNEL, same L3 leafs.
+		// Key: "PortChannelN" or "PortChannelN|IP/mask"
+		KeyPattern: `^PortChannel\d{1,4}(\|.+)?$`,
+		Fields: map[string]FieldConstraint{
+			"vrf_name":                 {Type: FieldString}, // YANG: leafref to VRF
+			"nat_zone":                 {Type: FieldString}, // YANG: uint8 0..3
+			"mpls":                     {Type: FieldString}, // YANG: enable/disable
+			"ipv6_use_link_local_only": {Type: FieldString}, // YANG: mode_enable
 		},
 	},
 
@@ -375,7 +393,7 @@ var Schema = map[string]TableSchema{
 		// YANG: sonic-port.yang — speed is uint32 1..1600000 (Mbps); newtron writes string enum
 		KeyPattern: `^Ethernet\d+$`,
 		Fields: map[string]FieldConstraint{
-			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}},                                            // YANG: default "down"
+			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}},                                             // YANG: default "down"
 			"mtu":          {Type: FieldInt, Range: intRange(68, 9216)},                                                 // YANG: uint16 68..9216
 			"speed":        {Type: FieldEnum, Enum: []string{"1G", "10G", "25G", "40G", "50G", "100G", "200G", "400G"}}, // YANG: uint32; newtron uses string
 			"description":  {Type: FieldString},                                                                         // YANG: length 0..255
@@ -392,10 +410,10 @@ var Schema = map[string]TableSchema{
 		KeyPattern: `^PortChannel\d{1,4}$`,
 		Fields: map[string]FieldConstraint{
 			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}}, // YANG: mandatory
-			"mtu":          {Type: FieldInt, Range: intRange(1, 9216)},       // YANG: uint16 1..9216
-			"min_links":    {Type: FieldInt, Range: intRange(1, 1024)},       // YANG: uint16 1..1024
-			"fallback":     {Type: FieldBool},                                // YANG: boolean_type
-			"fast_rate":    {Type: FieldBool},                                // YANG: boolean_type
+			"mtu":          {Type: FieldInt, Range: intRange(1, 9216)},      // YANG: uint16 1..9216
+			"min_links":    {Type: FieldInt, Range: intRange(1, 1024)},      // YANG: uint16 1..1024
+			"fallback":     {Type: FieldBool},                               // YANG: boolean_type
+			"fast_rate":    {Type: FieldBool},                               // YANG: boolean_type
 		},
 	},
 
@@ -451,7 +469,10 @@ var Schema = map[string]TableSchema{
 	// ========================================================================
 
 	"PORT_QOS_MAP": {
-		KeyPattern: `^(Ethernet|PortChannel)\d+$`,
+		// YANG: sonic-port-qos-map.yang — ifname is "global" or a leafref to
+		// PORT. LAGs are NOT legal keys; SONiC QoS maps bind to physical
+		// ports only (LAG QoS is per-member).
+		KeyPattern: `^(Ethernet\d+|global)$`,
 		Fields: map[string]FieldConstraint{
 			"dscp_to_tc_map":  {Type: FieldString},
 			"tc_to_queue_map": {Type: FieldString},
@@ -479,7 +500,7 @@ var Schema = map[string]TableSchema{
 		// YANG: sonic-scheduler.yang
 		Fields: map[string]FieldConstraint{
 			"type":   {Type: FieldEnum, Enum: []string{"DWRR", "WRR", "STRICT"}}, // YANG: enum {DWRR, WRR, STRICT}
-			"weight": {Type: FieldInt, Range: intRange(1, 100)},                   // YANG: uint8 1..100
+			"weight": {Type: FieldInt, Range: intRange(1, 100)},                  // YANG: uint8 1..100
 		},
 	},
 
@@ -493,8 +514,8 @@ var Schema = map[string]TableSchema{
 			"yellow_max_threshold":    {Type: FieldInt},                          // YANG: uint64 (bytes)
 			"yellow_min_threshold":    {Type: FieldInt},                          // YANG: uint64 (bytes)
 			"yellow_drop_probability": {Type: FieldInt, Range: intRange(0, 100)},
-			"red_max_threshold":       {Type: FieldInt},                          // YANG: uint64 (bytes)
-			"red_min_threshold":       {Type: FieldInt},                          // YANG: uint64 (bytes)
+			"red_max_threshold":       {Type: FieldInt}, // YANG: uint64 (bytes)
+			"red_min_threshold":       {Type: FieldInt}, // YANG: uint64 (bytes)
 			"red_drop_probability":    {Type: FieldInt, Range: intRange(0, 100)},
 		},
 	},
@@ -549,9 +570,9 @@ var Schema = map[string]TableSchema{
 		KeyPattern: `^[^|]+\|\d+$`,
 		Fields: map[string]FieldConstraint{
 			"route_operation":  {Type: FieldEnum, Enum: []string{"permit", "deny"}}, // YANG: routing-policy-action-type
-			"match_prefix_set": {Type: FieldString},                                  // YANG: leafref PREFIX_SET
-			"match_community":  {Type: FieldString},                                  // YANG: leafref COMMUNITY_SET
-			"set_local_pref":   {Type: FieldInt, Range: intRange(0, 4294967295)},     // YANG: uint32
+			"match_prefix_set": {Type: FieldString},                                 // YANG: leafref PREFIX_SET
+			"match_community":  {Type: FieldString},                                 // YANG: leafref COMMUNITY_SET
+			"set_local_pref":   {Type: FieldInt, Range: intRange(0, 4294967295)},    // YANG: uint32
 			"set_community":    {Type: FieldString},
 			"set_med":          {Type: FieldInt, Range: intRange(0, 4294967295)}, // YANG: uint32
 		},
