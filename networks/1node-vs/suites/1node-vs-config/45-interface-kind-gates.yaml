@@ -1,0 +1,105 @@
+name: interface-kind-gates
+description: |
+  Pins the interface-kind capability gates at the wire (§13: prevent, don't
+  detect): each op×kind cell the matrix refuses must 4xx with the modeled
+  message — including the configure-irb redirect for routed config on an
+  IRB. The allow cells are exercised throughout the rest of the suite
+  (Ethernet everywhere, configure-interface on PortChannels in the
+  2node primitive suites); this scenario pins the refusals.
+
+  Loopback mode — pure HTTP, no device.
+requires: [setup-device]
+
+steps:
+  # --- Setup: one interface of each gateable non-physical kind ---
+  - name: create-vlan-145
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 145}
+
+  - name: create-portchannel-45
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-portchannel?mode=loopback
+    params: {name: PortChannel45}
+
+  # --- IRB refusals ---
+  - name: gate-configure-interface-routed-on-irb
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan145/configure-interface?mode=loopback
+    params: {ip: "10.145.0.1/24"}
+    expect_failure: true
+    expect:
+      contains: "configure-irb"
+
+  - name: gate-configure-interface-bridged-on-irb
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan145/configure-interface?mode=loopback
+    params: {vlan_id: 145}
+    expect_failure: true
+    expect:
+      contains: "VLAN membership"
+
+  - name: gate-bind-acl-on-irb
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan145/bind-acl?mode=loopback
+    params: {acl: NOSUCH, direction: ingress}
+    expect_failure: true
+    expect:
+      contains: "ACL binding"
+
+  - name: gate-set-property-on-irb
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan145/set-property?mode=loopback
+    params: {property: mtu, value: "9100"}
+    expect_failure: true
+    expect:
+      contains: "port properties"
+
+  # --- PortChannel refusals (QoS is PORT-only per sonic-port-qos-map.yang;
+  #     speed lives only on the physical PORT row) ---
+  - name: gate-bind-qos-on-portchannel
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel45/bind-qos?mode=loopback
+    params: {policy: nosuch}
+    expect_failure: true
+    expect:
+      contains: "QoS binding"
+
+  - name: gate-set-property-speed-on-portchannel
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel45/set-property?mode=loopback
+    params: {property: speed, value: "100G"}
+    expect_failure: true
+    expect:
+      contains: "does not apply"
+
+  # --- Teardown (§15: the scenario leaves nothing behind) ---
+  - name: delete-portchannel-45
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-portchannel?mode=loopback
+    params: {name: PortChannel45}
+
+  - name: delete-vlan-145
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 145}

@@ -89,21 +89,28 @@ func createSviConfig(vlanID int, opts IRBConfig) []sonic.Entry {
 
 	// IP address binding
 	if opts.IPAddress != "" {
-		entries = append(entries, sonic.Entry{
-			Table: "VLAN_INTERFACE", Key: IRBIPKey(vlanID, opts.IPAddress), Fields: map[string]string{},
-		})
+		entries = append(entries, assignSviIPConfig(vlanID, opts.IPAddress)...)
 	}
 
 	// Anycast gateway MAC (SAG)
 	if opts.AnycastMAC != "" {
-		entries = append(entries, sonic.Entry{
-			Table: "SAG_GLOBAL", Key: "IPv4", Fields: map[string]string{
-				"gwmac": opts.AnycastMAC,
-			},
-		})
+		entries = append(entries, setSagGwmacConfig(opts.AnycastMAC)...)
 	}
 
 	return entries
+}
+
+// assignSviIPConfig returns the VLAN_INTERFACE IP sub-entry for an SVI.
+// The IP is the sub-entry's key (§47) — changing a gateway IP is a move
+// (delete old key, add new), never a field edit.
+func assignSviIPConfig(vlanID int, ipAddr string) []sonic.Entry {
+	return []sonic.Entry{{Table: "VLAN_INTERFACE", Key: IRBIPKey(vlanID, ipAddr), Fields: map[string]string{}}}
+}
+
+// setSagGwmacConfig returns the SAG_GLOBAL anycast gateway MAC entry —
+// a device-wide singleton shared by every anycast IRB.
+func setSagGwmacConfig(mac string) []sonic.Entry {
+	return []sonic.Entry{{Table: "SAG_GLOBAL", Key: "IPv4", Fields: map[string]string{"gwmac": mac}}}
 }
 
 // deleteSagGlobalConfig returns the delete entry for the SAG_GLOBAL IPv4 singleton.

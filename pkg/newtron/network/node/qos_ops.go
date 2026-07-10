@@ -18,10 +18,17 @@ import (
 // first reference and per-interface entries (PORT_QOS_MAP, QUEUE) every
 // time. §24: shared device-wide policy lifecycle, last-consumer cleanup
 // on UnbindQoS. §16 verb vocabulary: bind/unbind, mirror of BindACL.
-func (i *Interface) BindQoS(ctx context.Context, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
+func (i *Interface) BindQoS(ctx context.Context, policyName string) (*ChangeSet, error) {
 	n := i.node
 
 	if err := n.precondition(sonic.OpBindQoS, i.name).Result(); err != nil {
+		return nil, err
+	}
+	// Resolve after the gate: operations accept names and resolve specs
+	// internally (§33) — and a structurally-refused bind should never 404
+	// on the spec first.
+	policy, err := n.GetQoSPolicy(policyName)
+	if err != nil {
 		return nil, err
 	}
 

@@ -124,7 +124,10 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition(sonic.OpUpdateBGPPeer, i.name).Result(); err != nil {
+	// update-bgp-peer has no registry entry (updates modify the existing
+	// bgp-peer intent), so its capability gate is explicit.
+	if err := n.precondition(sonic.OpUpdateBGPPeer, i.name).
+		RequireInterfaceCapabilities(i.name, CapabilityBGPPeering).Result(); err != nil {
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {

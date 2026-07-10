@@ -1,0 +1,109 @@
+name: update-irb
+description: |
+  E2E coverage for update-irb — the §48 in-place mutation of an IRB's
+  identity. The gateway IP is the VLAN_INTERFACE sub-entry's key (§47), so
+  a change is delivered as a keyed move (old sub-entry gone, exactly one
+  new one — the ghost-gateway pin) while the SVI base row is never touched.
+  A VRF move is refused with the teardown path named: rebinding an SVI
+  re-originates its routes, which unconfigure-irb + configure-irb states
+  honestly.
+
+  Loopback mode — runs on switch1, pure HTTP + CLI.
+requires: [setup-device]
+
+steps:
+  # --- Setup: VLAN + operator-authored IRB ---
+  - name: create-vlan-146
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 146}
+
+  - name: configure-irb-146
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan configure-irb 146 --ip 10.146.0.1/24 --loopback"
+
+  - name: verify-gateway-ip
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE?mode=loopback
+    expect:
+      jq: 'index("Vlan146|10.146.0.1/24") != null'
+
+  # --- In-place gateway IP move ---
+  - name: update-irb-gateway-ip
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan update-irb 146 --ip 10.146.0.254/24 --loopback"
+
+  - name: verify-new-gateway-ip
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE?mode=loopback
+    expect:
+      jq: 'index("Vlan146|10.146.0.254/24") != null'
+
+  - name: verify-old-gateway-ip-gone
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE?mode=loopback
+    expect:
+      jq: 'index("Vlan146|10.146.0.1/24") == null'
+
+  - name: verify-svi-base-row-intact
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VLAN_INTERFACE Vlan146 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- VRF move refused with the designed path named ---
+  - name: update-irb-vrf-move-refused
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-irb?mode=loopback
+    params: {vlan_id: 146, vrf: Vrf_NOPE, ip_address: "10.146.0.254/24"}
+    expect_failure: true
+    expect:
+      contains: "unconfigure-irb"
+
+  # --- update-irb without an IRB redirects to configure-irb ---
+  - name: create-vlan-147
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 147}
+
+  - name: update-irb-without-irb-refused
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-irb?mode=loopback
+    params: {vlan_id: 147, ip_address: "10.147.0.1/24"}
+    expect_failure: true
+    expect:
+      contains: "configure-irb first"
+
+  # --- Teardown ---
+  - name: delete-vlan-147
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 147}
+
+  - name: unconfigure-irb-146
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan unconfigure-irb 146 --loopback"
+
+  - name: delete-vlan-146
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 146}

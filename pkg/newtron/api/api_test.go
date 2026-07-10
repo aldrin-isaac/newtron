@@ -218,6 +218,7 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateVLAN":              true,
 			"DeleteVLAN":              true,
 			"ConfigureIRB":            true,
+			"UpdateIRB":               true, // POST /networks/{netID}/nodes/{device}/update-irb
 			"UnconfigureIRB":          true,
 			"CreateVRF":               true,
 			"DeleteVRF":               true,
@@ -378,6 +379,7 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateVLAN":              auth.PermVLANCreate,
 			"DeleteVLAN":              auth.PermVLANDelete,
 			"ConfigureIRB":            auth.PermVLANModify,
+			"UpdateIRB":               auth.PermVLANModify,
 			"UnconfigureIRB":          auth.PermVLANModify,
 			"CreateVRF":               auth.PermVRFCreate,
 			"DeleteVRF":               auth.PermVRFDelete,

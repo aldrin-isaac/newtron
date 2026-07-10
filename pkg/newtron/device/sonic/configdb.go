@@ -13,44 +13,45 @@ import (
 
 // ConfigDB mirrors SONiC's config_db.json structure
 type ConfigDB struct {
-	DeviceMetadata    map[string]map[string]string  `json:"DEVICE_METADATA,omitempty"`
-	Port              map[string]PortEntry          `json:"PORT,omitempty"`
-	VLAN              map[string]VLANEntry          `json:"VLAN,omitempty"`
-	VLANMember        map[string]VLANMemberEntry    `json:"VLAN_MEMBER,omitempty"`
-	VLANInterface     map[string]map[string]string  `json:"VLAN_INTERFACE,omitempty"`
-	Interface         map[string]InterfaceEntry     `json:"INTERFACE,omitempty"`
-	PortChannel       map[string]PortChannelEntry   `json:"PORTCHANNEL,omitempty"`
-	PortChannelMember map[string]map[string]string  `json:"PORTCHANNEL_MEMBER,omitempty"`
-	LoopbackInterface map[string]map[string]string  `json:"LOOPBACK_INTERFACE,omitempty"`
-	VRF               map[string]VRFEntry           `json:"VRF,omitempty"`
-	VXLANTunnel       map[string]VXLANTunnelEntry   `json:"VXLAN_TUNNEL,omitempty"`
-	VXLANTunnelMap    map[string]VXLANMapEntry      `json:"VXLAN_TUNNEL_MAP,omitempty"`
-	VXLANEVPNNVO      map[string]EVPNNVOEntry       `json:"VXLAN_EVPN_NVO,omitempty"`
-	SuppressVLANNeigh map[string]map[string]string  `json:"SUPPRESS_VLAN_NEIGH,omitempty"`
-	SAG               map[string]map[string]string  `json:"SAG,omitempty"`
-	SAGGlobal         map[string]map[string]string  `json:"SAG_GLOBAL,omitempty"`
-	BGPNeighbor       map[string]BGPNeighborEntry   `json:"BGP_NEIGHBOR,omitempty"`
-	BGPNeighborAF     map[string]BGPNeighborAFEntry `json:"BGP_NEIGHBOR_AF,omitempty"`
-	BGPGlobals        map[string]BGPGlobalsEntry    `json:"BGP_GLOBALS,omitempty"`
-	BGPGlobalsAF      map[string]BGPGlobalsAFEntry  `json:"BGP_GLOBALS_AF,omitempty"`
-	BGPEVPNVNI        map[string]BGPEVPNVNIEntry    `json:"BGP_EVPN_VNI,omitempty"`
-	RouteTable        map[string]StaticRouteEntry   `json:"ROUTE_TABLE,omitempty"`
-	ACLTable          map[string]ACLTableEntry      `json:"ACL_TABLE,omitempty"`
-	ACLRule           map[string]ACLRuleEntry       `json:"ACL_RULE,omitempty"`
-	Scheduler         map[string]SchedulerEntry     `json:"SCHEDULER,omitempty"`
-	Queue             map[string]QueueEntry         `json:"QUEUE,omitempty"`
-	WREDProfile       map[string]WREDProfileEntry   `json:"WRED_PROFILE,omitempty"`
-	PortQoSMap        map[string]PortQoSMapEntry    `json:"PORT_QOS_MAP,omitempty"`
-	DSCPToTCMap       map[string]map[string]string  `json:"DSCP_TO_TC_MAP,omitempty"`
-	TCToQueueMap      map[string]map[string]string  `json:"TC_TO_QUEUE_MAP,omitempty"`
+	DeviceMetadata       map[string]map[string]string  `json:"DEVICE_METADATA,omitempty"`
+	Port                 map[string]PortEntry          `json:"PORT,omitempty"`
+	VLAN                 map[string]VLANEntry          `json:"VLAN,omitempty"`
+	VLANMember           map[string]VLANMemberEntry    `json:"VLAN_MEMBER,omitempty"`
+	VLANInterface        map[string]map[string]string  `json:"VLAN_INTERFACE,omitempty"`
+	Interface            map[string]InterfaceEntry     `json:"INTERFACE,omitempty"`
+	PortChannel          map[string]PortChannelEntry   `json:"PORTCHANNEL,omitempty"`
+	PortChannelInterface map[string]map[string]string  `json:"PORTCHANNEL_INTERFACE,omitempty"`
+	PortChannelMember    map[string]map[string]string  `json:"PORTCHANNEL_MEMBER,omitempty"`
+	LoopbackInterface    map[string]map[string]string  `json:"LOOPBACK_INTERFACE,omitempty"`
+	VRF                  map[string]VRFEntry           `json:"VRF,omitempty"`
+	VXLANTunnel          map[string]VXLANTunnelEntry   `json:"VXLAN_TUNNEL,omitempty"`
+	VXLANTunnelMap       map[string]VXLANMapEntry      `json:"VXLAN_TUNNEL_MAP,omitempty"`
+	VXLANEVPNNVO         map[string]EVPNNVOEntry       `json:"VXLAN_EVPN_NVO,omitempty"`
+	SuppressVLANNeigh    map[string]map[string]string  `json:"SUPPRESS_VLAN_NEIGH,omitempty"`
+	SAG                  map[string]map[string]string  `json:"SAG,omitempty"`
+	SAGGlobal            map[string]map[string]string  `json:"SAG_GLOBAL,omitempty"`
+	BGPNeighbor          map[string]BGPNeighborEntry   `json:"BGP_NEIGHBOR,omitempty"`
+	BGPNeighborAF        map[string]BGPNeighborAFEntry `json:"BGP_NEIGHBOR_AF,omitempty"`
+	BGPGlobals           map[string]BGPGlobalsEntry    `json:"BGP_GLOBALS,omitempty"`
+	BGPGlobalsAF         map[string]BGPGlobalsAFEntry  `json:"BGP_GLOBALS_AF,omitempty"`
+	BGPEVPNVNI           map[string]BGPEVPNVNIEntry    `json:"BGP_EVPN_VNI,omitempty"`
+	RouteTable           map[string]StaticRouteEntry   `json:"ROUTE_TABLE,omitempty"`
+	ACLTable             map[string]ACLTableEntry      `json:"ACL_TABLE,omitempty"`
+	ACLRule              map[string]ACLRuleEntry       `json:"ACL_RULE,omitempty"`
+	Scheduler            map[string]SchedulerEntry     `json:"SCHEDULER,omitempty"`
+	Queue                map[string]QueueEntry         `json:"QUEUE,omitempty"`
+	WREDProfile          map[string]WREDProfileEntry   `json:"WRED_PROFILE,omitempty"`
+	PortQoSMap           map[string]PortQoSMapEntry    `json:"PORT_QOS_MAP,omitempty"`
+	DSCPToTCMap          map[string]map[string]string  `json:"DSCP_TO_TC_MAP,omitempty"`
+	TCToQueueMap         map[string]map[string]string  `json:"TC_TO_QUEUE_MAP,omitempty"`
 	// v3: BGP management framework (frrcfgd) tables
-	RouteRedistribute  map[string]RouteRedistributeEntry  `json:"ROUTE_REDISTRIBUTE,omitempty"`
-	RouteMap           map[string]RouteMapEntry           `json:"ROUTE_MAP,omitempty"`
-	BGPPeerGroup       map[string]BGPPeerGroupEntry       `json:"BGP_PEER_GROUP,omitempty"`
-	BGPPeerGroupAF     map[string]BGPPeerGroupAFEntry     `json:"BGP_PEER_GROUP_AF,omitempty"`
-	BGPGlobalsEVPNRT   map[string]BGPGlobalsEVPNRTEntry   `json:"BGP_GLOBALS_EVPN_RT,omitempty"`
-	PrefixSet          map[string]PrefixSetEntry          `json:"PREFIX_SET,omitempty"`
-	CommunitySet       map[string]CommunitySetEntry       `json:"COMMUNITY_SET,omitempty"`
+	RouteRedistribute map[string]RouteRedistributeEntry `json:"ROUTE_REDISTRIBUTE,omitempty"`
+	RouteMap          map[string]RouteMapEntry          `json:"ROUTE_MAP,omitempty"`
+	BGPPeerGroup      map[string]BGPPeerGroupEntry      `json:"BGP_PEER_GROUP,omitempty"`
+	BGPPeerGroupAF    map[string]BGPPeerGroupAFEntry    `json:"BGP_PEER_GROUP_AF,omitempty"`
+	BGPGlobalsEVPNRT  map[string]BGPGlobalsEVPNRTEntry  `json:"BGP_GLOBALS_EVPN_RT,omitempty"`
+	PrefixSet         map[string]PrefixSetEntry         `json:"PREFIX_SET,omitempty"`
+	CommunitySet      map[string]CommunitySetEntry      `json:"COMMUNITY_SET,omitempty"`
 
 	StaticRoute map[string]map[string]string `json:"STATIC_ROUTE,omitempty"`
 
@@ -74,76 +75,77 @@ const (
 // Operation names — the 16 newtron operations (§19).
 // Each constant matches the operation's URL segment and intent record value.
 const (
-	OpSetupDevice        = "setup-device"
-	OpCreateVRF          = "create-vrf"
-	OpBindIPVPN          = "bind-ipvpn"
-	OpCreateVLAN         = "create-vlan"
-	OpBindMACVPN         = "bind-macvpn"
-	OpCreateACL          = "create-acl"
-	OpAddBGPEVPNPeer    = "add-bgp-evpn-peer"
-	OpUpdateBGPEVPNPeer = "update-bgp-evpn-peer" // in-place per-overlay-peer mutation (#227, §48)
-	OpCreatePortChannel  = "create-portchannel"
-	OpConfigureIRB       = "configure-irb"
-	OpAddStaticRoute     = "add-static-route"
-	OpUpdateStaticRoute  = "update-static-route" // in-place per-route mutation (#227, §48)
-	OpSetProperty        = "set-property"
-	OpClearProperty      = "clear-property"
-	OpConfigureInterface = "configure-interface"
-	OpAddTrunkVLAN       = "add-trunk-vlan"    // per-VLAN intent record op (#224)
-	OpRemoveTrunkVLAN    = "remove-trunk-vlan" // wire verb tag; no intent (#224)
-	OpAddBGPPeer         = "add-bgp-peer"
-	OpUpdateBGPPeer      = "update-bgp-peer" // in-place per-peer mutation (#227, §48)
-	OpApplyService       = "apply-service"
-	OpBindACL            = "bind-acl"
-	OpBindQoS               = "bind-qos"
-	OpUnbindQoS             = "unbind-qos"
-	OpAddACLRule            = "add-acl-rule"
-	OpUpdateACLRule         = "update-acl-rule" // in-place per-rule mutation (#227, §48)
-	OpAddPortChannelMember  = "add-pc-member"
-	OpInterfaceInit         = "interface-init"
-	OpDeployService         = "deploy-service"
+	OpSetupDevice          = "setup-device"
+	OpCreateVRF            = "create-vrf"
+	OpBindIPVPN            = "bind-ipvpn"
+	OpCreateVLAN           = "create-vlan"
+	OpBindMACVPN           = "bind-macvpn"
+	OpCreateACL            = "create-acl"
+	OpAddBGPEVPNPeer       = "add-bgp-evpn-peer"
+	OpUpdateBGPEVPNPeer    = "update-bgp-evpn-peer" // in-place per-overlay-peer mutation (#227, §48)
+	OpCreatePortChannel    = "create-portchannel"
+	OpConfigureIRB         = "configure-irb"
+	OpUpdateIRB            = "update-irb" // in-place IRB identity mutation (§48)
+	OpAddStaticRoute       = "add-static-route"
+	OpUpdateStaticRoute    = "update-static-route" // in-place per-route mutation (#227, §48)
+	OpSetProperty          = "set-property"
+	OpClearProperty        = "clear-property"
+	OpConfigureInterface   = "configure-interface"
+	OpAddTrunkVLAN         = "add-trunk-vlan"    // per-VLAN intent record op (#224)
+	OpRemoveTrunkVLAN      = "remove-trunk-vlan" // wire verb tag; no intent (#224)
+	OpAddBGPPeer           = "add-bgp-peer"
+	OpUpdateBGPPeer        = "update-bgp-peer" // in-place per-peer mutation (#227, §48)
+	OpApplyService         = "apply-service"
+	OpBindACL              = "bind-acl"
+	OpBindQoS              = "bind-qos"
+	OpUnbindQoS            = "unbind-qos"
+	OpAddACLRule           = "add-acl-rule"
+	OpUpdateACLRule        = "update-acl-rule" // in-place per-rule mutation (#227, §48)
+	OpAddPortChannelMember = "add-pc-member"
+	OpInterfaceInit        = "interface-init"
+	OpDeployService        = "deploy-service"
 )
 
 // Intent param field names — shared across intent construction, teardown reads,
 // and IntentToStep conversion. Using constants prevents typo-induced data loss.
 const (
-	FieldServiceName = "service_name"
-	FieldServiceType = "service_type"
-	FieldVRFName     = "vrf_name"
-	FieldIPAddress   = "ip_address"
-	FieldVLANID      = "vlan_id"
-	FieldL3VNI       = "l3vni"
-	FieldL3VNIVlan    = "l3vni_vlan"
-	FieldRouteTargets = "route_targets"
-	FieldName        = "name"
-	FieldNeighborIP  = "neighbor_ip"
-	FieldVRF         = "vrf"
-	FieldPrefix      = "prefix"
-	FieldNextHop     = "next_hop"
-	FieldMetric      = "metric"
-	FieldASN         = "asn"
-	FieldEVPN        = "evpn"
-	FieldDescription = "description"
-	FieldProperty    = "property"
-	FieldValue       = "value"
-	FieldIntfIP      = "ip"
-	FieldRemoteAS    = "remote_as"
-	FieldQoSPolicy   = "policy"
-	FieldACLName     = "acl_name"
-	FieldDirection   = "direction"
-	FieldMembers     = "members"
-	FieldACLType     = "type"
-	FieldStage       = "stage"
-	FieldPorts       = "ports"
-	FieldAnycastMAC  = "anycast_mac"
-	FieldMACVPN      = "macvpn"
-	FieldIPVPN       = "ipvpn"
-	FieldVNI         = "vni"
-	FieldSourceIP    = "source_ip"
-	FieldBGPPeerAS   = "bgp_peer_as"
-	FieldTagged          = "tagged"
-	FieldARPSuppression  = "arp_suppression"
-	FieldRules           = "rules"
+	FieldServiceName    = "service_name"
+	FieldServiceType    = "service_type"
+	FieldVRFName        = "vrf_name"
+	FieldIPAddress      = "ip_address"
+	FieldVLANID         = "vlan_id"
+	FieldL3VNI          = "l3vni"
+	FieldL3VNIVlan      = "l3vni_vlan"
+	FieldRouteTargets   = "route_targets"
+	FieldName           = "name"
+	FieldNeighborIP     = "neighbor_ip"
+	FieldVRF            = "vrf"
+	FieldPrefix         = "prefix"
+	FieldNextHop        = "next_hop"
+	FieldMetric         = "metric"
+	FieldASN            = "asn"
+	FieldEVPN           = "evpn"
+	FieldDescription    = "description"
+	FieldProperty       = "property"
+	FieldValue          = "value"
+	FieldIntfIP         = "ip"
+	FieldRemoteAS       = "remote_as"
+	FieldQoSPolicy      = "policy"
+	FieldACLName        = "acl_name"
+	FieldDirection      = "direction"
+	FieldMembers        = "members"
+	FieldACLType        = "type"
+	FieldStage          = "stage"
+	FieldPorts          = "ports"
+	FieldAnycastMAC     = "anycast_mac"
+	FieldMACVPN         = "macvpn"
+	FieldIPVPN          = "ipvpn"
+	FieldVNI            = "vni"
+	FieldSourceIP       = "source_ip"
+	FieldBGPPeerAS      = "bgp_peer_as"
+	FieldTagged         = "tagged"
+	FieldARPSuppression = "arp_suppression"
+	FieldRules          = "rules"
 	// FieldFilter records the source filter spec name on a service-derived
 	// create-acl intent. The ACL table itself is content-hash-named (§24/§25),
 	// so the hashed name can't be reversed to the filter; this preserves the
@@ -158,9 +160,9 @@ const (
 // pkg/newtron/types.go — a flattened DAG-display projection.
 type Intent struct {
 	// Identity
-	Resource  string `json:"resource"`            // binding point: "interface|Ethernet0", "vlan|100", "device"
-	Operation string `json:"operation"`           // composite op: "apply-service", "create-vlan", "setup-device"
-	Name      string `json:"name,omitempty"`      // spec reference: "transit", "" if none
+	Resource  string `json:"resource"`       // binding point: "interface|Ethernet0", "vlan|100", "device"
+	Operation string `json:"operation"`      // composite op: "apply-service", "create-vlan", "setup-device"
+	Name      string `json:"name,omitempty"` // spec reference: "transit", "" if none
 
 	// DAG — structural dependencies between intent records
 	Parents  []string `json:"parents,omitempty"`  // resource keys this intent depends on (_parents CSV)
@@ -177,10 +179,10 @@ type Intent struct {
 	Params map[string]string `json:"params,omitempty"`
 
 	// Composite operations — expanded primitive list for crash recovery.
-	Phase           string             `json:"phase,omitempty"`
-	RollbackHolder  string             `json:"rollback_holder,omitempty"`
-	RollbackStarted *time.Time         `json:"rollback_started,omitempty"`
-	Operations      []IntentOperation  `json:"operations,omitempty"`
+	Phase           string            `json:"phase,omitempty"`
+	RollbackHolder  string            `json:"rollback_holder,omitempty"`
+	RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
+	Operations      []IntentOperation `json:"operations,omitempty"`
 }
 
 // IsService returns true if this intent represents a service binding.
@@ -207,7 +209,7 @@ var intentIdentityFields = map[string]bool{
 	"applied_at": true, "applied_by": true,
 	"phase": true, "rollback_holder": true, "rollback_started": true,
 	"operations": true,
-	"_parents": true, "_children": true,
+	"_parents":   true, "_children": true,
 }
 
 // NewIntent constructs an Intent from a flat CONFIG_DB field map.
@@ -395,12 +397,12 @@ type BGPGlobalsEntry struct {
 	GracefulRestart string `json:"graceful_restart,omitempty"`
 
 	// v3: frrcfgd extended fields
-	LoadBalanceMPRelax  string `json:"load_balance_mp_relax,omitempty"`
-	RRClusterID         string `json:"rr_cluster_id,omitempty"`
-	EBGPRequiresPolicy  string `json:"ebgp_requires_policy,omitempty"`
-	DefaultIPv4Unicast  string `json:"default_ipv4_unicast,omitempty"`
-	LogNeighborChanges  string `json:"log_neighbor_changes,omitempty"`
-	SuppressFIBPending  string `json:"suppress_fib_pending,omitempty"`
+	LoadBalanceMPRelax string `json:"load_balance_mp_relax,omitempty"`
+	RRClusterID        string `json:"rr_cluster_id,omitempty"`
+	EBGPRequiresPolicy string `json:"ebgp_requires_policy,omitempty"`
+	DefaultIPv4Unicast string `json:"default_ipv4_unicast,omitempty"`
+	LogNeighborChanges string `json:"log_neighbor_changes,omitempty"`
+	SuppressFIBPending string `json:"suppress_fib_pending,omitempty"`
 }
 
 // BGPGlobalsAFEntry represents BGP address-family settings
@@ -418,10 +420,10 @@ type BGPGlobalsAFEntry struct {
 	RTExportEVPN       string `json:"route_target_export_evpn,omitempty"`
 
 	// v3: frrcfgd extended fields
-	MaxEBGPPaths           string `json:"max_ebgp_paths,omitempty"`
-	MaxIBGPPaths           string `json:"max_ibgp_paths,omitempty"`
-	RedistributeConnected  string `json:"redistribute_connected,omitempty"`
-	RedistributeStatic     string `json:"redistribute_static,omitempty"`
+	MaxEBGPPaths          string `json:"max_ebgp_paths,omitempty"`
+	MaxIBGPPaths          string `json:"max_ibgp_paths,omitempty"`
+	RedistributeConnected string `json:"redistribute_connected,omitempty"`
+	RedistributeStatic    string `json:"redistribute_static,omitempty"`
 }
 
 // BGPGlobalsEVPNRTEntry represents a per-VRF EVPN route-target entry (frrcfgd managed).
@@ -543,7 +545,6 @@ type PortQoSMapEntry struct {
 	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
 }
 
-
 // ============================================================================
 // v3: frrcfgd table entry types
 // ============================================================================
@@ -558,7 +559,7 @@ type RouteRedistributeEntry struct {
 // RouteMapEntry represents a route-map rule.
 // Key format: "map_name|seq" (e.g., "RM_IMPORT|10")
 type RouteMapEntry struct {
-	Action         string `json:"route_operation"`           // permit, deny
+	Action         string `json:"route_operation"` // permit, deny
 	MatchPrefixSet string `json:"match_prefix_set,omitempty"`
 	MatchCommunity string `json:"match_community,omitempty"`
 	MatchASPath    string `json:"match_as_path,omitempty"`
@@ -596,16 +597,16 @@ type BGPPeerGroupAFEntry struct {
 // PrefixSetEntry represents an IP prefix list entry for route-map matching.
 // Key format: "set_name|seq" (e.g., "PL_ALLOW|10")
 type PrefixSetEntry struct {
-	IPPrefix string `json:"ip_prefix"`
-	Action   string `json:"action"`           // permit, deny
+	IPPrefix     string `json:"ip_prefix"`
+	Action       string `json:"action"`                     // permit, deny
 	MaskLenRange string `json:"masklength_range,omitempty"` // e.g., "24..32"
 }
 
 // CommunitySetEntry represents a BGP community list.
 // Key format: set_name (e.g., "CUST_COMMUNITY")
 type CommunitySetEntry struct {
-	SetType     string `json:"set_type,omitempty"` // standard, expanded
-	MatchAction string `json:"match_action,omitempty"`
+	SetType         string `json:"set_type,omitempty"` // standard, expanded
+	MatchAction     string `json:"match_action,omitempty"`
 	CommunityMember string `json:"community_member,omitempty"` // Comma-separated communities
 }
 
@@ -654,6 +655,8 @@ func (db *ConfigDB) DeleteEntry(table, key string) {
 		delete(db.Interface, key)
 	case "VLAN_INTERFACE":
 		delete(db.VLANInterface, key)
+	case "PORTCHANNEL_INTERFACE":
+		delete(db.PortChannelInterface, key)
 	case "VXLAN_TUNNEL":
 		delete(db.VXLANTunnel, key)
 	case "VXLAN_TUNNEL_MAP":
@@ -761,6 +764,9 @@ func (db *ConfigDB) ExportEntries() []Entry {
 	}
 	for k, v := range db.VLANInterface {
 		appendRaw("VLAN_INTERFACE", k, v)
+	}
+	for k, v := range db.PortChannelInterface {
+		appendRaw("PORTCHANNEL_INTERFACE", k, v)
 	}
 	for k, v := range db.PortChannelMember {
 		appendRaw("PORTCHANNEL_MEMBER", k, v)
@@ -1051,7 +1057,6 @@ func (c *ConfigDBClient) HDelWithReply(table, key string, fields []string) (int6
 	return c.client.HDel(c.ctx, redisKey, fields...).Result()
 }
 
-
 // Get reads a table entry
 func (c *ConfigDBClient) Get(table, key string) (map[string]string, error) {
 	redisKey := fmt.Sprintf("%s|%s", table, key)
@@ -1071,7 +1076,6 @@ func (c *ConfigDBClient) Exists(table, key string) (bool, error) {
 	n, err := c.client.Exists(c.ctx, redisKey).Result()
 	return n > 0, err
 }
-
 
 // ============================================================================
 // Projection query methods — used by loopback mode to read from the in-memory

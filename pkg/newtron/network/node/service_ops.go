@@ -238,6 +238,28 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
 	}
 
+	// Capability gate, content-derived: what this service's resolved content
+	// asks of the delivery interface must be within the interface kind's
+	// nature (apply-service declares nil registry Needs; this is its
+	// in-method half — see contentDerivedOps). Refused before any
+	// infrastructure is created (§13).
+	if err := NewPreconditionChecker(n, sonic.OpApplyService, i.name).
+		RequireInterfaceCapabilities(i.name, serviceCapabilityNeeds(svc, peerGroup)...).
+		Result(); err != nil {
+		return nil, err
+	}
+
+	// SVI single-author guard, service side (§27 — the mirror of
+	// ConfigureIRB's sviServiceOwner check): an irb-type service renders
+	// the VLAN's SVI, so it refuses a VLAN whose IRB an operator already
+	// authored via configure-irb — two writers of one gateway diverge on
+	// the first refresh.
+	if svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeEVPNIRB {
+		if irb := n.GetIntent("interface|" + VLANName(vlanID)); irb != nil && irb.Operation == sonic.OpConfigureIRB {
+			return nil, fmt.Errorf("VLAN %d's IRB is operator-authored (configure-irb) — an irb-type service cannot adopt it; unconfigure-irb first or use a different VLAN", vlanID)
+		}
+	}
+
 	// Track ACL names from generated entries for interface-merging.
 	// ACL names are content-hashed from the filter spec (Principle 35).
 	var ingressACLName, egressACLName string
@@ -1394,4 +1416,31 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 
 	util.WithDevice(n.Name()).Infof("Refreshed service '%s' on interface %s", serviceName, i.name)
 	return cs, nil
+}
+
+// serviceCapabilityNeeds derives the interface capabilities a service apply
+// requires from the resolved spec content — the content-derived half of the
+// capability gate. The delivery interface carries the service's access-side
+// rows: bridged/irb types need VLAN membership on it (the irb types' routed
+// half lands on the VLAN's SVI, not here); routed types need an L3 identity;
+// filters, QoS, and BGP each add their bind-point requirement.
+func serviceCapabilityNeeds(svc *spec.ServiceSpec, peerGroup string) []InterfaceCapability {
+	var needs []InterfaceCapability
+	switch svc.ServiceType {
+	case spec.ServiceTypeRouted, spec.ServiceTypeEVPNRouted:
+		needs = append(needs, CapabilityRouting)
+	case spec.ServiceTypeBridged, spec.ServiceTypeEVPNBridged,
+		spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
+		needs = append(needs, CapabilityVLANMembership)
+	}
+	if svc.IngressFilter != "" || svc.EgressFilter != "" {
+		needs = append(needs, CapabilityACLBinding)
+	}
+	if svc.QoSPolicy != "" {
+		needs = append(needs, CapabilityQoSBinding)
+	}
+	if peerGroup != "" {
+		needs = append(needs, CapabilityBGPPeering)
+	}
+	return needs
 }

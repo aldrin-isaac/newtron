@@ -11,25 +11,25 @@ import (
 
 // InterfaceExists checks if an interface exists.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
-// Three-way check: physical ports from RegisterPort map, PortChannels and VLAN SVIs from intents.
+// Existence is kind-specific: physical ports from the RegisterPort map,
+// PortChannels and VLAN SVIs from intents. Classification and existence
+// share one source (interfaceKindOf) so they cannot diverge — and
+// ListInterfaces enumerates from the same sources, so whatever exists
+// is also listed (§24).
 func (n *Node) InterfaceExists(name string) bool {
 	name = util.NormalizeInterfaceName(name)
-	// Physical ports: populated by RegisterPort
-	if _, ok := n.interfaces[name]; ok {
-		return true
-	}
-	// PortChannels: intent-managed
-	if strings.HasPrefix(name, "PortChannel") && n.GetIntent("portchannel|"+name) != nil {
-		return true
-	}
-	// VLAN SVIs: intent-managed
-	if strings.HasPrefix(name, "Vlan") {
+	switch interfaceKindOf(name) {
+	case KindEthernet:
+		_, ok := n.interfaces[name]
+		return ok
+	case KindPortChannel:
+		return n.GetIntent("portchannel|"+name) != nil
+	case KindIRB:
 		vlanID := strings.TrimPrefix(name, "Vlan")
-		if n.GetIntent("vlan|"+vlanID) != nil {
-			return true
-		}
+		return n.GetIntent("vlan|"+vlanID) != nil
+	default:
+		return false
 	}
-	return false
 }
 
 // ============================================================================
@@ -40,7 +40,8 @@ func (n *Node) InterfaceExists(name string) bool {
 func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("set-ip", i.name).Result(); err != nil {
+	if err := n.precondition("set-ip", i.name).
+		RequireInterfaceCapabilities(i.name, CapabilityRouting).Result(); err != nil {
 		return nil, err
 	}
 	if !util.IsValidIPv4CIDR(ipAddr) {
@@ -106,7 +107,8 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("set-vrf", i.name).Result(); err != nil {
+	if err := n.precondition("set-vrf", i.name).
+		RequireInterfaceCapabilities(i.name, CapabilityRouting).Result(); err != nil {
 		return nil, err
 	}
 	if vrfName != "" && vrfName != "default" && n.GetIntent("vrf|"+vrfName) == nil {
@@ -155,7 +157,20 @@ func (i *Interface) ensureInterfaceIntent(cs *ChangeSet) error {
 func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition(sonic.OpConfigureInterface, i.name).Result(); err != nil {
+	// Capability gate, content-derived: bridged config needs VLAN
+	// membership, routed config needs an L3 identity the interface-op path
+	// authors (configure-interface declares nil registry Needs; this is
+	// its in-method half — see contentDerivedOps). On an IRB the routed
+	// case refuses with the configure-irb redirect.
+	var needs []InterfaceCapability
+	if cfg.VLAN > 0 {
+		needs = append(needs, CapabilityVLANMembership)
+	}
+	if cfg.VRF != "" || cfg.IP != "" {
+		needs = append(needs, CapabilityRouting)
+	}
+	if err := n.precondition(sonic.OpConfigureInterface, i.name).
+		RequireInterfaceCapabilities(i.name, needs...).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsPortChannelMember() {
@@ -548,6 +563,12 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		[]string{"interface|" + i.name}); err != nil {
 		return nil, err
 	}
+	// Per-property granularity within CapabilityPortProperties: speed and
+	// description exist only on the physical PORT row.
+	if _, known := propertyApplicability[property]; known && !propertyAppliesTo(property, i.Kind()) {
+		return nil, fmt.Errorf("property %q does not apply to a %s", property, i.Kind())
+	}
+
 	fields := make(map[string]string)
 
 	switch property {
@@ -584,13 +605,7 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		return nil, fmt.Errorf("unknown property: %s (valid: mtu, speed, admin-status, description)", property)
 	}
 
-	// Determine which table to update based on interface type
-	tableName := "PORT"
-	if i.IsPortChannel() {
-		tableName = "PORTCHANNEL"
-	}
-
-	cs.Updates(setPropertyConfig(tableName, i.name, fields))
+	cs.Updates(setPropertyConfig(propertyTable(i.name), i.name, fields))
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
@@ -617,14 +632,9 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpClearProperty)
 
-	tableName := "PORT"
-	if i.IsPortChannel() {
-		tableName = "PORTCHANNEL"
-	}
-
 	switch property {
 	case "mtu", "speed", "admin-status", "admin_status", "description":
-		cs.Updates(clearPropertyConfig(tableName, i.name, property))
+		cs.Updates(clearPropertyConfig(propertyTable(i.name), i.name, property))
 	default:
 		return nil, fmt.Errorf("unknown property: %s", property)
 	}

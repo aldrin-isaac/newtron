@@ -274,6 +274,44 @@ Examples:
 	},
 }
 
+var vlanUpdateIRBCmd = &cobra.Command{
+	Use:   "update-irb <vlan-id>",
+	Short: "Update an IRB's gateway IP or anycast MAC in place",
+	Long: `Update the IRB identity for a VLAN in place — the SVI base entry is never
+touched, so the gateway changes without tearing the interface down.
+
+Two fields are updatable: the gateway IP (delivered as a keyed sub-entry
+move) and the anycast gateway MAC (a SAG field edit, refused while other
+anycast IRBs share the device-wide value). A VRF move is refused — rebinding
+an SVI re-originates its routes, which is a teardown: use unconfigure-irb
+then configure-irb.
+
+Pass the full desired identity: the same VRF it has, plus the new IP and/or
+anycast MAC.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron -D leaf1-ny vlan update-irb 100 --vrf Vrf_CUST1 --ip 10.1.100.254/24 -x
+  newtron -D leaf1-ny vlan update-irb 100 --ip 10.1.100.1/24 --anycast-gw 00:00:00:00:02:02 -x`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
+		}
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.UpdateIRB(app.deviceName, newtron.IRBConfigureRequest{
+			VlanID:     vlanID,
+			VRF:        sviVRF,
+			IPAddress:  sviIP,
+			AnycastMAC: sviAnycastGW,
+		}, execOpts()))
+	},
+}
+
 var vlanBindMacvpnCmd = &cobra.Command{
 	Use:   "bind-macvpn <vlan-id> <macvpn-name>",
 	Short: "Bind a VLAN to a MAC-VPN definition",
@@ -374,6 +412,9 @@ func init() {
 	vlanConfigureIRBCmd.Flags().StringVar(&sviVRF, "vrf", "", "VRF to bind the IRB to")
 	vlanConfigureIRBCmd.Flags().StringVar(&sviIP, "ip", "", "IP address with prefix (e.g., 10.1.100.1/24)")
 	vlanConfigureIRBCmd.Flags().StringVar(&sviAnycastGW, "anycast-gw", "", "Anycast gateway MAC (SAG)")
+	vlanUpdateIRBCmd.Flags().StringVar(&sviVRF, "vrf", "", "The IRB's current VRF (VRF moves are refused)")
+	vlanUpdateIRBCmd.Flags().StringVar(&sviIP, "ip", "", "New gateway IP with prefix (e.g., 10.1.100.254/24)")
+	vlanUpdateIRBCmd.Flags().StringVar(&sviAnycastGW, "anycast-gw", "", "New anycast gateway MAC (SAG)")
 
 	vlanCmd.AddCommand(vlanListCmd)
 	vlanCmd.AddCommand(vlanShowCmd)
@@ -381,6 +422,7 @@ func init() {
 	vlanCmd.AddCommand(vlanCreateCmd)
 	vlanCmd.AddCommand(vlanDeleteCmd)
 	vlanCmd.AddCommand(vlanConfigureIRBCmd)
+	vlanCmd.AddCommand(vlanUpdateIRBCmd)
 	vlanCmd.AddCommand(vlanUnconfigureIRBCmd)
 	vlanCmd.AddCommand(vlanBindMacvpnCmd)
 	vlanCmd.AddCommand(vlanUnbindMacvpnCmd)
