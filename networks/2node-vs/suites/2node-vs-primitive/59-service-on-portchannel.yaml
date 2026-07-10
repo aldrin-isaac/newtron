@@ -1,0 +1,118 @@
+name: service-on-portchannel
+description: |
+  apply-service on a LAG — the §38 device witness for the PortChannel
+  delivery-point cells: the TRANSIT service (routed + BGP peer-as) applied
+  on PortChannel2 itself. Proves the service composite renders the LAG's
+  L3 into the canonical PORTCHANNEL_INTERFACE table and the session
+  reaches Established over the LAG. Members are refused as delivery
+  points ("configure the PortChannel instead"); the LAG is the §6 unit.
+
+  Runs after irb-bgp-peer so the Ethernet16/Ethernet20 links are free.
+requires: [irb-bgp-peer]
+
+steps:
+  # 1. Aggregate: PortChannel2 over both spare links
+  - name: create-portchannel2
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/create-portchannel
+    params: {name: PortChannel2}
+
+  - name: add-member-eth16
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/add-portchannel-member
+    params: {portchannel: PortChannel2, interface: Ethernet16}
+
+  - name: add-member-eth20
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/add-portchannel-member
+    params: {portchannel: PortChannel2, interface: Ethernet20}
+
+  # 2. Service ON the LAG (peer-as request → BGP neighbor derived from /31)
+  - name: apply-transit-on-lag-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel2/apply-service
+    params: {service: TRANSIT, ip_address: "10.59.0.0/31", peer_as: 65002}
+
+  - name: apply-transit-on-lag-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel2/apply-service
+    params: {service: TRANSIT, ip_address: "10.59.0.1/31", peer_as: 65001}
+
+  # 3. The service's L3 landed in the canonical LAG table
+  - name: verify-service-lag-l3-table-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/PORTCHANNEL_INTERFACE
+    expect:
+      jq: 'index("PortChannel2|10.59.0.0/31") != null'
+
+  - name: verify-binding-on-lag-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/interfaces/PortChannel2/binding
+    expect:
+      jq: '.service == "TRANSIT"'
+
+  # 4. Session over the LAG
+  - name: wait-lag-session-established
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show bgp neighbor 10.59.0.1 json' | head -50"}
+    poll:
+      timeout: 180s
+      interval: 10s
+    expect:
+      jq: '.output | contains("Established")'
+
+  # 5. Full reverse (§15)
+  - name: remove-service-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel2/remove-service
+
+  - name: remove-service-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel2/remove-service
+
+  - name: verify-lag-l3-clean-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/PORTCHANNEL_INTERFACE
+    expect:
+      jq: '[.[] | select(startswith("PortChannel2"))] | length == 0'
+
+  - name: remove-member-eth16
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/remove-portchannel-member
+    params: {portchannel: PortChannel2, interface: Ethernet16}
+
+  - name: remove-member-eth20
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/remove-portchannel-member
+    params: {portchannel: PortChannel2, interface: Ethernet20}
+
+  - name: delete-portchannel2
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-portchannel
+    params: {name: PortChannel2}
