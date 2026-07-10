@@ -40,7 +40,8 @@ func (n *Node) InterfaceExists(name string) bool {
 func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("set-ip", i.name).Result(); err != nil {
+	if err := n.precondition("set-ip", i.name).
+		RequireInterfaceCapabilities(i.name, CapabilityRouting).Result(); err != nil {
 		return nil, err
 	}
 	if !util.IsValidIPv4CIDR(ipAddr) {
@@ -106,7 +107,8 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("set-vrf", i.name).Result(); err != nil {
+	if err := n.precondition("set-vrf", i.name).
+		RequireInterfaceCapabilities(i.name, CapabilityRouting).Result(); err != nil {
 		return nil, err
 	}
 	if vrfName != "" && vrfName != "default" && n.GetIntent("vrf|"+vrfName) == nil {
@@ -155,7 +157,20 @@ func (i *Interface) ensureInterfaceIntent(cs *ChangeSet) error {
 func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition(sonic.OpConfigureInterface, i.name).Result(); err != nil {
+	// Capability gate, content-derived: bridged config needs VLAN
+	// membership, routed config needs an L3 identity the interface-op path
+	// authors (configure-interface declares nil registry Needs; this is
+	// its in-method half — see contentDerivedOps). On an IRB the routed
+	// case refuses with the configure-irb redirect.
+	var needs []InterfaceCapability
+	if cfg.VLAN > 0 {
+		needs = append(needs, CapabilityVLANMembership)
+	}
+	if cfg.VRF != "" || cfg.IP != "" {
+		needs = append(needs, CapabilityRouting)
+	}
+	if err := n.precondition(sonic.OpConfigureInterface, i.name).
+		RequireInterfaceCapabilities(i.name, needs...).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsPortChannelMember() {
@@ -548,6 +563,12 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		[]string{"interface|" + i.name}); err != nil {
 		return nil, err
 	}
+	// Per-property granularity within CapabilityPortProperties: speed and
+	// description exist only on the physical PORT row.
+	if _, known := propertyApplicability[property]; known && !propertyAppliesTo(property, i.Kind()) {
+		return nil, fmt.Errorf("property %q does not apply to a %s", property, i.Kind())
+	}
+
 	fields := make(map[string]string)
 
 	switch property {

@@ -29,12 +29,50 @@ func NewPreconditionChecker(d *Node, operation, resource string) *PreconditionCh
 // already called, since every write op needs both. This replaces requireWritable(d).
 // In offline mode, connected/locked checks are skipped — the projection serves
 // as the precondition state.
+//
+// Interface-scoped forward ops are additionally capability-gated here: when
+// the op's registry entry declares Needs, the target interface's kind is
+// checked against the capability matrix before any op logic runs (§13:
+// prevent, don't detect). The lookup is by forward wire verb, so reverse
+// ops never match — their exemption is structural, not a special case
+// (§15: you must always be able to undo). Content-derived ops
+// (contentDerivedOps) declare nil Needs and gate in-method.
 func (n *Node) precondition(operation, resource string) *PreconditionChecker {
 	pc := NewPreconditionChecker(n, operation, resource)
 	if n.actuatedIntent {
 		pc.RequireConnected().RequireLocked()
 	}
+	if spec, ok := opRegistry[operation]; ok && spec.Scope == ScopeInterface && len(spec.Needs) > 0 {
+		pc.RequireInterfaceCapabilities(resource, spec.Needs...)
+	}
 	return pc
+}
+
+// RequireInterfaceCapabilities checks that the named interface's kind
+// provides every listed capability — the per-kind operation gate. Two
+// refusal forms: the kind lacks the capability outright ("a VLAN interface
+// (IRB) does not support QoS binding"), or the kind provides it but a
+// different operation owns its authoring — then the refusal redirects to
+// the designed path instead of denying the capability's existence (the one
+// case today: routed config on an IRB is authored via configure-irb).
+func (p *PreconditionChecker) RequireInterfaceCapabilities(name string, caps ...InterfaceCapability) *PreconditionChecker {
+	kind := interfaceKindOf(util.NormalizeInterfaceName(name))
+	for _, c := range caps {
+		if owner := authoringOwner(kind, c); owner != "" {
+			p.errors = append(p.errors, util.NewPreconditionError(
+				p.operation, p.resource,
+				fmt.Sprintf("operation must own %s authoring for a %s", c, kind),
+				fmt.Sprintf("%s on a %s is authored via %s", c, kind, owner)))
+			continue
+		}
+		if !kind.HasCapability(c) {
+			p.errors = append(p.errors, util.NewPreconditionError(
+				p.operation, p.resource,
+				fmt.Sprintf("interface must support %s", c),
+				fmt.Sprintf("a %s does not support %s", kind, c)))
+		}
+	}
+	return p
 }
 
 // RequireConnected checks that the device is connected
