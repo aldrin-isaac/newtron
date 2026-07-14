@@ -6,6 +6,29 @@ description: |
 requires: [teardown-overlay]
 
 steps:
+  # Bridge domain for the evpn-irb service (VLAN 400 = SVC_VLAN400) — the
+  # service delivers onto it, no longer creates it (irb-service-redesign.md §5).
+  - name: create-vlan400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/create-vlan
+    params: {id: 400}
+
+  - name: bind-macvpn400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/bind-macvpn
+    params: {vlan_id: 400, macvpn: SVC_VLAN400}
+
+  - name: member-eth12-vlan400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet12/configure-interface
+    params: {vlan_id: 400, tagged: true}
+
   # 8a: Apply svc-evpn-irb on Eth3 (both switches)
   - name: apply-svc-evpn-irb-sw1
     action: newtron
@@ -187,16 +210,38 @@ steps:
   - name: verify-binding-removed-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12%7Cservice/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-binding-removed-sw2
     action: newtron
     devices: [switch2]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12%7Cservice/exists
     expect:
       jq: '.exists == false'
+
+  # Bridge-domain teardown (§15): the service left the VLAN + membership; the
+  # operator tears them down separately, and only then is Vlan400 gone.
+  - name: teardown-eth12-vlan400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet12/unconfigure-interface
+
+  - name: unbind-macvpn400-teardown
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unbind-macvpn
+    params: {vlan_id: 400}
+
+  - name: delete-vlan400-teardown
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 400}
 
   - name: verify-vlan400-removed-sw1
     action: newtron
@@ -212,7 +257,21 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # 8d: Apply svc-bridged on sw1:Eth1
+  # 8d: Apply svc-bridged on sw1:Eth1 — bridge domain first (VLAN 200, no VNI).
+  - name: create-vlan200
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan
+    params: {id: 200}
+
+  - name: member-eth4-vlan200
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet4/configure-interface
+    params: {vlan_id: 200, tagged: false}
+
   - name: apply-svc-bridged-sw1
     action: newtron
     devices: [switch1]
@@ -223,7 +282,7 @@ steps:
   - name: verify-bridged-binding-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4%7Cservice/exists
     expect:
       jq: '.exists == true'
 
@@ -244,9 +303,23 @@ steps:
   - name: verify-bridged-binding-removed
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4%7Cservice/exists
     expect:
       jq: '.exists == false'
+
+  # Bridge-domain teardown (§15) before asserting the VLAN is gone.
+  - name: teardown-eth4-vlan200
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet4/unconfigure-interface
+
+  - name: delete-vlan200-teardown
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 200}
 
   - name: verify-vlan200-removed
     action: newtron

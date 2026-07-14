@@ -93,7 +93,8 @@ func TestSVISingleAuthorGuards(t *testing.T) {
 	ctx := context.Background()
 
 	// Direction 1: operator-authored IRB exists → irb-type service refused.
-	// (Driven through the service path's guard by seeding the spec.)
+	// The SVI single-author guard fires before the bridge-domain precondition,
+	// so the "operator-authored" refusal stands regardless of membership.
 	n := irbNode(t, IRBConfig{IPAddress: "10.1.100.1/24"})
 	sp := n.SpecProvider.(*testSpecProvider)
 	sp.services["cust-irb"] = irbServiceSpec()
@@ -107,15 +108,19 @@ func TestSVISingleAuthorGuards(t *testing.T) {
 	}
 
 	// Direction 2: service-owned SVI → configure-irb (and update-irb) refused.
-	n2, _ := testInterface()
+	// The service now delivers onto a pre-existing bridge domain, so the VLAN
+	// and the interface's membership are authored first.
+	n2, intf2 := testInterface()
 	sp2 := n2.SpecProvider.(*testSpecProvider)
 	sp2.services["cust-irb"] = irbServiceSpec()
-	intf2, err := n2.GetInterface("Ethernet0")
-	if err != nil {
-		t.Fatalf("GetInterface: %v", err)
+	if _, err := n2.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+	if _, err := intf2.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
+		t.Fatalf("ConfigureInterface (membership): %v", err)
 	}
 	if _, err := intf2.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"}); err != nil {
-		t.Fatalf("ApplyService(irb) on clean VLAN: %v", err)
+		t.Fatalf("ApplyService(irb) onto a pre-existing bridge domain: %v", err)
 	}
 	_, err = n2.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.9/24"})
 	if err == nil || !strings.Contains(err.Error(), "owned by service") {
