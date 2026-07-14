@@ -260,6 +260,20 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
+	// Bridge-domain precondition (irb-service-redesign.md §5): a bridged or
+	// irb service delivers onto a pre-existing bridge domain — the VLAN and
+	// the interface's membership are authored separately (create-vlan,
+	// bind-macvpn for the overlay, configure-interface for membership), each
+	// with one owner. The service no longer creates them; it requires them.
+	if canBridge && vlanID > 0 {
+		if n.GetIntent("vlan|"+strconv.Itoa(vlanID)) == nil {
+			return nil, fmt.Errorf("VLAN %d does not exist — create it (and bind-macvpn for evpn) before applying service '%s'", vlanID, serviceName)
+		}
+		if !n.isVLANMember(i.name, vlanID) {
+			return nil, fmt.Errorf("interface %s is not a member of VLAN %d — configure-interface it into the VLAN before applying service '%s'", i.name, vlanID, serviceName)
+		}
+	}
+
 	// Track ACL names from generated entries for interface-merging.
 	// ACL names are content-hashed from the filter spec (Principle 35).
 	var ingressACLName, egressACLName string
@@ -435,25 +449,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Primitives create parent intents — must precede interface intent write (I4).
 	// =========================================================================
 
-	// VLAN infrastructure (intent-idempotent: CreateVLAN checks vlan intent)
-	if canBridge && vlanID > 0 {
-		l2vni := 0
-		if macvpnDef != nil {
-			l2vni = macvpnDef.VNI
-		}
-		vlanCS, err := n.CreateVLAN(ctx, vlanID, VLANConfig{L2VNI: l2vni})
-		if err != nil {
-			return nil, fmt.Errorf("create VLAN %d: %w", vlanID, err)
-		}
-		cs.Merge(vlanCS)
-		// ARP suppression: add unconditionally when the macvpn spec requires it.
-		// CreateVLAN is intent-idempotent (returns empty CS when vlan intent exists),
-		// but ARP suppression must still appear in the projection. render() handles
-		// upserts safely, so duplicate SUPPRESS_VLAN_NEIGH entries are harmless.
-		if macvpnDef != nil && macvpnDef.ARPSuppression {
-			cs.Adds(enableArpSuppressionConfig(VLANName(vlanID)))
-		}
-	}
+	// The VLAN, its L2VNI mapping, ARP suppression, and the interface's
+	// membership are the bridge domain — authored before the service and
+	// required by the precondition above (create-vlan, bind-macvpn,
+	// configure-interface). The service no longer creates them (§6: VLAN_MEMBER
+	// and the VLAN table each have one writer, and it is not the service).
 
 	// VRF infrastructure (intent-idempotent: CreateVRF checks vrf intent)
 	if vrfName != "" {
@@ -553,12 +553,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		cs.Adds(CreateRouteRedistributeConfig("default", "connected", "ipv4"))
 	}
 
-	// Per-interface entries by service type (config functions from owning files)
+	// Per-interface entries by service type (config functions from owning
+	// files). Membership is not created here — it is a precondition (above);
+	// the irb types render the SVI gateway, which they still own until it
+	// moves to configure-irb (irb-service-redesign.md §11-E).
 	switch svc.ServiceType {
 	case spec.ServiceTypeEVPNBridged, spec.ServiceTypeBridged:
-		if vlanID > 0 {
-			cs.Adds(createVlanMemberConfig(vlanID, i.name, false))
-		}
+		// L2-only: membership (the precondition) is the whole delivery.
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
 		if vrfName != "" {
 			cs.Adds(bindVrfConfig(i.name, vrfName))
@@ -570,7 +571,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	case spec.ServiceTypeEVPNIRB:
 		if vlanID > 0 {
-			cs.Adds(createVlanMemberConfig(vlanID, i.name, true))
 			irbOpts := IRBConfig{VRF: vrfName}
 			if macvpnDef != nil {
 				irbOpts.IPAddress = macvpnDef.AnycastIP
@@ -580,7 +580,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	case spec.ServiceTypeIRB:
 		if vlanID > 0 {
-			cs.Adds(createVlanMemberConfig(vlanID, i.name, true))
 			cs.Adds(createSviConfig(vlanID, IRBConfig{
 				VRF:       vrfName,
 				IPAddress: opts.IPAddress,
@@ -1078,19 +1077,14 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Derived booleans from serviceType
 	canRoute := serviceType == spec.ServiceTypeRouted || serviceType == spec.ServiceTypeEVPNRouted
-	canBridge := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeEVPNBridged ||
-		serviceType == spec.ServiceTypeIRB || serviceType == spec.ServiceTypeBridged
 	hasIRB := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeIRB
 
-	l2vni := bindingInt(b["l2vni"])
 	anycastIP := b["anycast_ip"]
 	anycastMAC := b[sonic.FieldAnycastMAC]
-	arpSuppression := b["arp_suppression"] == "true"
 
 	// Track which infrastructure intents to clean up after the interface
 	// intent is deleted (must happen in children-first order per I5).
 	var destroyedVRF string // VRF whose config was destroyed (needs intent cleanup)
-	var destroyedVLAN int   // VLAN whose config was destroyed (needs intent cleanup)
 
 	// (isLastServiceUser computed above)
 
@@ -1223,70 +1217,59 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	}
 
 	// =========================================================================
-	// Per-VLAN resources (delete only if last VLAN member)
+	// SVI gateway (irb types) — the only per-VLAN resource the service still
+	// owns. The VLAN, its L2VNI/ARP overlay realization, and membership are
+	// owned by create-vlan / bind-macvpn / configure-interface and are NOT
+	// torn down here (§6: one writer each). The SVI moves to configure-irb in
+	// the next step (§11-E); until then the service deletes it when the last
+	// irb-service binding for this VLAN is removed.
 	// =========================================================================
 
 	vlanID := bindingInt(b[sonic.FieldVLANID])
 
-	if canBridge && vlanID > 0 {
-		vlanName := VLANName(vlanID)
-
-		// Always remove this interface's VLAN membership
-		cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
-
-		// Check if this is the last VLAN member via DAG children
-		vlanIntent := n.GetIntent("vlan|" + strconv.Itoa(vlanID))
-		isLastVLANMember := true
-		if vlanIntent != nil {
-			for _, child := range vlanIntent.Children {
-				if strings.HasPrefix(child, "interface|") && child != excludeKey {
-					isLastVLANMember = false
-					break
-				}
+	if hasIRB && vlanID > 0 {
+		// Last irb-service user of this VLAN? Any other apply-service binding
+		// for the same VLAN with an irb type still needs the SVI.
+		isLastSVIUser := true
+		for resource, intent := range n.IntentsByOp(sonic.OpApplyService) {
+			if resource == excludeKey {
+				continue
+			}
+			if bindingInt(intent.Params[sonic.FieldVLANID]) != vlanID {
+				continue
+			}
+			switch intent.Params[sonic.FieldServiceType] {
+			case spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
+				isLastSVIUser = false
+			}
+			if !isLastSVIUser {
+				break
 			}
 		}
-		if isLastVLANMember {
-			// Last member - clean up all VLAN-related config
+		if isLastSVIUser {
+			if anycastIP != "" {
+				cs.Deletes(deleteSviIPConfig(vlanID, anycastIP))
+			} else if b[sonic.FieldIPAddress] != "" {
+				// Local IRB: IRB IP comes from opts.IPAddress (stored in binding)
+				cs.Deletes(deleteSviIPConfig(vlanID, b[sonic.FieldIPAddress]))
+			}
+			cs.Deletes(deleteSviBaseConfig(vlanID))
 
-			// IRB (for IRB types)
-			if hasIRB {
-				if anycastIP != "" {
-					cs.Deletes(deleteSviIPConfig(vlanID, anycastIP))
-				} else if b[sonic.FieldIPAddress] != "" {
-					// Local IRB: IRB IP comes from opts.IPAddress (stored in binding)
-					cs.Deletes(deleteSviIPConfig(vlanID, b[sonic.FieldIPAddress]))
-				}
-				cs.Deletes(deleteSviBaseConfig(vlanID))
-
-				// SAG_GLOBAL: clean up when last anycast MAC user is removed
-				isLastAnycastMAC := true
-				for resource := range n.IntentsByOp(sonic.OpApplyService) {
-					if resource != excludeKey {
-						intent := n.GetIntent(resource)
-						if intent != nil && intent.Params[sonic.FieldAnycastMAC] != "" {
-							isLastAnycastMAC = false
-							break
-						}
+			// SAG_GLOBAL: device-wide singleton — delete when the last anycast
+			// MAC user is removed.
+			isLastAnycastMAC := true
+			for resource := range n.IntentsByOp(sonic.OpApplyService) {
+				if resource != excludeKey {
+					intent := n.GetIntent(resource)
+					if intent != nil && intent.Params[sonic.FieldAnycastMAC] != "" {
+						isLastAnycastMAC = false
+						break
 					}
 				}
-				if anycastMAC != "" && isLastAnycastMAC {
-					cs.Deletes(deleteSagGlobalConfig())
-				}
 			}
-
-			// ARP suppression
-			if arpSuppression {
-				cs.Deletes(disableArpSuppressionConfig(vlanName))
+			if anycastMAC != "" && isLastAnycastMAC {
+				cs.Deletes(deleteSagGlobalConfig())
 			}
-
-			// VNI mapping
-			if l2vni > 0 {
-				cs.Deletes(deleteVniMapConfig(l2vni, vlanName))
-			}
-
-			// VLAN itself
-			cs.Deletes(deleteVlanConfig(vlanID))
-			destroyedVLAN = vlanID
 		}
 	}
 
@@ -1334,11 +1317,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			return nil, err
 		}
 	}
-	if destroyedVLAN > 0 {
-		if err := n.deleteIntent(cs, "vlan|"+strconv.Itoa(destroyedVLAN)); err != nil {
-			return nil, err
-		}
-	}
+	// The VLAN intent is not cleaned up here — create-vlan owns it, and the
+	// service required it to pre-exist (§6).
 
 	if err := n.render(cs); err != nil {
 		return nil, err

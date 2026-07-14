@@ -9,6 +9,27 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// isVLANMember reports whether intfName is a member of vlanID by an
+// authored membership — a configure-interface access member (identity
+// record with vlan_id) or a trunk member (add-trunk-vlan sub-resource).
+// The service binding also carries vlan_id, so it is excluded: this asks
+// "did someone put this port in the bridge domain?", which is the
+// membership operations' job, not the service's (irb-service-redesign.md
+// §5; VLAN_MEMBER has one writer).
+func (n *Node) isVLANMember(intfName string, vlanID int) bool {
+	want := strconv.Itoa(vlanID)
+	for resource, intent := range n.IntentsByParam(sonic.FieldVLANID, want) {
+		if resourceInterfaceName(resource) != intfName {
+			continue
+		}
+		switch intent.Operation {
+		case sonic.OpConfigureInterface, sonic.OpAddTrunkVLAN:
+			return true
+		}
+	}
+	return false
+}
+
 // InterfaceExists checks if an interface exists.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
 // Existence is kind-specific: physical ports from the RegisterPort map,
