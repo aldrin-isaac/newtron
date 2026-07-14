@@ -38,8 +38,15 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 		VRFType:     spec.VRFTypeInterface,
 	}
 
-	// ConfigDB state: service binding + VRF + IP + INTERFACE base
+	// ConfigDB state: identity record + service binding sub-resource + VRF +
+	// IP + INTERFACE base. The binding (interface|<name>|service) is a child
+	// of the identity record (interface|<name>).
 	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": sonic.OpInterfaceInit,
+		"state":     "actuated",
+		"_children": "interface|Ethernet0|service",
+	}
+	d.configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{
 		"service_name": "CUSTOMER_L3",
 		"service_type": spec.ServiceTypeEVPNRouted,
 		"vrf_type":     spec.VRFTypeInterface,
@@ -48,6 +55,7 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 		"state":        "actuated",
 		"operation":    "apply-service",
 		"name":         "CUSTOMER_L3",
+		"_parents":     "interface|Ethernet0",
 	}
 	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "CUSTOMER_L3_ETH0"}
 	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
@@ -64,7 +72,8 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeDelete)
 	// Per-interface VRF deleted (derived name: SERVICE_INTF)
 	assertChange(t, cs, "VRF", "CUSTOMER_L3_ETH0", ChangeDelete)
-	// Service binding removed
+	// Service binding removed, then the childless identity record
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|service", ChangeDelete)
 	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0", ChangeDelete)
 }
 
@@ -94,12 +103,18 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 		"_parents":  "acl|CUSTOMER_L3_IN",
 	}
 	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": sonic.OpInterfaceInit,
+		"state":     "actuated",
+		"_children": "interface|Ethernet0|service",
+	}
+	d.configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{
 		"service_name": "CUSTOMER_L3",
 		"service_type": spec.ServiceTypeEVPNRouted,
 		"ingress_acl":  "CUSTOMER_L3_IN",
 		"state":        "actuated",
 		"operation":    "apply-service",
 		"name":         "CUSTOMER_L3",
+		"_parents":     "interface|Ethernet0",
 	}
 
 	cs, err := intf.RemoveService(ctx)
@@ -107,9 +122,11 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 		t.Fatalf("RemoveService: %v", err)
 	}
 
-	// Last user → rules + table deleted
+	// Last user → rules + table deleted (the service-created ACL has no
+	// interface binding children, so this interface is the last user).
 	assertChange(t, cs, "ACL_RULE", "CUSTOMER_L3_IN|RULE_10", ChangeDelete)
 	assertChange(t, cs, "ACL_TABLE", "CUSTOMER_L3_IN", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|service", ChangeDelete)
 	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0", ChangeDelete)
 	assertChange(t, cs, "NEWTRON_INTENT", "acl|CUSTOMER_L3_IN", ChangeDelete)
 }
@@ -127,15 +144,21 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4",
 	}
+	// Identity record parents the binding and the standalone ACL binding.
 	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": sonic.OpInterfaceInit,
+		"state":     "actuated",
+		"_parents":  "device",
+		"_children": "interface|Ethernet0|service,interface|Ethernet0|acl|ingress",
+	}
+	d.configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{
 		"service_name": "CUSTOMER_L3",
 		"service_type": spec.ServiceTypeEVPNRouted,
 		"ingress_acl":  "CUSTOMER_L3_IN",
 		"state":        "actuated",
 		"operation":    "apply-service",
 		"name":         "CUSTOMER_L3",
-		"_parents":     "device",
-		"_children":    "interface|Ethernet0|acl|ingress",
+		"_parents":     "interface|Ethernet0",
 	}
 	// ACL intent with two binding children (Ethernet0 and Ethernet4)
 	d.configDB.NewtronIntent["acl|CUSTOMER_L3_IN"] = map[string]string{
@@ -164,6 +187,8 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	c := assertChange(t, cs, "ACL_TABLE", "CUSTOMER_L3_IN", ChangeModify)
 	assertField(t, c, "ports", "Ethernet4")
 	assertNoChange(t, cs, "ACL_RULE", "CUSTOMER_L3_IN|RULE_10")
+	// Binding and (once childless) the identity are removed.
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|service", ChangeDelete)
 	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0", ChangeDelete)
 }
 
@@ -440,7 +465,7 @@ func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 
 func TestApplyService_AlreadyBound(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{"service_name": "EXISTING_SERVICE", "state": "actuated", "operation": "apply-service", "name": "EXISTING_SERVICE"}
+	d.configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{"service_name": "EXISTING_SERVICE", "state": "actuated", "operation": "apply-service", "name": "EXISTING_SERVICE"}
 	d.SpecProvider.(*testSpecProvider).services["NEW_SERVICE"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 	}

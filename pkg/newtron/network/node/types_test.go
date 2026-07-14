@@ -463,7 +463,7 @@ func TestInterface_HasService(t *testing.T) {
 		NewtronIntent: map[string]map[string]string{},
 		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
-		configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{"service_name": "CUSTOMER_L3", "state": "actuated", "operation": "apply-service", "name": "CUSTOMER_L3"}
+		configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{"service_name": "CUSTOMER_L3", "state": "actuated", "operation": "apply-service", "name": "CUSTOMER_L3"}
 		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
 		intf := &Interface{node: d, name: "Ethernet0"}
 		if !intf.HasService() {
@@ -503,7 +503,7 @@ func TestInterface_ServiceBindingProperties(t *testing.T) {
 		NewtronIntent: map[string]map[string]string{},
 		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
-	configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{
 		"service_name": "CUSTOMER_L3",
 		"ip_address":   "10.1.1.1/30",
 		"vrf_name":     "CUSTOMER_L3_ETH0",
@@ -620,7 +620,7 @@ func TestInterface_String(t *testing.T) {
 			Interface:         map[string]sonic.InterfaceEntry{},
 			PortChannelMember: map[string]map[string]string{},
 			NewtronIntent: map[string]map[string]string{
-				"interface|Ethernet0": {"service_name": "CUSTOMER_L3", "state": "actuated", "operation": "apply-service", "name": "CUSTOMER_L3"},
+				"interface|Ethernet0|service": {"service_name": "CUSTOMER_L3", "state": "actuated", "operation": "apply-service", "name": "CUSTOMER_L3"},
 			},
 		}
 		intf := stringTestIntf(

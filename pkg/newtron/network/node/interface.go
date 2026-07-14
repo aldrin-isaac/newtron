@@ -150,19 +150,25 @@ func (i *Interface) VRF() string {
 	return intent.Params[sonic.FieldVRF]
 }
 
-// IPAddresses returns the IP addresses configured on this interface.
+// IPAddresses returns the IP addresses configured on this interface — from
+// the identity record (configure-interface / configure-irb) or, for a routed
+// service that carries its own address, from the service binding sub-resource.
 func (i *Interface) IPAddresses() []string {
-	intent := i.node.GetIntent("interface|" + i.name)
-	if intent == nil {
-		return nil
+	if intent := i.node.GetIntent("interface|" + i.name); intent != nil {
+		// configure-interface stores IP in FieldIntfIP ("ip") param
+		if ip := intent.Params[sonic.FieldIntfIP]; ip != "" {
+			return []string{ip}
+		}
+		// configure-irb stores IP in FieldIPAddress ("ip_address") param
+		if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
+			return []string{ip}
+		}
 	}
-	// configure-interface stores IP in FieldIntfIP ("ip") param
-	if ip := intent.Params[sonic.FieldIntfIP]; ip != "" {
-		return []string{ip}
-	}
-	// configure-irb stores IP in FieldIPAddress ("ip_address") param
-	if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
-		return []string{ip}
+	// Routed-service binding: the address is on the binding sub-resource.
+	if intent := i.node.GetIntent(bindingKey(i.name)); intent != nil {
+		if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
+			return []string{ip}
+		}
 	}
 	return nil
 }
@@ -178,7 +184,7 @@ func (i *Interface) binding() map[string]string {
 	if configDB == nil {
 		return map[string]string{}
 	}
-	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok {
+	if entry, ok := configDB.NewtronIntent[bindingKey(i.name)]; ok {
 		return entry
 	}
 	return map[string]string{}
@@ -190,7 +196,7 @@ func (i *Interface) ServiceName() string {
 	if configDB == nil {
 		return ""
 	}
-	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok {
+	if entry, ok := configDB.NewtronIntent[bindingKey(i.name)]; ok {
 		return entry["service_name"]
 	}
 	return ""
@@ -204,8 +210,8 @@ func (i *Interface) HasService() bool {
 // IngressACL returns the name of the ingress ACL bound to this interface.
 // Checks service binding intent first, then standalone BindACL intent.
 func (i *Interface) IngressACL() string {
-	// Service binding intent: interface|{name} → ingress_acl param
-	if intent := i.node.GetIntent("interface|" + i.name); intent != nil {
+	// Service binding sub-resource: interface|{name}|service → ingress_acl param
+	if intent := i.node.GetIntent(bindingKey(i.name)); intent != nil {
 		if aclName := intent.Params["ingress_acl"]; aclName != "" {
 			return aclName
 		}
@@ -220,8 +226,8 @@ func (i *Interface) IngressACL() string {
 // EgressACL returns the name of the egress ACL bound to this interface.
 // Checks service binding intent first, then standalone BindACL intent.
 func (i *Interface) EgressACL() string {
-	// Service binding intent: interface|{name} → egress_acl param
-	if intent := i.node.GetIntent("interface|" + i.name); intent != nil {
+	// Service binding sub-resource: interface|{name}|service → egress_acl param
+	if intent := i.node.GetIntent(bindingKey(i.name)); intent != nil {
 		if aclName := intent.Params["egress_acl"]; aclName != "" {
 			return aclName
 		}

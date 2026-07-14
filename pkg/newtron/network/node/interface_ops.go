@@ -136,6 +136,16 @@ type InterfaceConfig struct {
 	Tagged bool   // Tagged membership (bridged mode)
 }
 
+// bindingKey returns the intent resource key for an interface's service
+// binding — a sub-resource of the interface's identity record
+// (interface|<name>), the single owner of this key so writer, readers, and
+// teardown cannot diverge (§25). The identity record interface|<name> holds
+// what the interface *is* (from configure-interface / configure-irb /
+// interface-init); the binding holds the one service applied to it.
+func bindingKey(intfName string) string {
+	return "interface|" + intfName + "|service"
+}
+
 // ensureInterfaceIntent lazily creates the interface|INTF intent if it doesn't
 // exist. Sub-resource operations (SetProperty, BindACL, BindQoS) call this so
 // they work on interfaces that haven't had ConfigureInterface called.

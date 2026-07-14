@@ -569,6 +569,17 @@ meets physical infrastructure:
 - **The unit of isolation** — services on Ethernet0 and Ethernet4 are
   independent
 
+Isolation has one boundary: the container. A component that joins a
+container — an aggregate that presents to the rest of the system as one
+entity, or a shared domain with a single owner — cedes the
+container-scoped portion of its state to that owner. Two members of the
+same container are not independent in what the container owns; they stay
+independent in everything else. Isolation holds between peers, not
+between a member and the whole it has joined. This is the same rule that
+puts a method on the smallest object with the context to run it:
+container-scoped state belongs to the container, not to each member that
+happens to carry it.
+
 Because the interface is the unit of service in the domain, it is the
 unit of service in the code. `ApplyService` lives on Interface — not
 on Node, not on Network — because the interface is the entity being
@@ -1739,6 +1750,17 @@ The existing principle "intent records must be self-sufficient for reverse
 operations" (§15) extends here: **intent records must be self-sufficient for
 reconstruction of expected state.** Teardown is one consumer; drift
 detection is another. Same data, different purpose.
+
+Self-sufficiency is a property of the recorded-intent **store**, not of each
+record read in isolation. A record carries what its own reverse needs; where
+that reverse depends on the current shape of a container the record belongs
+to — which members remain, how many consumers a shared resource still has —
+it reads that shape from sibling records in the same store. This stays
+self-sufficient: the store is the system's own recorded intent, and reaching
+sideways to a sibling record is not reaching outward to an external
+definition. The rule "a reverse never re-resolves definitions" (§15) is
+unchanged; what widens is *where in the store a reverse may read* — its own
+record, and the sibling records that establish the container's current shape.
 
 This makes a specific demand on intent record design: every field needed to
 regenerate the expected CONFIG_DB entries must be stored in the intent record.
