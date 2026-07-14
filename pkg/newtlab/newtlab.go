@@ -1000,17 +1000,16 @@ func (l *Lab) bootstrapNodes(ctx context.Context, pubKey string) error {
 	})
 
 	// Phase 2: Wait for SSH readiness (parallel) — only for nodes still running.
-	// Pre-bootstrapped images skip Phase 1, so the VM is still booting from
-	// cold when we get here; use the full BootTimeout. For Phase-1 nodes
-	// (network just came up via console), 60s is plenty.
+	// Always budget the node's full BootTimeout: "60s is plenty for Phase-1
+	// nodes" was refuted on a loaded host — a 1-vCPU alpine host VM booting
+	// alongside three cold CiscoVS switches answered SSH moments after a 60s
+	// cutoff, and the error status then excluded it from every later
+	// provisioning pass. WaitForSSH polls and exits early, so light deploys
+	// stay fast (RCA-047-class budget rule).
 	if err2 := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		sshHost := resolveHostIP(node.Host, l.Config)
-		sshTimeout := 60 * time.Second
-		if node.SkipBootstrap {
-			sshTimeout = time.Duration(node.BootTimeout) * time.Second
-		}
 		return WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
-			sshTimeout)
+			time.Duration(node.BootTimeout)*time.Second)
 	}); err == nil {
 		err = err2
 	}

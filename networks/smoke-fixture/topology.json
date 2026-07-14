@@ -1,0 +1,149 @@
+{
+  "version": "1.0",
+  "description": "smoke-suite fixture (seed-fixture.mjs)",
+  "nodes": {
+    "switch1": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "65001",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch1",
+              "hwsku": "Force10-S6000",
+              "type": "LeafRouter"
+            }
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet0/apply-service",
+          "params": {
+            "ip_address": "10.255.255.0/31",
+            "peer_as": "65002",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet4/apply-service",
+          "params": {
+            "ip_address": "10.255.255.5/31",
+            "peer_as": "65003",
+            "service": "TRANSIT"
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": 9100
+        }
+      }
+    },
+    "switch2": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "65002",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch2",
+              "hwsku": "Force10-S6000",
+              "type": "LeafRouter"
+            }
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet0/apply-service",
+          "params": {
+            "ip_address": "10.255.255.1/31",
+            "peer_as": "65001",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet4/apply-service",
+          "params": {
+            "ip_address": "10.255.255.2/31",
+            "peer_as": "65003",
+            "service": "TRANSIT"
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": 9100
+        }
+      }
+    },
+    "switch3": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "65003",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch3",
+              "hwsku": "Force10-S6000",
+              "type": "LeafRouter"
+            }
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet0/apply-service",
+          "params": {
+            "ip_address": "10.255.255.3/31",
+            "peer_as": "65002",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet4/apply-service",
+          "params": {
+            "ip_address": "10.255.255.4/31",
+            "peer_as": "65001",
+            "service": "TRANSIT"
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": 9100
+        }
+      }
+    }
+  },
+  "links": [
+    {
+      "a": "switch1:Ethernet0",
+      "z": "switch2:Ethernet0"
+    },
+    {
+      "a": "switch2:Ethernet4",
+      "z": "switch3:Ethernet0"
+    },
+    {
+      "a": "switch3:Ethernet4",
+      "z": "switch1:Ethernet4"
+    }
+  ]
+}

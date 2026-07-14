@@ -9,17 +9,18 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
-// TestApplyService_RequiresBridgeDomain pins DE-1: a bridged or irb service
-// delivers onto a pre-existing bridge domain and no longer creates it. The
-// VLAN and the interface's membership are authored separately (create-vlan,
-// configure-interface); the service requires them.
-func TestApplyService_RequiresBridgeDomain(t *testing.T) {
+// TestApplyService_BridgedRequiresMembership pins the bridge-domain precondition
+// for the per-access-port service types (DE-1): a bridged service delivers onto
+// an access port that must already be a member of a pre-existing VLAN. The VLAN
+// and the membership are authored separately (create-vlan, configure-interface),
+// each with one owner (§6); the service requires them and creates neither.
+func TestApplyService_BridgedRequiresMembership(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("refused when VLAN absent", func(t *testing.T) {
 		n, intf := testInterface()
-		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
-		_, err := intf.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"})
+		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
+		_, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
 		if err == nil || !strings.Contains(err.Error(), "does not exist") {
 			t.Fatalf("want VLAN-absent refusal, got %v", err)
 		}
@@ -27,13 +28,13 @@ func TestApplyService_RequiresBridgeDomain(t *testing.T) {
 
 	t.Run("refused when not a member", func(t *testing.T) {
 		n, intf := testInterface()
-		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
+		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
 		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
 			t.Fatalf("CreateVLAN: %v", err)
 		}
-		_, err := intf.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"})
+		_, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
 		if err == nil || !strings.Contains(err.Error(), "not a member") {
-			t.Fatalf("want not-a-member refusal pointing at configure-interface, got %v", err)
+			t.Fatalf("want not-a-member refusal, got %v", err)
 		}
 		if !strings.Contains(err.Error(), "configure-interface") {
 			t.Fatalf("refusal should name configure-interface: %v", err)
@@ -42,7 +43,7 @@ func TestApplyService_RequiresBridgeDomain(t *testing.T) {
 
 	t.Run("succeeds onto a pre-existing bridge domain, creates no membership", func(t *testing.T) {
 		n, intf := testInterface()
-		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
+		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
 		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
 			t.Fatalf("CreateVLAN: %v", err)
 		}
@@ -53,53 +54,133 @@ func TestApplyService_RequiresBridgeDomain(t *testing.T) {
 		// The membership rows come from configure-interface, not the service.
 		assertChange(t, memberCS, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeAdd)
 
-		svcCS, err := intf.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"})
+		svcCS, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
 		if err != nil {
 			t.Fatalf("ApplyService onto a pre-existing bridge domain: %v", err)
 		}
-		// The service delivers the SVI gateway...
-		assertChange(t, svcCS, "VLAN_INTERFACE", "Vlan100", ChangeAdd)
-		// ...but NOT membership: VLAN_MEMBER is configure-interface's alone (§6).
+		// The service creates NO membership: VLAN_MEMBER is configure-interface's (§6).
 		assertNoChange(t, svcCS, "VLAN_MEMBER", "Vlan100|Ethernet0")
 	})
 }
 
-// TestRemoveService_LeavesBridgeDomain pins the teardown half of DE-1: removing
-// an irb service deletes its SVI but leaves the VLAN and the membership, which
-// it never owned.
-func TestRemoveService_LeavesBridgeDomain(t *testing.T) {
+// TestApplyService_IRBRequiresConfiguredIRB pins the delivery-point flip: an
+// irb-type service binds to the VLAN's L3 gateway — the IRB — and only the IRB
+// (irb-service-redesign.md §3). It refuses a physical port (the capability
+// gate: a port is no bridge-domain gateway), and on the IRB it refuses until
+// configure-irb has authored the gateway (§6: the service binds to an SVI it
+// does not create). Where it succeeds, it writes no VLAN_INTERFACE row.
+func TestApplyService_IRBRequiresConfiguredIRB(t *testing.T) {
 	ctx := context.Background()
-	n, intf := testInterface()
+
+	t.Run("refused on a physical port", func(t *testing.T) {
+		n, intf := testInterface()
+		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
+		_, err := intf.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100})
+		if err == nil || !strings.Contains(err.Error(), "gateway") {
+			t.Fatalf("want capability refusal (a physical port is no gateway), got %v", err)
+		}
+	})
+
+	t.Run("refused on the IRB before configure-irb", func(t *testing.T) {
+		n, _ := testInterface()
+		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatalf("CreateVLAN: %v", err)
+		}
+		irb, err := n.GetInterface("Vlan100")
+		if err != nil {
+			t.Fatalf("GetInterface(Vlan100): %v", err)
+		}
+		_, err = irb.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100})
+		if err == nil || !strings.Contains(err.Error(), "configure-irb") {
+			t.Fatalf("want configure-irb-first refusal, got %v", err)
+		}
+	})
+
+	t.Run("refused when carrying per-member policy until the product renderer", func(t *testing.T) {
+		n, _ := testInterface()
+		sp := n.SpecProvider.(*testSpecProvider)
+		sp.services["cust-irb-acl"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, IngressFilter: "FILTER1"}
+		sp.filterSpecs["FILTER1"] = &spec.FilterSpec{}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatalf("CreateVLAN: %v", err)
+		}
+		if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+			t.Fatalf("ConfigureIRB: %v", err)
+		}
+		irb, err := n.GetInterface("Vlan100")
+		if err != nil {
+			t.Fatalf("GetInterface: %v", err)
+		}
+		_, err = irb.ApplyService(ctx, "cust-irb-acl", ApplyServiceOpts{VLAN: 100})
+		if err == nil || !strings.Contains(err.Error(), "product renderer") {
+			t.Fatalf("policy-bearing irb service must fail closed pending the product renderer, got %v", err)
+		}
+	})
+
+	t.Run("succeeds on the IRB, does not author the SVI", func(t *testing.T) {
+		n, _ := testInterface()
+		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatalf("CreateVLAN: %v", err)
+		}
+		if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+			t.Fatalf("ConfigureIRB: %v", err)
+		}
+		irb, err := n.GetInterface("Vlan100")
+		if err != nil {
+			t.Fatalf("GetInterface(Vlan100): %v", err)
+		}
+		svcCS, err := irb.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100})
+		if err != nil {
+			t.Fatalf("ApplyService(irb) on the IRB: %v", err)
+		}
+		// The service binds; it does NOT write the SVI (configure-irb's, §6).
+		assertNoChange(t, svcCS, "VLAN_INTERFACE", "Vlan100")
+		// The binding is a sub-resource of the IRB identity (interface|Vlan100|service).
+		if n.GetIntent(bindingKey("Vlan100")) == nil {
+			t.Fatal("service binding intent missing on the IRB")
+		}
+	})
+}
+
+// TestRemoveService_IRBLeavesGateway pins the teardown half of the flip: removing
+// an irb service deletes its binding but leaves the SVI gateway, which
+// configure-irb owns (§6). The gateway is torn down by unconfigure-irb, not
+// remove-service — and it survives reconstruction (no drift on rebuild).
+func TestRemoveService_IRBLeavesGateway(t *testing.T) {
+	ctx := context.Background()
+	n, _ := testInterface()
 	n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
 	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
 		t.Fatalf("CreateVLAN: %v", err)
 	}
-	if _, err := intf.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
-		t.Fatalf("ConfigureInterface: %v", err)
+	if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+		t.Fatalf("ConfigureIRB: %v", err)
 	}
-	if _, err := intf.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"}); err != nil {
+	irb, err := n.GetInterface("Vlan100")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	if _, err := irb.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100}); err != nil {
 		t.Fatalf("ApplyService: %v", err)
 	}
 
-	cs, err := intf.RemoveService(ctx)
+	cs, err := irb.RemoveService(ctx)
 	if err != nil {
 		t.Fatalf("RemoveService: %v", err)
 	}
-	// SVI gateway torn down (last irb-service user)...
-	assertChange(t, cs, "VLAN_INTERFACE", "Vlan100", ChangeDelete)
-	// ...but the VLAN and the membership stay — the service never owned them.
-	assertNoChange(t, cs, "VLAN", "Vlan100")
-	assertNoChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0")
-	if n.GetIntent("vlan|100") == nil {
-		t.Fatal("VLAN intent must survive service removal (create-vlan owns it)")
+	// The SVI gateway stays — configure-irb owns it, unconfigure-irb removes it (§6).
+	assertNoChange(t, cs, "VLAN_INTERFACE", "Vlan100")
+	// The binding is gone...
+	if n.GetIntent(bindingKey("Vlan100")) != nil {
+		t.Fatal("service binding must be deleted by remove-service")
 	}
-	// The untagged membership lives on the identity record (configure-interface),
-	// which the service must NOT delete even when childless — otherwise the
-	// VLAN_MEMBER strands as drift on the next rebuild (found cold). Prove it
-	// survives reconstruction.
-	if identity := n.GetIntent("interface|Ethernet0"); identity == nil || identity.Operation != sonic.OpConfigureInterface {
-		t.Fatalf("configure-interface identity (the membership) must survive service removal, got %+v", identity)
+	// ...but the IRB identity (configure-irb) survives — the SVI has an owner.
+	if irbIntent := n.GetIntent("interface|Vlan100"); irbIntent == nil || irbIntent.Operation != sonic.OpConfigureIRB {
+		t.Fatalf("configure-irb identity (the SVI) must survive service removal, got %+v", irbIntent)
 	}
+	// The SVI survives reconstruction — no drift on the device.
 	intents := map[string]map[string]string{}
 	for k, v := range n.configDB.NewtronIntent {
 		cp := map[string]string{}
@@ -111,36 +192,36 @@ func TestRemoveService_LeavesBridgeDomain(t *testing.T) {
 	if err := n.RebuildProjectionFromIntents(ctx, intents); err != nil {
 		t.Fatalf("rebuild after removal: %v", err)
 	}
-	if _, ok := n.configDB.VLANMember["Vlan100|Ethernet0"]; !ok {
-		t.Fatal("VLAN_MEMBER must survive in the rebuilt projection — else it drifts on the device")
+	if _, ok := n.configDB.VLANInterface["Vlan100"]; !ok {
+		t.Fatal("SVI must survive in the rebuilt projection — configure-irb owns it")
 	}
 }
 
-// TestApplyService_ReconstructsAfterBridgeDomain pins the replay half of DE-1:
-// the bridge-domain precondition is an interactive-input guard and must NOT
-// fire during reconstruction. Replay re-applies recorded intents in DAG order,
-// and the membership is not a parent of the service binding, so apply-service
-// can replay before the membership — the precondition would spuriously refuse
-// (found cold: reconcile failed "not a member" mid-replay). The final
-// projection is correct regardless of intra-replay order (§20).
-func TestApplyService_ReconstructsAfterBridgeDomain(t *testing.T) {
+// TestApplyService_IRBReconstructs pins that the flipped irb binding round-trips
+// through reconstruction. The IRB identity IS a DAG parent of the binding, so
+// replay applies it first — but the precondition is gated on !reconstructing
+// regardless (§20: the whole intent DB is replayed jointly, never re-validated
+// against a half-rebuilt projection).
+func TestApplyService_IRBReconstructs(t *testing.T) {
 	ctx := context.Background()
-	n, intf := testInterface()
+	n, _ := testInterface()
 	// Normalized key: production normalizes spec names at load, so replay's
 	// NormalizeName-resolved GetService matches. The raw fixture key must too.
 	n.SpecProvider.(*testSpecProvider).services["CUST_IRB"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
 	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
 		t.Fatalf("CreateVLAN: %v", err)
 	}
-	if _, err := intf.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
-		t.Fatalf("ConfigureInterface: %v", err)
+	if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+		t.Fatalf("ConfigureIRB: %v", err)
 	}
-	if _, err := intf.ApplyService(ctx, "CUST_IRB", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"}); err != nil {
+	irb, err := n.GetInterface("Vlan100")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	if _, err := irb.ApplyService(ctx, "CUST_IRB", ApplyServiceOpts{VLAN: 100}); err != nil {
 		t.Fatalf("ApplyService: %v", err)
 	}
 
-	// Snapshot the recorded intents and reconstruct from them — the exact
-	// path reconcile takes.
 	intents := map[string]map[string]string{}
 	for k, v := range n.configDB.NewtronIntent {
 		cp := map[string]string{}
@@ -150,10 +231,12 @@ func TestApplyService_ReconstructsAfterBridgeDomain(t *testing.T) {
 		intents[k] = cp
 	}
 	if err := n.RebuildProjectionFromIntents(ctx, intents); err != nil {
-		t.Fatalf("reconstruction must not fire the interactive bridge-domain precondition: %v", err)
+		t.Fatalf("reconstruction must not fire the interactive precondition: %v", err)
 	}
-	// The SVI survives the round trip.
 	if _, ok := n.configDB.VLANInterface["Vlan100"]; !ok {
 		t.Fatal("SVI missing after reconstruction")
+	}
+	if n.GetIntent(bindingKey("Vlan100")) == nil {
+		t.Fatal("binding missing after reconstruction")
 	}
 }
