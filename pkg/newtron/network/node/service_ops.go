@@ -1087,18 +1087,20 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Per-interface resources (always delete)
 	// =========================================================================
 
-	// Remove QoS: per-interface entries (PORT_QOS_MAP, QUEUE) + device-wide if last user
+	// Remove QoS: per-interface entries (PORT_QOS_MAP, QUEUE) + device-wide
+	// if last user. Only when the binding recorded a QoS policy — the
+	// binding is teardown's ground truth (§15: the reverse deletes what the
+	// forward wrote). An unconditional delete emitted PORT_QOS_MAP keys for
+	// interfaces that never had QoS — a silent no-op on Ethernet, a schema
+	// refusal on LAGs (PORT_QOS_MAP keys are global|PORT only).
 	qosPolicyName := b["qos_policy"]
-	var qosPolicy *spec.QoSPolicy
-	var queueCount int
 	if qosPolicyName != "" {
-		qosPolicy, _ = n.GetQoSPolicy(qosPolicyName)
+		qosPolicy, _ := n.GetQoSPolicy(qosPolicyName)
+		queueCount := 0
 		if qosPolicy != nil {
 			queueCount = len(qosPolicy.Queues)
 		}
-	}
-	cs.Deletes(unbindQosConfig(i.name, queueCount))
-	if qosPolicyName != "" {
+		cs.Deletes(unbindQosConfig(i.name, queueCount))
 		if !n.isQoSPolicyReferenced(qosPolicyName, i.name) {
 			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName, qosPolicy))
 		}

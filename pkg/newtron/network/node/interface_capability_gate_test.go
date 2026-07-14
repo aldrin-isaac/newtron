@@ -48,7 +48,8 @@ func isCapabilityRefusal(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "does not support") ||
-		strings.Contains(err.Error(), "is authored via")
+		strings.Contains(err.Error(), "is authored via") ||
+		strings.Contains(err.Error(), "does not apply to a")
 }
 
 // gateMatrixNode builds a loopback node carrying all three gateable kinds:
@@ -144,11 +145,8 @@ func TestCapabilityGateMatrix(t *testing.T) {
 			}
 			err = tt.run(n, intf)
 			if tt.refused {
-				if !isCapabilityRefusal(err) && (tt.redirect == "" && err == nil) {
+				if !isCapabilityRefusal(err) {
 					t.Fatalf("want capability refusal, got %v", err)
-				}
-				if err == nil {
-					t.Fatal("want refusal, got nil")
 				}
 				if tt.redirect != "" && !strings.Contains(err.Error(), tt.redirect) {
 					t.Fatalf("refusal %q does not name %q", err.Error(), tt.redirect)

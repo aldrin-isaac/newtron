@@ -2832,7 +2832,7 @@ Device-Scoped (requires device name)
 ├── interface  list | show | binding | set | clear
 ├── service    apply | remove | refresh
 ├── vlan       list | show | create | delete
-│              configure-irb | unconfigure-irb
+│              configure-irb | update-irb | unconfigure-irb
 │              bind-macvpn | unbind-macvpn
 ├── vrf        list | show | create | delete
 │              add-interface | remove-interface

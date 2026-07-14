@@ -108,6 +108,30 @@ steps:
     url: /nodes/{{device}}/interfaces/PortChannel1/configure-interface
     params: {ip: "10.30.0.1/31"}
 
+  # 4b. Verify the canonical LAG L3 table — INTERFACE keys are leafrefs to
+  # PORT only (sonic-interface.yang); LAG L3 lives in PORTCHANNEL_INTERFACE.
+  # The kernel-IP polls below then prove intfmgrd programs from it.
+  - name: verify-lag-l3-table-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/PORTCHANNEL_INTERFACE
+    expect:
+      jq: 'index("PortChannel1|10.30.0.0/31") != null'
+
+  - name: verify-lag-l3-table-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/PORTCHANNEL_INTERFACE
+    expect:
+      jq: 'index("PortChannel1|10.30.0.1/31") != null'
+
+  - name: verify-no-interface-table-residue-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/INTERFACE
+    expect:
+      jq: '[.[] | select(startswith("PortChannel"))] | length == 0'
+
   # 5. Wait for kernel IPs
   - name: wait-portchannel1-ip-sw1
     action: newtron
@@ -195,6 +219,43 @@ steps:
     command: "ping -c 5 -W 2 10.20.0.0"
     expect:
       success_rate: 0.8
+
+  # 8b. ACL on LAG — sonic-acl.yang ports is PORT ∪ PORTCHANNEL; prove the
+  # LAG bind point end to end on Silicon One as well.
+  - name: create-acl-lag-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-acl
+    params: {name: LAG_EDGE, type: L3, stage: ingress}
+
+  - name: bind-acl-lag-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel1/bind-acl
+    params: {acl: LAG_EDGE, direction: ingress}
+
+  - name: verify-acl-ports-carries-lag-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_TABLE/LAG_EDGE
+    expect:
+      jq: '.ports | contains("PortChannel1")'
+
+  - name: unbind-acl-lag-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/PortChannel1/unbind-acl
+    params: {acl: LAG_EDGE}
+
+  - name: delete-acl-lag-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-acl
+    params: {name: LAG_EDGE}
 
   # 9. Cleanup
   - name: remove-static-route-sw1

@@ -1,0 +1,223 @@
+name: irb-bgp-peer
+description: |
+  BGP peering on an IRB interface — the §38 device witness for the
+  KindIRB/BGPPeering matrix cell: VLAN 200 bridged over the Ethernet16
+  link, gateway SVIs on both switches (configure-irb), then add-bgp-peer
+  on Vlan200 itself. The session must reach Established over the SVI
+  adjacency — the classic gateway-peering flow.
+
+  Also carries the update-irb device leg on a second, session-free VLAN:
+  the gateway IP moves in place — the old address vanishes from the
+  kernel, the new one appears, and the Vlan netdev itself never goes
+  down (the SVI base row is untouched, §48).
+
+  Runs after the portchannel scenario so Ethernet16 is unconfigured.
+requires: [portchannel]
+
+steps:
+  # ====================================================================
+  # 1. Bridge domain over the E16 link: VLAN 200 + untagged membership
+  # ====================================================================
+  - name: create-vlan-200
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/create-vlan
+    params: {id: 200}
+
+  - name: bridge-eth16
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet16/configure-interface
+    params: {vlan_id: 200}
+
+  # ====================================================================
+  # 2. Gateway SVIs (configure-irb) — /31 pair across the bridge
+  # ====================================================================
+  - name: configure-irb-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/configure-irb
+    params: {vlan_id: 200, ip_address: "10.200.0.0/31"}
+
+  - name: configure-irb-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/configure-irb
+    params: {vlan_id: 200, ip_address: "10.200.0.1/31"}
+
+  - name: wait-svi-kernel-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "ip addr show Vlan200"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.200.0.0")'
+
+  - name: wait-svi-kernel-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "ip addr show Vlan200"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.200.0.1")'
+
+  # SVI-to-SVI adjacency across the bridge before BGP
+  - name: prime-svi-adjacency
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Vlan200 10.200.0.1"}
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.output | contains("1 received")'
+
+  # ====================================================================
+  # 3. BGP peer ON the IRB interface (neighbor auto-derived from the /31)
+  # ====================================================================
+  - name: add-bgp-peer-on-irb-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan200/add-bgp-peer
+    params: {remote_as: 65002, description: "irb-peer"}
+
+  - name: add-bgp-peer-on-irb-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan200/add-bgp-peer
+    params: {remote_as: 65001, description: "irb-peer"}
+
+  - name: wait-irb-session-established
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show bgp neighbor 10.200.0.1 json' | head -50"}
+    poll:
+      timeout: 120s
+      interval: 10s
+    expect:
+      jq: '.output | contains("Established")'
+
+  # ====================================================================
+  # 4. update-irb device leg — session-free VLAN 201: the gateway IP
+  #    moves in place; the netdev never goes down
+  # ====================================================================
+  - name: create-vlan-201
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan
+    params: {id: 201}
+
+  - name: configure-irb-201
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/configure-irb
+    params: {vlan_id: 201, ip_address: "10.201.0.1/24"}
+
+  - name: wait-svi-201-kernel
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "ip addr show Vlan201"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.201.0.1")'
+
+  - name: update-irb-gateway-ip
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/update-irb
+    params: {vlan_id: 201, ip_address: "10.201.0.254/24"}
+
+  - name: verify-gateway-moved-in-kernel
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "ip addr show Vlan201"}
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '(.output | contains("10.201.0.254")) and (.output | contains("10.201.0.1/24") | not)'
+
+  - name: verify-svi-netdev-still-present
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/ssh-command
+    params: {command: "ip link show Vlan201"}
+    expect:
+      jq: '.output | contains("Vlan201")'
+
+  # ====================================================================
+  # 5. Full reverse (§15) — peers, IRBs, membership, VLANs
+  # ====================================================================
+  - name: remove-bgp-peer-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan200/remove-bgp-peer
+
+  - name: remove-bgp-peer-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan200/remove-bgp-peer
+
+  - name: unconfigure-irb-201
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/unconfigure-irb
+    params: {vlan_id: 201}
+
+  - name: delete-vlan-201
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 201}
+
+  - name: unconfigure-irb-200
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unconfigure-irb
+    params: {vlan_id: 200}
+
+  - name: unbridge-eth16
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet16/unconfigure-interface
+
+  - name: delete-vlan-200
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 200}

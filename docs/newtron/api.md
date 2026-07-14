@@ -136,7 +136,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 |-------------|--------------|
 | `/setup-device` | Unified baseline setup (metadata + loopback + BGP + VTEP + RR) |
 | `/create-vlan`, `/delete-vlan` | Create/delete VLAN |
-| `/configure-irb`, `/unconfigure-irb` | Configure/unconfigure IRB (SVI) |
+| `/configure-irb`, `/update-irb`, `/unconfigure-irb` | Configure/update-in-place/unconfigure IRB (SVI) |
 | `/create-vrf`, `/delete-vrf` | Create/delete VRF |
 | `/bind-ipvpn`, `/unbind-ipvpn` | Bind/unbind IP-VPN to VRF |
 | `/bind-macvpn`, `/unbind-macvpn` | Bind/unbind MAC-VPN (node-level, VLAN to L2VNI) |
@@ -185,9 +185,33 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/configure-interface`, `/unconfigure-interface` | Configure/unconfigure interface (trunk-tagged: additive per-VLAN intent, #224) |
 | `/remove-trunk-vlan` | Atomic single-VLAN strip from a trunk port (#224) |
 | `/bind-acl`, `/unbind-acl` | ACL binding |
-| `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
+| `/add-bgp-peer`, `/update-bgp-peer`, `/remove-bgp-peer` | BGP peer |
 | `/bind-qos`, `/unbind-qos` | QoS policy |
 | `/set-property`, `/clear-property` | Set/clear port property |
+
+**Interface kinds and operation applicability.** The interface path segment
+accepts three operable kinds — physical ports (`EthernetN`), LAGs
+(`PortChannelN`), and IRBs (`VlanN`, the VLAN's L3 interface) — and every
+forward operation is gated by the interface kind's capabilities before any
+write logic runs. A refused cell returns 4xx with a precondition error that
+names the missing capability, or redirects to the designed authoring path.
+
+| Capability | Ethernet | PortChannel | IRB (VlanN) |
+|---|---|---|---|
+| routing (IP/VRF via `configure-interface`) | ✓ | ✓ | ✓ by nature, but authored via `configure-irb` — `configure-interface` redirects |
+| VLAN membership (bridged/trunk) | ✓ | ✓ | ✗ — an SVI IS the VLAN's L3 face |
+| ACL binding (`bind-acl`) | ✓ | ✓ | ✗ — SONiC limitation: `sonic-acl.yang` ports is PORT ∪ PORTCHANNEL |
+| QoS binding (`bind-qos`) | ✓ | ✗ — SONiC limitation: `PORT_QOS_MAP` ifname is `global`\|PORT | ✗ |
+| BGP peering (`add-bgp-peer`, `update-bgp-peer`) | ✓ | ✓ | ✓ — the classic gateway-peering flow |
+| port properties (`set-property`) | ✓ all | ✓ `admin_status`, `mtu` only | ✗ — no PORT/PORTCHANNEL row |
+
+Service applicability is content-derived from the same matrix: what a
+service's resolved content asks of the delivery interface (its type's
+membership/routing, plus filters → ACL binding, QoS → QoS binding, peer-AS →
+BGP peering) must be within the kind's capabilities. Reverse operations
+(`remove-*`, `unbind-*`, `unconfigure-*`, `clear-property`) are never gated —
+you can always undo. Loopbacks are baseline-owned (`setup-device`) and take
+no interface operations.
 
 ---
 
@@ -3213,6 +3237,29 @@ VRF binding, IP address, and anycast MAC.
 | `vrf` | string | no | VRF to bind the SVI to |
 | `ip_address` | string | no | IP address in CIDR (e.g., `"10.1.1.1/24"`) |
 | `anycast_mac` | string | no | SAG anycast MAC address |
+
+**Response (200):** `WriteResult`
+
+#### POST /newtron/v1/networks/{netID}/nodes/{node}/update-irb
+
+Mutate an existing IRB's identity in place (§48) — the SVI base row is
+never touched, so the gateway changes without tearing the interface down.
+Same body as `configure-irb` (the same identity, a different verb): pass
+the full desired identity.
+
+Two fields are updatable: the gateway IP (the IP is the sub-entry's key,
+§47, so a change is delivered as a keyed move — old sub-entry deleted, new
+one added, in one ChangeSet) and the anycast MAC (a `SAG_GLOBAL` field
+edit, refused while other anycast IRBs share the device-wide value). A VRF
+move is refused with the designed path named — rebinding an SVI
+re-originates its routes, which is a teardown-replace by nature:
+`unconfigure-irb` then `configure-irb`. Refused when the VLAN's SVI is
+owned by an irb-type service (§27 single author — service-owned gateways
+update via the service spec and `refresh-service`).
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:** identical to `configure-irb`.
 
 **Response (200):** `WriteResult`
 

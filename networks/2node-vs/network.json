@@ -122,6 +122,14 @@
       "ipvpn": "IRB",
       "macvpn": "SVC_VLAN400",
       "vrf_type": "shared"
+    },
+    "TRANSIT": {
+      "description": "Transit peering interface",
+      "service_type": "routed",
+      "routing": {
+        "protocol": "bgp",
+        "peer_as": "request"
+      }
     }
   }
 }
