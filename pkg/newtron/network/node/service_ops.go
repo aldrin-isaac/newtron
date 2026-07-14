@@ -265,7 +265,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// the interface's membership are authored separately (create-vlan,
 	// bind-macvpn for the overlay, configure-interface for membership), each
 	// with one owner. The service no longer creates them; it requires them.
-	if canBridge && vlanID > 0 {
+	//
+	// Skipped during reconstruction: replay re-applies recorded intents in DAG
+	// order, and the membership is not a parent of the binding, so it may be
+	// re-applied after this step — the final projection is correct regardless,
+	// and re-validating operator input against a half-rebuilt projection is
+	// the wrong check (§20: the whole intent DB is replayed jointly).
+	if canBridge && vlanID > 0 && !n.reconstructing {
 		if n.GetIntent("vlan|"+strconv.Itoa(vlanID)) == nil {
 			return nil, fmt.Errorf("VLAN %d does not exist — create it (and bind-macvpn for evpn) before applying service '%s'", vlanID, serviceName)
 		}
@@ -1283,9 +1289,13 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Delete the identity record too when the service was its only reason to
 	// exist — a service-only interface leaves nothing behind (§15). deleteIntent
 	// updated the identity's children in place when it removed the binding, so
-	// a childless identity here means the operator added no standalone ops
-	// (bind-acl, set-property, add-bgp-peer); those keep the identity alive.
-	if identity := n.GetIntent("interface|" + i.name); identity != nil && len(identity.Children) == 0 {
+	// a childless identity here means no sub-resources remain. But only a BARE
+	// interface-init record is the service's to remove: a configure-interface
+	// identity carries membership or an IP the service never owned (an untagged
+	// member's VLAN_MEMBER lives on this record), and deleting the intent would
+	// strand that CONFIG_DB entry as drift. Those survive.
+	if identity := n.GetIntent("interface|" + i.name); identity != nil &&
+		len(identity.Children) == 0 && identity.Operation == sonic.OpInterfaceInit {
 		if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
 			return nil, err
 		}

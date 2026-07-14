@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -91,5 +92,68 @@ func TestRemoveService_LeavesBridgeDomain(t *testing.T) {
 	assertNoChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0")
 	if n.GetIntent("vlan|100") == nil {
 		t.Fatal("VLAN intent must survive service removal (create-vlan owns it)")
+	}
+	// The untagged membership lives on the identity record (configure-interface),
+	// which the service must NOT delete even when childless — otherwise the
+	// VLAN_MEMBER strands as drift on the next rebuild (found cold). Prove it
+	// survives reconstruction.
+	if identity := n.GetIntent("interface|Ethernet0"); identity == nil || identity.Operation != sonic.OpConfigureInterface {
+		t.Fatalf("configure-interface identity (the membership) must survive service removal, got %+v", identity)
+	}
+	intents := map[string]map[string]string{}
+	for k, v := range n.configDB.NewtronIntent {
+		cp := map[string]string{}
+		for kk, vv := range v {
+			cp[kk] = vv
+		}
+		intents[k] = cp
+	}
+	if err := n.RebuildProjectionFromIntents(ctx, intents); err != nil {
+		t.Fatalf("rebuild after removal: %v", err)
+	}
+	if _, ok := n.configDB.VLANMember["Vlan100|Ethernet0"]; !ok {
+		t.Fatal("VLAN_MEMBER must survive in the rebuilt projection — else it drifts on the device")
+	}
+}
+
+// TestApplyService_ReconstructsAfterBridgeDomain pins the replay half of DE-1:
+// the bridge-domain precondition is an interactive-input guard and must NOT
+// fire during reconstruction. Replay re-applies recorded intents in DAG order,
+// and the membership is not a parent of the service binding, so apply-service
+// can replay before the membership — the precondition would spuriously refuse
+// (found cold: reconcile failed "not a member" mid-replay). The final
+// projection is correct regardless of intra-replay order (§20).
+func TestApplyService_ReconstructsAfterBridgeDomain(t *testing.T) {
+	ctx := context.Background()
+	n, intf := testInterface()
+	// Normalized key: production normalizes spec names at load, so replay's
+	// NormalizeName-resolved GetService matches. The raw fixture key must too.
+	n.SpecProvider.(*testSpecProvider).services["CUST_IRB"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+	if _, err := intf.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
+		t.Fatalf("ConfigureInterface: %v", err)
+	}
+	if _, err := intf.ApplyService(ctx, "CUST_IRB", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"}); err != nil {
+		t.Fatalf("ApplyService: %v", err)
+	}
+
+	// Snapshot the recorded intents and reconstruct from them — the exact
+	// path reconcile takes.
+	intents := map[string]map[string]string{}
+	for k, v := range n.configDB.NewtronIntent {
+		cp := map[string]string{}
+		for kk, vv := range v {
+			cp[kk] = vv
+		}
+		intents[k] = cp
+	}
+	if err := n.RebuildProjectionFromIntents(ctx, intents); err != nil {
+		t.Fatalf("reconstruction must not fire the interactive bridge-domain precondition: %v", err)
+	}
+	// The SVI survives the round trip.
+	if _, ok := n.configDB.VLANInterface["Vlan100"]; !ok {
+		t.Fatal("SVI missing after reconstruction")
 	}
 }
