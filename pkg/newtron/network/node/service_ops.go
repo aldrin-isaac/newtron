@@ -1080,6 +1080,11 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Derived booleans from serviceType
 	canRoute := serviceType == spec.ServiceTypeRouted || serviceType == spec.ServiceTypeEVPNRouted
+	// An irb-type service binds to an operator-authored bridge domain (§6): the
+	// VRF the SVI is bound to was created by create-vrf + bind-ipvpn (required
+	// by configure-irb), so the service never tears it down — exactly as it
+	// leaves the VLAN and the membership.
+	isIRB := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeIRB
 
 	// Track which infrastructure intents to clean up after the interface
 	// intent is deleted (must happen in children-first order per I5).
@@ -1192,18 +1197,22 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			cs.Deletes(enableIpRoutingConfig(i.name))
 		}
 
-		// Per-interface VRF: delete VRF and related config
-		if vrfType == spec.VRFTypeInterface {
+		// Per-interface VRF: delete VRF and related config. Skipped for irb
+		// types — the operator authored the VRF (create-vrf), configure-irb
+		// bound the SVI to it, and unbind-ipvpn + delete-vrf tear it down.
+		if vrfType == spec.VRFTypeInterface && !isIRB {
 			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
 			l3vni, l3vniVlan := bindingInt(b[sonic.FieldL3VNI]), bindingInt(b[sonic.FieldL3VNIVlan])
 			cs.Deletes(destroyVrfConfig(derivedVRF, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
 			destroyedVRF = derivedVRF
 		}
 
-		// Shared VRF: delete when last ipvpn user is removed.
-		// The shared VRF was auto-created by the first service apply and should
-		// be cleaned up when no service bindings reference the ipvpn anymore.
-		if vrfType == spec.VRFTypeShared && b[sonic.FieldIPVPN] != "" {
+		// Shared VRF: delete when last ipvpn user is removed. Skipped for irb
+		// types — the shared VRF is operator-authored (create-vrf + bind-ipvpn),
+		// not auto-created by the first apply, so the service does not own its
+		// teardown (§6). For routed services the first apply DID auto-create it,
+		// so it is cleaned up here when the last ipvpn user is removed.
+		if vrfType == spec.VRFTypeShared && b[sonic.FieldIPVPN] != "" && !isIRB {
 			// Check if this is the last IPVPN user via interface intent scan.
 			// Only count interface|* intents — ipvpn|* intents are infrastructure,
 			// not service bindings.

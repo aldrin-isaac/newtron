@@ -6,8 +6,12 @@ description: |
 requires: [teardown-overlay]
 
 steps:
-  # Bridge domain for the evpn-irb service (VLAN 400 = SVC_VLAN400) — the
-  # service delivers onto it, no longer creates it (irb-service-redesign.md §5).
+  # Bridge domain + gateway for the evpn-irb service (VLAN 400 = SVC_VLAN400).
+  # Under the delivery-point flip an irb-type service binds to the IRB, so the
+  # operator authors the full bridge domain — L2 overlay (bind-macvpn),
+  # membership (configure-interface), L3 overlay (create-vrf + bind-ipvpn), and
+  # the gateway (configure-irb) — before the service binds
+  # (irb-service-redesign.md §3, §6). The service no longer creates any of it.
   - name: create-vlan400
     action: newtron
     devices: [switch1, switch2]
@@ -29,33 +33,57 @@ steps:
     url: /nodes/{{device}}/interfaces/Ethernet12/configure-interface
     params: {vlan_id: 400, tagged: true}
 
-  # 8a: Apply svc-evpn-irb on Eth3 (both switches)
+  - name: create-vrf-irb
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/create-vrf
+    params: {name: Vrf_IRB}
+
+  - name: bind-ipvpn-irb
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/bind-ipvpn
+    params: {ipvpn: IRB}
+
+  # The SVI gateway — configure-irb is its sole author (§6): VRF binding,
+  # anycast IP, and anycast MAC all come from here, not from the service.
+  - name: configure-irb-vlan400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/configure-irb
+    params: {vlan_id: 400, vrf: Vrf_IRB, ip_address: "10.4.0.1/24", anycast_mac: "00:00:00:01:04:00"}
+
+  # 8a: Apply svc-evpn-irb on the IRB (Vlan400), both switches — the flip: the
+  # service binds to the gateway, not to an access port.
   - name: apply-svc-evpn-irb-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet12/apply-service
+    url: /nodes/{{device}}/interfaces/Vlan400/apply-service
     params: {service: svc-evpn-irb}
 
   - name: apply-svc-evpn-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet12/apply-service
+    url: /nodes/{{device}}/interfaces/Vlan400/apply-service
     params: {service: svc-evpn-irb}
 
-  # Verify service binding
+  # Verify service binding — the sub-resource of the IRB identity (§5).
   - name: verify-binding-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-binding-sw2
     action: newtron
     devices: [switch2]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
     expect:
       jq: '.exists == true'
 
@@ -174,55 +202,88 @@ steps:
     expect:
       success_rate: 0.8
 
-  # 8b: Refresh service — verify no error, binding still present
+  # 8b: Refresh service on the IRB — verify no error, binding still present.
+  # The single-binding refresh converges the gateway with no SVI bounce: the
+  # SVI is configure-irb's, so refresh re-renders only the binding (§4).
   - name: refresh-svc-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet12/refresh-service
+    url: /nodes/{{device}}/interfaces/Vlan400/refresh-service
 
   - name: refresh-svc-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet12/refresh-service
+    url: /nodes/{{device}}/interfaces/Vlan400/refresh-service
 
   - name: verify-binding-after-refresh-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
     expect:
       jq: '.exists == true'
 
-  # 8c: Remove service from both Eth3
+  # 8c: Remove service from the IRB (both switches)
   - name: remove-svc-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet12/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan400/remove-service
 
   - name: remove-svc-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet12/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan400/remove-service
 
   - name: verify-binding-removed-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12%7Cservice/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-binding-removed-sw2
     action: newtron
     devices: [switch2]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12%7Cservice/exists
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
     expect:
       jq: '.exists == false'
 
-  # Bridge-domain teardown (§15): the service left the VLAN + membership; the
-  # operator tears them down separately, and only then is Vlan400 gone.
+  # The SVI survives remove-service — configure-irb owns it (§6). It goes only
+  # when the operator unconfigures the IRB.
+  - name: verify-svi-survives-remove-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400/exists
+    expect:
+      jq: '.exists == true'
+
+  # Bridge-domain + gateway teardown (§15), reverse of setup: the operator tears
+  # down what it authored — the IRB, then the L3 overlay, then the L2 membership
+  # and VLAN. Only after all of it is Vlan400 gone.
+  - name: unconfigure-irb-vlan400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unconfigure-irb
+    params: {vlan_id: 400}
+
+  - name: unbind-ipvpn-irb-teardown
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unbind-ipvpn
+    params: {ipvpn: IRB}
+
+  - name: delete-vrf-irb-teardown
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vrf
+    params: {name: Vrf_IRB}
+
   - name: teardown-eth12-vlan400
     action: newtron
     devices: [switch1, switch2]
