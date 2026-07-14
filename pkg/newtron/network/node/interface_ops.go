@@ -146,6 +146,21 @@ func bindingKey(intfName string) string {
 	return "interface|" + intfName + "|service"
 }
 
+// resourceInterfaceName returns the interface name a resource key names —
+// the first segment after "interface|", so identity records
+// (interface|Ethernet0) and every sub-resource (interface|Ethernet0|service,
+// interface|Ethernet0|acl|ingress, interface|Ethernet0|trunk-vlan|100) all
+// resolve to the same interface. Scans that iterate intents and extract the
+// bound port MUST route through this, or a sub-resource key leaks its suffix
+// into a port list. Returns "" for non-interface keys.
+func resourceInterfaceName(resource string) string {
+	if !strings.HasPrefix(resource, "interface|") {
+		return ""
+	}
+	rest := resource[len("interface|"):]
+	return strings.SplitN(rest, "|", 2)[0]
+}
+
 // ensureInterfaceIntent lazily creates the interface|INTF intent if it doesn't
 // exist. Sub-resource operations (SetProperty, BindACL, BindQoS) call this so
 // they work on interfaces that haven't had ConfigureInterface called.
