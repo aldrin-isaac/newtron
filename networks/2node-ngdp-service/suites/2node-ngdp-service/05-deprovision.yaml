@@ -81,3 +81,88 @@ steps:
   # Reprovisioning (CompositeOverwrite) is the collective reverse.
   # config reload restores saved state (not factory) since every API write
   # calls config save — it cannot clean up baseline infrastructure.
+
+  # ====================================================================
+  # Bridge-domain teardown (§15 symmetry with provisioning setup):
+  # unconfigure-interface → unbind-macvpn → delete-vlan. Shared VLANs on
+  # both switches; Ethernet4 differs (VLAN 400 sw1, 401 sw2).
+  # ====================================================================
+  - name: unconfigure-eth1
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet1/unconfigure-interface
+
+  - name: delete-vlan100
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 100}
+
+  - name: unconfigure-eth2
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet2/unconfigure-interface
+
+  - name: delete-vlan200
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 200}
+
+  - name: unconfigure-eth3
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet3/unconfigure-interface
+
+  - name: unbind-macvpn300
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unbind-macvpn
+    params: {vlan_id: 300}
+
+  - name: delete-vlan300
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 300}
+
+  - name: unconfigure-eth4
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet4/unconfigure-interface
+
+  - name: unbind-macvpn400-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/unbind-macvpn
+    params: {vlan_id: 400}
+
+  - name: delete-vlan400-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 400}
+
+  - name: unbind-macvpn401-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/unbind-macvpn
+    params: {vlan_id: 401}
+
+  - name: delete-vlan401-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan
+    params: {id: 401}
