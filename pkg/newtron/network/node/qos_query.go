@@ -15,15 +15,13 @@ func (n *Node) isQoSPolicyReferenced(policyName, excludeInterface string) bool {
 	for resource, intent := range n.IntentsByPrefix("interface|") {
 		// Standalone QoS intents: "interface|Ethernet0|qos"
 		if strings.HasSuffix(resource, "|qos") && intent.Params[sonic.FieldQoSPolicy] == policyName {
-			parts := strings.SplitN(resource, "|", 3)
-			if len(parts) >= 2 && parts[1] != excludeInterface {
+			if name := resourceInterfaceName(resource); name != "" && name != excludeInterface {
 				return true
 			}
 		}
-		// Service intents with QoS: "interface|Ethernet0" (OpApplyService with qos_policy)
+		// Service binding with QoS: "interface|Ethernet0|service" (OpApplyService with qos_policy)
 		if intent.Operation == sonic.OpApplyService && intent.Params["qos_policy"] == policyName {
-			parts := strings.SplitN(resource, "|", 2)
-			if len(parts) == 2 && parts[1] != excludeInterface {
+			if name := resourceInterfaceName(resource); name != "" && name != excludeInterface {
 				return true
 			}
 		}

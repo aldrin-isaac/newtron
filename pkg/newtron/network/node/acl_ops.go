@@ -31,9 +31,8 @@ func (n *Node) aclPortsFromIntents(aclName, direction string) string {
 		}
 		// Service intents with ACL: "interface|Ethernet0" (OpApplyService with ingress_acl/egress_acl)
 		if intent.Operation == sonic.OpApplyService && intent.Params[aclField] == aclName {
-			parts := strings.SplitN(resource, "|", 2)
-			if len(parts) == 2 {
-				ports = append(ports, parts[1])
+			if name := resourceInterfaceName(resource); name != "" {
+				ports = append(ports, name)
 			}
 		}
 	}

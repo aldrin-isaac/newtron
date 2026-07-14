@@ -322,9 +322,7 @@ func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
 			strings.HasPrefix(resource, "interface|Vlan") {
 			continue
 		}
-		parts := strings.SplitN(resource, "|", 2)
-		if len(parts) == 2 {
-			member := parts[1]
+		if member := resourceInterfaceName(resource); member != "" {
 			if intent.Params[sonic.FieldTagged] == "true" {
 				info.Members = append(info.Members, member+"(t)")
 			} else {
