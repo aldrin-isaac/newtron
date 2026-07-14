@@ -1,7 +1,8 @@
 # IRB Service Redesign — The Gateway Is the Point of Service
 
-**Status:** Design proposal. No code written. Two `DESIGN_PRINCIPLES_NEWTRON.md`
-amendments (§10) require ratification before implementation begins.
+**Status:** Ratified. The two design-principle amendments (§10) are applied
+to both `DESIGN_PRINCIPLES.md` (concept) and `DESIGN_PRINCIPLES_NEWTRON.md`
+(application) as of 2026-07-14; implementation proceeds by the phasing in §11.
 
 **Prerequisite, landed:** the interface-kind capability model (`interface_kind.go`),
 the per-kind capability gates, `update-irb`, and the SVI single-author guards
@@ -267,8 +268,10 @@ the model change — they are the implementation's cost, not a separate migratio
 ## 10. DESIGN_PRINCIPLES amendments (require ratification)
 
 The redesign is compliant with the design principles except at two points, where
-it needs the principles themselves refined. Both are written here as proposals;
-neither is applied to `DESIGN_PRINCIPLES_NEWTRON.md` until ratified.
+it needs the principles themselves refined. Both are **ratified and applied**
+(2026-07-14) — to `DESIGN_PRINCIPLES.md` as concept and
+`DESIGN_PRINCIPLES_NEWTRON.md` as application, per the dual-doc contract. The
+wording below records what was decided.
 
 ### 10.1 §20 — joint reconstruction from the intent DB
 

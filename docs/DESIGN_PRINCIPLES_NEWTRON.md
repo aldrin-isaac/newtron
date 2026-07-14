@@ -573,6 +573,18 @@ meets physical infrastructure:
 - **The unit of isolation** — services on Ethernet0 and Ethernet4 are
   independent
 
+Container membership is the one boundary on this isolation (universal
+§6). A PortChannel member cedes its L2/L3 configuration to the LAG —
+`SetIP` and `ConfigureInterface` on a member are refused with "configure
+the PortChannel instead". A member of a serviced VLAN cedes its
+service-derived policy rows to the VLAN's IRB binding: those rows are a
+**product** of the binding and the membership, owned by the IRB service
+and rendered from it, not carried by the port
+(`irb-service-redesign.md`). Services on two unrelated interfaces stay
+independent; two members of one serviced VLAN share exactly the
+container-scoped policy and nothing else. Which surface each interface
+kind cedes is declared in the capability model (`interface_kind.go`).
+
 Because the interface is the unit of service in the domain, it is the
 unit of service in the code. `ApplyService` lives on Interface — not
 on Node, not on Network — because the interface is the entity being
@@ -1685,6 +1697,18 @@ The existing principle "intent records must be self-sufficient for reverse
 operations" (§15) extends here: **intent records must be self-sufficient for
 reconstruction of expected state.** Teardown is one consumer; drift
 detection is another. Same data, different purpose.
+
+Some reverses read sibling intents, not only their own record (universal
+§20: self-sufficiency is a property of the store). When a service's
+per-member policy is a **product** of a binding and a VLAN's membership
+(`irb-service-redesign.md`), tearing down one member's rows reads the sibling
+`interface|<name>` membership intents from the intent DB to know which members
+remain — never the service spec. §15's "never re-resolve specs at removal"
+holds exactly: sibling intents are the intent DB, not specs.
+`TestOpRoundTrip` already replays the *whole* intent DB
+(`IntentsToSteps(configDB.NewtronIntent)` onto a fresh node), so joint
+reconstruction is the mechanism it exercises today — the product-rule reverses
+land inside an enforcement that already drives them as production does.
 
 This makes a specific demand on intent record design: every field needed to
 regenerate the expected CONFIG_DB entries must be stored in the intent record.
