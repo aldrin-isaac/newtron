@@ -10,6 +10,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Device LLD | `docs/newtron/device-lld.md` | CONFIG_DB/APP_DB/ASIC_DB/STATE_DB layer, SSH tunneling, ChangeSets |
 | Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Unified pipeline: Intent → Replay → Render → [Deliver], end-to-end traces |
+| IRB Service Redesign | `docs/newtron/irb-service-redesign.md` | Design proposal — IRB as first-class service delivery point; VLAN as membership container; the product rule; two DESIGN_PRINCIPLES amendments awaiting ratification |
 | newtron HOWTO | `docs/newtron/howto.md` | Operational patterns, provisioning flow |
 | newtrun HLD | `docs/newtrun/hld.md` | E2E test framework design |
 | newtrun LLD | `docs/newtrun/lld.md` | Step actions, suite mode, dependency ordering |
