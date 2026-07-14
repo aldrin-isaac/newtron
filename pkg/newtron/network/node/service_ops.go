@@ -517,9 +517,17 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		intentParents = append(intentParents, serviceIntentKey)
 	}
 
-	// Interface intent — write-ahead manifest for crash recovery.
-	// Parents created above (including service intent if BGP); I4 check passes.
-	if err := n.writeIntent(cs, sonic.OpApplyService, "interface|"+i.name, bindingParams, intentParents); err != nil {
+	// The service binding is a sub-resource of the interface's identity
+	// record (interface|<name>), not the identity record itself — one
+	// resource, one meaning (§13). The identity record is created first as
+	// the binding's parent (the same record bind-acl/bind-qos/bgp-peer
+	// hang off), joining the existing sub-resource family
+	// (…|acl|ingress, …|qos, …|bgp-peer). See irb-service-redesign.md §5.
+	if err := i.ensureInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	bindingParents := append([]string{"interface|" + i.name}, intentParents...)
+	if err := n.writeIntent(cs, sonic.OpApplyService, bindingKey(i.name), bindingParams, bindingParents); err != nil {
 		return nil, err
 	}
 
@@ -1049,13 +1057,16 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Determine if this is the last interface using this service via the
 	// service intent DAG. The service intent's children are the interface
 	// intents that reference it. If this is the only child, we are the last user.
-	excludeKey := "interface|" + i.name
+	// The binding is a sub-resource (interface|<name>|service); it is the
+	// child that parents to the service, VLAN, and VRF intents, so every
+	// "is anyone else still using this?" scan excludes it by the binding key.
+	excludeKey := bindingKey(i.name)
 	serviceIntentKey := "service|" + serviceName
 	serviceIntent := n.GetIntent(serviceIntentKey)
 	isLastServiceUser := true
 	if serviceIntent != nil {
 		for _, child := range serviceIntent.Children {
-			if strings.HasPrefix(child, "interface|") && child != "interface|"+i.name {
+			if strings.HasPrefix(child, "interface|") && child != excludeKey {
 				isLastServiceUser = false
 				break
 			}
@@ -1228,7 +1239,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		isLastVLANMember := true
 		if vlanIntent != nil {
 			for _, child := range vlanIntent.Children {
-				if strings.HasPrefix(child, "interface|") && child != "interface|"+i.name {
+				if strings.HasPrefix(child, "interface|") && child != excludeKey {
 					isLastVLANMember = false
 					break
 				}
@@ -1283,8 +1294,18 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Service binding tracking (always delete)
 	// =========================================================================
 
-	if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
+	if err := n.deleteIntent(cs, excludeKey); err != nil {
 		return nil, err
+	}
+	// Delete the identity record too when the service was its only reason to
+	// exist — a service-only interface leaves nothing behind (§15). deleteIntent
+	// updated the identity's children in place when it removed the binding, so
+	// a childless identity here means the operator added no standalone ops
+	// (bind-acl, set-property, add-bgp-peer); those keep the identity alive.
+	if identity := n.GetIntent("interface|" + i.name); identity != nil && len(identity.Children) == 0 {
+		if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
+			return nil, err
+		}
 	}
 
 	// Delete service intent when this is the last user. The interface intent

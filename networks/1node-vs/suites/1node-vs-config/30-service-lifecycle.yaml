@@ -2,7 +2,8 @@ name: service-lifecycle
 description: |
   Service apply/remove lifecycle using the "transit" service from network.json.
   transit = routed service with BGP (peer_as: request).
-  Intent DAG: device → interface|Ethernet28 → service-binding.
+  Intent DAG: device → interface|Ethernet28 (identity) →
+  interface|Ethernet28|service (binding).
 requires: [setup-device]
 
 steps:
@@ -19,7 +20,14 @@ steps:
     expect:
       jq: '.exists == true'
 
-  - name: verify-service-intent
+  - name: verify-service-binding-intent
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT interface|Ethernet28|service --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-identity-intent
     action: newtron-cli
     devices: [switch1]
     command: "configdb exists NEWTRON_INTENT interface|Ethernet28 --loopback"
@@ -32,7 +40,14 @@ steps:
     devices: [switch1]
     command: "service remove Ethernet28 --loopback"
 
-  - name: verify-service-removed
+  - name: verify-service-binding-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT interface|Ethernet28|service --loopback"
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-identity-removed
     action: newtron-cli
     devices: [switch1]
     command: "configdb exists NEWTRON_INTENT interface|Ethernet28 --loopback"
