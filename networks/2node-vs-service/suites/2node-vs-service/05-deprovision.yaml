@@ -14,18 +14,20 @@ steps:
   # Reverse:  iface.RemoveService(ctx)
   # =========================================================================
 
-  # Remove EVPN overlay services first (have VXLAN dependencies)
+  # Remove EVPN overlay services first (have VXLAN dependencies). Under the
+  # delivery-point flip the irb service binds to the IRB, so it is removed from
+  # Vlan400 (switch1) / Vlan401 (switch2), not the access port.
   - name: remove-overlay-irb-switch1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet16/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan400/remove-service
 
   - name: remove-overlay-irb-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet16/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan401/remove-service
 
   - name: remove-l2-extend-switch1
     action: newtron
@@ -52,17 +54,18 @@ steps:
     method: POST
     url: /nodes/{{device}}/interfaces/Ethernet8/remove-service
 
+  # Local IRB also binds to its IRB (Vlan100), not the access port.
   - name: remove-local-irb-switch1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet4/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan100/remove-service
 
   - name: remove-local-irb-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet4/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan100/remove-service
 
   # Remove transit (underlay BGP) last
   - name: remove-transit-switch1
@@ -83,12 +86,21 @@ steps:
   # calls config save — it cannot clean up baseline infrastructure.
 
   # ====================================================================
-  # Bridge-domain teardown (§15 symmetry with the provisioning setup).
-  # The service owns neither membership nor the VLAN — reverse them here:
-  # unconfigure-interface (membership) → unbind-macvpn (overlay) → delete-vlan.
-  # Shared VLANs (Ethernet4/8/12) run on both switches; Ethernet16 differs
-  # per switch (VLAN 400 on switch1, 401 on switch2).
+  # Bridge-domain + gateway teardown (§15 symmetry with the provisioning setup).
+  # The service owns neither the IRB gateway, the L3/L2 overlay, the membership,
+  # nor the VLAN — reverse each with its own owner: unconfigure-irb (gateway) →
+  # unbind-ipvpn + delete-vrf (L3 overlay) → unconfigure-interface (membership) →
+  # unbind-macvpn (L2 overlay) → delete-vlan. Shared VLANs (Ethernet4/8/12) run
+  # on both switches; Ethernet16 differs per switch (VLAN 400 sw1, 401 sw2).
   # ====================================================================
+  # Local IRB gateway (Vlan100) — no VRF/overlay, just the SVI.
+  - name: unconfigure-irb-vlan100
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unconfigure-irb
+    params: {vlan_id: 100}
+
   - name: unconfigure-eth4
     action: newtron
     devices: [switch1, switch2]
@@ -134,6 +146,37 @@ steps:
     method: POST
     url: /nodes/{{device}}/delete-vlan
     params: {id: 300}
+
+  # Overlay IRB gateway (Vlan400 sw1 / Vlan401 sw2) + the shared L3 overlay.
+  - name: unconfigure-irb-vlan400-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/unconfigure-irb
+    params: {vlan_id: 400}
+
+  - name: unconfigure-irb-vlan401-sw2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /nodes/{{device}}/unconfigure-irb
+    params: {vlan_id: 401}
+
+  # L3 overlay (shared Vrf_IRB) — reverse of bind-ipvpn + create-vrf. Both
+  # switches, after their SVI is unbound from the VRF.
+  - name: unbind-ipvpn-irb
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/unbind-ipvpn
+    params: {ipvpn: IRB}
+
+  - name: delete-vrf-irb
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/delete-vrf
+    params: {name: Vrf_IRB}
 
   - name: unconfigure-eth16
     action: newtron

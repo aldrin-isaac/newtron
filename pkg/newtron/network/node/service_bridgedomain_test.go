@@ -97,6 +97,27 @@ func TestApplyService_IRBRequiresConfiguredIRB(t *testing.T) {
 		}
 	})
 
+	t.Run("refused when carrying per-member policy until the product renderer", func(t *testing.T) {
+		n, _ := testInterface()
+		sp := n.SpecProvider.(*testSpecProvider)
+		sp.services["cust-irb-acl"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, IngressFilter: "FILTER1"}
+		sp.filterSpecs["FILTER1"] = &spec.FilterSpec{}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatalf("CreateVLAN: %v", err)
+		}
+		if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+			t.Fatalf("ConfigureIRB: %v", err)
+		}
+		irb, err := n.GetInterface("Vlan100")
+		if err != nil {
+			t.Fatalf("GetInterface: %v", err)
+		}
+		_, err = irb.ApplyService(ctx, "cust-irb-acl", ApplyServiceOpts{VLAN: 100})
+		if err == nil || !strings.Contains(err.Error(), "product renderer") {
+			t.Fatalf("policy-bearing irb service must fail closed pending the product renderer, got %v", err)
+		}
+	})
+
 	t.Run("succeeds on the IRB, does not author the SVI", func(t *testing.T) {
 		n, _ := testInterface()
 		n.SpecProvider.(*testSpecProvider).services["cust-irb"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB}

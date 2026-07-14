@@ -288,6 +288,16 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
+	// Per-member policy on an irb-type service is realized on the VLAN's member
+	// ports by the product renderer (§4, §7), which is not yet delivered. A VLAN
+	// interface is not an ACL or QoS bind point (§7), so until the renderer
+	// lands an irb service that carries a filter or QoS cannot be honored on the
+	// IRB — refuse it closed rather than silently dropping the policy or emitting
+	// an illegal per-VLAN bind. Policy-free irb services deliver fully.
+	if isIRB && (svc.IngressFilter != "" || svc.EgressFilter != "" || svc.QoSPolicy != "") && !n.reconstructing {
+		return nil, fmt.Errorf("irb-type service '%s' carries per-member policy (filter/QoS), which is realized on the VLAN's member ports by the product renderer — not yet delivered; apply a policy-free irb service, or bind the policy per member directly", serviceName)
+	}
+
 	// Track ACL names from generated entries for interface-merging.
 	// ACL names are content-hashed from the filter spec (Principle 35).
 	var ingressACLName, egressACLName string
