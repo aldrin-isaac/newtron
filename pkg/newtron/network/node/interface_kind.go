@@ -102,6 +102,13 @@ const (
 	// CapabilityPortProperties — the interface owns a port row whose
 	// properties (admin status, MTU, ...) can be set per interface.
 	CapabilityPortProperties
+	// CapabilityGateway — the interface is a bridge-domain L3 gateway: an
+	// SVI standing for a VLAN's routed face. It is where an irb-type service
+	// binds (irb-service-redesign.md §3). Distinct from CapabilityRouting —
+	// a physical port routes its own traffic, but only an IRB gateways a
+	// bridge domain — so this is the surface that scopes irb / evpn-irb
+	// delivery to the IRB and nowhere else.
+	CapabilityGateway
 )
 
 // String returns the capability's §6-vocabulary name for error messages.
@@ -119,6 +126,8 @@ func (c InterfaceCapability) String() string {
 		return "BGP peering"
 	case CapabilityPortProperties:
 		return "port properties"
+	case CapabilityGateway:
+		return "bridge-domain gateway"
 	default:
 		return "unknown capability"
 	}
@@ -153,6 +162,9 @@ var kindCapabilities = map[InterfaceKind]map[InterfaceCapability]bool{
 		// see capabilityAuthoring.
 		CapabilityRouting:    true,
 		CapabilityBGPPeering: true,
+		// The IRB alone is a bridge-domain gateway — the surface an
+		// irb-type service binds to (irb-service-redesign.md §3, §6).
+		CapabilityGateway: true,
 	},
 	// KindLoopback, KindUnknown: no capabilities — every gated op refuses.
 }

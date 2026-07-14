@@ -1,0 +1,124 @@
+{
+  "version": "1.0",
+  "super_users": null,
+  "user_groups": null,
+  "permissions": null,
+  "prefix_lists": {
+    "PREFIXLIST1": [
+      "0.0.0.0/0",
+      "10.0.0.0/8",
+      "10.0.0.0/8",
+      "10.0.0.0/8",
+      "10.0.0.0/8",
+      "10.0.0.0/8",
+      "10.0.0.0/8",
+      "10.0.0.0/8"
+    ]
+  },
+  "filters": {
+    "FILTER1": {
+      "description": "filter 1",
+      "type": "ipv4",
+      "rules": [
+        {
+          "seq": 100,
+          "src_prefix_list": "PREFIXLIST1",
+          "dst_prefix_list": "PREFIXLIST1",
+          "action": "permit"
+        }
+      ]
+    }
+  },
+  "qos_policies": {
+    "QOS1": {
+      "description": "qos 1",
+      "queues": [
+        {
+          "name": "q0",
+          "type": "dwrr",
+          "weight": 25,
+          "dscp": [
+            0
+          ]
+        },
+        {
+          "name": "q1",
+          "type": "dwrr",
+          "weight": 25,
+          "dscp": [
+            8
+          ]
+        },
+        {
+          "name": "q2",
+          "type": "dwrr",
+          "weight": 25,
+          "dscp": [
+            16
+          ]
+        },
+        {
+          "name": "q3",
+          "type": "dwrr",
+          "weight": 25,
+          "dscp": [
+            24
+          ]
+        }
+      ]
+    }
+  },
+  "route_policies": {
+    "ROUTEPOLICY1": {
+      "description": "route policy",
+      "rules": []
+    }
+  },
+  "ipvpns": {
+    "IPVPN": {
+      "description": "L3 VRF for EVPNIRB",
+      "l3vni": 10001,
+      "route_targets": [
+        "65001:300"
+      ]
+    }
+  },
+  "macvpns": {
+    "MACVPN": {
+      "description": "L2 bridge domain for EVPNIRB",
+      "vlan_id": 100,
+      "vni": 10100,
+      "anycast_ip": "10.100.0.1/24",
+      "anycast_mac": "01:01:01:01:01:01",
+      "route_targets": [
+        "65533:100"
+      ]
+    }
+  },
+  "services": {
+    "EVPNIRB": {
+      "description": "irb",
+      "service_type": "evpn-irb",
+      "ipvpn": "IPVPN",
+      "macvpn": "MACVPN",
+      "vrf_type": "interface",
+      "routing": {
+        "protocol": "bgp",
+        "redistribute": false
+      },
+      "ingress_filter": "FILTER1",
+      "egress_filter": "FILTER1",
+      "qos_policy": "QOS1"
+    },
+    "TRANSIT": {
+      "description": "Underlay L3 routed transit fabric (point-to-point inter-switch links)",
+      "service_type": "routed",
+      "routing": {
+        "protocol": "bgp",
+        "peer_as": "request"
+      }
+    }
+  },
+  "ssh_user": "admin",
+  "ssh_pass": "${secret:ssh_pass}"
+}

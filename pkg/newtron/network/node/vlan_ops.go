@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
-	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -73,34 +72,18 @@ func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	return cs, nil
 }
 
-// sviServiceOwner returns the name of the irb-type service whose binding
-// owns VLAN vlanID's SVI, or "" when no service owns it. The SVI has two
-// authoring paths (configure-irb and irb-type apply-service) and §27 allows
-// only one owner at a time — both paths consult this before writing.
-func (n *Node) sviServiceOwner(vlanID int) string {
-	want := strconv.Itoa(vlanID)
-	for _, intent := range n.IntentsByOp(sonic.OpApplyService) {
-		if intent.Params[sonic.FieldVLANID] != want {
-			continue
-		}
-		switch intent.Params[sonic.FieldServiceType] {
-		case spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
-			return intent.Params[sonic.FieldServiceName]
-		}
-	}
-	return ""
-}
-
 // ConfigureIRB configures a VLAN's IRB (Integrated Routing and Bridging) interface.
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 // Intent-idempotent: if the IRB intent already exists, returns empty ChangeSet.
-// Refuses when an irb-type service owns the VLAN's SVI (§27: one SVI author
-// at a time — service-owned gateways are updated via the spec + refresh).
+//
+// configure-irb is the SVI's sole author (§6). Under the delivery-point flip an
+// irb-type service binds to the IRB and never writes VLAN_INTERFACE, so the
+// single-author guarantee is structural, not defensive: there is no rival
+// writer to consult before authoring the gateway, and unconfigure-irb is
+// refused while a service is bound because the binding is a DAG child of this
+// identity (I5), not because of a bespoke check.
 func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*ChangeSet, error) {
-	if owner := n.sviServiceOwner(vlanID); owner != "" {
-		return nil, fmt.Errorf("VLAN %d's IRB is owned by service '%s' — its gateway is updated via the service spec and refresh-service, not configure-irb", vlanID, owner)
-	}
 	if n.GetIntent("interface|"+VLANName(vlanID)) != nil {
 		return NewChangeSet(n.name, "device."+sonic.OpConfigureIRB), nil
 	}

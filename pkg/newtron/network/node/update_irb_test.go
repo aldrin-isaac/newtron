@@ -86,45 +86,48 @@ func TestUpdateIRBIdempotentNoOp(t *testing.T) {
 	}
 }
 
-// TestSVISingleAuthorGuards pins §27 both ways: configure-irb refuses a
-// service-owned SVI, and an irb-type service refuses an operator-authored
-// one. Two writers of one gateway diverge on the first refresh.
-func TestSVISingleAuthorGuards(t *testing.T) {
+// TestSVISingleAuthorStructural pins §6 under the delivery-point flip: the SVI
+// has exactly one author — configure-irb — structurally, not defensively. An
+// irb-type service binds on top of the operator-authored IRB without writing
+// VLAN_INTERFACE, so there is no rival writer to guard against; and calling
+// configure-irb again once the service is bound is an idempotent no-op (the IRB
+// already exists), not a refusal. The pre-flip mutual-exclusion — where the
+// service authored its own SVI and the two paths fought — is gone.
+func TestSVISingleAuthorStructural(t *testing.T) {
 	ctx := context.Background()
 
-	// Direction 1: operator-authored IRB exists → irb-type service refused.
-	// The SVI single-author guard fires before the bridge-domain precondition,
-	// so the "operator-authored" refusal stands regardless of membership.
+	// Operator authors the IRB (create-vlan + configure-irb), then the service
+	// binds to it — the flipped order (irb-service-redesign.md §3).
 	n := irbNode(t, IRBConfig{IPAddress: "10.1.100.1/24"})
 	sp := n.SpecProvider.(*testSpecProvider)
 	sp.services["cust-irb"] = irbServiceSpec()
-	intf, err := n.GetInterface("Ethernet0")
+	irb, err := n.GetInterface("Vlan100")
 	if err != nil {
-		t.Fatalf("GetInterface: %v", err)
+		t.Fatalf("GetInterface(Vlan100): %v", err)
 	}
-	_, err = intf.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"})
-	if err == nil || !strings.Contains(err.Error(), "operator-authored") {
-		t.Fatalf("irb-type service must refuse an operator-authored SVI, got %v", err)
+	svcCS, err := irb.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100})
+	if err != nil {
+		t.Fatalf("irb-type service must bind to the operator-authored IRB, got %v", err)
+	}
+	// The service does not touch the SVI — configure-irb is its sole author.
+	assertNoChange(t, svcCS, "VLAN_INTERFACE", "Vlan100")
+
+	// configure-irb again, now that the service is bound, is an idempotent
+	// no-op (the IRB already exists) — not a "owned by service" refusal.
+	cs, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"})
+	if err != nil {
+		t.Fatalf("re-configure-irb after service bind must be a no-op, got %v", err)
+	}
+	if len(cs.Changes) != 0 {
+		t.Fatalf("re-configure-irb must be a no-op, got %d changes", len(cs.Changes))
 	}
 
-	// Direction 2: service-owned SVI → configure-irb (and update-irb) refused.
-	// The service now delivers onto a pre-existing bridge domain, so the VLAN
-	// and the interface's membership are authored first.
-	n2, intf2 := testInterface()
-	sp2 := n2.SpecProvider.(*testSpecProvider)
-	sp2.services["cust-irb"] = irbServiceSpec()
-	if _, err := n2.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
-		t.Fatalf("CreateVLAN: %v", err)
-	}
-	if _, err := intf2.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
-		t.Fatalf("ConfigureInterface (membership): %v", err)
-	}
-	if _, err := intf2.ApplyService(ctx, "cust-irb", ApplyServiceOpts{VLAN: 100, IPAddress: "10.1.100.1/24"}); err != nil {
-		t.Fatalf("ApplyService(irb) onto a pre-existing bridge domain: %v", err)
-	}
-	_, err = n2.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.9/24"})
-	if err == nil || !strings.Contains(err.Error(), "owned by service") {
-		t.Fatalf("configure-irb must refuse a service-owned SVI, got %v", err)
+	// And unconfigure-irb is refused while the service is bound — the binding is
+	// a DAG child of the IRB identity, so I5 blocks the teardown (§5): no
+	// bespoke guard, the lifecycle rule falls out of the invariant.
+	_, err = n.UnconfigureIRB(ctx, 100)
+	if err == nil || !strings.Contains(err.Error(), "children") {
+		t.Fatalf("unconfigure-irb must be refused (I5) while a service is bound, got %v", err)
 	}
 }
 

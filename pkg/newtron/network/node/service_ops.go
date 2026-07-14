@@ -164,6 +164,9 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Determine which layers this service uses
 	canBridge := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
 		svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
+	// An irb-type service delivers onto the IRB gateway (§3); the other
+	// bridge-domain types (bridged, evpn-bridged) deliver onto an access port.
+	isIRB := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeIRB
 
 	// Resolve nodeSpec early — needed for BGP prerequisite and entry generation.
 	resolved := n.Resolved()
@@ -249,29 +252,34 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		return nil, err
 	}
 
-	// SVI single-author guard, service side (§27 — the mirror of
-	// ConfigureIRB's sviServiceOwner check): an irb-type service renders
-	// the VLAN's SVI, so it refuses a VLAN whose IRB an operator already
-	// authored via configure-irb — two writers of one gateway diverge on
-	// the first refresh.
-	if svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeEVPNIRB {
-		if irb := n.GetIntent("interface|" + VLANName(vlanID)); irb != nil && irb.Operation == sonic.OpConfigureIRB {
-			return nil, fmt.Errorf("VLAN %d's IRB is operator-authored (configure-irb) — an irb-type service cannot adopt it; unconfigure-irb first or use a different VLAN", vlanID)
+	// Delivery-point precondition, by service type (irb-service-redesign.md §3).
+	// Both branches are interactive-input guards, skipped during reconstruction:
+	// replay re-applies recorded intents in DAG order, and neither the IRB nor
+	// the membership is a parent of the binding, so either may be re-applied
+	// after this step — the final projection is correct regardless, and
+	// re-validating operator input against a half-rebuilt projection is the
+	// wrong check (§20: the whole intent DB is replayed jointly).
+	switch {
+	case isIRB && !n.reconstructing:
+		// An irb-type service binds to the VLAN's L3 gateway — the IRB (the
+		// capability gate above already fixed the target kind). It requires the
+		// operator to have authored the gateway's identity first (configure-irb),
+		// the LAG rule applied to the gateway: bind only once the interface
+		// exists. configure-irb is the SVI's sole author (§6) — the service
+		// layers overlay + policy onto a gateway it does not create.
+		if VLANName(vlanID) != i.name {
+			return nil, fmt.Errorf("irb-type service '%s' is for VLAN %d's IRB (%s) but was applied on %s — apply it on %s", serviceName, vlanID, VLANName(vlanID), i.name, VLANName(vlanID))
 		}
-	}
-
-	// Bridge-domain precondition (irb-service-redesign.md §5): a bridged or
-	// irb service delivers onto a pre-existing bridge domain — the VLAN and
-	// the interface's membership are authored separately (create-vlan,
-	// bind-macvpn for the overlay, configure-interface for membership), each
-	// with one owner. The service no longer creates them; it requires them.
-	//
-	// Skipped during reconstruction: replay re-applies recorded intents in DAG
-	// order, and the membership is not a parent of the binding, so it may be
-	// re-applied after this step — the final projection is correct regardless,
-	// and re-validating operator input against a half-rebuilt projection is
-	// the wrong check (§20: the whole intent DB is replayed jointly).
-	if canBridge && vlanID > 0 && !n.reconstructing {
+		irb := n.GetIntent("interface|" + i.name)
+		if irb == nil || irb.Operation != sonic.OpConfigureIRB {
+			return nil, fmt.Errorf("VLAN %d has no IRB — author its gateway with configure-irb before applying irb-type service '%s' (the service binds to the IRB; it no longer creates the SVI)", vlanID, serviceName)
+		}
+	case canBridge && vlanID > 0 && !n.reconstructing:
+		// A bridged / evpn-bridged service delivers onto an access port that
+		// must already be a member of the pre-existing bridge domain — the VLAN
+		// and the membership are authored separately (create-vlan, bind-macvpn
+		// for the overlay, configure-interface for membership), each with one
+		// owner (§6). The service requires them; it no longer creates them.
 		if n.GetIntent("vlan|"+strconv.Itoa(vlanID)) == nil {
 			return nil, fmt.Errorf("VLAN %d does not exist — create it (and bind-macvpn for evpn) before applying service '%s'", vlanID, serviceName)
 		}
@@ -560,12 +568,17 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// Per-interface entries by service type (config functions from owning
-	// files). Membership is not created here — it is a precondition (above);
-	// the irb types render the SVI gateway, which they still own until it
-	// moves to configure-irb (irb-service-redesign.md §11-E).
+	// files). Membership is not created here — it is a precondition (above).
 	switch svc.ServiceType {
 	case spec.ServiceTypeEVPNBridged, spec.ServiceTypeBridged:
-		// L2-only: membership (the precondition) is the whole delivery.
+		// L2-only: membership (the precondition) is the whole per-port delivery.
+	case spec.ServiceTypeEVPNIRB, spec.ServiceTypeIRB:
+		// The SVI gateway — VLAN_INTERFACE base, IP, VRF binding, anycast MAC —
+		// is the IRB's own identity, authored by configure-irb (§6). The service
+		// binds to it and does not create it; the overlay realization (VRF,
+		// L3VNI, route targets) is delivered by the VRF infrastructure block
+		// above, and per-member policy is the product (§4). Nothing to render
+		// on the delivery interface here — the binding record is the delivery.
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
 		if vrfName != "" {
 			cs.Adds(bindVrfConfig(i.name, vrfName))
@@ -574,22 +587,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 		if opts.IPAddress != "" {
 			cs.Adds(assignIpAddressConfig(i.name, opts.IPAddress))
-		}
-	case spec.ServiceTypeEVPNIRB:
-		if vlanID > 0 {
-			irbOpts := IRBConfig{VRF: vrfName}
-			if macvpnDef != nil {
-				irbOpts.IPAddress = macvpnDef.AnycastIP
-				irbOpts.AnycastMAC = macvpnDef.AnycastMAC
-			}
-			cs.Adds(createSviConfig(vlanID, irbOpts))
-		}
-	case spec.ServiceTypeIRB:
-		if vlanID > 0 {
-			cs.Adds(createSviConfig(vlanID, IRBConfig{
-				VRF:       vrfName,
-				IPAddress: opts.IPAddress,
-			}))
 		}
 	}
 
@@ -1083,10 +1080,6 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Derived booleans from serviceType
 	canRoute := serviceType == spec.ServiceTypeRouted || serviceType == spec.ServiceTypeEVPNRouted
-	hasIRB := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeIRB
-
-	anycastIP := b["anycast_ip"]
-	anycastMAC := b[sonic.FieldAnycastMAC]
 
 	// Track which infrastructure intents to clean up after the interface
 	// intent is deleted (must happen in children-first order per I5).
@@ -1121,9 +1114,17 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	// Remove IP addresses from interface
-	for _, ipAddr := range i.IPAddresses() {
-		cs.Deletes(assignIpAddressConfig(i.name, ipAddr))
+	// Remove IP addresses the service assigned on the delivery interface —
+	// only routed services put an IP on the interface itself (the routed apply
+	// case does assignIpAddressConfig on the physical INTERFACE). An irb-type
+	// service's gateway IP lives on the SVI, which is configure-irb's (§6): the
+	// service never wrote it and must not delete it — and it is a VLAN_INTERFACE
+	// row, so treating it as a physical INTERFACE entry here would be wrong on
+	// both counts (ownership and table).
+	if canRoute {
+		for _, ipAddr := range i.IPAddresses() {
+			cs.Deletes(assignIpAddressConfig(i.name, ipAddr))
+		}
 	}
 
 	// Remove INTERFACE base entry for routed services (created by service).
@@ -1223,61 +1224,15 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	}
 
 	// =========================================================================
-	// SVI gateway (irb types) — the only per-VLAN resource the service still
-	// owns. The VLAN, its L2VNI/ARP overlay realization, and membership are
-	// owned by create-vlan / bind-macvpn / configure-interface and are NOT
-	// torn down here (§6: one writer each). The SVI moves to configure-irb in
-	// the next step (§11-E); until then the service deletes it when the last
-	// irb-service binding for this VLAN is removed.
+	// The SVI gateway is NOT torn down here. Under the delivery-point flip an
+	// irb-type service binds to the IRB and no longer authors its gateway —
+	// the VLAN_INTERFACE base, IP, VRF binding, and anycast MAC are all
+	// configure-irb's, removed by unconfigure-irb (irb-service-redesign.md §6).
+	// The VLAN, its L2VNI/ARP overlay realization, and membership likewise have
+	// their own owners (create-vlan / bind-macvpn / configure-interface). The
+	// service removes only what it wrote: the binding, its BGP/ACL/QoS, and the
+	// overlay VRF when it was the last user (above).
 	// =========================================================================
-
-	vlanID := bindingInt(b[sonic.FieldVLANID])
-
-	if hasIRB && vlanID > 0 {
-		// Last irb-service user of this VLAN? Any other apply-service binding
-		// for the same VLAN with an irb type still needs the SVI.
-		isLastSVIUser := true
-		for resource, intent := range n.IntentsByOp(sonic.OpApplyService) {
-			if resource == excludeKey {
-				continue
-			}
-			if bindingInt(intent.Params[sonic.FieldVLANID]) != vlanID {
-				continue
-			}
-			switch intent.Params[sonic.FieldServiceType] {
-			case spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
-				isLastSVIUser = false
-			}
-			if !isLastSVIUser {
-				break
-			}
-		}
-		if isLastSVIUser {
-			if anycastIP != "" {
-				cs.Deletes(deleteSviIPConfig(vlanID, anycastIP))
-			} else if b[sonic.FieldIPAddress] != "" {
-				// Local IRB: IRB IP comes from opts.IPAddress (stored in binding)
-				cs.Deletes(deleteSviIPConfig(vlanID, b[sonic.FieldIPAddress]))
-			}
-			cs.Deletes(deleteSviBaseConfig(vlanID))
-
-			// SAG_GLOBAL: device-wide singleton — delete when the last anycast
-			// MAC user is removed.
-			isLastAnycastMAC := true
-			for resource := range n.IntentsByOp(sonic.OpApplyService) {
-				if resource != excludeKey {
-					intent := n.GetIntent(resource)
-					if intent != nil && intent.Params[sonic.FieldAnycastMAC] != "" {
-						isLastAnycastMAC = false
-						break
-					}
-				}
-			}
-			if anycastMAC != "" && isLastAnycastMAC {
-				cs.Deletes(deleteSagGlobalConfig())
-			}
-		}
-	}
 
 	// =========================================================================
 	// Service binding tracking (always delete)
@@ -1439,18 +1394,29 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 // filters, QoS, and BGP each add their bind-point requirement.
 func serviceCapabilityNeeds(svc *spec.ServiceSpec, peerGroup string) []InterfaceCapability {
 	var needs []InterfaceCapability
+	isIRB := svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeEVPNIRB
 	switch svc.ServiceType {
 	case spec.ServiceTypeRouted, spec.ServiceTypeEVPNRouted:
 		needs = append(needs, CapabilityRouting)
-	case spec.ServiceTypeBridged, spec.ServiceTypeEVPNBridged,
-		spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
+	case spec.ServiceTypeBridged, spec.ServiceTypeEVPNBridged:
 		needs = append(needs, CapabilityVLANMembership)
+	case spec.ServiceTypeIRB, spec.ServiceTypeEVPNIRB:
+		// An irb-type service binds to the bridge domain's L3 gateway —
+		// the IRB, and only the IRB (irb-service-redesign.md §3, §6).
+		needs = append(needs, CapabilityGateway)
 	}
-	if svc.IngressFilter != "" || svc.EgressFilter != "" {
-		needs = append(needs, CapabilityACLBinding)
-	}
-	if svc.QoSPolicy != "" {
-		needs = append(needs, CapabilityQoSBinding)
+	// Per-member policy (ACL/QoS) is realized on the VLAN's member ports by
+	// the product renderer, not on the delivery interface (§4, §7). For an
+	// irb-type service it is therefore NOT a capability the IRB must provide
+	// — the members carry it. The per-port service types (routed, bridged)
+	// bind policy on the delivery interface itself, so it must provide it.
+	if !isIRB {
+		if svc.IngressFilter != "" || svc.EgressFilter != "" {
+			needs = append(needs, CapabilityACLBinding)
+		}
+		if svc.QoSPolicy != "" {
+			needs = append(needs, CapabilityQoSBinding)
+		}
 	}
 	if peerGroup != "" {
 		needs = append(needs, CapabilityBGPPeering)

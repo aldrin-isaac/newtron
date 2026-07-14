@@ -1,0 +1,194 @@
+{
+  "version": "1.0",
+  "description": "3-node vs network for newtcon testing (RECONSTRUCTED from audit logs 2026-06-28 after accidental deletion)",
+  "nodes": {
+    "host1": {},
+    "host2": {},
+    "host3": {},
+    "switch1": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "64512",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch1",
+              "hwsku": "cisco-p200-32x100-vs",
+              "type": "LeafRouter"
+            }
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet0/apply-service",
+          "params": {
+            "ip_address": "10.255.255.0/31",
+            "peer_as": "64513",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet4/apply-service",
+          "params": {
+            "ip_address": "10.255.255.5/31",
+            "peer_as": "64514",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet1/configure-interface",
+          "params": {
+            "ip": "10.10.1.1/24"
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet1": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": 9100
+        }
+      }
+    },
+    "switch2": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "64513",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch2",
+              "hwsku": "cisco-p200-32x100-vs",
+              "type": "LeafRouter"
+            }
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet0/apply-service",
+          "params": {
+            "ip_address": "10.255.255.1/31",
+            "peer_as": "64512",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet4/apply-service",
+          "params": {
+            "ip_address": "10.255.255.2/31",
+            "peer_as": "64514",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet1/configure-interface",
+          "params": {
+            "ip": "10.10.2.1/24"
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet1": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": 9100
+        }
+      }
+    },
+    "switch3": {
+      "steps": [
+        {
+          "url": "/setup-device",
+          "params": {
+            "fields": {
+              "bgp_asn": "64514",
+              "docker_routing_config_mode": "unified",
+              "frr_mgmt_framework_config": "true",
+              "hostname": "switch3",
+              "hwsku": "cisco-p200-32x100-vs",
+              "type": "LeafRouter"
+            }
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet0/apply-service",
+          "params": {
+            "ip_address": "10.255.255.3/31",
+            "peer_as": "64513",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet4/apply-service",
+          "params": {
+            "ip_address": "10.255.255.4/31",
+            "peer_as": "64512",
+            "service": "TRANSIT"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet1/configure-interface",
+          "params": {
+            "ip": "10.10.3.1/24"
+          }
+        }
+      ],
+      "ports": {
+        "Ethernet0": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet1": {
+          "admin_status": "up",
+          "mtu": 9100
+        },
+        "Ethernet4": {
+          "admin_status": "up",
+          "mtu": 9100
+        }
+      }
+    }
+  },
+  "links": [
+    {
+      "a": "switch2:Ethernet4",
+      "z": "switch3:Ethernet0"
+    },
+    {
+      "a": "switch3:Ethernet4",
+      "z": "switch1:Ethernet4"
+    },
+    {
+      "a": "switch1:Ethernet0",
+      "z": "switch2:Ethernet0"
+    },
+    {
+      "a": "switch1:Ethernet1",
+      "z": "host1:eth0"
+    },
+    {
+      "a": "switch2:Ethernet1",
+      "z": "host2:eth0"
+    },
+    {
+      "a": "switch3:Ethernet1",
+      "z": "host3:eth0"
+    }
+  ]
+}
