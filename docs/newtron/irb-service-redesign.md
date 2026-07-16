@@ -96,7 +96,7 @@ refusing to bind until it exists. The same LAG rule, applied to the gateway.
 
 ---
 
-## 4. The product rule — how per-access-port policy is realized
+## 4. Per-member policy — how a filter/QoS reaches the members
 
 An irb-type service still has per-access-port content: a filter or QoS or storm
 control that must reach every member port, not just the gateway. Under the old
@@ -106,34 +106,40 @@ order-dependent (the "what if the IRB is created after the members?" question is
 the tell: any model whose outcome depends on arrival order is a hidden state
 machine).
 
-The redesign makes the derived state a **product, not a copy**:
+The redesign **derives** the per-member policy instead of copying it. The IRB is
+no ACL/QoS bind point (§7), so an irb service's filter/QoS is **bound to the
+VLAN's member ports**, and that binding is a derived view of two facts:
 
-> A per-member policy row exists **iff** the service is bound on the IRB **and**
-> the port is a member of the VLAN. It is rendered by the service engine —
+> A member port carries the policy **iff** the service is bound on the IRB
+> **and** the port is a member of the VLAN. The binding is (re)derived by
 > whichever fact arrives second.
 
-- Member joins after the service is bound → render its rows at join.
-- Service binds after members exist → sweep the existing members.
-- Member leaves, or the service unbinds → that side of the product vanishes; the
-  other persists.
+- Member joins after the service is bound → bind the policy to it at join.
+- Service binds after members exist → bind it to the existing members.
+- Member leaves, or the service unbinds → the binding for that member goes; the
+  rest persist.
 
-The product is **computed, never recorded** (`DESIGN_PRINCIPLES_NEWTRON.md`
-§21 — Reconstruct, Don't Record). Materializing a per-member derived intent would
-store the *join of two other intents*, which can go stale inside the intent DB —
-the precise drift §1 exists to kill, reintroduced in the substrate. Instead one
-owner function renders the product, invoked from three sites with one
-implementation (§27, and its mechanical check `ai-instructions.md` §25):
+The per-member bindings are **derived, never recorded**
+(`DESIGN_PRINCIPLES_NEWTRON.md` §21 — Reconstruct, Don't Record). Materializing a
+per-member derived intent would store the *join of two other intents*, which can
+go stale inside the intent DB — the precise drift §1 exists to kill, reintroduced
+in the substrate. Instead one owner computes the bindings, invoked from three
+sites with one implementation (§27, and its mechanical check `ai-instructions.md`
+§25):
 
-1. The binding operations (`apply`/`refresh-service`) — full render over the
-   VLAN's current members.
-2. The membership operations (join/leave) — delta render for the one member.
-3. The binding's replay — scans the fully-loaded intent DB for members;
-   order-independent by construction, because the DB loads before any replay runs.
+1. The binding operations (`apply`/`refresh-service`) — bind over the VLAN's
+   current members.
+2. The membership operations (join/leave) — bind/unbind the one member.
+3. Reconstruction — a post-replay reconcile pass. Replay rebuilds the intent DB
+   incrementally, so a per-step binding computed mid-replay can see a
+   partially-loaded DB; once every intent is loaded, the reconcile pass
+   recomputes each service ACL's bound ports from the complete DB, so the result
+   is order-independent regardless of the order the steps replayed in.
 
 The ten-binding refresh dissolves: one binding on the IRB, one `refresh-service`
-call, and the fan-out over members is internal to the single owner. The gateway
-identity converges in that one call with no ghost, because there is now one
-binding whose teardown-replace owns the sub-entry.
+call, and binding the policy to each member is internal to the single owner. The
+gateway identity converges in that one call with no ghost, because there is now
+one binding whose teardown-replace owns the sub-entry.
 
 ---
 
@@ -170,7 +176,7 @@ unbound; access members join and leave freely because nothing parents to them.
 No new machinery — the existing bottom-up deletion invariant already enforces
 every rule the two anchors need.
 
-**The product rows are not in this tree.** They are projection-level, recomputed
+**The per-member policy rows are not in this tree.** They are projection-level, recomputed
 per §4 — the DAG records decisions, not their derivations.
 
 ---
@@ -185,12 +191,12 @@ land on either side has no owner.
 |---|---|---|
 | Gateway identity | the IRB (`VLAN_INTERFACE` base + IP) | anycast IP, VRF binding, anycast MAC |
 | Overlay realization | VLAN-level infrastructure | L2VNI mapping, route targets, ARP suppression |
-| Per-member policy | each access port (the product, §4) | ingress/egress filter, QoS, storm control |
+| Per-member policy | each access port (derived per-member, §4) | ingress/egress filter, QoS, storm control |
 
 Gateway identity is the IRB's own (`configure-irb` authors it; `update-irb`
 mutates it in place). Overlay realization is VLAN-scoped and converges through
 the binding's render, not through `CreateVLAN`'s idempotent skip. Per-member
-policy is the product. One consequence to ratify explicitly: with the binding on
+policy is derived per-member (§4). One consequence to ratify explicitly: with the binding on
 the IRB, `configure-irb` becomes the **sole** author of the SVI — the #433
 dual-writer guard becomes structural rather than defensive, because the service
 layers policy on top of an SVI it no longer creates.
@@ -207,7 +213,7 @@ to `PORT` and `PORTCHANNEL` only, and `aclorch.cpp`'s bind-point table
 `SAI_ACL_BIND_POINT_TYPE_VLAN`, but SONiC never wired it. So "bind at the irb,
 applies to the bridge domain" — the Junos model — is not natively expressible.
 
-The feasible realization is the product rule projecting per-member-port rows via
+The feasible realization is deriving per-member-port rows via
 the standard tables — abstraction on top of the community mechanism, not a
 replacement for it (Platform Patching Principle, §37). One native assist:
 `aclorch.cpp` maps `MATCH_VLAN_ID` to `SAI_ACL_ENTRY_ATTR_FIELD_OUTER_VLAN_ID`,
@@ -224,8 +230,8 @@ Two honest limits the design must state, not paper over:
   as such — not an approximation of gateway filtering.
 - **QoS on a shared trunk port is unsolvable and must fail closed.** QoS maps
   are per-port with no VLAN qualifier, so two serviced VLANs with different QoS
-  policies projecting onto one trunk member cannot both be honored. The product
-  rule refuses the conflict before writing, naming both services (§13: prevent,
+  policies bound to one trunk member cannot both be honored. The
+  binding refuses the conflict before writing, naming both services (§13: prevent,
   don't detect).
 
 ---
@@ -235,12 +241,12 @@ Two honest limits the design must state, not paper over:
 - **Bridged / evpn-bridged services stay per-access-port.** They have no L3
   gateway, so there is no delivery interface to bind to; their content genuinely
   is per-port. Whether a pure-L2 VLAN eventually deserves a VLAN-anchored variant
-  of the product rule is a real open question — it must get its own answer, not
+  of this per-member model is a real open question — it must get its own answer, not
   inherit the irb answer by assumption.
 - **The saga executor** remains deferred (`memory/project_saga_design.md`): built
   as newtrun's model pointed at production when a consumer exists, never as a
   config-only engine.
-- **A device-scoped `refresh-service <name>` fan-out** (one call re-renders every
+- **A device-scoped `refresh-service <name>`** (one call re-applies every
   binding of a service on a node) is a thin convenience over the per-binding
   primitive. It does not change the model and is not required here.
 
@@ -278,7 +284,7 @@ wording below records what was decided.
 **Current:** "intent records must be self-sufficient for reconstruction of
 expected state." The wording speaks of per-record sufficiency.
 
-**Tension:** the product rule reconstructs a member's policy rows from *sibling
+**Tension:** per-member policy reconstructs a member's rows from *sibling
 intents* (the membership records), not from that binding record alone — and not
 from specs.
 
@@ -294,7 +300,7 @@ describes enforced reality rather than loosening a guarantee.
 **Current:** "services on Ethernet0 and Ethernet4 are independent" (the unit of
 isolation).
 
-**Tension:** under the product rule, a member port's policy rows are partially
+**Tension:** under per-member policy, a member port's rows are partially
 derived from its VLAN's service. Members of a serviced VLAN are not fully
 independent.
 
@@ -315,7 +321,7 @@ ratified:
 - **C — Intent/DAG mechanics.** Binding re-key to `interface|<name>|service` for
   every kind; `interface|<name>` normalized to identity-only; registry + Replay +
   round-trip sequence updates; I5-driven lifecycle asserted by tests.
-- **D — The product renderer.** Single-owner render function (full / member-delta
+- **D — Per-member policy delivery.** Single-owner binding function (full / member-delta
   / replay entry points); `ACL_TABLE` ports-list changes as §48 in-place edits;
   VLAN_ID-qualified rule generation; QoS conflict fail-closed.
 - **E — Content partition + delivery-point flip.** irb / evpn-irb deliverable
@@ -330,7 +336,7 @@ ratified:
   ownership map; the §9 conformance audit; a full 13-suite sweep as the exit gate.
 
 The suite workstream — an audit-first per-suite impact pass, new witnesses
-(order-independence, single-call fan-out, ghost-IP-inverted, member-leave
+(order-independence, single-call member binding, ghost-IP-inverted, member-leave
 continuity, QoS conflict, the VLAN_ID battery), and two full-sweep checkpoints —
 runs across C–G, not inside any one phase.
 
