@@ -3,7 +3,24 @@
   "super_users": null,
   "user_groups": null,
   "permissions": null,
+  "filters": {
+    "FILTER_GATE": {
+      "description": "Local-irb ingress filter for the §7 trunk-gate loopback witness",
+      "type": "ipv4",
+      "rules": [
+        {
+          "seq": 10,
+          "action": "permit"
+        }
+      ]
+    }
+  },
   "services": {
+    "SVC_GATE": {
+      "description": "Local IRB carrying a filter — exercises the §7 trunk-eligibility gate",
+      "service_type": "irb",
+      "ingress_filter": "FILTER_GATE"
+    },
     "TRANSIT": {
       "description": "Transit peering interface",
       "service_type": "routed",

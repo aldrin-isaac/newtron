@@ -84,15 +84,32 @@ model is the PortChannel's, exactly:
 | Members individually serviceable | refused — "configure the PortChannel instead" | access ports take membership only |
 
 Most of this exists. `configure-irb` / `update-irb` / `unconfigure-irb` are
-already the IRB's create/update/destroy lifecycle; membership operations are
-already first-class and service-independent. The redesign is not "build an IRB
-object" — it is **move the irb-type service binding to the IRB, and strip
-membership and SVI authorship out of the per-access-port apply path.**
+already the IRB's create/update/destroy lifecycle as a **disaggregated
+primitive**; membership operations are already first-class and
+service-independent. The redesign is one change: **move the irb-type service
+binding from the access port to the IRB (`VlanN`), so the shared gateway is
+bound once rather than smeared across every member port.**
 
-This restores an invariant the current code quietly violates: *`apply-service`
-never creates its own delivery interface.* A physical port exists by hardware; a
-PortChannel by creation; and now an IRB by `configure-irb` — with the service
-refusing to bind until it exists. The same LAG rule, applied to the gateway.
+Binding once at the IRB is the whole of the flip. It does **not** change what
+`apply-service` is: a *composite* that assembles the infrastructure it delivers
+by calling the owning primitives, intent-idempotently — exactly as it already
+composes a routed service's VRF (`DESIGN_PRINCIPLES_NEWTRON.md` §2: "Composites
+call the owning primitives and merge their ChangeSets"). Applied to `VlanN`, the
+composite ensures the VLAN, the L2VNI (from the service's `macvpn`), the VRF and
+L3VNI (from its `ipvpn`), and the SVI gateway (`--ip` / `--anycast-mac`), then
+delivers per-member policy to the members. Every primitive checks the intent DB
+before writing, so the composite and the disaggregated path coexist: an operator
+may pre-author any piece by hand (the primitive suites), and a later
+`apply-service` reuses whatever already exists.
+
+The one authorship the flip genuinely decouples is **membership**. Because the
+service now binds to the IRB rather than to a port, it can no longer be the
+operation that adds a port to the VLAN — *which* ports belong is a topology fact
+authored by `configure-interface`, service-agnostic (a port joins knowing
+nothing about whether the VLAN is serviced). The service delivers per-member
+policy to whoever is a member; membership churns independently. That is the only
+thing the apply path gives up — not the SVI, not the overlay, not the VRF, all
+of which the composite still assembles.
 
 ---
 
@@ -118,6 +135,11 @@ VLAN's member ports**, and that binding is a derived view of two facts:
 - Service binds after members exist → bind it to the existing members.
 - Member leaves, or the service unbinds → the binding for that member goes; the
   rest persist.
+
+Every member reached this way is single-VLAN: a filter/QoS-bearing irb service is
+refused on a VLAN with any trunk member, both at apply and at membership join
+(§7). So the per-port row the derivation writes is always exactly the per-VLAN
+policy — no VLAN qualifier, no trunk to bleed onto.
 
 The per-member bindings are **derived, never recorded**
 (`DESIGN_PRINCIPLES_NEWTRON.md` §21 — Reconstruct, Don't Record). Materializing a
@@ -193,46 +215,65 @@ land on either side has no owner.
 | Overlay realization | VLAN-level infrastructure | L2VNI mapping, route targets, ARP suppression |
 | Per-member policy | each access port (derived per-member, §4) | ingress/egress filter, QoS, storm control |
 
-Gateway identity is the IRB's own (`configure-irb` authors it; `update-irb`
-mutates it in place). Overlay realization is VLAN-scoped and converges through
-the binding's render, not through `CreateVLAN`'s idempotent skip. Per-member
-policy is derived per-member (§4). One consequence to ratify explicitly: with the binding on
-the IRB, `configure-irb` becomes the **sole** author of the SVI — the #433
-dual-writer guard becomes structural rather than defensive, because the service
-layers policy on top of an SVI it no longer creates.
+Gateway identity is the SVI's `VLAN_INTERFACE` base + IP + anycast MAC. It has a
+**single owning function** — `createSviConfig` — and a single intent record,
+`interface|VlanN`. Two callers may reach that function: `configure-irb` (the
+disaggregated primitive) and `apply-service` (the composite, which ensures the
+gateway when composing an irb service). This is not two writers (§27): both
+delegate to the one owning function, and the intent record has exactly one owner
+at a time, arbitrated by the intent DB — whichever caller creates it first; the
+other's idempotent ensure reuses it. `update-irb` mutates it in place. If both a
+pre-authored SVI and the composite's `--ip` are present and disagree, the
+composite fails closed rather than silently overwriting. This is the same shape
+as a routed service's VRF: `CreateVRF`/`createSviConfig` is the owner,
+`apply-service` and the standalone primitive both call it, idempotently (§2,
+§30). Overlay realization is VLAN-scoped and converges through the binding's
+render. Per-member policy is derived per-member (§4).
 
 ---
 
-## 7. Policy scope — vlan-scoped, declared, not approximated
+## 7. Policy scope — deliverable only on single-VLAN members, else refused
 
 SONiC cannot bind an ACL or a QoS map to a VLAN interface. Verified against the
-pinned 202511 tree: `sonic-acl.yang`'s `ports` leaf-list is a union of leafrefs
-to `PORT` and `PORTCHANNEL` only, and `aclorch.cpp`'s bind-point table
-(`aclBindPointTypeLookup`) has exactly those two entries; `PORT_QOS_MAP`'s
-`ifname` key is `global` or a leafref to `PORT`. SAI defines
-`SAI_ACL_BIND_POINT_TYPE_VLAN`, but SONiC never wired it. So "bind at the irb,
-applies to the bridge domain" — the Junos model — is not natively expressible.
+pinned tree: `sonic-acl.yang`'s `ports` leaf-list is a union of leafrefs to
+`PORT` and `PORTCHANNEL` only, and `aclorch.cpp`'s built-in table types bind to
+`SAI_ACL_BIND_POINT_TYPE_PORT` / `_LAG` — never `_VLAN` (SAI defines the enum,
+SONiC never wired it); `PORT_QOS_MAP`'s `ifname` key is `global` or a leafref to
+`PORT`. So "bind at the IRB, applies to the bridge domain" — the Junos model — is
+not natively expressible. The policy must instead be delivered to the VLAN's
+member ports.
 
-The feasible realization is deriving per-member-port rows via
-the standard tables — abstraction on top of the community mechanism, not a
-replacement for it (Platform Patching Principle, §37). One native assist:
-`aclorch.cpp` maps `MATCH_VLAN_ID` to `SAI_ACL_ENTRY_ATTR_FIELD_OUTER_VLAN_ID`,
-so projected ACL *rules* can be VLAN-qualified — a trunk member carrying two
-service-VLANs receives the union of two vlan-scoped rule sets rather than a
-collision.
+Per-port delivery is **correct only when a member carries exactly the one VLAN**.
+On such a member (a pure-access port, or a single-VLAN trunk) the per-port row
+*is* the per-VLAN policy: an unqualified L3 ACL matches only that VLAN's traffic
+(it is the only traffic on the port), and a `PORT_QOS_MAP` scopes to it exactly.
+Rules are therefore **unqualified** — there is no VLAN match.
 
-Two honest limits the design must state, not paper over:
+A **multi-VLAN (trunk) member cannot be served**, and neither native trick
+rescues it — verified in `aclorch.cpp` (202505), not assumed:
 
-- **The policy is vlan-scoped, not gateway-scoped.** A Junos irb filter touches
-  only traffic crossing the L3 hop; per-member-port projection also catches
-  intra-VLAN east-west traffic that never reaches the gateway. That is a
-  different policy scope. The service field means *vlan-scoped policy* — named
-  as such — not an approximation of gateway filtering.
-- **QoS on a shared trunk port is unsolvable and must fail closed.** QoS maps
-  are per-port with no VLAN qualifier, so two serviced VLANs with different QoS
-  policies bound to one trunk member cannot both be honored. The
-  binding refuses the conflict before writing, naming both services (§13: prevent,
-  don't detect).
+- The built-in `L3` table *does* carry `SAI_ACL_TABLE_ATTR_FIELD_OUTER_VLAN_ID`,
+  so an outer-VLAN match programs. But it keys on the **tag on the wire**: a
+  trunk's tagged traffic matches, while an **untagged (PVID-classified) member
+  has no outer tag at the ingress-ACL stage**, so the match never fires — the
+  filter would silently miss that member. An outer-VLAN qualifier thus *requires*
+  a VLAN match that untagged traffic cannot satisfy.
+- `PORT_QOS_MAP` has no VLAN qualifier at all, so a per-port QoS on a trunk
+  member bleeds to the trunk's other VLANs.
+
+Rather than deliver a filter/QoS that only half-applies, newtron **fails closed**:
+a filter- or QoS-bearing irb service is refused on a VLAN with any trunk member,
+enforced symmetrically (§15) — at `apply-service` (a trunk member present) and at
+membership join (a policy-serviced member going multi-VLAN),
+`refuseTrunkOnPolicyVLAN` naming the offending member. A plain irb service (no
+filter/QoS) is unaffected; trunk members are fine there. When SONiC wires
+`SAI_ACL_BIND_POINT_TYPE_VLAN`, the filter binds to the IRB and the refusal lifts
+— one place to change.
+
+One consequence to state, not paper over: where the policy *is* delivered
+(single-VLAN members), it is realized per member port, so it also inspects
+intra-VLAN east-west traffic that never crosses the L3 gateway — a broader scope
+than a Junos gateway filter. The `ingress_filter`/`qos_policy` tooltips name this.
 
 ---
 
@@ -325,13 +366,17 @@ ratified:
   / replay entry points); `ACL_TABLE` ports-list changes as §48 in-place edits;
   VLAN_ID-qualified rule generation; QoS conflict fail-closed.
 - **E — Content partition + delivery-point flip.** irb / evpn-irb deliverable
-  only on `KindIRB` (a registry matrix change); `apply-service` requires the
-  pre-existing IRB; the ownership split of §6 realized; `VLAN_MEMBER` gets one
-  writer (the membership ops).
-- **F — §38 validation battery.** VLAN_ID rule matching on tagged and
-  untagged/PVID members, both platforms; live ACL ports-list rebind behavior;
-  single-binding refresh convergence (the ghost-IP regression, inverted); suite
-  rewrites, cold.
+  only on `KindIRB` (a registry matrix change); `apply-service` binds to the IRB;
+  the ownership split of §6 realized; `VLAN_MEMBER` gets one writer (the
+  membership ops). *Superseded by the composite restoration:* `apply-service`
+  binds to the IRB **and** re-assembles the bridge domain it delivers (VLAN,
+  L2VNI, VRF, SVI) via the idempotent primitives — it does not require them
+  pre-authored (§3).
+- **F — per-member policy, fail-closed on trunks.** Filter/QoS delivered per
+  member port with **unqualified** rules on single-VLAN members; a VLAN with any
+  trunk member is refused at apply and at membership join (§7); live ACL
+  ports-list rebind behavior; single-binding refresh convergence keeps the
+  gateway (the ghost-IP regression, inverted); suite rewrites, cold.
 - **G — Wire, docs, closure.** api.md; the pipeline and howto docs; CLAUDE.md
   ownership map; the §9 conformance audit; a full 13-suite sweep as the exit gate.
 
@@ -350,5 +395,9 @@ runs across C–G, not inside any one phase.
    cleanly onto one class?
 3. **Bridged-service policy (§8)** — leave per-port for this redesign (proposed),
    or design the VLAN-anchored variant now?
-4. **Policy scope (§7)** — ship vlan-scoped with the semantic declared (proposed),
-   or invest in gateway-scoped approximation via dst-MAC rules?
+4. **Policy scope (§7)** — resolved: deliver the filter/QoS per-member on
+   single-VLAN members (unqualified rows), and fail closed on any VLAN with a
+   trunk member (an outer-VLAN qualifier can't cover an untagged member; per-port
+   QoS bleeds). The OUTER_VLAN_ID "union on a trunk" approach was tried and
+   backed out — it only half-applied. Revisit if SONiC wires
+   `SAI_ACL_BIND_POINT_TYPE_VLAN`.

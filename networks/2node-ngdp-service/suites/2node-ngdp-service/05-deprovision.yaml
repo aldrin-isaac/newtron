@@ -86,20 +86,14 @@ steps:
   # calls config save — it cannot clean up baseline infrastructure.
 
   # ====================================================================
-  # Bridge-domain + gateway teardown (§15 symmetry with provisioning setup):
-  # unconfigure-irb (gateway) → unbind-ipvpn + delete-vrf (L3 overlay) →
-  # unconfigure-interface (membership) → unbind-macvpn (L2 overlay) →
-  # delete-vlan. Shared VLANs on both switches; Ethernet4 differs
-  # (VLAN 400 sw1, 401 sw2).
+  # Bridge-domain teardown (§15). remove-service reaped the L3 it delivered — the
+  # SVI gateways, the shared Vrf_IRB, and the L3VNI — on the last consumer above.
+  # What survives is the L2 bridge domain: unconfigure-interface (membership) →
+  # unbind-macvpn (L2 overlay) → delete-vlan. Shared VLANs on both switches;
+  # Ethernet4 differs (VLAN 400 sw1, 401 sw2).
   # ====================================================================
-  # Local IRB gateway (Vlan100) — no VRF/overlay, just the SVI.
-  - name: unconfigure-irb-vlan100
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/unconfigure-irb
-    params: {vlan_id: 100}
-
+  # Local IRB (Vlan100): the SVI was reaped by remove-service — only the
+  # membership and VLAN remain.
   - name: unconfigure-eth1
     action: newtron
     devices: [switch1, switch2]
@@ -146,35 +140,9 @@ steps:
     url: /nodes/{{device}}/delete-vlan
     params: {id: 300}
 
-  # Overlay IRB gateway (Vlan400 sw1 / Vlan401 sw2) + the shared L3 overlay.
-  - name: unconfigure-irb-vlan400-sw1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/unconfigure-irb
-    params: {vlan_id: 400}
-
-  - name: unconfigure-irb-vlan401-sw2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /nodes/{{device}}/unconfigure-irb
-    params: {vlan_id: 401}
-
-  - name: unbind-ipvpn-irb
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/unbind-ipvpn
-    params: {ipvpn: IRB}
-
-  - name: delete-vrf-irb
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/delete-vrf
-    params: {name: Vrf_IRB}
-
+  # Overlay IRB (Vlan400 sw1 / Vlan401 sw2): the SVI, the shared Vrf_IRB, and the
+  # L3VNI were all reaped by remove-service on the last consumer — only the L2
+  # overlay, membership, and VLAN remain below.
   - name: unconfigure-eth4
     action: newtron
     devices: [switch1, switch2]

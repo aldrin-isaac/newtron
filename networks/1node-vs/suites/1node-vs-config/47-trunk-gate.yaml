@@ -1,0 +1,112 @@
+name: trunk-gate
+description: |
+  §7 fail-closed trunk-eligibility gate (loopback). A filter-bearing irb service
+  (SVC_GATE carries ingress_filter FILTER_GATE) delivers its filter to the VLAN's
+  member ports — SONiC cannot bind an ACL to the IRB — which is correct only on
+  single-VLAN members. So it is refused on a VLAN with any trunk (multi-VLAN)
+  member, enforced from both directions:
+    - apply-time: a trunk member is present when the service is applied.
+    - membership-join: a single-VLAN member carrying the policy becomes a trunk.
+  Config-level (the refusal precedes any device write), so it runs in loopback.
+
+steps:
+  # --- apply-time gate: Ethernet0 is a trunk (member of VLAN 777 AND 778) ---
+  - name: gate-create-vlan777
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 777}
+
+  - name: gate-create-vlan778
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/create-vlan?mode=loopback
+    params: {id: 778}
+
+  - name: gate-member-eth0-vlan777
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet0/configure-interface?mode=loopback
+    params: {vlan_id: 777, tagged: true}
+
+  - name: gate-member-eth0-vlan778
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet0/configure-interface?mode=loopback
+    params: {vlan_id: 778, tagged: true}
+
+  # apply-service on the IRB is refused — Ethernet0 is a trunk member of VLAN 777.
+  - name: gate-apply-refused-trunk-present
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan777/apply-service?mode=loopback
+    params: {service: SVC_GATE, vlan: 777, ip_address: "10.9.0.1/24"}
+    expect_failure: true
+    expect:
+      contains: "trunk"
+
+  # --- happy path: drop VLAN 778, Ethernet0 is single-VLAN, the service applies ---
+  - name: gate-remove-eth0-vlan778
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet0/remove-trunk-vlan?mode=loopback
+    params: {vlan_id: 778}
+
+  - name: gate-apply-succeeds-single-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan777/apply-service?mode=loopback
+    params: {service: SVC_GATE, vlan: 777, ip_address: "10.9.0.1/24"}
+
+  - name: gate-verify-binding
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan777%7Cservice/exists?mode=loopback
+    expect:
+      jq: '.exists == true'
+
+  # --- membership-join gate: Ethernet0 now carries the policy; making it a
+  # trunk (adding VLAN 778) is refused ---
+  - name: gate-join-refused-becomes-trunk
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet0/configure-interface?mode=loopback
+    params: {vlan_id: 778, tagged: true}
+    expect_failure: true
+    expect:
+      contains: "trunk"
+
+  # --- cleanup (the loopback projection persists across scenarios) ---
+  - name: gate-cleanup-remove-service
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Vlan777/remove-service?mode=loopback
+
+  - name: gate-cleanup-eth0
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet0/unconfigure-interface?mode=loopback
+
+  - name: gate-cleanup-vlan778
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 778}
+
+  - name: gate-cleanup-vlan777
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/delete-vlan?mode=loopback
+    params: {id: 777}
