@@ -87,6 +87,33 @@ steps:
     expect:
       jq: '.exists == true'
 
+  # Per-member policy (§38 real-device witness): svc-evpn-irb carries
+  # ingress_filter FILTER_IRB. The service binds on the IRB, but its ACL is
+  # bound to the VLAN's member ports (§4, §7) — the device must accept an
+  # ACL_TABLE whose ports are the members and ACL_RULEs carrying VLAN_ID.
+  - name: capture-irb-acl-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice
+    capture:
+      acl: .ingress_acl
+
+  # The ACL binds to the member (Ethernet12), never the IRB (Vlan400).
+  - name: verify-acl-binds-member-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_TABLE/{{captured.acl}}
+    expect:
+      jq: '.ports | contains("Ethernet12") and (contains("Vlan400") | not)'
+
+  # The projected rule is VLAN-qualified to the service's VLAN (§7).
+  - name: verify-acl-rule-vlan-qualified-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/{{captured.acl}}%7CRULE_10
+    expect:
+      jq: '.VLAN_ID == "400"'
+
   # Verify VLAN 400 created
   - name: verify-vlan400-sw1
     action: newtron
@@ -248,6 +275,16 @@ steps:
     action: newtron
     devices: [switch2]
     url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
+    expect:
+      jq: '.exists == false'
+
+  # The per-member ACL is torn down with the binding — removeSharedACL drops the
+  # last user's rules (§4): the service unbinds and its member ACL goes with it.
+  # vanishes).
+  - name: verify-acl-removed-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_TABLE/{{captured.acl}}/exists
     expect:
       jq: '.exists == false'
 
