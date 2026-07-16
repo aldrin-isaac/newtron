@@ -1964,6 +1964,17 @@ reference counting as an optimization; it is the only correct
 behavior. An ACL that protects four interfaces must survive the
 removal of three.
 
+The **bridge domain** a service assembles follows the same split. The **VLAN and its
+L2VNI** are shared objects — many members and services reference one VLAN — so they
+are reaped on the *last* consumer, not with any single one (they are ID-named rather
+than content-hashed, but the lifecycle is the shared-object one, not the per-interface
+one). A port's **access membership** is per-interface infrastructure: it exists
+because a service put the port in the VLAN, and dies with that service. It follows
+that operator config a service overlaps is reaped along with the service — an operator
+membership or VLAN survives only while no service overlaps it. One last-consumer test
+governs every shared object — VLAN, L2VNI, SVI, VRF — so reference-aware reversal is
+one mechanism, not a special case per object.
+
 The separation also enables content-hashed naming (§25) — because
 policy objects have identities independent of any interface, their
 names can encode their content, allowing automatic change detection and

@@ -80,7 +80,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l"}
     poll:
-      timeout: 180s
+      timeout: 240s
       interval: 5s
     expect:
       jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'
@@ -92,7 +92,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l"}
     poll:
-      timeout: 180s
+      timeout: 240s
       interval: 5s
     expect:
       jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'

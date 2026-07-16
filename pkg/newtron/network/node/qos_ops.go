@@ -33,7 +33,7 @@ func (i *Interface) BindQoS(ctx context.Context, policyName string) (*ChangeSet,
 	}
 
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpBindQoS)
-	if err := i.ensureInterfaceIntent(cs); err != nil {
+	if err := i.createInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
 	if err := i.node.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",

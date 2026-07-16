@@ -56,6 +56,65 @@ func irbGateway(opts ApplyServiceOpts, macvpnDef *spec.MACVPNSpec) (ip, mac stri
 	return ip, mac
 }
 
+// createBridgeDomain creates the L2 bridge domain a bridge-domain service
+// delivers into: the VLAN and, for an evpn overlay, its L2VNI. Idempotent
+// (matching the CreateVLAN / BindMACVPN primitives it wraps), so an
+// operator-pre-authored VLAN/L2VNI is reused rather than duplicated. It is shared
+// by the bridged and irb service composites — an irb integrates routing and
+// bridging, so it creates the same L2 domain a bridged service does and adds an
+// SVI gateway on top, while a bridged service creates it and adds an access
+// membership (the two halves of the type table in irb-service-redesign.md §3).
+// Its §15 reverse is destroyBridgeDomain (reference-aware — it reaps only on the
+// last consumer). Returns whether this call created the VLAN (it did not already
+// exist).
+func (n *Node) createBridgeDomain(ctx context.Context, cs *ChangeSet, vlanID int, macvpnDef *spec.MACVPNSpec, macvpnName string) (createdVLAN bool, err error) {
+	createdVLAN = n.GetIntent("vlan|"+strconv.Itoa(vlanID)) == nil
+	vlanCS, err := n.CreateVLAN(ctx, vlanID, VLANConfig{})
+	if err != nil {
+		return false, fmt.Errorf("create VLAN %d: %w", vlanID, err)
+	}
+	cs.Merge(vlanCS)
+	// Bind the L2VNI only when the macvpn actually carries one (evpn overlay). A
+	// local bridge references a macvpn purely for its vlan_id (VNI 0, no overlay);
+	// BindMACVPN there would write a VXLAN_TUNNEL_MAP with VNI 0 (schema-refused)
+	// and require a VTEP the local service does not need.
+	if macvpnDef != nil && macvpnDef.VNI > 0 {
+		mvCS, err := n.BindMACVPN(ctx, vlanID, macvpnName)
+		if err != nil {
+			return false, fmt.Errorf("bind macvpn %s: %w", macvpnName, err)
+		}
+		cs.Merge(mvCS)
+	}
+	return createdVLAN, nil
+}
+
+// destroyBridgeDomain is the §15 reverse of createBridgeDomain: it reaps the VLAN
+// and its L2VNI on the last consumer. Reference-aware — it deletes only when the
+// VLAN is childless save for the L2VNI it co-reaps (any remaining member, SVI, or
+// binding keeps the domain alive), so it is safe whichever binding is removed
+// last. The L2VNI (macvpn, a child of the VLAN) is reaped first, then the VLAN.
+// arpSuppression mirrors what BindMACVPN wrote. A no-op for vlanID <= 0 (routed).
+func (n *Node) destroyBridgeDomain(cs *ChangeSet, vlanID, l2vni int, arpSuppression bool) error {
+	if vlanID <= 0 {
+		return nil
+	}
+	macvpnChild := "macvpn|" + strconv.Itoa(vlanID)
+	if !n.childlessExcept("vlan|"+strconv.Itoa(vlanID), macvpnChild) {
+		return nil
+	}
+	if l2vni > 0 {
+		cs.Deletes(deleteVniMapConfig(l2vni, VLANName(vlanID)))
+		if arpSuppression {
+			cs.Deletes(disableArpSuppressionConfig(VLANName(vlanID)))
+		}
+		if err := n.deleteIntent(cs, macvpnChild); err != nil {
+			return err
+		}
+	}
+	cs.Deletes(deleteVlanConfig(vlanID))
+	return n.deleteIntent(cs, "vlan|"+strconv.Itoa(vlanID))
+}
+
 // vlanPolicyServiceName returns the name of the irb service bound to vlanID when
 // that service carries per-member policy (a filter or QoS), else "". Such policy
 // is delivered to the VLAN's member ports because SONiC cannot bind an ACL/QoS to
@@ -339,18 +398,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		if gwIP, _ := irbGateway(opts, macvpnDef); gwIP == "" && !irbAuthored {
 			return nil, fmt.Errorf("irb-type service '%s' needs a gateway address — set anycast_ip on its macvpn, pass --ip, or run configure-irb first", serviceName)
 		}
-	case canBridge && vlanID > 0 && !n.reconstructing:
-		// A bridged / evpn-bridged service delivers onto an access port that
-		// must already be a member of the pre-existing bridge domain — the VLAN
-		// and the membership are authored separately (create-vlan, bind-macvpn
-		// for the overlay, configure-interface for membership), each with one
-		// owner (§6). The service requires them; it no longer creates them.
-		if n.GetIntent("vlan|"+strconv.Itoa(vlanID)) == nil {
-			return nil, fmt.Errorf("VLAN %d does not exist — create it (and bind-macvpn for evpn) before applying service '%s'", vlanID, serviceName)
-		}
-		if !n.isVLANMember(i.name, vlanID) {
-			return nil, fmt.Errorf("interface %s is not a member of VLAN %d — configure-interface it into the VLAN before applying service '%s'", i.name, vlanID, serviceName)
-		}
+		// No bridged branch: a bridged / evpn-bridged service is a composite that
+		// assembles the VLAN, its L2VNI overlay, and this port's access membership
+		// below (reusing any operator-pre-authored piece, §2). Nothing must pre-exist
+		// — the only requirement, a VLAN id, is already enforced by the per-type
+		// validation above.
 	}
 
 	// Per-member policy delivery gate (§7): an irb service's filter/QoS is
@@ -547,28 +599,38 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Primitives create parent intents — must precede interface intent write (I4).
 	// =========================================================================
 
-	// Bridge domain for an irb service — the VLAN and its L2VNI overlay, which
-	// the composite assembles (intent-idempotent: CreateVLAN/BindMACVPN check
-	// their intents and reuse an operator-authored piece). The SVI gateway is
-	// composed after the VRF block below (it parents to both vlan and vrf).
-	// Membership is NOT composed — which ports belong is a service-agnostic
-	// topology fact authored by configure-interface (irb-service-redesign.md §3).
-	if isIRB {
-		vlanCS, err := n.CreateVLAN(ctx, vlanID, VLANConfig{})
-		if err != nil {
-			return nil, fmt.Errorf("create VLAN %d: %w", vlanID, err)
+	// L2 bridge domain — the VLAN and, for an evpn overlay, its L2VNI. Created by
+	// both bridge-domain types (canBridge): an irb integrates routing and bridging,
+	// so it creates the same L2 domain a bridged service does and adds an SVI
+	// gateway after the VRF block below; a bridged service creates it and adds this
+	// port's access membership just below. createBridgeDomain is idempotent (it
+	// reuses an operator-authored VLAN/L2VNI) and its §15 reverse is
+	// destroyBridgeDomain, called on the last consumer in RemoveService (§2, §30).
+	if canBridge && vlanID > 0 {
+		if _, err := n.createBridgeDomain(ctx, cs, vlanID, macvpnDef, svc.MACVPN); err != nil {
+			return nil, err
 		}
-		cs.Merge(vlanCS)
-		// Bind the L2VNI only when the macvpn actually carries one (evpn-irb). A
-		// local irb references a macvpn purely for its vlan_id (VNI 0, no overlay);
-		// BindMACVPN there would write a VXLAN_TUNNEL_MAP with VNI 0 (schema-
-		// refused) and require a VTEP the local service does not need.
-		if macvpnDef != nil && macvpnDef.VNI > 0 {
-			mvCS, err := n.BindMACVPN(ctx, vlanID, svc.MACVPN)
-			if err != nil {
-				return nil, fmt.Errorf("bind macvpn %s: %w", svc.MACVPN, err)
+		// No created_vlan flag: destroyBridgeDomain reaps on last-consumer
+		// childlessness, the same rule the VRF and SVI reaps use, so it works for a
+		// VLAN shared across ports whichever binding is removed first. An irb leaves
+		// the VLAN standing for its independent members (§3).
+	}
+
+	// Access membership — the bridged / evpn-bridged delivery point: this port
+	// joins the L2 domain. (The irb delivery point is the SVI, created after the
+	// VRF block; a bridged service has no SVI.) Idempotent: skipped when the port is
+	// already a member (operator-authored or a sibling service). No provenance flag
+	// — RemoveService reaps this membership on the last consumer (childless), the
+	// same last-consumer rule as the SVI/VRF/VLAN reaps. Gated by the trunk-
+	// eligibility check, like configure-interface (§7).
+	if canBridge && !isIRB && vlanID > 0 && !n.isVLANMember(i.name, vlanID) {
+		if !n.reconstructing {
+			if err := n.refuseTrunkOnPolicyVLAN(i.name, vlanID); err != nil {
+				return nil, err
 			}
-			cs.Merge(mvCS)
+		}
+		if err := i.createAccessMembership(cs, vlanID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -658,7 +720,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// the binding's parent (the same record bind-acl/bind-qos/bgp-peer
 	// hang off), joining the existing sub-resource family
 	// (…|acl|ingress, …|qos, …|bgp-peer). See irb-service-redesign.md §5.
-	if err := i.ensureInterfaceIntent(cs); err != nil {
+	if err := i.createInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
 	bindingParents := append([]string{"interface|" + i.name}, intentParents...)
@@ -1455,6 +1517,18 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
 				return nil, err
 			}
+		case identity.Operation == sonic.OpConfigureInterface && identity.Params[sonic.FieldVLANID] != "" && !deliveryOnly:
+			// This port was an access member of the VLAN the removed service
+			// overlapped; reap the membership now the binding (its child) is gone.
+			// Last-consumer, no provenance — the same rule the SVI and VRF reaps use:
+			// an operator's configure-interface membership that a service overlapped
+			// is reaped with it. An operator membership no service ever overlapped
+			// keeps its binding-free identity and fires no removeService, so it
+			// survives (§15). destroyAccessMembership is the reverse of the
+			// createAccessMembership this teardown undoes.
+			if err := i.destroyAccessMembership(cs, bindingInt(identity.Params[sonic.FieldVLANID])); err != nil {
+				return nil, err
+			}
 		case identity.Operation == sonic.OpInterfaceInit:
 			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
 				return nil, err
@@ -1488,11 +1562,23 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 			return nil, err
 		}
 	}
-	// The VLAN intent is not reaped here. Though the composite ensures it on
-	// apply (CreateVLAN, idempotent), its lifecycle belongs to the members and
-	// create-vlan — the L2 bridge domain outlives the L3 service (membership
-	// independence, irb-service-redesign.md §3). It is reaped when its last
-	// member leaves, not when a service does.
+	// Reap the L2 bridge domain on the last consumer — the bridged mirror of the
+	// routed VRF reap (isLastIPVPN) and the irb SVI reap: last-consumer, keyed on
+	// destroyBridgeDomain — the §15 reverse of createBridgeDomain — reaps the VLAN
+	// and its L2VNI on the last consumer (reference-aware, the same last-consumer
+	// rule the SVI and VRF reaps use). This port's membership + binding were
+	// deregistered from the VLAN above, so it is childless save for the L2VNI unless
+	// another member, SVI, or binding still needs it.
+	//
+	// Bridged only (!isIRB). For an irb the VLAN + L2VNI are the EVPN bridge domain,
+	// which serves the overlay (remote members, the distributed anycast gateway)
+	// independently of local membership, so an irb leaves them standing even when
+	// locally childless (irb-service-redesign.md §3) — the one documented exception.
+	if !deliveryOnly && !isIRB {
+		if err := n.destroyBridgeDomain(cs, bindingInt(b[sonic.FieldVLANID]), bindingInt(b["l2vni"]), b["arp_suppression"] == "true"); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := n.render(cs); err != nil {
 		return nil, err

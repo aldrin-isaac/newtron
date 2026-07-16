@@ -342,27 +342,14 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # 8d: Apply svc-bridged on sw1:Eth1 — bridge domain first (VLAN 200, no VNI).
-  - name: create-vlan200
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/create-vlan
-    params: {id: 200}
-
-  - name: member-eth4-vlan200
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet4/configure-interface
-    params: {vlan_id: 200, tagged: false}
-
+  # 8d: Apply svc-bridged on sw1:Eth4 — the composite assembles the bridge domain
+  # (VLAN 200, no VNI) and this port's access membership; nothing pre-authored.
   - name: apply-svc-bridged-sw1
     action: newtron
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/interfaces/Ethernet4/apply-service
-    params: {service: svc-bridged}
+    params: {service: svc-bridged, vlan: 200}
 
   - name: verify-bridged-binding-sw1
     action: newtron
@@ -371,14 +358,23 @@ steps:
     expect:
       jq: '.exists == true'
 
-  - name: verify-vlan200-sw1
+  - name: verify-vlan200-composed-sw1
     action: newtron
     devices: [switch1]
     url: /nodes/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
       jq: '.exists == true'
 
-  # 8e: Remove svc-bridged from sw1:Eth1
+  - name: verify-member-eth4-composed-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan200%7CEthernet4/exists
+    expect:
+      jq: '.exists == true'
+
+  # 8e: Remove svc-bridged — the composite reaps this port's membership and the
+  # VLAN it created on the last consumer (§24: per-interface membership dies with
+  # the service; the shared VLAN is reaped once childless). No manual teardown.
   - name: remove-svc-bridged-sw1
     action: newtron
     devices: [switch1]
@@ -392,21 +388,14 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # Bridge-domain teardown (§15) before asserting the VLAN is gone.
-  - name: teardown-eth4-vlan200
+  - name: verify-member-eth4-reaped
     action: newtron
     devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet4/unconfigure-interface
+    url: /nodes/{{device}}/configdb/VLAN_MEMBER/Vlan200%7CEthernet4/exists
+    expect:
+      jq: '.exists == false'
 
-  - name: delete-vlan200-teardown
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/delete-vlan
-    params: {id: 200}
-
-  - name: verify-vlan200-removed
+  - name: verify-vlan200-reaped
     action: newtron
     devices: [switch1]
     url: /nodes/{{device}}/configdb/VLAN/Vlan200/exists
