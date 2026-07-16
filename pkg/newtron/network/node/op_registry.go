@@ -254,10 +254,11 @@ func buildOpRegistry() map[string]*OpSpec {
 				required(sonic.FieldName), required(sonic.FieldACLType), required(sonic.FieldStage),
 				caller(sonic.FieldPorts), caller(sonic.FieldDescription),
 				// Service-derived ACLs (content-hashed, written by ApplyService)
-				// additionally record their rule set, source filter, and — for an
-				// irb-type service — the VLAN their rules are qualified by (§24/§25,
-				// §7). The VLAN lets the replay rebuild the same vlan-scoped rules.
-				recorded(sonic.FieldRules), recorded(sonic.FieldFilter), recorded(sonic.FieldVLANID),
+				// record their source filter and — for an irb-type service — the
+				// VLAN their rules are qualified by (§24/§25, §7). Those are the
+				// decision; the rules are derived from them at replay, not recorded
+				// (§21). The VLAN lets the replay rebuild the same vlan-scoped rules.
+				recorded(sonic.FieldFilter), recorded(sonic.FieldVLANID),
 			},
 			Replay: func(ctx context.Context, n *Node, _ *Interface, p map[string]any) error {
 				name := paramString(p, "name")

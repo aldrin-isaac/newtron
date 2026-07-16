@@ -629,17 +629,20 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				// is already included.
 				ports := n.aclPortsFromIntents(ingressACLName, "ingress")
 				cs.Adds(createAclTableConfig(ingressACLName, mapFilterType(filterSpec.Type), "ingress", ports, desc))
-				ruleNames := n.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec, aclVLAN)
+				n.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec, aclVLAN)
+				// The acl intent records the DECISION (its source filter + the VLAN
+				// its rules are qualified by), not the derivation (§21): the rules
+				// are regenerated from the filter at replay and read from the
+				// projected ACL_RULE table at teardown — the rule names are never
+				// consulted, so they are not recorded.
 				aclParams := map[string]string{
 					sonic.FieldName:        ingressACLName,
 					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
 					sonic.FieldStage:       "ingress",
 					sonic.FieldPorts:       ports,
 					sonic.FieldDescription: desc,
-					sonic.FieldRules:       strings.Join(ruleNames, ","),
 					sonic.FieldFilter:      svc.IngressFilter,
 				}
-				// Record the VLAN so the replay rebuilds vlan-qualified rules (§7).
 				if aclVLAN > 0 {
 					aclParams[sonic.FieldVLANID] = fmt.Sprintf("%d", aclVLAN)
 				}
@@ -662,14 +665,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				desc := fmt.Sprintf("Egress filter for %s", serviceName)
 				ports := n.aclPortsFromIntents(egressACLName, "egress")
 				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", ports, desc))
-				ruleNames := n.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec, aclVLAN)
+				n.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec, aclVLAN)
 				aclParams := map[string]string{
 					sonic.FieldName:        egressACLName,
 					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
 					sonic.FieldStage:       "egress",
 					sonic.FieldPorts:       ports,
 					sonic.FieldDescription: desc,
-					sonic.FieldRules:       strings.Join(ruleNames, ","),
 					sonic.FieldFilter:      svc.EgressFilter,
 				}
 				if aclVLAN > 0 {
@@ -1004,9 +1006,9 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 			children := make([]string, len(aclIntent.Children))
 			copy(children, aclIntent.Children)
 
-			// Delete rule entries. Two sources: per-rule DAG children (acl|NAME|RULE)
-			// or FieldRules CSV in intent params (ApplyService creates rules without
-			// per-rule intents — §10.16 integration is deferred).
+			// Delete rule entries. A standalone ACL carries per-rule DAG children
+			// (acl|NAME|RULE); a service ACL writes its rules inline (no per-rule
+			// intents), so those are read from the projected ACL_RULE table below.
 			hasRuleChildren := false
 			for _, child := range children {
 				if intentKind(child) == "acl" {
