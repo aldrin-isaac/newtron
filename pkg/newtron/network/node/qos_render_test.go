@@ -1,7 +1,6 @@
 package node
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
@@ -42,41 +41,13 @@ func TestMemberPolicy_QoSBindsMembers(t *testing.T) {
 	irbQoSBinding(n, "400", "QOS1", "svc-a")
 
 	cs := NewChangeSet(n.Name(), "test")
-	if err := n.bindMemberQoS(cs, 400); err != nil {
-		t.Fatalf("bindMemberQoS: %v", err)
-	}
+	n.bindMemberQoS(cs, 400)
 	assertChange(t, cs, "PORT_QOS_MAP", "Ethernet0", ChangeAdd)
 	assertChange(t, cs, "PORT_QOS_MAP", "Ethernet4", ChangeAdd)
 	assertNoChange(t, cs, "PORT_QOS_MAP", "Vlan400")
 }
 
-// TestMemberPolicy_QoSConflict pins the fail-closed conflict (§7): a trunk
-// member on two serviced VLANs whose services carry different QoS policies is
-// refused before any write, naming both services — PORT_QOS_MAP is per-port with
-// no VLAN qualifier, so only one policy could ever be honored.
-func TestMemberPolicy_QoSConflict(t *testing.T) {
-	n := testDevice()
-	sp := n.SpecProvider.(*testSpecProvider)
-	sp.qosPolicies["QOS_A"] = &spec.QoSPolicy{}
-	sp.qosPolicies["QOS_B"] = &spec.QoSPolicy{}
-	// Ethernet0 is a trunk member of BOTH VLAN 400 and 500.
-	trunkMember(n, "Ethernet0", "400")
-	trunkMember(n, "Ethernet0", "500")
-	irbQoSBinding(n, "400", "QOS_A", "svc-a")
-	irbQoSBinding(n, "500", "QOS_B", "svc-b")
-
-	cs := NewChangeSet(n.Name(), "test")
-	err := n.bindMemberQoS(cs, 400)
-	if err == nil || !strings.Contains(err.Error(), "QoS conflict") {
-		t.Fatalf("shared trunk member with two QoS policies must be refused, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "svc-a") || !strings.Contains(err.Error(), "svc-b") {
-		t.Fatalf("conflict must name both services, got %v", err)
-	}
-	// Same policy on both VLANs is NOT a conflict — the member honors one policy.
-	sp.qosPolicies["QOS_B"] = sp.qosPolicies["QOS_A"]
-	irbQoSBinding(n, "500", "QOS_A", "svc-b")
-	if err := n.bindMemberQoS(NewChangeSet(n.Name(), "test"), 400); err != nil {
-		t.Fatalf("same policy on both VLANs must not conflict, got %v", err)
-	}
-}
+// The trunk-member QoS conflict is no longer a bindMemberQoS concern: a QoS-bearing
+// irb service is refused on a VLAN with any trunk (multi-VLAN) member at apply/join
+// time, so a member reaching bindMemberQoS is always single-VLAN. That gate is
+// covered by TestMemberPolicy_TrunkGate (service_bridgedomain_test.go).

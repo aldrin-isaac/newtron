@@ -455,12 +455,6 @@ var Schema = map[string]TableSchema{
 			"ICMP_TYPE":         {Type: FieldInt, Range: intRange(0, 255)},
 			"ICMP_CODE":         {Type: FieldInt, Range: intRange(0, 255)},
 			"ETHER_TYPE":        {Type: FieldString, Pattern: `^(0x[0-9a-fA-F]+|\d+)$`},
-			// YANG: sonic-acl.yang ACL_RULE/VLAN_ID (uint16 1..4095) — the outer
-			// VLAN match. aclorch.cpp maps it to SAI_ACL_ENTRY_ATTR_FIELD_OUTER_
-			// VLAN_ID; an irb-type service VLAN-qualifies its per-member rule with
-			// it so a trunk member on two service-VLANs receives the union of two
-			// vlan-scoped rule sets, not a collision (irb-service-redesign.md §7).
-			"VLAN_ID":           {Type: FieldInt, Range: intRange(1, 4095)},
 			"DSCP":              {Type: FieldInt, Range: intRange(0, 63)},
 			"TC":                {Type: FieldInt, Range: intRange(0, 7)},
 			"IN_PORTS":          {Type: FieldString},

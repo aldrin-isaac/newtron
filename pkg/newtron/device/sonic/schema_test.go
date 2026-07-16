@@ -151,24 +151,6 @@ func TestValidateEntry_VLAN_ValidKey(t *testing.T) {
 	}
 }
 
-func TestValidateEntry_ACLRule_VLANIDQualifier(t *testing.T) {
-	// An irb-service VLAN-qualifies its per-member rule (§7): VLAN_ID is a
-	// valid ACL_RULE field in 1..4095, and out-of-range is refused (fail-closed).
-	if err := Schema["ACL_RULE"].ValidateEntry("ACL_RULE", "FILTER1_IN_ab12cd34|RULE_10", map[string]string{
-		"PRIORITY":      "9990",
-		"PACKET_ACTION": "FORWARD",
-		"VLAN_ID":       "400",
-	}); err != nil {
-		t.Errorf("VLAN-qualified rule (VLAN_ID=400) should validate: %v", err)
-	}
-	if err := Schema["ACL_RULE"].ValidateEntry("ACL_RULE", "FILTER1_IN_ab12cd34|RULE_10", map[string]string{
-		"PACKET_ACTION": "FORWARD",
-		"VLAN_ID":       "5000",
-	}); err == nil {
-		t.Error("ACL_RULE with VLAN_ID=5000 (out of 1..4095) should fail")
-	}
-}
-
 func TestValidateEntry_VLAN_InvalidID(t *testing.T) {
 	err := Schema["VLAN"].ValidateEntry("VLAN", "Vlan100", map[string]string{
 		"vlanid": "99999",

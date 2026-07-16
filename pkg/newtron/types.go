@@ -302,7 +302,7 @@ type ServiceProjectionResult struct {
 
 // ApplyServiceOpts contains options for applying a service to an interface.
 type ApplyServiceOpts struct {
-	IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30")
+	IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30"); for a local irb, the SVI gateway the composite authors
 	VLAN      int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
 	PeerAS    int               // BGP peer AS number (for services with routing.peer_as="request")
 	Params    map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)

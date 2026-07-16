@@ -206,7 +206,6 @@ func init() {
 				ICMPType:       vals["ICMP_TYPE"],
 				ICMPCode:       vals["ICMP_CODE"],
 				EtherType:      vals["ETHER_TYPE"],
-				VLANID:         vals["VLAN_ID"],
 				InPorts:        vals["IN_PORTS"],
 				RedirectPort:   vals["REDIRECT_PORT"],
 			}

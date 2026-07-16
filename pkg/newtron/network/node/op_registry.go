@@ -254,11 +254,10 @@ func buildOpRegistry() map[string]*OpSpec {
 				required(sonic.FieldName), required(sonic.FieldACLType), required(sonic.FieldStage),
 				caller(sonic.FieldPorts), caller(sonic.FieldDescription),
 				// Service-derived ACLs (content-hashed, written by ApplyService)
-				// record their source filter and — for an irb-type service — the
-				// VLAN their rules are qualified by (§24/§25, §7). Those are the
-				// decision; the rules are derived from them at replay, not recorded
-				// (§21). The VLAN lets the replay rebuild the same vlan-scoped rules.
-				recorded(sonic.FieldFilter), recorded(sonic.FieldVLANID),
+				// record their source filter (§24/§25). That is the decision; the
+				// rules are unqualified and derived from the filter at replay, not
+				// recorded (§21).
+				recorded(sonic.FieldFilter),
 			},
 			Replay: func(ctx context.Context, n *Node, _ *Interface, p map[string]any) error {
 				name := paramString(p, "name")
@@ -279,7 +278,7 @@ func buildOpRegistry() map[string]*OpSpec {
 				}
 				// A service-derived ACL records its source filter; its rules are
 				// written inline at apply (no per-rule intents), so rebuild them
-				// here from the recorded filter + VLAN — otherwise they vanish on
+				// here from the recorded filter — otherwise they vanish on
 				// projection rebuild and the device drifts (§20). Standalone ACLs
 				// (no filter) carry their rules as separate add-acl-rule intents.
 				filterName := paramString(p, "filter")
@@ -291,7 +290,7 @@ func buildOpRegistry() map[string]*OpSpec {
 					return nil // filter removed — leave the ACL rule-less (orphan handling)
 				}
 				cs := NewChangeSet(n.Name(), "device."+sonic.OpCreateACL)
-				n.addACLRulesFromFilterSpec(cs, name, filterSpec, paramInt(p, sonic.FieldVLANID))
+				n.addACLRulesFromFilterSpec(cs, name, filterSpec)
 				return n.render(cs)
 			},
 		},

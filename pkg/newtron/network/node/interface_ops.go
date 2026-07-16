@@ -263,6 +263,15 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		if n.GetIntent(fmt.Sprintf("vlan|%d", cfg.VLAN)) == nil {
 			return nil, fmt.Errorf("VLAN %d does not exist", cfg.VLAN)
 		}
+		// Single-VLAN-member gate (§7): refuse this join if it would make the port
+		// a trunk while it carries an irb service's per-member filter/QoS — that
+		// policy cannot be delivered correctly to a multi-VLAN member. Symmetric
+		// with the apply-service gate. Skipped during replay (enforced at author).
+		if !n.reconstructing {
+			if err := n.refuseTrunkOnPolicyVLAN(i.name, cfg.VLAN); err != nil {
+				return nil, err
+			}
+		}
 		// Trunk membership is multi-valued per interface — each VLAN gets its
 		// own intent record so add/remove are reference-aware §15 mirrors and
 		// replay reconstructs the full trunk set (#224, Intent Round-Trip
@@ -293,11 +302,9 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 			cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(cfg.VLAN)}
 			// Per-member policy (§4): this port just joined a VLAN — if an irb service
 			// is bound on that VLAN's IRB, its policy now reaches this member. QoS
-			// may refuse a shared-trunk conflict (§7).
+			// to this now-joined member (§7; members are single-VLAN by the gate).
 			n.rebindMemberACLs(cs, cfg.VLAN)
-			if err := n.bindMemberQoS(cs, cfg.VLAN); err != nil {
-				return nil, err
-			}
+			n.bindMemberQoS(cs, cfg.VLAN)
 			if err := n.render(cs); err != nil {
 				return nil, err
 			}
@@ -371,11 +378,9 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	cs.OperationParams = map[string]string{"interface": i.name}
 	// Per-member policy (§4): an access member just joined — render any irb-service
 	// policy bound on this VLAN's IRB onto it (no-op for routed config, VLAN==0).
-	// QoS may refuse a shared-trunk conflict (§7).
+	// Fan the service's per-member ACL/QoS to this member (§7).
 	n.rebindMemberACLs(cs, cfg.VLAN)
-	if err := n.bindMemberQoS(cs, cfg.VLAN); err != nil {
-		return nil, err
-	}
+	n.bindMemberQoS(cs, cfg.VLAN)
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
