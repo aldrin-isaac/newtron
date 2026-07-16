@@ -3,8 +3,10 @@ package node
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
@@ -28,6 +30,33 @@ func (n *Node) isVLANMember(intfName string, vlanID int) bool {
 		}
 	}
 	return false
+}
+
+// vlanMemberPorts returns the access-port members of a VLAN — the interfaces an
+// operator joined via configure-interface (untagged) or add-trunk-vlan (tagged),
+// read from the membership intents. An irb service's per-member policy is bound
+// to exactly this set (§4): a member gets the policy iff a service is bound on
+// the VLAN's IRB AND the port is a member. The set is derived from the intent DB,
+// never recorded (§21), so it is correct whichever fact (membership or binding)
+// arrived second. Sorted for a stable ACL_TABLE ports-list (deterministic §48
+// in-place diffs).
+func (n *Node) vlanMemberPorts(vlanID int) []string {
+	want := strconv.Itoa(vlanID)
+	set := map[string]bool{}
+	for resource, intent := range n.IntentsByParam(sonic.FieldVLANID, want) {
+		switch intent.Operation {
+		case sonic.OpConfigureInterface, sonic.OpAddTrunkVLAN:
+			if name := resourceInterfaceName(resource); name != "" {
+				set[name] = true
+			}
+		}
+	}
+	ports := make([]string, 0, len(set))
+	for p := range set {
+		ports = append(ports, p)
+	}
+	sort.Strings(ports)
+	return ports
 }
 
 // InterfaceExists checks if an interface exists.
@@ -234,6 +263,15 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		if n.GetIntent(fmt.Sprintf("vlan|%d", cfg.VLAN)) == nil {
 			return nil, fmt.Errorf("VLAN %d does not exist", cfg.VLAN)
 		}
+		// Single-VLAN-member gate (§7): refuse this join if it would make the port
+		// a trunk while it carries an irb service's per-member filter/QoS — that
+		// policy cannot be delivered correctly to a multi-VLAN member. Symmetric
+		// with the apply-service gate. Skipped during replay (enforced at author).
+		if !n.reconstructing {
+			if err := n.refuseTrunkOnPolicyVLAN(i.name, cfg.VLAN); err != nil {
+				return nil, err
+			}
+		}
 		// Trunk membership is multi-valued per interface — each VLAN gets its
 		// own intent record so add/remove are reference-aware §15 mirrors and
 		// replay reconstructs the full trunk set (#224, Intent Round-Trip
@@ -262,6 +300,11 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 			}
 			cs.ReverseOp = "interface." + sonic.OpRemoveTrunkVLAN
 			cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(cfg.VLAN)}
+			// Per-member policy (§4): this port just joined a VLAN — if an irb service
+			// is bound on that VLAN's IRB, its policy now reaches this member. QoS
+			// to this now-joined member (§7; members are single-VLAN by the gate).
+			n.rebindMemberACLs(cs, cfg.VLAN)
+			n.bindMemberQoS(cs, cfg.VLAN)
 			if err := n.render(cs); err != nil {
 				return nil, err
 			}
@@ -333,6 +376,11 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 
 	cs.ReverseOp = "interface.unconfigure-interface"
 	cs.OperationParams = map[string]string{"interface": i.name}
+	// Per-member policy (§4): an access member just joined — render any irb-service
+	// policy bound on this VLAN's IRB onto it (no-op for routed config, VLAN==0).
+	// Fan the service's per-member ACL/QoS to this member (§7).
+	n.rebindMemberACLs(cs, cfg.VLAN)
+	n.bindMemberQoS(cs, cfg.VLAN)
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
@@ -367,6 +415,12 @@ func (i *Interface) RemoveTrunkVLAN(ctx context.Context, vlanID int) (*ChangeSet
 		return nil, err
 	}
 	cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(vlanID)}
+	// Per-member policy (§4): the member left — its binding goes with it, so
+	// drop it from any irb-service ACL bound on this VLAN (the membership intent
+	// is already deleted, so aclPortsFromIntents no longer includes it), and
+	// remove its QoS rows unless another serviced VLAN still binds it.
+	n.rebindMemberACLs(cs, vlanID)
+	n.unbindMemberQoS(cs, i.name)
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
@@ -397,6 +451,22 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 	// Snapshot the children list since removals mutate it.
 	children := make([]string, len(intent.Children))
 	copy(children, intent.Children)
+
+	// Per-member policy (§4): this interface is leaving every VLAN it belonged to —
+	// its access VLAN and each trunk VLAN. Collect them now (the intents still
+	// exist); after teardown removes the memberships, re-render each VLAN's
+	// irb-service ACLs so this port drops out of their ports-list.
+	leftVLANs := map[int]bool{}
+	if v, _ := strconv.Atoi(intent.Params[sonic.FieldVLANID]); v > 0 {
+		leftVLANs[v] = true
+	}
+	for _, childKey := range children {
+		if ci := n.GetIntent(childKey); ci != nil && ci.Operation == sonic.OpAddTrunkVLAN {
+			if v, _ := strconv.Atoi(ci.Params[sonic.FieldVLANID]); v > 0 {
+				leftVLANs[v] = true
+			}
+		}
+	}
 
 	for _, childKey := range children {
 		childIntent := n.GetIntent(childKey)
@@ -492,6 +562,13 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 	if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
 		return nil, err
 	}
+	// Now that every membership intent (access + trunk) is gone, re-render the
+	// irb-service ACLs of each VLAN this port left, and drop its QoS rows (the
+	// interface belongs to no serviced VLAN anymore) — §4.
+	for v := range leftVLANs {
+		n.rebindMemberACLs(cs, v)
+	}
+	n.unbindMemberQoS(cs, i.name)
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}

@@ -254,21 +254,44 @@ func buildOpRegistry() map[string]*OpSpec {
 				required(sonic.FieldName), required(sonic.FieldACLType), required(sonic.FieldStage),
 				caller(sonic.FieldPorts), caller(sonic.FieldDescription),
 				// Service-derived ACLs (content-hashed, written by ApplyService)
-				// additionally record their rule set and source filter (§24/§25).
-				recorded(sonic.FieldRules), recorded(sonic.FieldFilter),
+				// record their source filter (§24/§25). That is the decision; the
+				// rules are unqualified and derived from the filter at replay, not
+				// recorded (§21).
+				recorded(sonic.FieldFilter),
 			},
 			Replay: func(ctx context.Context, n *Node, _ *Interface, p map[string]any) error {
 				name := paramString(p, "name")
 				if name == "" {
 					return fmt.Errorf("create-acl: missing 'name' param")
 				}
-				_, err := n.CreateACL(ctx, name, ACLConfig{
+				// The recorded ports seed the table; for a service ACL they are a
+				// derived snapshot that can be stale (members joined/left after the
+				// ACL was created), so RebuildProjectionFromIntents recomputes them
+				// in a post-replay finalization once the whole intent DB is loaded.
+				if _, err := n.CreateACL(ctx, name, ACLConfig{
 					Type:        paramString(p, "type"),
 					Stage:       paramString(p, "stage"),
 					Ports:       paramString(p, "ports"),
 					Description: paramString(p, "description"),
-				})
-				return err
+				}); err != nil {
+					return err
+				}
+				// A service-derived ACL records its source filter; its rules are
+				// written inline at apply (no per-rule intents), so rebuild them
+				// here from the recorded filter — otherwise they vanish on
+				// projection rebuild and the device drifts (§20). Standalone ACLs
+				// (no filter) carry their rules as separate add-acl-rule intents.
+				filterName := paramString(p, "filter")
+				if filterName == "" {
+					return nil
+				}
+				filterSpec, err := n.GetFilter(filterName)
+				if err != nil || filterSpec == nil {
+					return nil // filter removed — leave the ACL rule-less (orphan handling)
+				}
+				cs := NewChangeSet(n.Name(), "device."+sonic.OpCreateACL)
+				n.addACLRulesFromFilterSpec(cs, name, filterSpec)
+				return n.render(cs)
 			},
 		},
 

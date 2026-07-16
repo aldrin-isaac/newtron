@@ -6,24 +6,18 @@ description: |
 requires: [teardown-overlay]
 
 steps:
-  # Bridge domain + gateway for the evpn-irb service (VLAN 400 = SVC_VLAN400).
-  # Under the delivery-point flip the operator authors the full bridge domain —
-  # L2 overlay (bind-macvpn), membership (configure-interface), L3 overlay
-  # (create-vrf + bind-ipvpn), and the gateway (configure-irb) — before the
-  # service binds to the IRB (irb-service-redesign.md §3, §6).
+  # The operator authors only the membership container — the VLAN and its member
+  # ports. apply-service is a composite: it assembles the rest of the bridge
+  # domain it delivers — the L2VNI overlay (from the service's macvpn), the VRF +
+  # L3VNI (from its ipvpn), and the anycast SVI gateway (from the macvpn's
+  # anycast_ip/anycast_mac) — binds on the IRB (Vlan400), and fans the filter to
+  # the members. The fabric is not pre-authored (irb-service-redesign.md §3).
   - name: create-vlan400
     action: newtron
     devices: [switch1, switch2]
     method: POST
     url: /nodes/{{device}}/create-vlan
     params: {id: 400}
-
-  - name: bind-macvpn400
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/bind-macvpn
-    params: {vlan_id: 400, macvpn: SVC_VLAN400}
 
   - name: member-eth3-vlan400
     action: newtron
@@ -32,29 +26,9 @@ steps:
     url: /nodes/{{device}}/interfaces/Ethernet3/configure-interface
     params: {vlan_id: 400, tagged: true}
 
-  - name: create-vrf-irb
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/create-vrf
-    params: {name: Vrf_IRB}
-
-  - name: bind-ipvpn-irb
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/bind-ipvpn
-    params: {ipvpn: IRB}
-
-  # The SVI gateway — configure-irb is its sole author (§6).
-  - name: configure-irb-vlan400
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/configure-irb
-    params: {vlan_id: 400, vrf: Vrf_IRB, ip_address: "10.4.0.1/24", anycast_mac: "00:00:00:01:04:00"}
-
-  # 8a: Apply svc-evpn-irb on the IRB (Vlan400), both switches.
+  # 8a: Apply svc-evpn-irb on the IRB (Vlan400) — the composite assembles
+  # macvpn/VRF/SVI and binds to the gateway. The anycast gateway comes from the
+  # SVC_VLAN400 macvpn (§7); no per-apply gateway params needed.
   - name: apply-svc-evpn-irb-sw1
     action: newtron
     devices: [switch1]
@@ -83,6 +57,34 @@ steps:
     url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice/exists
     expect:
       jq: '.exists == true'
+
+  # Per-member policy (§38 real-device witness): svc-evpn-irb carries
+  # ingress_filter FILTER_IRB. The service binds on the IRB, but its ACL is bound
+  # to the VLAN's member ports (§4, §7) — the device must accept an ACL_TABLE
+  # whose ports are the members. Ethernet3 is single-VLAN, so rules are
+  # unqualified (no VLAN_ID) — per-port == per-VLAN.
+  - name: capture-irb-acl-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CVlan400%7Cservice
+    capture:
+      acl: .ingress_acl
+
+  # The ACL binds to the member (Ethernet3), never the IRB (Vlan400).
+  - name: verify-acl-binds-member-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_TABLE/{{captured.acl}}
+    expect:
+      jq: '.ports | contains("Ethernet3") and (contains("Vlan400") | not)'
+
+  # The rule is unqualified — no VLAN_ID (single-VLAN member, §7).
+  - name: verify-acl-rule-unqualified-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_RULE/{{captured.acl}}%7CRULE_10
+    expect:
+      jq: '.PACKET_ACTION == "FORWARD" and (has("VLAN_ID") | not)'
 
   # Verify VLAN 400 created
   - name: verify-vlan400-sw1
@@ -122,6 +124,21 @@ steps:
     url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400
     expect:
       jq: '.vrf_name == "Vrf_IRB"'
+
+  # The composite sourced the anycast gateway from the SVC_VLAN400 macvpn (§7).
+  - name: verify-svi-anycast-ip-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400%7C10.4.0.1%2F24/exists
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-sag-anycast-mac-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/SAG_GLOBAL/IPv4
+    expect:
+      jq: '.gwmac == "00:00:00:01:04:00"'
 
   # Configure host sub-interfaces while waiting (overlap with EVPN convergence)
   - name: host3-configure-subintf
@@ -217,6 +234,14 @@ steps:
     expect:
       jq: '.exists == true'
 
+  # The composed SVI survives the refresh (deliveryOnly — no flap, §48, #624).
+  - name: verify-svi-survives-refresh-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400/exists
+    expect:
+      jq: '.exists == true'
+
   # 8c: Remove service from the IRB (both switches)
   - name: remove-svc-sw1
     action: newtron
@@ -244,48 +269,48 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # The SVI survives remove-service — configure-irb owns it (§6).
-  - name: verify-svi-survives-remove-sw1
+  # The per-member ACL is torn down with the binding — removeSharedACL deletes
+  # the last user's rules (§4), leaving no orphan rule to drift.
+  - name: verify-acl-removed-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ACL_TABLE/{{captured.acl}}/exists
+    expect:
+      jq: '.exists == false'
+
+  # The SVI is reaped by remove-service — the composite created it, so it owns the
+  # teardown on the last consumer (reap-on-last-consumer, §15). The VRF and L3VNI
+  # go the same way; the VLAN, its L2VNI, and membership survive (§3).
+  - name: verify-svi-reaped-on-remove-sw1
     action: newtron
     devices: [switch1]
     url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400/exists
     expect:
-      jq: '.exists == true'
+      jq: '.exists == false'
 
-  # Bridge-domain + gateway teardown (§15), reverse of setup.
-  - name: unconfigure-irb-vlan400
+  # The shared VRF is reaped too — sw1 was its last ipvpn consumer (§15).
+  - name: verify-vrf-reaped-on-remove-sw1
     action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/unconfigure-irb
-    params: {vlan_id: 400}
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB/exists
+    expect:
+      jq: '.exists == false'
 
-  - name: unbind-ipvpn-irb-teardown
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/unbind-ipvpn
-    params: {ipvpn: IRB}
-
-  - name: delete-vrf-irb-teardown
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/delete-vrf
-    params: {name: Vrf_IRB}
-
-  - name: teardown-eth3-vlan400
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet3/unconfigure-interface
-
+  # Bridge-domain teardown (§15): remove-service already reaped the SVI, VRF, and
+  # L3VNI, so the operator tears down only what survived — the L2VNI overlay, the
+  # membership, and the VLAN container.
   - name: unbind-macvpn400-teardown
     action: newtron
     devices: [switch1, switch2]
     method: POST
     url: /nodes/{{device}}/unbind-macvpn
     params: {vlan_id: 400}
+
+  - name: teardown-eth3-vlan400
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet3/unconfigure-interface
 
   - name: delete-vlan400-teardown
     action: newtron

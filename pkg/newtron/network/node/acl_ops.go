@@ -11,33 +11,137 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
-// aclPortsFromIntents collects all interface names bound to an ACL by scanning
-// intent records. Checks both standalone ACL binding intents (interface|X|acl|DIR)
-// and service intents (interface|X with ingress_acl/egress_acl params).
-// Returns the ports as a comma-separated string.
+// aclPortsFromIntents computes the port set an ACL binds to by scanning the
+// intent DB — derived, never recorded (§21). It reads two binding kinds:
+//
+//   - Standalone ACL bindings ("interface|X|acl|DIR") bind X directly.
+//   - Service bindings ("interface|X|service", OpApplyService) that reference the
+//     ACL. A per-port service (routed/bridged) binds its own interface. An
+//     irb-type service binds the IRB (VlanN) — but a VLAN interface is not an ACL
+//     bind point (§7), so an irb service's ACL is bound to the VLAN's member ports
+//     instead: the IRB binding is expanded to the current members. Order-
+//     independent by construction: whether the members or the binding was
+//     authored first, the set is the same because both are read from the DB here.
+//
+// Returns the sorted, comma-separated ports for the ACL_TABLE ports field.
 func (n *Node) aclPortsFromIntents(aclName, direction string) string {
-	var ports []string
 	aclField := direction + "_acl" // "ingress_acl" or "egress_acl"
+	set := map[string]bool{}
 	for resource, intent := range n.IntentsByPrefix("interface|") {
 		// Standalone ACL binding intents: "interface|Ethernet0|acl|ingress"
 		if strings.HasSuffix(resource, "|acl|"+direction) {
 			if intent.Params[sonic.FieldACLName] == aclName {
 				parts := strings.SplitN(resource, "|", 3)
 				if len(parts) >= 2 {
-					ports = append(ports, parts[1])
+					set[parts[1]] = true
 				}
 			}
 			continue
 		}
-		// Service intents with ACL: "interface|Ethernet0" (OpApplyService with ingress_acl/egress_acl)
+		// Service bindings ("interface|X|service") referencing the ACL.
 		if intent.Operation == sonic.OpApplyService && intent.Params[aclField] == aclName {
-			if name := resourceInterfaceName(resource); name != "" {
-				ports = append(ports, name)
+			ifName := resourceInterfaceName(resource)
+			if ifName == "" {
+				continue
+			}
+			if interfaceKindOf(ifName) == KindIRB {
+				// An irb service's ACL binds to the VLAN's member ports.
+				for _, m := range n.vlanMemberPorts(bindingInt(intent.Params[sonic.FieldVLANID])) {
+					set[m] = true
+				}
+			} else {
+				set[ifName] = true
 			}
 		}
 	}
+	ports := make([]string, 0, len(set))
+	for p := range set {
+		ports = append(ports, p)
+	}
 	sort.Strings(ports)
 	return strings.Join(ports, ",")
+}
+
+// rebindMemberACLs updates the ACL_TABLE ports-list for every ACL an irb-type
+// service binds on this VLAN — the membership-delta entry point (§4). A member
+// joining or leaving the VLAN changes which ports the ACL binds to, so each
+// affected ACL's ports are recomputed from the intent DB and delivered as an
+// in-place field edit (§48 — the ACL must not bounce; a rule flush would drop
+// traffic on the other members). Call it after the membership intent is written
+// (join) or removed (leave); either way aclPortsFromIntents reflects the change,
+// because writeIntent/deleteIntent update the projection in place. A no-op when
+// no irb service on the VLAN carries a filter.
+func (n *Node) rebindMemberACLs(cs *ChangeSet, vlanID int) {
+	if vlanID <= 0 {
+		return
+	}
+	rendered := map[string]bool{} // "dir|acl" — render each ACL once
+	for resource, intent := range n.IntentsByParam(sonic.FieldVLANID, strconv.Itoa(vlanID)) {
+		if intent.Operation != sonic.OpApplyService {
+			continue
+		}
+		// Only an irb binding (on the IRB) binds its ACL to the members; a
+		// per-port service binds its own interface, unaffected by another
+		// member's join or leave.
+		if interfaceKindOf(resourceInterfaceName(resource)) != KindIRB {
+			continue
+		}
+		for _, dir := range []string{"ingress", "egress"} {
+			aclName := intent.Params[dir+"_acl"]
+			if aclName == "" || rendered[dir+"|"+aclName] {
+				continue
+			}
+			rendered[dir+"|"+aclName] = true
+			if n.GetIntent("acl|"+aclName) == nil {
+				continue // table not created (the service carries no filter this direction)
+			}
+			merged := updateAclPorts(aclName, n.aclPortsFromIntents(aclName, dir))
+			cs.Update(merged.Table, merged.Key, merged.Fields)
+		}
+	}
+}
+
+// reconcileMemberACLPorts recomputes every service ACL's ports-list from the
+// fully-loaded intent DB — the order-independence guarantee (§4), enforced after
+// an incremental replay. During RebuildProjectionFromIntents the intent DB is
+// built step by step, so a per-step update (create-acl, membership, or binding)
+// can compute the ports against a partially-loaded DB; whichever ran last wins,
+// and it may disagree with the final truth. Once every intent is loaded, this
+// pass recomputes each service ACL's bound ports from (binding × members) and
+// delivers the correction as an in-place field edit (§48). A no-op when the ports
+// already match.
+func (n *Node) reconcileMemberACLPorts(ctx context.Context) error {
+	cs := NewChangeSet(n.Name(), "reconcile-acl-ports")
+	done := map[string]bool{}
+	// Scan the service bindings — they name their ingress/egress ACL — rather
+	// than the acl intents: a service ACL is one a binding references, and its
+	// bound ports are the VLAN's members. A standalone ACL (no binding) authors
+	// its own ports and is left untouched.
+	for _, intent := range n.IntentsByPrefix("interface|") {
+		if intent.Operation != sonic.OpApplyService {
+			continue
+		}
+		for _, dir := range []string{"ingress", "egress"} {
+			name := intent.Params[dir+"_acl"]
+			if name == "" || done[dir+"|"+name] {
+				continue
+			}
+			done[dir+"|"+name] = true
+			if _, ok := n.configDB.ACLTable[name]; !ok {
+				continue
+			}
+			want := n.aclPortsFromIntents(name, dir)
+			if n.configDB.ACLTable[name].Ports == want {
+				continue
+			}
+			merged := updateAclPorts(name, want)
+			cs.Update(merged.Table, merged.Key, merged.Fields)
+		}
+	}
+	if len(cs.Changes) == 0 {
+		return nil
+	}
+	return n.render(cs)
 }
 
 // ============================================================================

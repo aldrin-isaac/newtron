@@ -85,9 +85,13 @@ func createAclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []sonic
 	return []sonic.Entry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
 }
 
-// buildAclRuleFields returns the ACL_RULE field map for a filter rule spec.
+// buildAclRuleFields builds the ACL_RULE field map for a filter rule spec.
 // Takes explicit srcIP/dstIP to support prefix-list expansion (Cartesian product)
-// in the service_ops path.
+// in the service_ops path. The rules are unqualified L3 matches: an irb-type
+// service's filter reaches its members only on single-VLAN (access) ports, where
+// per-port == per-VLAN and no VLAN qualifier is needed. A serviced VLAN with a
+// trunk member is refused (SONiC cannot bind an ACL to the IRB, and an outer-VLAN
+// match cannot cover an untagged member) — irb-service-redesign.md §7.
 func buildAclRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]string {
 	fields := map[string]string{
 		"PRIORITY": fmt.Sprintf("%d", 10000-rule.Sequence),
@@ -166,6 +170,8 @@ func updateAclPorts(aclName, ports string) sonic.Entry {
 // computeFilterHash computes the content hash for a filter spec by hashing
 // the ACL_RULE field maps that would be written to CONFIG_DB.
 // Per DESIGN_PRINCIPLES_NEWTRON.md §16 (Content-Hashed Naming): hash the generated fields, not the spec.
+// The hash is over the filter's content alone — rules are unqualified, so two
+// services sharing a filter converge on the same ACL table by design.
 func computeFilterHash(filterSpec *spec.FilterSpec) string {
 	var fieldMaps []map[string]string
 	for _, rule := range filterSpec.Rules {

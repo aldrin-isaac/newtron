@@ -193,12 +193,20 @@ type ServiceSpec struct {
 	// Routing protocol specification
 	Routing *RoutingSpec `json:"routing,omitempty" label:"Routing" tooltip:"BGP / static-routing protocol parameters"`
 
-	// Filters (references to filters)
-	IngressFilter string `json:"ingress_filter,omitempty" label:"Ingress Filter" tooltip:"Reference to a filter applied to ingress traffic on this service" ref:"FilterSpec"`
-	EgressFilter  string `json:"egress_filter,omitempty" label:"Egress Filter" tooltip:"Reference to a filter applied to egress traffic on this service" ref:"FilterSpec"`
+	// Filters (references to filters). On a routed/bridged service the filter
+	// binds to the service's own interface. On an irb-type service it is bound to
+	// the VLAN's member ports (SONiC cannot bind an ACL to the IRB), so it also
+	// inspects intra-VLAN east-west traffic, not only traffic crossing the L3
+	// gateway — deliverable only on single-VLAN members; a VLAN with any trunk
+	// member is refused (irb-service-redesign.md §7).
+	IngressFilter string `json:"ingress_filter,omitempty" label:"Ingress Filter" tooltip:"Reference to an ingress filter. On an irb-type service the filter is realized per member port (SONiC cannot bind an ACL to the IRB), so it also inspects intra-VLAN east-west traffic, not only traffic crossing the L3 gateway. Deliverable only on single-VLAN members: a VLAN with any trunk member is refused." ref:"FilterSpec"`
+	EgressFilter  string `json:"egress_filter,omitempty" label:"Egress Filter" tooltip:"Reference to an egress filter. On an irb-type service the filter is realized per member port (SONiC cannot bind an ACL to the IRB), so it also inspects intra-VLAN east-west traffic, not only traffic crossing the L3 gateway. Deliverable only on single-VLAN members: a VLAN with any trunk member is refused." ref:"FilterSpec"`
 
-	// QoS
-	QoSPolicy string `json:"qos_policy,omitempty" label:"QoS Policy" tooltip:"Reference to a QoS policy bound to interfaces using this service" ref:"QoSPolicy"`
+	// QoS. On an irb-type service the policy is realized per member port (SONiC
+	// cannot bind a QoS map to the IRB). PORT_QOS_MAP has no VLAN qualifier, so a
+	// trunk member would bleed it to other VLANs — a VLAN with any trunk member is
+	// refused at apply/join (irb-service-redesign.md §7).
+	QoSPolicy string `json:"qos_policy,omitempty" label:"QoS Policy" tooltip:"Reference to a QoS policy. On an irb-type service it is realized per member port (SONiC cannot bind a QoS map to the IRB); deliverable only on single-VLAN members — a VLAN with any trunk member is refused." ref:"QoSPolicy"`
 }
 
 // RoutingSpec defines routing protocol specification for a service.

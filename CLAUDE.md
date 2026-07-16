@@ -10,7 +10,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Device LLD | `docs/newtron/device-lld.md` | CONFIG_DB/APP_DB/ASIC_DB/STATE_DB layer, SSH tunneling, ChangeSets |
 | Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Unified pipeline: Intent → Replay → Render → [Deliver], end-to-end traces |
-| IRB Service Redesign | `docs/newtron/irb-service-redesign.md` | Ratified design — IRB as first-class service delivery point; VLAN as membership container; the product rule; §6/§20 amendments applied; phased C→G |
+| IRB Service Redesign | `docs/newtron/irb-service-redesign.md` | Ratified design — IRB as first-class service delivery point; VLAN as membership container; per-member policy derived from binding + membership; §6/§20 amendments applied; phased C→G |
 | newtron HOWTO | `docs/newtron/howto.md` | Operational patterns, provisioning flow |
 | newtrun HLD | `docs/newtrun/hld.md` | E2E test framework design |
 | newtrun LLD | `docs/newtrun/lld.md` | Step actions, suite mode, dependency ordering |
@@ -499,6 +499,27 @@ Before making any change to `service_ops.go`, `*_ops.go`, or any shared code pat
    working features are at risk and how they are protected
 
 Tracking what was working (update this as test suites are validated):
+
+**R-6 targeted sweep 2026-07-15 (irb composite restoration, branch feat/irb-per-member-policy)**:
+the irb-affected suites, both platforms, after restoring `apply-service` as a
+composite (it re-assembles the VLAN/L2VNI/VRF/SVI it delivers — DE-1's decoupling
+was corrected) while keeping the delivery-point flip, plus the §7 fail-closed
+trunk-eligibility gate (a filter/QoS-bearing irb service is refused on a VLAN with
+any multi-VLAN member; rules are unqualified, delivered per-member only on
+single-VLAN ports). **2node-vs-primitive 25/25, 2node-ngdp-primitive 22/22**
+(composite + macvpn-sourced anycast gateway + refresh-keeps-SVI + reap-on-last-
+consumer, cold, both platforms); **1node-vs-config 28/28** loopback (adds
+`47-trunk-gate` — apply + join refusal + single-VLAN happy path); **2node-vs-service
+7/7, 2node-ngdp-service 6/6** (topology-reconcile provision + dataplane + the
+rewritten deprovision + verify-clean). `go test ./...` 25 pkgs + vet green. Two
+non-code failures during the sweep, both diagnosed and dismissed: a test-only SAG
+assertion key (`SAG_GLOBAL/IP` → `IPv4`; the anycast MAC lands correctly, verified
+by direct device query) and the RCA-047-family `config reload` "SwSS not ready"
+cold-boot race (`sonic-cfggen` on the composite config is clean; passes once SwSS
+is up). The service suite caught the one real bug the unit tests + primitive suites
+missed: a local irb's vni=0 macvpn made the composite write a `VXLAN_TUNNEL_MAP`
+with VNI 0 (bind an L2VNI only when `VNI > 0`; regression test added). RCA-051
+documents the ACL/QoS-can't-bind-to-IRB limitation this arc is built around.
 
 **Full-sweep 2026-07-10 (interface-kind Checkpoint 1)**: all 13 suites
 sequentially on feat/interface-kind-scenarios @ post-#432 + the two

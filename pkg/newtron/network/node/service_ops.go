@@ -27,7 +27,7 @@ func (n *Node) InterfaceHasService(name string) bool {
 
 // ApplyServiceOpts contains options for applying a service to an interface.
 type ApplyServiceOpts struct {
-	IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30")
+	IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30"); for a local irb, the SVI gateway the composite authors
 	VLAN      int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
 	PeerAS    int               // BGP peer AS number (for services with routing.peer_as="request")
 	Params    map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
@@ -37,6 +37,69 @@ type ApplyServiceOpts struct {
 func bindingInt(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
+}
+
+// irbGateway resolves the SVI gateway address the composite authors for an irb
+// service. The anycast IP/MAC are a subnet property — identical on every leaf,
+// authored once in the network-scoped macvpn (evpn-irb, §7) — so they come from
+// the macvpn spec. A local irb (no macvpn) takes its per-device gateway IP from
+// the apply-time opts and has no anycast MAC. Either may be empty (e.g. when the
+// operator pre-authored the SVI via configure-irb).
+func irbGateway(opts ApplyServiceOpts, macvpnDef *spec.MACVPNSpec) (ip, mac string) {
+	ip = opts.IPAddress
+	if macvpnDef != nil {
+		if macvpnDef.AnycastIP != "" {
+			ip = macvpnDef.AnycastIP
+		}
+		mac = macvpnDef.AnycastMAC
+	}
+	return ip, mac
+}
+
+// vlanPolicyServiceName returns the name of the irb service bound to vlanID when
+// that service carries per-member policy (a filter or QoS), else "". Such policy
+// is delivered to the VLAN's member ports because SONiC cannot bind an ACL/QoS to
+// the IRB — and that is only correct on single-VLAN members (§7). This identifies
+// the VLANs whose membership is constrained to single-VLAN (access) ports.
+func (n *Node) vlanPolicyServiceName(vlanID int) string {
+	b := n.GetIntent(bindingKey(VLANName(vlanID)))
+	if b == nil {
+		return ""
+	}
+	if b.Params["ingress_acl"] != "" || b.Params["egress_acl"] != "" || b.Params["qos_policy"] != "" {
+		return b.Params[sonic.FieldServiceName]
+	}
+	return ""
+}
+
+// refuseTrunkOnPolicyVLAN enforces the §7 single-VLAN-member invariant from the
+// membership side: a port may not become multi-VLAN (a trunk) while it belongs to
+// any VLAN whose irb service carries a filter/QoS. That policy is delivered per
+// member port and cannot be scoped to one VLAN on a trunk — an unqualified ACL /
+// per-port QoS would bleed to the trunk's other VLANs, and an untagged member
+// cannot be VLAN-matched. Called from every membership-add path with the VLAN
+// being joined; a no-op unless the join makes the port multi-VLAN.
+func (n *Node) refuseTrunkOnPolicyVLAN(member string, joiningVLAN int) error {
+	var others []int
+	for _, v := range n.vlanMembershipsOf(member) {
+		if v != joiningVLAN {
+			others = append(others, v)
+		}
+	}
+	if len(others) == 0 {
+		return nil // the port stays single-VLAN
+	}
+	// The join makes the port multi-VLAN. Refuse if the VLAN being joined, or any
+	// VLAN the port already belongs to, carries a policy-bearing irb service.
+	if svc := n.vlanPolicyServiceName(joiningVLAN); svc != "" {
+		return fmt.Errorf("cannot add %s to VLAN %d as a trunk member: that VLAN has irb service %q carrying a filter/QoS, which SONiC cannot bind to the IRB and cannot deliver to a trunk member (%s would also be in VLANs %v) — remove the policy or keep %s single-VLAN", member, joiningVLAN, svc, member, others, member)
+	}
+	for _, v := range others {
+		if svc := n.vlanPolicyServiceName(v); svc != "" {
+			return fmt.Errorf("cannot make %s a trunk (adding VLAN %d): it is a single-VLAN member of VLAN %d whose irb service %q carries a filter/QoS that cannot be delivered to a trunk member — remove the policy or keep %s single-VLAN", member, joiningVLAN, v, svc, member)
+		}
+	}
+	return nil
 }
 
 // ApplyService applies a service definition to this interface.
@@ -262,17 +325,19 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	switch {
 	case isIRB && !n.reconstructing:
 		// An irb-type service binds to the VLAN's L3 gateway — the IRB (the
-		// capability gate above already fixed the target kind). It requires the
-		// operator to have authored the gateway's identity first (configure-irb),
-		// the LAG rule applied to the gateway: bind only once the interface
-		// exists. configure-irb is the SVI's sole author (§6) — the service
-		// layers overlay + policy onto a gateway it does not create.
+		// delivery-point flip; the capability gate above already fixed the target
+		// kind). The service is a composite: it assembles the VLAN, the L2VNI
+		// overlay, the VRF/L3VNI, and the SVI gateway below, reusing any piece the
+		// operator pre-authored (§2, §30). The one thing it cannot derive is the
+		// gateway address, so require that here — via --ip (the composite authors
+		// the SVI) or a pre-authored SVI (configure-irb).
 		if VLANName(vlanID) != i.name {
 			return nil, fmt.Errorf("irb-type service '%s' is for VLAN %d's IRB (%s) but was applied on %s — apply it on %s", serviceName, vlanID, VLANName(vlanID), i.name, VLANName(vlanID))
 		}
 		irb := n.GetIntent("interface|" + i.name)
-		if irb == nil || irb.Operation != sonic.OpConfigureIRB {
-			return nil, fmt.Errorf("VLAN %d has no IRB — author its gateway with configure-irb before applying irb-type service '%s' (the service binds to the IRB; it no longer creates the SVI)", vlanID, serviceName)
+		irbAuthored := irb != nil && irb.Operation == sonic.OpConfigureIRB
+		if gwIP, _ := irbGateway(opts, macvpnDef); gwIP == "" && !irbAuthored {
+			return nil, fmt.Errorf("irb-type service '%s' needs a gateway address — set anycast_ip on its macvpn, pass --ip, or run configure-irb first", serviceName)
 		}
 	case canBridge && vlanID > 0 && !n.reconstructing:
 		// A bridged / evpn-bridged service delivers onto an access port that
@@ -288,18 +353,27 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
-	// Per-member policy on an irb-type service is realized on the VLAN's member
-	// ports by the product renderer (§4, §7), which is not yet delivered. A VLAN
-	// interface is not an ACL or QoS bind point (§7), so until the renderer
-	// lands an irb service that carries a filter or QoS cannot be honored on the
-	// IRB — refuse it closed rather than silently dropping the policy or emitting
-	// an illegal per-VLAN bind. Policy-free irb services deliver fully.
-	if isIRB && (svc.IngressFilter != "" || svc.EgressFilter != "" || svc.QoSPolicy != "") && !n.reconstructing {
-		return nil, fmt.Errorf("irb-type service '%s' carries per-member policy (filter/QoS), which is realized on the VLAN's member ports by the product renderer — not yet delivered; apply a policy-free irb service, or bind the policy per member directly", serviceName)
+	// Per-member policy delivery gate (§7): an irb service's filter/QoS is
+	// delivered to the VLAN's member ports because SONiC cannot bind an ACL/QoS to
+	// the IRB. That is only correct on single-VLAN (access) members — on a trunk
+	// member an unqualified ACL / per-port QoS would bleed to the trunk's other
+	// VLANs, and an untagged member cannot be VLAN-matched. Fail closed rather than
+	// deliver the policy partially: refuse a policy-bearing irb service on a VLAN
+	// with any trunk member. (Membership churn is gated symmetrically in
+	// ConfigureInterface via refuseTrunkOnPolicyVLAN.)
+	if isIRB && !n.reconstructing && (svc.IngressFilter != "" || svc.EgressFilter != "" || svc.QoSPolicy != "") {
+		for _, member := range n.vlanMemberPorts(vlanID) {
+			if memberVLANs := n.vlanMembershipsOf(member); len(memberVLANs) > 1 {
+				return nil, fmt.Errorf("service %q carries a filter/QoS but VLAN %d member %s is a trunk (also in VLANs %v) — SONiC cannot bind a filter/QoS to the IRB, and a per-port policy on a trunk member would bleed to its other VLANs or miss untagged traffic; remove the filter/QoS from the service, or keep %s single-VLAN", serviceName, vlanID, member, memberVLANs, member)
+			}
+		}
 	}
 
 	// Track ACL names from generated entries for interface-merging.
-	// ACL names are content-hashed from the filter spec (Principle 35).
+	// ACL names are content-hashed from the filter spec (Principle 35). Rules are
+	// unqualified — an irb service's filter reaches its members only on single-VLAN
+	// (access) ports, gated by the eligibility check above; there is no VLAN
+	// qualifier and no per-VLAN ACL variant (§7).
 	var ingressACLName, egressACLName string
 	if svc.IngressFilter != "" {
 		if filterSpec, err := n.GetFilter(svc.IngressFilter); err == nil {
@@ -473,11 +547,30 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Primitives create parent intents — must precede interface intent write (I4).
 	// =========================================================================
 
-	// The VLAN, its L2VNI mapping, ARP suppression, and the interface's
-	// membership are the bridge domain — authored before the service and
-	// required by the precondition above (create-vlan, bind-macvpn,
-	// configure-interface). The service no longer creates them (§6: VLAN_MEMBER
-	// and the VLAN table each have one writer, and it is not the service).
+	// Bridge domain for an irb service — the VLAN and its L2VNI overlay, which
+	// the composite assembles (intent-idempotent: CreateVLAN/BindMACVPN check
+	// their intents and reuse an operator-authored piece). The SVI gateway is
+	// composed after the VRF block below (it parents to both vlan and vrf).
+	// Membership is NOT composed — which ports belong is a service-agnostic
+	// topology fact authored by configure-interface (irb-service-redesign.md §3).
+	if isIRB {
+		vlanCS, err := n.CreateVLAN(ctx, vlanID, VLANConfig{})
+		if err != nil {
+			return nil, fmt.Errorf("create VLAN %d: %w", vlanID, err)
+		}
+		cs.Merge(vlanCS)
+		// Bind the L2VNI only when the macvpn actually carries one (evpn-irb). A
+		// local irb references a macvpn purely for its vlan_id (VNI 0, no overlay);
+		// BindMACVPN there would write a VXLAN_TUNNEL_MAP with VNI 0 (schema-
+		// refused) and require a VTEP the local service does not need.
+		if macvpnDef != nil && macvpnDef.VNI > 0 {
+			mvCS, err := n.BindMACVPN(ctx, vlanID, svc.MACVPN)
+			if err != nil {
+				return nil, fmt.Errorf("bind macvpn %s: %w", svc.MACVPN, err)
+			}
+			cs.Merge(mvCS)
+		}
+	}
 
 	// VRF infrastructure (intent-idempotent: CreateVRF checks vrf intent)
 	if vrfName != "" {
@@ -497,6 +590,24 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			return nil, fmt.Errorf("bind IPVPN %s: %w", svc.IPVPN, err)
 		}
 		cs.Merge(ipvpnCS)
+	}
+
+	// SVI gateway for an irb service — the delivery point. ConfigureIRB is
+	// intent-idempotent (reuses a pre-authored SVI; composes it from --ip /
+	// --anycast-mac otherwise), so this is the same ensure the routed VRF uses
+	// above. It parents to vlan + vrf, both created above (I4). The precondition
+	// guaranteed an address is available (opts.IPAddress or a pre-authored SVI).
+	if isIRB {
+		gwIP, gwMAC := irbGateway(opts, macvpnDef)
+		irbCS, err := n.ConfigureIRB(ctx, vlanID, IRBConfig{
+			VRF:        vrfName,
+			IPAddress:  gwIP,
+			AnycastMAC: gwMAC,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ensure IRB gateway for VLAN %d: %w", vlanID, err)
+		}
+		cs.Merge(irbCS)
 	}
 
 	// =========================================================================
@@ -587,7 +698,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		// is the IRB's own identity, authored by configure-irb (§6). The service
 		// binds to it and does not create it; the overlay realization (VRF,
 		// L3VNI, route targets) is delivered by the VRF infrastructure block
-		// above, and per-member policy is the product (§4). Nothing to render
+		// above, and per-member policy is bound to the members (§4). Nothing to bind
 		// on the delivery interface here — the binding record is the delivery.
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
 		if vrfName != "" {
@@ -622,17 +733,27 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			filterSpec, _ := n.GetFilter(svc.IngressFilter)
 			if filterSpec != nil {
 				desc := fmt.Sprintf("Ingress filter for %s", serviceName)
-				cs.Adds(createAclTableConfig(ingressACLName, mapFilterType(filterSpec.Type), "ingress", i.name, desc))
-				ruleNames := i.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec)
-				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+ingressACLName, map[string]string{
+				// First user creates the table — the ports are the members bound by
+				// this binding, computed the same way every later render is (§4):
+				// the interface itself for a per-port service, the VLAN's members
+				// for an irb service. The binding intent is written above, so it
+				// is already included.
+				ports := n.aclPortsFromIntents(ingressACLName, "ingress")
+				cs.Adds(createAclTableConfig(ingressACLName, mapFilterType(filterSpec.Type), "ingress", ports, desc))
+				n.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec)
+				// The acl intent records the DECISION (its source filter), not the
+				// derivation (§21): the rules are regenerated from the filter at
+				// replay and read from the projected ACL_RULE table at teardown —
+				// the rule names are never consulted, so they are not recorded.
+				aclParams := map[string]string{
 					sonic.FieldName:        ingressACLName,
 					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
 					sonic.FieldStage:       "ingress",
-					sonic.FieldPorts:       i.name,
+					sonic.FieldPorts:       ports,
 					sonic.FieldDescription: desc,
-					sonic.FieldRules:       strings.Join(ruleNames, ","),
 					sonic.FieldFilter:      svc.IngressFilter,
-				}, []string{"device"}); err != nil {
+				}
+				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+ingressACLName, aclParams, []string{"device"}); err != nil {
 					return nil, err
 				}
 			}
@@ -649,32 +770,42 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			filterSpec, _ := n.GetFilter(svc.EgressFilter)
 			if filterSpec != nil {
 				desc := fmt.Sprintf("Egress filter for %s", serviceName)
-				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", i.name, desc))
-				ruleNames := i.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec)
-				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+egressACLName, map[string]string{
+				ports := n.aclPortsFromIntents(egressACLName, "egress")
+				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", ports, desc))
+				n.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec)
+				aclParams := map[string]string{
 					sonic.FieldName:        egressACLName,
 					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
 					sonic.FieldStage:       "egress",
-					sonic.FieldPorts:       i.name,
+					sonic.FieldPorts:       ports,
 					sonic.FieldDescription: desc,
-					sonic.FieldRules:       strings.Join(ruleNames, ","),
 					sonic.FieldFilter:      svc.EgressFilter,
-				}, []string{"device"}); err != nil {
+				}
+				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+egressACLName, aclParams, []string{"device"}); err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
 
-	// QoS entries (per-interface binding + device-wide tables)
+	// QoS entries. The binding intent + the device-wide QoS tables (shared,
+	// referenced by policy name) are written once here; the per-port
+	// PORT_QOS_MAP / QUEUE rows are the per-member bindings (§4). A per-port service binds
+	// them on its own interface; an irb service binds them on the VLAN's members
+	// (bindMemberQoS) — all single-VLAN, since the apply gate above refused a
+	// QoS-bearing service on a VLAN with any trunk member (§7).
 	if qosPolicy != nil {
 		if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
 			map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
 			[]string{"interface|" + i.name}); err != nil {
 			return nil, err
 		}
-		cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
 		cs.Adds(GenerateDeviceQoSConfig(qosPolicyName, qosPolicy))
+		if isIRB {
+			n.bindMemberQoS(cs, vlanID)
+		} else {
+			cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
+		}
 	}
 
 	if err := n.render(cs); err != nil {
@@ -887,13 +1018,18 @@ func diffRoutePolicyKeyCSV(oldCSV, newCSV string) string {
 	return strings.Join(stale, ";")
 }
 
-// addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix lists
-func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, filterSpec *spec.FilterSpec) []string {
+// addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix
+// lists. Rules are unqualified — an irb service reaches only single-VLAN members
+// (§7), so no VLAN match is needed.
+// Node-scoped so the create-acl replay can rebuild a service ACL's rules from
+// its recorded filter (the rules are written inline at apply, not as per-rule
+// intents — without this they vanish on projection rebuild, drifting the device).
+func (n *Node) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, filterSpec *spec.FilterSpec) []string {
 	var ruleNames []string
 	for _, rule := range filterSpec.Rules {
 		// Expand prefix lists if used
-		srcIPs := i.expandPrefixList(rule.SrcPrefixList, rule.SrcIP)
-		dstIPs := i.expandPrefixList(rule.DstPrefixList, rule.DstIP)
+		srcIPs := n.expandPrefixList(rule.SrcPrefixList, rule.SrcIP)
+		dstIPs := n.expandPrefixList(rule.DstPrefixList, rule.DstIP)
 
 		// If no prefix lists, create single rule
 		if len(srcIPs) == 0 {
@@ -924,8 +1060,10 @@ func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, fil
 	return ruleNames
 }
 
-// expandPrefixList expands a prefix list name to its IP prefixes, or returns direct IP if provided
-func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
+// expandPrefixList expands a prefix list name to its IP prefixes, or returns
+// direct IP if provided. Node-scoped: prefix lists are node/spec-level, so the
+// rule generator can run without an interface (e.g. from the create-acl replay).
+func (n *Node) expandPrefixList(prefixListName, directIP string) []string {
 	if directIP != "" {
 		return []string{directIP}
 	}
@@ -933,7 +1071,7 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 		return nil
 	}
 
-	prefixes, err := i.Node().GetPrefixList(prefixListName)
+	prefixes, err := n.GetPrefixList(prefixListName)
 	if err != nil || len(prefixes) == 0 {
 		return nil
 	}
@@ -972,9 +1110,9 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 			children := make([]string, len(aclIntent.Children))
 			copy(children, aclIntent.Children)
 
-			// Delete rule entries. Two sources: per-rule DAG children (acl|NAME|RULE)
-			// or FieldRules CSV in intent params (ApplyService creates rules without
-			// per-rule intents — §10.16 integration is deferred).
+			// Delete rule entries. A standalone ACL carries per-rule DAG children
+			// (acl|NAME|RULE); a service ACL writes its rules inline (no per-rule
+			// intents), so those are read from the projected ACL_RULE table below.
 			hasRuleChildren := false
 			for _, child := range children {
 				if intentKind(child) == "acl" {
@@ -987,12 +1125,17 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 				}
 			}
 			if !hasRuleChildren {
-				// Fallback: read rule names from FieldRules CSV in intent params.
-				if rulesCSV := aclIntent.Params[sonic.FieldRules]; rulesCSV != "" {
-					for _, ruleName := range strings.Split(rulesCSV, ",") {
-						ruleName = strings.TrimSpace(ruleName)
-						if ruleName != "" {
-							cs.Deletes(deleteAclRuleConfig(aclName, ruleName))
+				// Service ACL: its rules are written inline (no per-rule intents),
+				// and the acl intent's recorded rule list does not survive a
+				// projection rebuild — so read the rules straight from the
+				// projected ACL_RULE table (which the create-acl replay rebuilds
+				// from the filter). Robust: it deletes exactly what is on the
+				// device, no dependence on a recorded derived list.
+				for ruleKey := range i.node.configDB.ACLRule {
+					if strings.HasPrefix(ruleKey, aclName+"|") {
+						parts := strings.SplitN(ruleKey, "|", 2)
+						if len(parts) == 2 {
+							cs.Deletes(deleteAclRuleConfig(parts[0], parts[1]))
 						}
 					}
 				}
@@ -1042,11 +1185,22 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 	return nil
 }
 
-// RemoveService removes the service from this interface.
-// Uses the stored intent record (NEWTRON_INTENT) to know exactly
-// what was applied and needs to be removed.
-// Shared resources (ACLs, VLANs) are only deleted when this is the last user.
+// RemoveService tears the service down fully — its delivery (binding, ACL, QoS,
+// BGP neighbor) AND the delivery point the composite created for it (the SVI and
+// its VRF, reaped on the last consumer, §15). The bridge domain (VLAN/macvpn/
+// members) is left to its own owners. Uses the stored intent record to know
+// exactly what was applied.
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
+	return i.removeService(ctx, false)
+}
+
+// removeService is RemoveService's body. deliveryOnly scopes the teardown to what
+// the service *delivers* — its binding, ACL, QoS, and BGP neighbor — leaving the
+// delivery point (the SVI it binds to) and that SVI's VRF standing. It is the
+// refresh path: the idempotent re-apply reuses the surviving delivery point, so
+// the gateway does not flap (§48) and its IP is not lost. deliveryOnly=false is a
+// real remove-service, which also reaps the delivery point on the last consumer.
+func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*ChangeSet, error) {
 	n := i.node
 
 	if err := n.precondition("remove-service", i.name).Result(); err != nil {
@@ -1119,7 +1273,18 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if qosPolicy != nil {
 			queueCount = len(qosPolicy.Queues)
 		}
-		cs.Deletes(unbindQosConfig(i.name, queueCount))
+		if isIRB {
+			// Per-member QoS (§4): i.name is the IRB, which never held a
+			// PORT_QOS_MAP row — the rows are on the VLAN's members. Remove each
+			// unless another irb-service binding (not this one) still binds it.
+			for _, member := range n.vlanMemberPorts(bindingInt(b[sonic.FieldVLANID])) {
+				if !n.isMemberServiceQoSBound(member, excludeKey) {
+					cs.Deletes(unbindQosConfig(member, queueCount))
+				}
+			}
+		} else {
+			cs.Deletes(unbindQosConfig(i.name, queueCount))
+		}
 		if !n.isQoSPolicyReferenced(qosPolicyName, i.name) {
 			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName, qosPolicy))
 		}
@@ -1207,22 +1372,22 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			cs.Deletes(enableIpRoutingConfig(i.name))
 		}
 
-		// Per-interface VRF: delete VRF and related config. Skipped for irb
-		// types — the operator authored the VRF (create-vrf), configure-irb
-		// bound the SVI to it, and unbind-ipvpn + delete-vrf tear it down.
-		if vrfType == spec.VRFTypeInterface && !isIRB {
+		// Per-interface VRF: delete VRF and related config. The composite
+		// created it (CreateVRF on apply), so it owns the teardown — reap on
+		// last consumer, the same rule the routed path uses.
+		if !deliveryOnly && vrfType == spec.VRFTypeInterface {
 			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
 			l3vni, l3vniVlan := bindingInt(b[sonic.FieldL3VNI]), bindingInt(b[sonic.FieldL3VNIVlan])
 			cs.Deletes(destroyVrfConfig(derivedVRF, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
 			destroyedVRF = derivedVRF
 		}
 
-		// Shared VRF: delete when last ipvpn user is removed. Skipped for irb
-		// types — the shared VRF is operator-authored (create-vrf + bind-ipvpn),
-		// not auto-created by the first apply, so the service does not own its
-		// teardown (§6). For routed services the first apply DID auto-create it,
-		// so it is cleaned up here when the last ipvpn user is removed.
-		if vrfType == spec.VRFTypeShared && b[sonic.FieldIPVPN] != "" && !isIRB {
+		// Shared VRF: delete when the last ipvpn user is removed. The composite
+		// created it (CreateVRF + BindIPVPN on the first apply), so it is reaped
+		// here on the last consumer — uniformly for irb and routed. An operator
+		// who pre-authored it and never serviced it keeps it (no last-consumer
+		// event fires). This is the reference-count scan, not a who-created flag.
+		if !deliveryOnly && vrfType == spec.VRFTypeShared && b[sonic.FieldIPVPN] != "" {
 			// Check if this is the last IPVPN user via interface intent scan.
 			// Only count interface|* intents — ipvpn|* intents are infrastructure,
 			// not service bindings.
@@ -1242,16 +1407,13 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	// =========================================================================
-	// The SVI gateway is NOT torn down here. Under the delivery-point flip an
-	// irb-type service binds to the IRB and no longer authors its gateway —
-	// the VLAN_INTERFACE base, IP, VRF binding, and anycast MAC are all
-	// configure-irb's, removed by unconfigure-irb (irb-service-redesign.md §6).
-	// The VLAN, its L2VNI/ARP overlay realization, and membership likewise have
-	// their own owners (create-vlan / bind-macvpn / configure-interface). The
-	// service removes only what it wrote: the binding, its BGP/ACL/QoS, and the
-	// overlay VRF when it was the last user (above).
-	// =========================================================================
+	// The SVI gateway is reaped below, after the binding is deleted — it is the
+	// irb identity record and the binding is its child (I5). The VLAN, its
+	// L2VNI/ARP overlay, and membership are NOT reaped: they are the bridge
+	// domain, which outlives the L3 service and is owned by the members
+	// (configure-interface) and create-vlan — the same reason routed leaves the
+	// physical port. The service reaps only the L3 it delivered: the SVI gateway
+	// and the shared VRF (above), mirroring routed's INTERFACE-base + VRF reap.
 
 	// =========================================================================
 	// Service binding tracking (always delete)
@@ -1260,18 +1422,43 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	if err := n.deleteIntent(cs, excludeKey); err != nil {
 		return nil, err
 	}
-	// Delete the identity record too when the service was its only reason to
-	// exist — a service-only interface leaves nothing behind (§15). deleteIntent
-	// updated the identity's children in place when it removed the binding, so
-	// a childless identity here means no sub-resources remain. But only a BARE
-	// interface-init record is the service's to remove: a configure-interface
-	// identity carries membership or an IP the service never owned (an untagged
-	// member's VLAN_MEMBER lives on this record), and deleting the intent would
-	// strand that CONFIG_DB entry as drift. Those survive.
-	if identity := n.GetIntent("interface|" + i.name); identity != nil &&
-		len(identity.Children) == 0 && identity.Operation == sonic.OpInterfaceInit {
-		if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
-			return nil, err
+	// Reap the identity record now that the binding (its child) is gone.
+	//   - irb: the composite authored the SVI gateway (ConfigureIRB on apply),
+	//     so it reaps it on the last consumer — the binding just removed. Delete
+	//     the VLAN_INTERFACE IP/base and the reference-shared SAG, mirroring
+	//     UnconfigureIRB, then the intent. (Reap-on-last-consumer, like routed's
+	//     VRF: an operator's standalone configure-irb that was never serviced
+	//     fires no last-consumer event and survives.)
+	//   - bare interface-init: the service's to remove — a service-only interface
+	//     leaves nothing behind (§15). A configure-interface identity carrying
+	//     membership or an IP the service never owned survives.
+	if identity := n.GetIntent("interface|" + i.name); identity != nil && len(identity.Children) == 0 {
+		switch {
+		case isIRB && identity.Operation == sonic.OpConfigureIRB && !deliveryOnly:
+			sviVLAN := bindingInt(identity.Params[sonic.FieldVLANID])
+			if ip := identity.Params[sonic.FieldIPAddress]; ip != "" {
+				cs.Deletes(deleteSviIPConfig(sviVLAN, ip))
+			}
+			cs.Deletes(deleteSviBaseConfig(sviVLAN))
+			if identity.Params[sonic.FieldAnycastMAC] != "" {
+				otherSAG := false
+				for resource, irbIntent := range n.IntentsByOp(sonic.OpConfigureIRB) {
+					if resource != "interface|"+i.name && irbIntent.Params[sonic.FieldAnycastMAC] != "" {
+						otherSAG = true
+						break
+					}
+				}
+				if !otherSAG {
+					cs.Deletes(deleteSagGlobalConfig())
+				}
+			}
+			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
+				return nil, err
+			}
+		case identity.Operation == sonic.OpInterfaceInit:
+			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1301,8 +1488,11 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			return nil, err
 		}
 	}
-	// The VLAN intent is not cleaned up here — create-vlan owns it, and the
-	// service required it to pre-exist (§6).
+	// The VLAN intent is not reaped here. Though the composite ensures it on
+	// apply (CreateVLAN, idempotent), its lifecycle belongs to the members and
+	// create-vlan — the L2 bridge domain outlives the L3 service (membership
+	// independence, irb-service-redesign.md §3). It is reaped when its last
+	// member leaves, not when a service does.
 
 	if err := n.render(cs); err != nil {
 		return nil, err
@@ -1345,8 +1535,11 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 		oldRoutePolicyKeys = si.Params["route_policy_keys"]
 	}
 
-	// Remove the current service
-	removeCS, err := i.RemoveService(ctx)
+	// Remove only the current delivery (deliveryOnly), leaving the delivery point
+	// (SVI) and its VRF standing — refresh re-delivers the service, it does not
+	// rebuild the gateway. The idempotent re-apply reuses the surviving delivery
+	// point, so there is no gateway flap (§48) and the SVI's IP is not lost (#624).
+	removeCS, err := i.removeService(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("removing old service: %w", err)
 	}
@@ -1425,7 +1618,7 @@ func serviceCapabilityNeeds(svc *spec.ServiceSpec, peerGroup string) []Interface
 		needs = append(needs, CapabilityGateway)
 	}
 	// Per-member policy (ACL/QoS) is realized on the VLAN's member ports by
-	// the product renderer, not on the delivery interface (§4, §7). For an
+	// bound to the VLAN's member ports, not the delivery interface (§4, §7). For an
 	// irb-type service it is therefore NOT a capability the IRB must provide
 	// — the members carry it. The per-port service types (routed, bridged)
 	// bind policy on the delivery interface itself, so it must provide it.

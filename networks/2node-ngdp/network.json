@@ -3,6 +3,20 @@
   "super_users": null,
   "user_groups": null,
   "permissions": null,
+  "filters": {
+    "FILTER_IRB": {
+      "description": "Per-member ingress filter for the evpn-irb §38 witness",
+      "type": "ipv4",
+      "rules": [
+        {
+          "seq": 10,
+          "protocol": "tcp",
+          "dst_port": "179",
+          "action": "permit"
+        }
+      ]
+    }
+  },
   "qos_policies": {
     "TEST_4Q": {
       "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
@@ -121,7 +135,8 @@
       "service_type": "evpn-irb",
       "ipvpn": "IRB",
       "macvpn": "SVC_VLAN400",
-      "vrf_type": "shared"
+      "vrf_type": "shared",
+      "ingress_filter": "FILTER_IRB"
     }
   }
 }
