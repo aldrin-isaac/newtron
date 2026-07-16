@@ -509,6 +509,7 @@ type ACLRuleEntry struct {
 	ICMPType       string `json:"ICMP_TYPE,omitempty"`
 	ICMPCode       string `json:"ICMP_CODE,omitempty"`
 	EtherType      string `json:"ETHER_TYPE,omitempty"`
+	VLANID         string `json:"VLAN_ID,omitempty"` // outer VLAN match — per-member rule VLAN-qualifier (§7)
 	InPorts        string `json:"IN_PORTS,omitempty"`
 	RedirectPort   string `json:"REDIRECT_PORT,omitempty"`
 }

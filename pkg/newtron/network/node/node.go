@@ -247,6 +247,14 @@ func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[str
 	//   unsaved intent guard must still block mode switching.
 	// - After re-reading from device (actuated rebuild): stays false —
 	//   device intents are persisted, not unsaved.
+	// Reconcile the derived ACL ports against the now-complete
+	// intent DB (§4). The incremental replay above can leave a service ACL's
+	// ports computed from a partially-loaded DB; this makes them order-independent.
+	if err := n.reconcileMemberACLPorts(ctx); err != nil {
+		n.actuatedIntent = wasActuated
+		return fmt.Errorf("finalizing member ACL ports: %w", err)
+	}
+
 	n.actuatedIntent = wasActuated
 	n.unsavedIntents = wasUnsaved
 	return nil

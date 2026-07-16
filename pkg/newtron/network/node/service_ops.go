@@ -288,27 +288,27 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
-	// Per-member policy on an irb-type service is realized on the VLAN's member
-	// ports by the product renderer (§4, §7), which is not yet delivered. A VLAN
-	// interface is not an ACL or QoS bind point (§7), so until the renderer
-	// lands an irb service that carries a filter or QoS cannot be honored on the
-	// IRB — refuse it closed rather than silently dropping the policy or emitting
-	// an illegal per-VLAN bind. Policy-free irb services deliver fully.
-	if isIRB && (svc.IngressFilter != "" || svc.EgressFilter != "" || svc.QoSPolicy != "") && !n.reconstructing {
-		return nil, fmt.Errorf("irb-type service '%s' carries per-member policy (filter/QoS), which is realized on the VLAN's member ports by the product renderer — not yet delivered; apply a policy-free irb service, or bind the policy per member directly", serviceName)
-	}
 
 	// Track ACL names from generated entries for interface-merging.
 	// ACL names are content-hashed from the filter spec (Principle 35).
+	//
+	// aclVLAN VLAN-qualifies an irb-type service's ACL: it folds into the content
+	// hash (so a filter shared by two services on different VLANs yields distinct
+	// ACLs) and into each rule (the VLAN_ID match) — §7. Per-port services leave
+	// it 0, so their ACL naming and rules are unchanged.
+	aclVLAN := 0
+	if isIRB {
+		aclVLAN = vlanID
+	}
 	var ingressACLName, egressACLName string
 	if svc.IngressFilter != "" {
 		if filterSpec, err := n.GetFilter(svc.IngressFilter); err == nil {
-			ingressACLName = util.DeriveACLName(svc.IngressFilter, "in", computeFilterHash(filterSpec))
+			ingressACLName = util.DeriveACLName(svc.IngressFilter, "in", computeFilterHash(filterSpec, aclVLAN))
 		}
 	}
 	if svc.EgressFilter != "" {
 		if filterSpec, err := n.GetFilter(svc.EgressFilter); err == nil {
-			egressACLName = util.DeriveACLName(svc.EgressFilter, "out", computeFilterHash(filterSpec))
+			egressACLName = util.DeriveACLName(svc.EgressFilter, "out", computeFilterHash(filterSpec, aclVLAN))
 		}
 	}
 
@@ -587,7 +587,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		// is the IRB's own identity, authored by configure-irb (§6). The service
 		// binds to it and does not create it; the overlay realization (VRF,
 		// L3VNI, route targets) is delivered by the VRF infrastructure block
-		// above, and per-member policy is the product (§4). Nothing to render
+		// above, and per-member policy is bound to the members (§4). Nothing to bind
 		// on the delivery interface here — the binding record is the delivery.
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
 		if vrfName != "" {
@@ -622,17 +622,28 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			filterSpec, _ := n.GetFilter(svc.IngressFilter)
 			if filterSpec != nil {
 				desc := fmt.Sprintf("Ingress filter for %s", serviceName)
-				cs.Adds(createAclTableConfig(ingressACLName, mapFilterType(filterSpec.Type), "ingress", i.name, desc))
-				ruleNames := i.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec)
-				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+ingressACLName, map[string]string{
+				// First user creates the table — the ports are the members bound by
+				// this binding, computed the same way every later render is (§4):
+				// the interface itself for a per-port service, the VLAN's members
+				// for an irb service. The binding intent is written above, so it
+				// is already included.
+				ports := n.aclPortsFromIntents(ingressACLName, "ingress")
+				cs.Adds(createAclTableConfig(ingressACLName, mapFilterType(filterSpec.Type), "ingress", ports, desc))
+				ruleNames := n.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec, aclVLAN)
+				aclParams := map[string]string{
 					sonic.FieldName:        ingressACLName,
 					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
 					sonic.FieldStage:       "ingress",
-					sonic.FieldPorts:       i.name,
+					sonic.FieldPorts:       ports,
 					sonic.FieldDescription: desc,
 					sonic.FieldRules:       strings.Join(ruleNames, ","),
 					sonic.FieldFilter:      svc.IngressFilter,
-				}, []string{"device"}); err != nil {
+				}
+				// Record the VLAN so the replay rebuilds vlan-qualified rules (§7).
+				if aclVLAN > 0 {
+					aclParams[sonic.FieldVLANID] = fmt.Sprintf("%d", aclVLAN)
+				}
+				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+ingressACLName, aclParams, []string{"device"}); err != nil {
 					return nil, err
 				}
 			}
@@ -649,32 +660,47 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			filterSpec, _ := n.GetFilter(svc.EgressFilter)
 			if filterSpec != nil {
 				desc := fmt.Sprintf("Egress filter for %s", serviceName)
-				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", i.name, desc))
-				ruleNames := i.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec)
-				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+egressACLName, map[string]string{
+				ports := n.aclPortsFromIntents(egressACLName, "egress")
+				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", ports, desc))
+				ruleNames := n.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec, aclVLAN)
+				aclParams := map[string]string{
 					sonic.FieldName:        egressACLName,
 					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
 					sonic.FieldStage:       "egress",
-					sonic.FieldPorts:       i.name,
+					sonic.FieldPorts:       ports,
 					sonic.FieldDescription: desc,
 					sonic.FieldRules:       strings.Join(ruleNames, ","),
 					sonic.FieldFilter:      svc.EgressFilter,
-				}, []string{"device"}); err != nil {
+				}
+				if aclVLAN > 0 {
+					aclParams[sonic.FieldVLANID] = fmt.Sprintf("%d", aclVLAN)
+				}
+				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+egressACLName, aclParams, []string{"device"}); err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
 
-	// QoS entries (per-interface binding + device-wide tables)
+	// QoS entries. The binding intent + the device-wide QoS tables (shared,
+	// referenced by policy name) are written once here; the per-port
+	// PORT_QOS_MAP / QUEUE rows are the per-member bindings (§4). A per-port service binds
+	// them on its own interface; an irb service binds them on the VLAN's members
+	// (bindMemberQoS), which refuses a shared-trunk conflict before writing (§7).
 	if qosPolicy != nil {
 		if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
 			map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
 			[]string{"interface|" + i.name}); err != nil {
 			return nil, err
 		}
-		cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
 		cs.Adds(GenerateDeviceQoSConfig(qosPolicyName, qosPolicy))
+		if isIRB {
+			if err := n.bindMemberQoS(cs, vlanID); err != nil {
+				return nil, err
+			}
+		} else {
+			cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
+		}
 	}
 
 	if err := n.render(cs); err != nil {
@@ -887,13 +913,17 @@ func diffRoutePolicyKeyCSV(oldCSV, newCSV string) string {
 	return strings.Join(stale, ";")
 }
 
-// addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix lists
-func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, filterSpec *spec.FilterSpec) []string {
+// addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix
+// lists. vlanID > 0 (an irb-type service) VLAN-qualifies each rule (§7).
+// Node-scoped so the create-acl replay can rebuild a service ACL's rules from
+// its recorded filter (the rules are written inline at apply, not as per-rule
+// intents — without this they vanish on projection rebuild, drifting the device).
+func (n *Node) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, filterSpec *spec.FilterSpec, vlanID int) []string {
 	var ruleNames []string
 	for _, rule := range filterSpec.Rules {
 		// Expand prefix lists if used
-		srcIPs := i.expandPrefixList(rule.SrcPrefixList, rule.SrcIP)
-		dstIPs := i.expandPrefixList(rule.DstPrefixList, rule.DstIP)
+		srcIPs := n.expandPrefixList(rule.SrcPrefixList, rule.SrcIP)
+		dstIPs := n.expandPrefixList(rule.DstPrefixList, rule.DstIP)
 
 		// If no prefix lists, create single rule
 		if len(srcIPs) == 0 {
@@ -912,7 +942,7 @@ func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, fil
 					suffix = fmt.Sprintf("_%d", ruleIdx)
 					ruleIdx++
 				}
-				e := createAclRuleFromFilterConfig(aclName, rule, srcIP, dstIP, suffix)
+				e := createAclRuleFromFilterConfig(aclName, rule, srcIP, dstIP, suffix, vlanID)
 				cs.Add(e.Table, e.Key, e.Fields)
 				// Extract rule name from ACL_RULE key (format: "ACLNAME|RULENAME")
 				if parts := strings.SplitN(e.Key, "|", 2); len(parts) == 2 {
@@ -924,8 +954,10 @@ func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, fil
 	return ruleNames
 }
 
-// expandPrefixList expands a prefix list name to its IP prefixes, or returns direct IP if provided
-func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
+// expandPrefixList expands a prefix list name to its IP prefixes, or returns
+// direct IP if provided. Node-scoped: prefix lists are node/spec-level, so the
+// rule generator can run without an interface (e.g. from the create-acl replay).
+func (n *Node) expandPrefixList(prefixListName, directIP string) []string {
 	if directIP != "" {
 		return []string{directIP}
 	}
@@ -933,7 +965,7 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 		return nil
 	}
 
-	prefixes, err := i.Node().GetPrefixList(prefixListName)
+	prefixes, err := n.GetPrefixList(prefixListName)
 	if err != nil || len(prefixes) == 0 {
 		return nil
 	}
@@ -987,12 +1019,17 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 				}
 			}
 			if !hasRuleChildren {
-				// Fallback: read rule names from FieldRules CSV in intent params.
-				if rulesCSV := aclIntent.Params[sonic.FieldRules]; rulesCSV != "" {
-					for _, ruleName := range strings.Split(rulesCSV, ",") {
-						ruleName = strings.TrimSpace(ruleName)
-						if ruleName != "" {
-							cs.Deletes(deleteAclRuleConfig(aclName, ruleName))
+				// Service ACL: its rules are written inline (no per-rule intents),
+				// and the acl intent's recorded rule list does not survive a
+				// projection rebuild — so read the rules straight from the
+				// projected ACL_RULE table (which the create-acl replay rebuilds
+				// from the filter). Robust: it deletes exactly what is on the
+				// device, no dependence on a recorded derived list.
+				for ruleKey := range i.node.configDB.ACLRule {
+					if strings.HasPrefix(ruleKey, aclName+"|") {
+						parts := strings.SplitN(ruleKey, "|", 2)
+						if len(parts) == 2 {
+							cs.Deletes(deleteAclRuleConfig(parts[0], parts[1]))
 						}
 					}
 				}
@@ -1119,7 +1156,18 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if qosPolicy != nil {
 			queueCount = len(qosPolicy.Queues)
 		}
-		cs.Deletes(unbindQosConfig(i.name, queueCount))
+		if isIRB {
+			// Per-member QoS (§4): i.name is the IRB, which never held a
+			// PORT_QOS_MAP row — the rows are on the VLAN's members. Remove each
+			// unless another irb-service binding (not this one) still binds it.
+			for _, member := range n.vlanMemberPorts(bindingInt(b[sonic.FieldVLANID])) {
+				if !n.isMemberServiceQoSBound(member, excludeKey) {
+					cs.Deletes(unbindQosConfig(member, queueCount))
+				}
+			}
+		} else {
+			cs.Deletes(unbindQosConfig(i.name, queueCount))
+		}
 		if !n.isQoSPolicyReferenced(qosPolicyName, i.name) {
 			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName, qosPolicy))
 		}
@@ -1425,7 +1473,7 @@ func serviceCapabilityNeeds(svc *spec.ServiceSpec, peerGroup string) []Interface
 		needs = append(needs, CapabilityGateway)
 	}
 	// Per-member policy (ACL/QoS) is realized on the VLAN's member ports by
-	// the product renderer, not on the delivery interface (§4, §7). For an
+	// bound to the VLAN's member ports, not the delivery interface (§4, §7). For an
 	// irb-type service it is therefore NOT a capability the IRB must provide
 	// — the members carry it. The per-port service types (routed, bridged)
 	// bind policy on the delivery interface itself, so it must provide it.

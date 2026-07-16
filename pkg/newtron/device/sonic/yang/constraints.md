@@ -241,6 +241,7 @@ ACL schemas derived from newtron usage and SONiC documentation.
 - `ICMP_TYPE`: uint8, range 0..255
 - `ICMP_CODE`: uint8, range 0..255
 - `ETHER_TYPE`: string, pattern `^(0x[0-9a-fA-F]+|\d+)$`
+- `VLAN_ID`: uint16, range 1..4095 (outer VLAN match; aclorch → `SAI_ACL_ENTRY_ATTR_FIELD_OUTER_VLAN_ID`. An irb-type service VLAN-qualifies its per-member rule with it — irb-service-redesign.md §7)
 - `DSCP`: uint8, range 0..63
 - `TC`: uint8, range 0..7
 - `IN_PORTS`: string
