@@ -459,14 +459,16 @@ PortChannel interface is configured or has a service).
 | Param | Source | Description |
 |-------|--------|-------------|
 | `name` | arg | PortChannel name (e.g., `PortChannel100`) |
-| `members` | `PortChannelConfig.Members` | Comma-separated member interfaces |
 | `mtu` | `PortChannelConfig.MTU` | MTU (integer as string) |
 | `min_links` | `PortChannelConfig.MinLinks` | Minimum links (integer as string) |
 | `fallback` | `PortChannelConfig.Fallback` | `"true"` if LACP fallback enabled |
 | `fast_rate` | `PortChannelConfig.FastRate` | `"true"` if fast LACP rate |
 
-`intentParamsToStepParams` splits `members` from comma-separated string back
-into `[]any` for replay.
+Members are **not** a parameter on this intent. Each member is recorded as its
+own `portchannel|{NAME}|{MEMBER}` child intent (`add-portchannel-member`), which
+is the single representation every reader scans — a `PortChannelConfig.Members`
+passed to `CreatePortChannel` expands into those child intents. The create step
+exports with the default pass-through (no members field).
 
 ---
 

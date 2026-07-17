@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -213,8 +212,12 @@ func buildOpRegistry() map[string]*OpSpec {
 
 		sonic.OpCreatePortChannel: {
 			Op: sonic.OpCreatePortChannel, Scope: ScopeNode, Inverse: "device.delete-portchannel",
+			// members is a caller INPUT (bulk-add convenience) that expands into
+			// child membership intents (portchannel|<pc>|<member>) rather than a
+			// stored param — so it is not in the manifest; the child intents carry
+			// it, covered by add-portchannel-member's manifest.
 			Params: []ParamSpec{
-				required(sonic.FieldName), caller(sonic.FieldMembers),
+				required(sonic.FieldName),
 				caller("mtu"), caller("min_links"), caller("fallback"), caller("fast_rate"),
 			},
 			Replay: func(ctx context.Context, n *Node, _ *Interface, p map[string]any) error {
@@ -231,7 +234,6 @@ func buildOpRegistry() map[string]*OpSpec {
 				})
 				return err
 			},
-			Export: exportCreatePortChannel,
 		},
 
 		sonic.OpAddPortChannelMember: {
@@ -646,23 +648,6 @@ func exportApplyService(intent *sonic.Intent) map[string]any {
 	return result
 }
 
-func exportCreatePortChannel(intent *sonic.Intent) map[string]any {
-	// Members are stored as comma-separated string in intent; replay expects []any.
-	result := make(map[string]any, len(intent.Params))
-	for k, v := range intent.Params {
-		if k == sonic.FieldMembers && v != "" {
-			parts := strings.Split(v, ",")
-			slice := make([]any, len(parts))
-			for i, p := range parts {
-				slice[i] = p
-			}
-			result[k] = slice
-		} else {
-			result[k] = v
-		}
-	}
-	return result
-}
 
 // RegisteredOps exposes the registry to conformance sweeps (pkg/conformance)
 // and orchestration that dispatches by verb. Callers treat it as read-only —

@@ -281,14 +281,7 @@ func (i *Interface) PortChannelMembers() []string {
 	if !i.IsPortChannel() {
 		return nil
 	}
-	memberIntents := i.node.IntentsByPrefix("portchannel|" + i.name + "|")
-	var members []string
-	for _, intent := range memberIntents {
-		if memberName := intent.Params[sonic.FieldName]; memberName != "" {
-			members = append(members, memberName)
-		}
-	}
-	return members
+	return i.node.portChannelMembers(i.name)
 }
 
 // VLANMembers returns the member interfaces if this is a VLAN interface.
