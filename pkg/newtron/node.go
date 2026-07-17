@@ -110,6 +110,44 @@ func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawC
 	return n.internal.ConfigDBSnapshot(ctx, ownedOnly)
 }
 
+// OperDBSnapshot reads an entire operational DB (STATE_DB, APPL_DB,
+// COUNTERS_DB, ASIC_DB) as table → key → fields — the device's runtime
+// state, observed as-is (§1, §4). CONFIG_DB is not served here; it has its
+// own read (ConfigDBSnapshot) with config-specific semantics.
+func (n *Node) OperDBSnapshot(ctx context.Context, dbName string) (sonic.RawConfigDB, error) {
+	if err := validateOperDBName(dbName); err != nil {
+		return nil, err
+	}
+	return n.internal.OperDBSnapshot(ctx, dbName)
+}
+
+// OperDBTable reads one table of an operational DB as key → fields.
+func (n *Node) OperDBTable(ctx context.Context, dbName, table string) (map[string]map[string]string, error) {
+	if err := validateOperDBName(dbName); err != nil {
+		return nil, err
+	}
+	return n.internal.OperDBTable(ctx, dbName, table)
+}
+
+// OperDBEntry reads one entry of an operational DB; key "" reads a
+// flat-hash table (e.g. COUNTERS_DB's COUNTERS_PORT_NAME_MAP).
+func (n *Node) OperDBEntry(ctx context.Context, dbName, table, key string) (map[string]string, error) {
+	if err := validateOperDBName(dbName); err != nil {
+		return nil, err
+	}
+	return n.internal.OperDBEntry(ctx, dbName, table, key)
+}
+
+// validateOperDBName rejects an unknown operational-DB name as a validation
+// error (→ 400) before any device I/O. Membership and the allowed-set
+// message both come from the sonic registry — one owner.
+func validateOperDBName(dbName string) error {
+	if !sonic.KnownOperDB(dbName) {
+		return &ValidationError{Message: fmt.Sprintf("unknown operational DB %q (one of %s)", dbName, strings.Join(sonic.OperDBNames(), ", "))}
+	}
+	return nil
+}
+
 // BindsService reports whether this Node has at least one actuated
 // apply-service intent for the named service. Used by Network.ServiceProjection
 // (and api handlers iterating over nodes) to skip non-binders cheaply before
@@ -224,16 +262,6 @@ func (n *Node) ConfigDBEntryExists(table, key string) (bool, error) {
 		return n.internal.ConfigDB().Exists(table, key), nil
 	}
 	return client.Exists(table, key)
-}
-
-// QueryStateDB reads a STATE_DB entry by table and key.
-// Returns nil (not error) if the entry does not exist.
-func (n *Node) QueryStateDB(table, key string) (map[string]string, error) {
-	client := n.internal.StateDBClient()
-	if client == nil {
-		return nil, fmt.Errorf("no STATE_DB client for device %s", n.internal.Name())
-	}
-	return client.GetEntry(table, key)
 }
 
 // ============================================================================

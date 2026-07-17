@@ -113,6 +113,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `/interfaces` | Interface list |
 | `/interfaces/{i}` | Interface detail |
 | `/interfaces/{i}/binding` | Service binding |
+| `/interfaces/{i}/status` | Live operational status (counters, rates, ARP, LLDP, optics) |
 | `/vlans` | VLAN list |
 | `/vlans/{id}` | VLAN detail |
 | `/vrfs` | VRF list |
@@ -175,7 +176,9 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `GET /configdb/{table}` | List CONFIG_DB keys |
 | `GET /configdb/{table}/{key}` | Read CONFIG_DB entry |
 | `GET /configdb/{table}/{key}/exists` | Check CONFIG_DB entry exists |
-| `GET /statedb/{table}/{key}` | Read STATE_DB entry |
+| `GET /db/{db}` | Full operational-DB snapshot (STATE_DB, APPL_DB, COUNTERS_DB, ASIC_DB) |
+| `GET /db/{db}/{table}` | Read one operational-DB table |
+| `GET /db/{db}/{table}/{key...}` | Read one operational-DB entry (key may embed the DB separator) |
 
 **Interface Operations** (S12) -- all `POST /newtron/v1/networks/{n}/nodes/{d}/interfaces/{i}/...`
 
@@ -328,7 +331,7 @@ is validated but not persisted to disk.
 Two rules describe every path in this reference:
 
 - **Collection nouns are plural.** `/networks`, `/networks/{n}/services`, `/networks/{n}/nodes/{d}/interfaces`, `/networks/{n}/nodes/{d}/routes/{vrf}/{prefix...}`. Both list (`GET /noun`) and single-resource (`GET /noun/{id}`) paths share the plural form, matching the JSON spec keys (`services: {...}`, `zones: {...}`) and Go field names (`Services`, `Zones`).
-- **Action verbs and singletons stay singular.** Action paths are verb-noun forms — `create-service`, `delete-vlan`, `apply-service`, `bind-acl`, `setup-device`, `restart-daemon`. Status/view paths name a singleton — `/health`, `/info`, `/status`, `/bgp/status`, `/intent/projection`, `/intent/tree`, `/intent/drift`, `/intent/reconcile`. The one spec-view singleton is `/networks/{n}/topology` (a network has one topology). Database names — `/configdb`, `/statedb` — stay singular (each is one DB).
+- **Action verbs and singletons stay singular.** Action paths are verb-noun forms — `create-service`, `delete-vlan`, `apply-service`, `bind-acl`, `setup-device`, `restart-daemon`. Status/view paths name a singleton — `/health`, `/info`, `/status`, `/bgp/status`, `/intent/projection`, `/intent/tree`, `/intent/drift`, `/intent/reconcile`. The one spec-view singleton is `/networks/{n}/topology` (a network has one topology). Database names — `/configdb`, `/db/{db}` — stay singular (each read names one DB).
 
 This split is what distinguishes a noun a consumer can list ("there are zero or more *services* on this network") from a verb the server performs ("apply *this* service to *this* interface"). When in doubt, the route table in `pkg/newtron/api/handler.go` is authoritative.
 
@@ -2898,6 +2901,71 @@ Show the service binding on an interface.
 
 **Response (200):** `ServiceBindingDetail` (see [S13](#servicebindingdetail)) or `null` if no binding
 
+#### GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces/{name}/status
+
+The interface's composed live operational picture — one call across
+STATE_DB, APPL_DB, and COUNTERS_DB, so consumers never touch the
+COUNTERS_DB OID indirection or per-DB key separators. Pure observation
+(§4): every value is reported as the daemons wrote it; the caller judges
+correctness. This is the read that turns "BGP neighbor Active" into a
+diagnosable interface picture: oper state, counters, rates, ARP
+resolution, and the LLDP-verified far end.
+
+**Path parameters:** `name` -- interface name
+
+**Response (200):** `InterfaceStatus`:
+
+```json
+{
+  "name": "Ethernet0",
+  "admin_status": "up",
+  "oper_status": "up",
+  "speed": "100000",
+  "mtu": "9100",
+  "fec": "rs",
+  "host_tx_ready": "true",
+  "counters": {
+    "rx_octets": 123636, "rx_unicast_packets": 699,
+    "rx_non_unicast_packets": 0, "rx_discards": 0, "rx_errors": 0,
+    "tx_octets": 120401, "tx_unicast_packets": 647,
+    "tx_non_unicast_packets": 0, "tx_discards": 0, "tx_errors": 0
+  },
+  "rates": {
+    "rx_bps": 10.3, "rx_pps": 0.04, "tx_bps": 0.95, "tx_pps": 0.003,
+    "fec_pre_ber": 0, "fec_post_ber": 0
+  },
+  "neighbors": [
+    {"address": "10.255.255.1", "mac": "22:17:af:0f:8c:a7", "family": "IPv4"}
+  ],
+  "lldp_peer": {
+    "chassis_id": "52:54:00:61:9f:4d", "port_id": "Ethernet0",
+    "port_description": "Ethernet0", "system_name": "switch2",
+    "system_description": "SONiC Software Version: ..."
+  }
+}
+```
+
+Section semantics:
+
+- `counters` — cumulative SAI port counters (COUNTERS_DB `COUNTERS:<oid>`);
+  `rates` — SONiC-computed (COUNTERS_DB `RATES:<oid>`), no
+  poll-twice-and-subtract needed. Both omitted where the platform doesn't
+  populate COUNTERS_DB.
+- `neighbors` — RESOLVED entries from APPL_DB `NEIGH_TABLE` only. The
+  kernel does not publish INCOMPLETE entries to APPL_DB, so an
+  expected-but-absent neighbor here IS the unresolved-ARP signal. The
+  field is `address`, not `neighbor_ip`: an observed adjacency address,
+  not a BGP peer identity (see "Wire field-name conventions").
+- `lldp_peer` — the far end as LLDP heard it (APPL_DB
+  `LLDP_ENTRY_TABLE`); omitted when no LLDP neighbor. This is the
+  one-call wiring truth: a mismatch between the authored link and
+  `lldp_peer.port_id` is the mis-wiring signal.
+- `optics` — the STATE_DB `TRANSCEIVER_INFO`/`_DOM_SENSOR`/`_STATUS`
+  tables passed through as written; present on physical hardware only
+  (`-vs` platforms have no sensors, so the section is omitted).
+
+**Status codes:** 200 success, 404 interface not found
+
 ### VLANs
 
 #### GET /newtron/v1/networks/{netID}/nodes/{node}/vlans
@@ -3818,13 +3886,50 @@ Check if a CONFIG_DB entry exists.
 {"data": {"exists": true}}
 ```
 
-### GET /newtron/v1/networks/{netID}/nodes/{node}/statedb/{table}/{key}
+### GET /newtron/v1/networks/{netID}/nodes/{node}/db/{db}
 
-Get all fields of a STATE_DB entry.
+Full snapshot of one operational DB, as `table → key → fields`. This is the
+generic observation surface (§4: the device is the source of reality) — it
+guarantees nothing on the device is unreachable from a console, and it is
+the substrate under the curated status endpoints.
 
-**Path parameters:** `table` -- STATE_DB table name, `key` -- entry key
+**Path parameters:** `db` -- one of `STATE_DB`, `APPL_DB`, `COUNTERS_DB`,
+`ASIC_DB` (fail-closed: any other name is a 400 naming the allowed set).
+`CONFIG_DB` is deliberately not served here — `/configdb` owns the config
+read with its own semantics (`owned_only`, the observed ⊇ intended
+invariant).
+
+Keys are split into (table, entry key) on the DB's separator — `|` for
+STATE_DB, `:` for the others. A key with no separator is a flat hash (e.g.
+COUNTERS_DB's `COUNTERS_PORT_NAME_MAP`): it appears as a table whose single
+entry key is `""`. Non-hash Redis keys (ProducerStateTable `_KEY_SET` sets
+and similar plumbing) are skipped. ASIC_DB's keys all share the
+`ASIC_STATE` prefix, so its snapshot is honestly one large table whose
+entry keys carry the SAI object type.
+
+**Response (200):** `map[table]map[key]map[field]value`
+
+### GET /newtron/v1/networks/{netID}/nodes/{node}/db/{db}/{table}
+
+One table of an operational DB, as `key → fields`. A flat-hash table comes
+back as a single `""` entry.
+
+**Response (200):** `map[key]map[field]value`
+
+### GET /newtron/v1/networks/{netID}/nodes/{node}/db/{db}/{table}/{key...}
+
+One entry's fields. The key is matched as a path wildcard because
+operational keys embed the DB separator — e.g.
+`/db/APPL_DB/NEIGH_TABLE/Ethernet4:10.255.255.4` or
+`/db/COUNTERS_DB/COUNTERS/oid:0x1000000000002`.
 
 **Response (200):** Field map (`map[string]string`)
+
+**Example:**
+
+```
+GET /newtron/v1/networks/default/nodes/switch1/db/STATE_DB/PORT_TABLE/Ethernet0
+```
 
 ---
 

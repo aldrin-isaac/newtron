@@ -207,7 +207,9 @@ func TestAPICompleteness(t *testing.T) {
 			"ConfigDBTableKeys":   true,
 			"ConfigDBEntryExists": true,
 			"ConfigDBSnapshot":    true, // #17: GET /networks/{netID}/nodes/{device}/configdb
-			"QueryStateDB":        true,
+			"OperDBSnapshot":      true, // GET /networks/{netID}/nodes/{device}/db/{db}
+			"OperDBTable":         true, // GET /networks/{netID}/nodes/{device}/db/{db}/{table}
+			"OperDBEntry":         true, // GET /networks/{netID}/nodes/{device}/db/{db}/{table}/{key...}
 			// Write operations
 			"AddBGPEVPNPeer":          true,
 			"UpdateBGPEVPNPeer":       true,
@@ -263,6 +265,7 @@ func TestAPICompleteness(t *testing.T) {
 			"UnconfigureInterface": true,
 			"BindQoS":              true,
 			"UnbindQoS":            true,
+			"Status":               true, // GET .../interfaces/{name}/status
 		},
 	}
 
@@ -491,14 +494,18 @@ func TestAPICompleteness(t *testing.T) {
 			"ConfigDBTableKeys":       "device read",
 			"ConfigDBEntryExists":     "device read",
 			"ConfigDBSnapshot":        "device read",
-			"QueryStateDB":            "device read",
+			"OperDBSnapshot":          "device read",
+			"OperDBTable":             "device read",
+			"OperDBEntry":             "device read",
 			"Projection":              "intent read",
 			"ProjectionDiff":          "intent dry-run preview (no device writes)",
 			"Tree":                    "intent read",
 			"Drift":                   "intent + device read",
 			"Execute":                 "orchestration wrapper — gates fire on each mutation inside fn",
 		},
-		"Interface": {},
+		"Interface": {
+			"Status": "device read",
+		},
 	}
 
 	for _, tt := range types {

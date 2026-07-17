@@ -347,6 +347,84 @@ type InterfaceDetail struct {
 	VLANMembers []string `json:"vlan_members,omitempty"`
 }
 
+// InterfaceStatus is the composed live operational picture of one interface —
+// link state, counters, rates, resolved neighbors, LLDP far end, optics —
+// read across STATE_DB, APPL_DB, and COUNTERS_DB in one call. Pure
+// observation (§4): values are reported as the daemons wrote them.
+type InterfaceStatus struct {
+	Name        string             `json:"name"`
+	AdminStatus string             `json:"admin_status"`
+	OperStatus  string             `json:"oper_status"`
+	Speed       string             `json:"speed,omitempty"`
+	MTU         string             `json:"mtu,omitempty"`
+	FEC         string             `json:"fec,omitempty"`
+	HostTxReady string             `json:"host_tx_ready,omitempty"`
+	Counters    *InterfaceCounters `json:"counters,omitempty"`
+	Rates       *InterfaceRates    `json:"rates,omitempty"`
+	Neighbors   []ARPNeighbor      `json:"neighbors"`
+	LLDPPeer    *LLDPPeer          `json:"lldp_peer,omitempty"`
+	Optics      *OpticsInfo        `json:"optics,omitempty"`
+}
+
+// InterfaceCounters holds the cumulative SAI port counters
+// (COUNTERS_DB COUNTERS:<oid>).
+type InterfaceCounters struct {
+	RxOctets         uint64 `json:"rx_octets"`
+	RxUnicastPackets uint64 `json:"rx_unicast_packets"`
+	RxNonUnicastPkts uint64 `json:"rx_non_unicast_packets"`
+	RxDiscards       uint64 `json:"rx_discards"`
+	RxErrors         uint64 `json:"rx_errors"`
+	TxOctets         uint64 `json:"tx_octets"`
+	TxUnicastPackets uint64 `json:"tx_unicast_packets"`
+	TxNonUnicastPkts uint64 `json:"tx_non_unicast_packets"`
+	TxDiscards       uint64 `json:"tx_discards"`
+	TxErrors         uint64 `json:"tx_errors"`
+}
+
+// InterfaceRates holds the SONiC-computed port rates (COUNTERS_DB
+// RATES:<oid>) — no poll-twice-and-subtract needed.
+type InterfaceRates struct {
+	RxBps      float64 `json:"rx_bps"`
+	RxPps      float64 `json:"rx_pps"`
+	TxBps      float64 `json:"tx_bps"`
+	TxPps      float64 `json:"tx_pps"`
+	FecPreBer  float64 `json:"fec_pre_ber"`
+	FecPostBer float64 `json:"fec_post_ber"`
+}
+
+// ARPNeighbor is one RESOLVED L3 adjacency on the interface (APPL_DB
+// NEIGH_TABLE). The kernel does not publish INCOMPLETE entries to APPL_DB —
+// an expected-but-absent neighbor IS the unresolved-ARP signal. The wire
+// field is `address`, not `neighbor_ip`: an observed adjacency address, not
+// a BGP peer identity (see api.md "Wire field-name conventions").
+type ARPNeighbor struct {
+	Address string `json:"address"`
+	MAC     string `json:"mac"`
+	Family  string `json:"family"`
+}
+
+// LLDPPeer is the interface's far end as LLDP reported it (APPL_DB
+// LLDP_ENTRY_TABLE).
+type LLDPPeer struct {
+	ChassisID       string `json:"chassis_id"`
+	PortID          string `json:"port_id"`
+	PortDescription string `json:"port_description,omitempty"`
+	SystemName      string `json:"system_name,omitempty"`
+	SystemDesc      string `json:"system_description,omitempty"`
+}
+
+// OpticsInfo passes through the interface's transceiver tables (STATE_DB
+// TRANSCEIVER_INFO / _DOM_SENSOR / _STATUS) as written — populated on
+// physical hardware, absent on -vs platforms (pmon has no sensors to read).
+// Raw maps rather than curated fields: the DOM schema varies by module type
+// and the observation surface reports what exists.
+type OpticsInfo struct {
+	Present bool              `json:"present"`
+	Info    map[string]string `json:"info,omitempty"`
+	DOM     map[string]string `json:"dom,omitempty"`
+	Status  map[string]string `json:"status,omitempty"`
+}
+
 // BGPNeighborEntry is a BGP neighbor from CONFIG_DB for VRF show.
 // The wire name follows the intent-param vocabulary (neighbor_ip) — the
 // registry manifest is the canonical wire vocabulary; see api.md

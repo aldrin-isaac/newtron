@@ -7,8 +7,6 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
-
-	"github.com/aldrin-isaac/newtron/pkg/cli"
 )
 
 var configdbCmd = &cobra.Command{
@@ -91,18 +89,7 @@ Examples:
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(fields)
 		}
-
-		names := make([]string, 0, len(fields))
-		for f := range fields {
-			names = append(names, f)
-		}
-		sort.Strings(names)
-
-		t := cli.NewTable("FIELD", "VALUE")
-		for _, f := range names {
-			t.Row(f, fields[f])
-		}
-		t.Flush()
+		printFieldTable(fields)
 
 		return nil
 	},

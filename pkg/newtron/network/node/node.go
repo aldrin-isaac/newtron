@@ -603,6 +603,43 @@ func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawC
 	return n.conn.Client().GetRawAllTables(ctx)
 }
 
+// OperDBSnapshot reads an entire operational DB (STATE_DB, APPL_DB,
+// COUNTERS_DB, ASIC_DB) as table → key → fields. Pure observation of the
+// device's runtime state — no projection fallback exists or could: an
+// operational DB has no intended side (§1: the device is the source of
+// reality). Auto-connects transport if needed.
+func (n *Node) OperDBSnapshot(ctx context.Context, dbName string) (sonic.RawConfigDB, error) {
+	if n.conn == nil {
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport for %s snapshot: %w", dbName, err)
+		}
+	}
+	return n.conn.OperDBSnapshot(ctx, dbName)
+}
+
+// OperDBTable reads one table of an operational DB. Auto-connects transport
+// if needed.
+func (n *Node) OperDBTable(ctx context.Context, dbName, table string) (map[string]map[string]string, error) {
+	if n.conn == nil {
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport for %s read: %w", dbName, err)
+		}
+	}
+	return n.conn.OperDBTable(ctx, dbName, table)
+}
+
+// OperDBEntry reads one entry of an operational DB; key "" reads a
+// flat-hash table (e.g. COUNTERS_PORT_NAME_MAP). Auto-connects transport
+// if needed.
+func (n *Node) OperDBEntry(ctx context.Context, dbName, table, key string) (map[string]string, error) {
+	if n.conn == nil {
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport for %s read: %w", dbName, err)
+		}
+	}
+	return n.conn.OperDBEntry(ctx, dbName, table, key)
+}
+
 // Drift compares the projection (expected state from intent replay) against
 // the device's actual CONFIG_DB. Auto-connects transport if needed.
 func (n *Node) Drift(ctx context.Context) ([]sonic.DriftEntry, error) {

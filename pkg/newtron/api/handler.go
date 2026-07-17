@@ -166,6 +166,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces", s.handleListInterfaces)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces/{name}", s.handleShowInterface)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces/{name}/binding", s.handleShowServiceBinding)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/interfaces/{name}/status", s.handleInterfaceStatus)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/vlans", s.handleListVLANs)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/vlans/{id}", s.handleShowVLAN)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/vrfs", s.handleListVRFs)
@@ -218,7 +219,9 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/configdb/{table}", s.handleConfigDBTableKeys)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/configdb/{table}/{key}", s.handleQueryConfigDB)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/configdb/{table}/{key}/exists", s.handleConfigDBEntryExists)
-	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/statedb/{table}/{key}", s.handleQueryStateDB)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/db/{db}", s.handleOperDBSnapshot)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/db/{db}/{table}", s.handleOperDBTable)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/db/{db}/{table}/{key...}", s.handleOperDBEntry)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/bgp/check", s.handleCheckBGPSessions)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/lags/{name}", s.handleShowLAGDetail)
 

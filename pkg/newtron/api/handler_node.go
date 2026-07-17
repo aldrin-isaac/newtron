@@ -1066,15 +1066,59 @@ func (s *Server) handleConfigDBEntryExists(w http.ResponseWriter, r *http.Reques
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleQueryStateDB(w http.ResponseWriter, r *http.Request) {
+// handleOperDBSnapshot returns an entire operational DB (STATE_DB, APPL_DB,
+// COUNTERS_DB, ASIC_DB) as table → key → fields — the raw observation
+// surface for console diagnostics (§1, §4). CONFIG_DB is not served on this
+// path; /configdb owns the config read with its own semantics.
+func (s *Server) handleOperDBSnapshot(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
+	dbName := r.PathValue("db")
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.OperDBSnapshot(r.Context(), dbName)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
+// handleOperDBTable returns one table of an operational DB as key → fields.
+// A flat-hash table (e.g. COUNTERS_DB's COUNTERS_PORT_NAME_MAP) comes back
+// as a single "" entry.
+func (s *Server) handleOperDBTable(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	dbName := r.PathValue("db")
+	table := r.PathValue("table")
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.OperDBTable(r.Context(), dbName, table)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
+// handleOperDBEntry returns one entry's fields. The key is the wildcard
+// remainder of the path because operational keys embed the DB separator
+// (APPL_DB "NEIGH_TABLE:Ethernet4:10.255.255.4" → key "Ethernet4:10.255.255.4").
+func (s *Server) handleOperDBEntry(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	dbName := r.PathValue("db")
 	table := r.PathValue("table")
 	key := r.PathValue("key")
 	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return n.QueryStateDB(table, key)
+		return n.OperDBEntry(r.Context(), dbName, table, key)
 	})
 	if err != nil {
 		writeError(w, err)

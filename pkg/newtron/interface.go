@@ -293,3 +293,46 @@ func (i *Interface) UnbindQoS(ctx context.Context) error {
 	i.node.appendPending(cs)
 	return nil
 }
+
+// Status returns the interface's composed live operational picture — link
+// state, counters, rates, resolved neighbors, LLDP far end, optics — read
+// across STATE_DB, APPL_DB, and COUNTERS_DB. Pure observation (§4); no
+// permission gate, matching the other read paths.
+func (i *Interface) Status(ctx context.Context) (*InterfaceStatus, error) {
+	st, err := i.internal.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &InterfaceStatus{
+		Name:        st.Name,
+		AdminStatus: st.AdminStatus,
+		OperStatus:  st.OperStatus,
+		Speed:       st.Speed,
+		MTU:         st.MTU,
+		FEC:         st.FEC,
+		HostTxReady: st.HostTxReady,
+		Neighbors:   make([]ARPNeighbor, len(st.Neighbors)),
+	}
+	// Sub-structs are field-identical to their internal counterparts —
+	// direct conversion keeps the boundary compiler-checked (§33).
+	for idx, n := range st.Neighbors {
+		out.Neighbors[idx] = ARPNeighbor(n)
+	}
+	if st.Counters != nil {
+		c := InterfaceCounters(*st.Counters)
+		out.Counters = &c
+	}
+	if st.Rates != nil {
+		r := InterfaceRates(*st.Rates)
+		out.Rates = &r
+	}
+	if st.LLDPPeer != nil {
+		p := LLDPPeer(*st.LLDPPeer)
+		out.LLDPPeer = &p
+	}
+	if st.Optics != nil {
+		o := OpticsInfo(*st.Optics)
+		out.Optics = &o
+	}
+	return out, nil
+}

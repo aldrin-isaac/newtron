@@ -63,6 +63,7 @@ type Device struct {
 	applClient  *AppDBClient  // APP_DB (DB 0) for route verification
 	asicClient  *AsicDBClient // ASIC_DB (DB 1) for ASIC-level verification
 	tunnel      *SSHTunnel    // SSH tunnel for Redis access (nil if direct)
+	redisAddr   string        // resolved Redis address (tunnel-local or direct) — set by Connect
 	connected   bool
 	locked      bool
 	lockHolder  string // holder identity for distributed lock
@@ -130,6 +131,7 @@ func (d *Device) Connect(ctx context.Context) error {
 		// directly reachable at mgmt_ip:6379 (no tunnel).
 		addr = fmt.Sprintf("%s:6379", d.NodeSpec.MgmtIP)
 	}
+	d.redisAddr = addr
 
 	// Connect to CONFIG_DB (DB 4)
 	d.client = NewConfigDBClient(addr)

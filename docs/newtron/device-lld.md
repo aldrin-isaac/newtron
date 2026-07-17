@@ -896,7 +896,9 @@ fields (`state`, `operation`, `name`, `holder`, `created`, `applied_at`,
 
 STATE_DB (Redis DB 6) contains the operational/runtime state of the device, separate from configuration. CONFIG_DB is the device's configured state — ground reality, whether correct or not. STATE_DB is what the system is actually doing at runtime.
 
-**Consumer note:** newtrun's `verifyStateDBExecutor` reads STATE_DB tables via the HTTP API client (`Client.QueryStateDB()`), which calls the newtron-server, which internally calls `StateDBClient.GetEntry()`. Similarly, `verifyBGPExecutor` calls `Client.CheckBGPSessions()`, which reads BGP neighbor state from STATE_DB on the server side. Both executors poll with timeout until expected values appear.
+**Consumer note:** external consumers reach STATE_DB through the generic operational read (`GET /nodes/{node}/db/STATE_DB/{table}/{key}` → `Client.OperDBEntry()`, backed by `OperDBClient` in `operdb.go`) or through the curated status endpoints (`/bgp/check`, `/interfaces/{name}/status`) that compose STATE_DB internally. newtrun scenarios poll these HTTP endpoints with timeout until expected values appear.
+
+**Generic operational reads (`operdb.go`):** alongside the persistent per-purpose clients below, `OperDBClient` serves ad-hoc raw reads of any operational DB — STATE_DB, APPL_DB, COUNTERS_DB, ASIC_DB — as `table → key → fields`, splitting keys on the DB's separator (`|` for STATE_DB, `:` for the rest; a separator-less key is a flat hash such as COUNTERS_DB's `COUNTERS_PORT_NAME_MAP`). It is fail-closed on the DB name, skips non-hash plumbing keys (ProducerStateTable `_KEY_SET` sets), and opens/closes per call so an idle Device carries no extra connections. CONFIG_DB is deliberately excluded — `/configdb` owns the config read with its own semantics.
 
 ### 5.1 StateDB Struct
 
