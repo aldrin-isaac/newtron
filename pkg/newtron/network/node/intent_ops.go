@@ -99,6 +99,33 @@ func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string
 
 // deleteIntent removes a NEWTRON_INTENT record and deregisters from all parents.
 // Returns error if the record has children (I5 — must remove children first).
+// childlessExcept reports whether resource's intent exists and its only remaining
+// children are the co-reaped keys passed in — i.e. its last real consumer is gone.
+// It is the shared last-consumer test behind the reference-aware reaps in
+// RemoveService: a resource a service composed (the VLAN, its L2VNI) — or one an
+// operator authored and a service then overlapped — is reaped once no binding,
+// member, or SVI still needs it. coReaped names children removed in the same
+// teardown (e.g. a VLAN's macvpn), which must not count as remaining consumers.
+func (n *Node) childlessExcept(resource string, coReaped ...string) bool {
+	intent := n.GetIntent(resource)
+	if intent == nil {
+		return false
+	}
+	for _, child := range intent.Children {
+		kept := true
+		for _, ignore := range coReaped {
+			if child == ignore {
+				kept = false
+				break
+			}
+		}
+		if kept {
+			return false
+		}
+	}
+	return true
+}
+
 func (n *Node) deleteIntent(cs *ChangeSet, resource string) error {
 	intent := n.GetIntent(resource)
 	if intent == nil {

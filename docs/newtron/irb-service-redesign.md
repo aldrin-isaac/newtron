@@ -279,11 +279,24 @@ than a Junos gateway filter. The `ingress_filter`/`qos_policy` tooltips name thi
 
 ## 8. Out of scope, with reasons
 
-- **Bridged / evpn-bridged services stay per-access-port.** They have no L3
-  gateway, so there is no delivery interface to bind to; their content genuinely
-  is per-port. Whether a pure-L2 VLAN eventually deserves a VLAN-anchored variant
-  of this per-member model is a real open question — it must get its own answer, not
-  inherit the irb answer by assumption.
+- **Bridged / evpn-bridged services are composites too — but deliver per-access-port.**
+  A follow-up made them composites like the irb: `apply-service` assembles the L2
+  bridge domain it delivers (the VLAN, the L2VNI overlay for evpn, and this port's
+  access membership) via the shared `createBridgeDomain` + `createAccessMembership`
+  primitives, then binds on the access port. An irb *integrates* routing and
+  bridging, so it composes that same L2 domain and adds an SVI gateway on top;
+  a bridged service composes it and stops at the membership — the two halves of
+  the type table in §3. What bridged does *not* get is the irb's per-member
+  filter/QoS model: with no SVI there is no VLAN-anchored delivery point for it,
+  and whether a pure-L2 VLAN eventually deserves one remains a real open question
+  — it must get its own answer, not inherit the irb answer by assumption.
+
+  Teardown follows the one last-consumer reap rule (`DESIGN_PRINCIPLES_NEWTRON.md`
+  §24): the VLAN, L2VNI, SVI, VRF, and access membership are each reaped once no
+  consumer remains, with no operator-authored protection. The irb is that rule's one
+  exception: its own VLAN + L2VNI are the EVPN bridge domain, serving the overlay
+  (remote members, the distributed anycast gateway) independent of local membership,
+  so an irb leaves them standing even when locally childless.
 - **The saga executor** remains deferred (`memory/project_saga_design.md`): built
   as newtrun's model pointed at production when a consumer exists, never as a
   config-only engine.

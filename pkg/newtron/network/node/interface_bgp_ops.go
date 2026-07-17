@@ -82,7 +82,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 		ActivateIPv4: true,
 	})
 	cs := buildChangeSet(n.Name(), "interface."+sonic.OpAddBGPPeer, config, ChangeAdd)
-	if err := i.ensureInterfaceIntent(cs); err != nil {
+	if err := i.createInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
 	intentParams := map[string]string{

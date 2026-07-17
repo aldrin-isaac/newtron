@@ -500,6 +500,33 @@ Before making any change to `service_ops.go`, `*_ops.go`, or any shared code pat
 
 Tracking what was working (update this as test suites are validated):
 
+**B-phase cold sweep 2026-07-16 (bridged/evpn-bridged composite, branch feat/bridged-composite)**:
+made bridged/evpn-bridged services composites like the irb — `apply-service` assembles
+the L2 bridge domain it delivers (VLAN + L2VNI-for-evpn + this port's access
+membership) via the shared `ensureBridgeDomain` + `ensureAccessMembership` primitives,
+then binds on the access port. An irb integrates routing and bridging, so it composes
+the same L2 domain and adds an SVI gateway on top; a bridged service stops at the
+membership. Teardown unified to one last-consumer predicate (`childlessExcept`) —
+VLAN, L2VNI, SVI, VRF, membership — **no provenance flag**: per §24 the VLAN is a
+shared object (reaped on last consumer) and the membership is per-interface
+infrastructure (dies with the service), so operator config a service overlaps is
+reaped with the service (user directive). The one exception: an irb leaves its own
+VLAN/L2VNI standing (the EVPN bridge domain outlives the L3 service). Naming: the
+helpers are the established `ensure*` family (not a new "compose" verb). **Cold,
+both platforms, all green — 2node-vs-primitive 25/25, 2node-ngdp-primitive 22/22
+(CiscoVS), 2node-vs-service 7/7, 2node-ngdp-service 6/6 (CiscoVS)**; `go test ./...`
+(25 pkgs) + vet green; the composite apply+reap also proven directly on-device
+(apply assembles VLAN+member+binding 6/6; remove reaps binding→member→VLAN 6/6).
+Service-suite deprovisions dropped the now-redundant bridged/evpn-bridged manual
+teardown (remove-service reaps it), kept the irb teardown. **Process note (RCA-047):**
+the truly-cold run is `newtlab destroy <lab>` THEN `newtrun start` — `EnsureTopology`
+warm-reuses a running lab, so a bare re-`start` runs on accumulated config-save state
+(surfaces as "BGP peer already exists"), not a cold deploy. This host's cold VLAN_MEMBER
+ASIC convergence runs ~184s, so 10-bridged's ASIC polls were raised 180s→240s (#261
+precedent; polls exit early on success, warm runs unaffected). DP/editing-guidelines
+audited: §24 owns the shared-vs-per-interface lifecycle principle, irb-service-redesign
+§8 references it (§4 no-duplication; no code-function names in the principles doc).
+
 **R-6 targeted sweep 2026-07-15 (irb composite restoration, branch feat/irb-per-member-policy)**:
 the irb-affected suites, both platforms, after restoring `apply-service` as a
 composite (it re-assembles the VLAN/L2VNI/VRF/SVI it delivers — DE-1's decoupling

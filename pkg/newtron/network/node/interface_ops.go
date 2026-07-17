@@ -186,6 +186,36 @@ type InterfaceConfig struct {
 	Tagged bool   // Tagged membership (bridged mode)
 }
 
+// createAccessMembership makes this interface an untagged (access) member of
+// vlanID: the VLAN_MEMBER row plus the singleton access-membership intent that
+// isVLANMember / vlanMemberPorts read (§24). It is the single owner of the
+// access-membership write, shared by ConfigureInterface (operator authoring) and
+// the bridged / evpn-bridged composite (the service authoring its L2 delivery
+// point). Its §15 reverse is destroyAccessMembership. The caller is responsible
+// for the trunk-eligibility gate and render.
+func (i *Interface) createAccessMembership(cs *ChangeSet, vlanID int) error {
+	cs.Adds(createVlanMemberConfig(vlanID, i.name, false))
+	parents := []string{"vlan|" + strconv.Itoa(vlanID)}
+	if i.IsPortChannel() {
+		parents = append(parents, "portchannel|"+i.name)
+	}
+	return i.node.writeIntent(cs, sonic.OpConfigureInterface, "interface|"+i.name,
+		map[string]string{
+			sonic.FieldVLANID: strconv.Itoa(vlanID),
+			sonic.FieldTagged: "false",
+		}, parents)
+}
+
+// destroyAccessMembership is the §15 reverse of createAccessMembership: it removes
+// this interface's access membership — the VLAN_MEMBER row and the singleton
+// membership identity intent. The caller confirms the intent is childless (its
+// binding has been removed) before calling. A trunk membership is a separate
+// sub-resource (interface|<name>|trunk-vlan|<id>) and is not touched here.
+func (i *Interface) destroyAccessMembership(cs *ChangeSet, vlanID int) error {
+	cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
+	return i.node.deleteIntent(cs, "interface|"+i.name)
+}
+
 // bindingKey returns the intent resource key for an interface's service
 // binding — a sub-resource of the interface's identity record
 // (interface|<name>), the single owner of this key so writer, readers, and
@@ -211,10 +241,16 @@ func resourceInterfaceName(resource string) string {
 	return strings.SplitN(rest, "|", 2)[0]
 }
 
-// ensureInterfaceIntent lazily creates the interface|INTF intent if it doesn't
-// exist. Sub-resource operations (SetProperty, BindACL, BindQoS) call this so
-// they work on interfaces that haven't had ConfigureInterface called.
-func (i *Interface) ensureInterfaceIntent(cs *ChangeSet) error {
+// createInterfaceIntent writes the interface|INTF identity intent if absent
+// (idempotent). It is the interface's intent-writer — the standalone equivalent of
+// the writeIntent every CreateVLAN / CreateVRF / CreatePortChannel does inline,
+// needed here because the interface is the one delivery target newtron does not
+// create (a physical port pre-exists via RegisterPort, so there is no
+// CreateInterface to own interface|INTF). Sub-resource operations (SetProperty,
+// BindACL, BindQoS, apply-service, add-trunk-vlan) call it so they have a DAG
+// parent to hang off. Its reverse is the universal deleteIntent (childless-gated),
+// as for every intent record.
+func (i *Interface) createInterfaceIntent(cs *ChangeSet) error {
 	resource := "interface|" + i.name
 	if i.node.GetIntent(resource) != nil {
 		return nil
@@ -277,7 +313,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		// replay reconstructs the full trunk set (#224, Intent Round-Trip
 		// Completeness). Access mode stays singleton on the base record.
 		if cfg.Tagged {
-			if err := i.ensureInterfaceIntent(cs); err != nil {
+			if err := i.createInterfaceIntent(cs); err != nil {
 				return nil, err
 			}
 			trunkResource := fmt.Sprintf("interface|%s|trunk-vlan|%d", i.name, cfg.VLAN)
@@ -311,10 +347,25 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 			util.WithDevice(n.Name()).Infof("Added trunk VLAN %d on %s", cfg.VLAN, i.name)
 			return cs, nil
 		}
-		// Access mode — singleton, lives on the base interface record.
-		cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, false))
-		configureIntentParams[sonic.FieldVLANID] = strconv.Itoa(cfg.VLAN)
-		configureIntentParams[sonic.FieldTagged] = "false"
+		// Access mode — singleton membership on the base record. The write is
+		// shared with the bridged / evpn-bridged composite via
+		// createAccessMembership (§30: one owner of the access-membership write).
+		// Access carries no routed params, so this completes the op — return here
+		// rather than falling through the routed section below.
+		if err := i.createAccessMembership(cs, cfg.VLAN); err != nil {
+			return nil, err
+		}
+		cs.ReverseOp = "interface.unconfigure-interface"
+		cs.OperationParams = map[string]string{"interface": i.name}
+		// Per-member policy (§4): an access member just joined — fan any irb-service
+		// policy bound on this VLAN's IRB onto it (§7; members are single-VLAN).
+		n.rebindMemberACLs(cs, cfg.VLAN)
+		n.bindMemberQoS(cs, cfg.VLAN)
+		if err := n.render(cs); err != nil {
+			return nil, err
+		}
+		util.WithDevice(n.Name()).Infof("Configured interface %s access VLAN %d", i.name, cfg.VLAN)
+		return cs, nil
 	}
 
 	// Routed mode — VRF binding and/or IP address
@@ -592,7 +643,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	}
 
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpBindACL)
-	if err := i.ensureInterfaceIntent(cs); err != nil {
+	if err := i.createInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
 	if err := i.node.writeIntent(cs, sonic.OpBindACL, "interface|"+i.name+"|acl|"+direction,
@@ -678,7 +729,7 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 	}
 
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpSetProperty)
-	if err := i.ensureInterfaceIntent(cs); err != nil {
+	if err := i.createInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
 	if err := i.node.writeIntent(cs, sonic.OpSetProperty, "interface|"+i.name+"|"+property,

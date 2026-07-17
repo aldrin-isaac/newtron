@@ -309,56 +309,58 @@ func TestMemberPolicy_TrunkGate(t *testing.T) {
 	})
 }
 
-// TestApplyService_BridgedRequiresMembership pins the bridge-domain precondition
-// for the per-access-port service types (DE-1): a bridged service delivers onto
-// an access port that must already be a member of a pre-existing VLAN. The VLAN
-// and the membership are authored separately (create-vlan, configure-interface),
-// each with one owner (§6); the service requires them and creates neither.
-func TestApplyService_BridgedRequiresMembership(t *testing.T) {
+// TestApplyService_BridgedComposesBridgeDomain pins the bridged / evpn-bridged
+// composite (B): the service assembles the L2 bridge domain it delivers — the
+// VLAN and this port's untagged access membership (its delivery point) — reusing
+// any piece the operator pre-authored (§2). The one thing it cannot derive is
+// which VLAN, so it requires that. Reap flags (created_vlan/created_membership)
+// record what apply created so remove reaps only that (§15, reference-aware).
+func TestApplyService_BridgedComposesBridgeDomain(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("refused when VLAN absent", func(t *testing.T) {
+	t.Run("refused without a VLAN", func(t *testing.T) {
 		n, intf := testInterface()
 		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
-		_, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
-		if err == nil || !strings.Contains(err.Error(), "does not exist") {
-			t.Fatalf("want VLAN-absent refusal, got %v", err)
+		_, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{})
+		if err == nil || !strings.Contains(err.Error(), "requires a VLAN") {
+			t.Fatalf("want VLAN-required refusal, got %v", err)
 		}
 	})
 
-	t.Run("refused when not a member", func(t *testing.T) {
+	t.Run("assembles the VLAN and access membership when absent", func(t *testing.T) {
 		n, intf := testInterface()
 		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
-		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
-			t.Fatalf("CreateVLAN: %v", err)
-		}
-		_, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
-		if err == nil || !strings.Contains(err.Error(), "not a member") {
-			t.Fatalf("want not-a-member refusal, got %v", err)
-		}
-		if !strings.Contains(err.Error(), "configure-interface") {
-			t.Fatalf("refusal should name configure-interface: %v", err)
-		}
-	})
-
-	t.Run("succeeds onto a pre-existing bridge domain, creates no membership", func(t *testing.T) {
-		n, intf := testInterface()
-		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
-		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
-			t.Fatalf("CreateVLAN: %v", err)
-		}
-		memberCS, err := intf.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100})
+		cs, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
 		if err != nil {
+			t.Fatalf("ApplyService (assemble): %v", err)
+		}
+		// The composite creates the VLAN and this port's untagged membership.
+		assertChange(t, cs, "VLAN", "Vlan100", ChangeAdd)
+		assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeAdd)
+		if n.GetIntent("vlan|100") == nil {
+			t.Fatalf("VLAN intent not created")
+		}
+		if !n.isVLANMember("Ethernet0", 100) {
+			t.Fatalf("access membership intent not created")
+		}
+		// No reap flags: both the VLAN and the membership are reaped on the last
+		// consumer (childlessness), the same rule the SVI/VRF reaps use.
+	})
+
+	t.Run("reuses an operator-authored VLAN and membership", func(t *testing.T) {
+		n, intf := testInterface()
+		n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatalf("CreateVLAN: %v", err)
+		}
+		if _, err := intf.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
 			t.Fatalf("ConfigureInterface (membership): %v", err)
 		}
-		// The membership rows come from configure-interface, not the service.
-		assertChange(t, memberCS, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeAdd)
-
 		svcCS, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100})
 		if err != nil {
-			t.Fatalf("ApplyService onto a pre-existing bridge domain: %v", err)
+			t.Fatalf("ApplyService onto a pre-authored bridge domain: %v", err)
 		}
-		// The service creates NO membership: VLAN_MEMBER is configure-interface's (§6).
+		// Idempotent: the composite re-adds neither the VLAN nor the membership.
 		assertNoChange(t, svcCS, "VLAN_MEMBER", "Vlan100|Ethernet0")
 	})
 }
@@ -596,6 +598,108 @@ func TestRemoveService_IRBComposesAndReapsGateway(t *testing.T) {
 	}
 }
 
+// TestRemoveService_BridgedReapsComposedDomain pins the bridged composite
+// teardown (B): a bridged service that assembled the VLAN + this port's access
+// membership reaps both on the last consumer — the reference-aware mirror of the
+// irb SVI reap. The membership identity and the VLAN are gone after remove.
+func TestRemoveService_BridgedReapsComposedDomain(t *testing.T) {
+	ctx := context.Background()
+	n, intf := testInterface()
+	n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
+	if _, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100}); err != nil {
+		t.Fatalf("ApplyService: %v", err)
+	}
+	if n.GetIntent("vlan|100") == nil || !n.isVLANMember("Ethernet0", 100) {
+		t.Fatal("apply must assemble the VLAN and the access membership")
+	}
+
+	cs, err := intf.RemoveService(ctx)
+	if err != nil {
+		t.Fatalf("RemoveService: %v", err)
+	}
+	// Reap: the membership row and the VLAN this apply created are both removed.
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
+	assertChange(t, cs, "VLAN", "Vlan100", ChangeDelete)
+	if n.GetIntent(bindingKey("Ethernet0")) != nil {
+		t.Fatal("service binding must be deleted")
+	}
+	if n.GetIntent("interface|Ethernet0") != nil {
+		t.Fatal("the created access-membership identity must be reaped on the last consumer")
+	}
+	if n.GetIntent("vlan|100") != nil {
+		t.Fatal("the created VLAN must be reaped on the last consumer")
+	}
+}
+
+// TestRemoveService_BridgedKeepsOperatorDomain pins reference-awareness: when the
+// operator pre-authored the VLAN + membership, apply-service reuses them (no reap
+// operator config overlapped by a service — is reaped along with the service (an
+// operator resource is preserved only while no service overlaps it). Last-consumer,
+// no provenance: the VLAN + membership go on the service's removal.
+func TestRemoveService_BridgedReapsOverlappedOperatorDomain(t *testing.T) {
+	ctx := context.Background()
+	n, intf := testInterface()
+	n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
+	// Operator authors the VLAN + membership standalone...
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+	if _, err := intf.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
+		t.Fatalf("ConfigureInterface: %v", err)
+	}
+	// ...then a service overlaps them.
+	if _, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100}); err != nil {
+		t.Fatalf("ApplyService: %v", err)
+	}
+	cs, err := intf.RemoveService(ctx)
+	if err != nil {
+		t.Fatalf("RemoveService: %v", err)
+	}
+	// Both are reaped with the service they overlapped — no operator protection.
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
+	assertChange(t, cs, "VLAN", "Vlan100", ChangeDelete)
+	if n.isVLANMember("Ethernet0", 100) {
+		t.Fatal("overlapped operator membership must be reaped with the service")
+	}
+	if n.GetIntent("vlan|100") != nil {
+		t.Fatal("overlapped operator VLAN must be reaped with the service")
+	}
+}
+
+// TestRemoveService_BridgedSharedVLANSurvives pins the last-consumer childlessness:
+// two ports bridged onto one VLAN. Removing the first leaves the VLAN (the second
+// member remains); removing the second reaps it.
+func TestRemoveService_BridgedSharedVLANSurvives(t *testing.T) {
+	ctx := context.Background()
+	n, intf := testInterface()
+	n.SpecProvider.(*testSpecProvider).services["cust-bridged"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
+	other, err := n.GetInterface("Ethernet4")
+	if err != nil {
+		t.Fatalf("GetInterface Ethernet4: %v", err)
+	}
+	if _, err := intf.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100}); err != nil {
+		t.Fatalf("ApplyService Ethernet0: %v", err)
+	}
+	if _, err := other.ApplyService(ctx, "cust-bridged", ApplyServiceOpts{VLAN: 100}); err != nil {
+		t.Fatalf("ApplyService Ethernet4: %v", err)
+	}
+	if _, err := intf.RemoveService(ctx); err != nil {
+		t.Fatalf("RemoveService Ethernet0: %v", err)
+	}
+	if n.GetIntent("vlan|100") == nil {
+		t.Fatal("VLAN must survive while another bridged member remains")
+	}
+	if !n.isVLANMember("Ethernet4", 100) {
+		t.Fatal("the second member must remain")
+	}
+	if _, err := other.RemoveService(ctx); err != nil {
+		t.Fatalf("RemoveService Ethernet4: %v", err)
+	}
+	if n.GetIntent("vlan|100") != nil {
+		t.Fatal("VLAN must be reaped once the last bridged member leaves")
+	}
+}
+
 // TestApplyService_IRBReconstructs pins that the flipped irb binding round-trips
 // through reconstruction. The IRB identity IS a DAG parent of the binding, so
 // replay applies it first — but the precondition is gated on !reconstructing
@@ -636,6 +740,41 @@ func TestApplyService_IRBReconstructs(t *testing.T) {
 		t.Fatal("SVI missing after reconstruction")
 	}
 	if n.GetIntent(bindingKey("Vlan100")) == nil {
+		t.Fatal("binding missing after reconstruction")
+	}
+}
+
+// TestApplyService_BridgedReconstructs pins that the bridged composite round-trips
+// through reconstruction: replaying the binding re-assembles the VLAN and this
+// port's access membership (both are DAG ancestors of the binding, applied first).
+// The trunk-eligibility gate and membership write are skipped/idempotent under
+// !reconstructing, so the rebuilt projection matches (§20).
+func TestApplyService_BridgedReconstructs(t *testing.T) {
+	ctx := context.Background()
+	n, intf := testInterface()
+	n.SpecProvider.(*testSpecProvider).services["CUST_BRIDGED"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged}
+	if _, err := intf.ApplyService(ctx, "CUST_BRIDGED", ApplyServiceOpts{VLAN: 100}); err != nil {
+		t.Fatalf("ApplyService: %v", err)
+	}
+
+	intents := map[string]map[string]string{}
+	for k, v := range n.configDB.NewtronIntent {
+		cp := map[string]string{}
+		for kk, vv := range v {
+			cp[kk] = vv
+		}
+		intents[k] = cp
+	}
+	if err := n.RebuildProjectionFromIntents(ctx, intents); err != nil {
+		t.Fatalf("reconstruction must not fire the interactive precondition: %v", err)
+	}
+	if n.GetIntent("vlan|100") == nil {
+		t.Fatal("composed VLAN missing after reconstruction")
+	}
+	if !n.isVLANMember("Ethernet0", 100) {
+		t.Fatal("composed access membership missing after reconstruction")
+	}
+	if n.GetIntent(bindingKey("Ethernet0")) == nil {
 		t.Fatal("binding missing after reconstruction")
 	}
 }
