@@ -2346,6 +2346,20 @@ Domain-intent naming makes the symmetry legible:
 `assign`/`unassign` for values, `generate` for composite production.
 Noun-only names are reserved for types and constructors.
 
+**The state-verb class and the naming-time diagnostic are `DESIGN_PRINCIPLES.md`
+§32** — some verbs guarantee a state rather than create a record and so have no
+paired reverse, and whether you can name the reverse tells you which kind you are
+naming. In newtron that class is `setup`/`set` (remediation is reconcile, §16) plus
+`ensure`, which names an idempotent guarantee of a mode or state that is not a
+discrete created record: a device or daemon mode (`EnsureUnifiedConfigMode`), a
+node's intent source (`ensureActuatedIntent`), a lab being deployed (`EnsureTopology`,
+which guards the real `DeployTopology`/`DestroyTopology` pair). Apply the diagnostic
+the other way to place a `create`: `createBridgeDomain` has a nameable
+`destroyBridgeDomain`, so it is a create; `createInterfaceIntent` writes the
+interface's identity record — a physical port has no `create` operation of its own —
+and its reverse is the generic `deleteIntent`, so it too is a create. Using `ensure`
+on either would have hidden the create/destroy pair and the §15 symmetry with it.
+
 **Exceptions.** Three categories of identifier may stay noun-form
 without a verb prefix:
 

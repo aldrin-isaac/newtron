@@ -2363,6 +2363,18 @@ Domain-intent naming makes the symmetry legible:
 `assign`/`unassign` for values, `generate` for composite production.
 Noun-only names are reserved for types and constructors.
 
+**Not every verb has a paired reverse — a class of them guarantees a state rather
+than creating a thing.** `setup` and `set` are already in this class (their
+remediation is reconcile, §16); `ensure` is another member of it, naming an
+idempotent guarantee of a mode or state that is not a discrete created record — its
+reverse, if any, is reconcile or another state-`ensure`, never a `de-ensure`. The two
+classes give a diagnostic to apply *at naming time*: **if the thing you are naming
+creates a resource or a record, you can name its reverse (`delete`/`destroy`) — so it
+is `create`, not a state verb.** Reaching for a reverseless verb on something that
+creates a record hides a real create/destroy pair and the symmetry (§15) with it. The
+inability to name a clean reverse marks a state verb; the ability to name one marks a
+create.
+
 **Exceptions.** Three categories of identifier may stay noun-form
 without a verb prefix:
 
