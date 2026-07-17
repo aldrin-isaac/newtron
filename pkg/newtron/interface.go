@@ -334,5 +334,13 @@ func (i *Interface) Status(ctx context.Context) (*InterfaceStatus, error) {
 		o := OpticsInfo(*st.Optics)
 		out.Optics = &o
 	}
+	// Members present only for composites — nil for a physical port so the wire
+	// field is omitted. MemberStatus is field-identical to its internal twin (§33).
+	if len(st.Members) > 0 {
+		out.Members = make([]MemberStatus, len(st.Members))
+		for idx, m := range st.Members {
+			out.Members[idx] = MemberStatus(m)
+		}
+	}
 	return out, nil
 }

@@ -55,6 +55,25 @@ type InterfaceStatus struct {
 	// the DOM schema varies by module type and the observation surface
 	// reports what exists.
 	Optics *OpticsInfo
+
+	// Members — the constituent member ports of a composite interface: a
+	// PortChannel's members, or an SVI's VLAN members. Nil for a physical
+	// port (it has no members). Kind-aware: the composite's own row lives in
+	// LAG_TABLE (LAG) or has no port row at all (SVI), so the member link
+	// state is the operative detail a status on VlanN / PortChannelN must show.
+	Members []MemberStatus
+}
+
+// MemberStatus is one constituent port of a composite interface — a PortChannel
+// member or an SVI's VLAN member — reporting the member's link state as the oper
+// DBs wrote it (§4). A composite forwards through its members (a LAG bundles a
+// member; an SVI's bridge reaches a host over a member port), so a member's
+// oper_status is the signal that explains a composite's reachability.
+type MemberStatus struct {
+	Name        string
+	AdminStatus string
+	OperStatus  string
+	Speed       string
 }
 
 // InterfaceCounters holds the cumulative SAI port counters.
@@ -155,64 +174,67 @@ func parseRates(raw map[string]string) *InterfaceRates {
 	return r
 }
 
-// Status composes the interface's live operational picture. Every section
-// is best-effort observation: a DB or table a platform doesn't populate
-// (COUNTERS_DB on some -vs, TRANSCEIVER_* on all -vs) yields a nil/empty
-// section, not an error — the read reports what exists.
+// Status composes the interface's live operational picture, dispatched on the
+// interface kind — the composite's own row lives in a different table per kind
+// (a physical port in PORT_TABLE, a PortChannel in LAG_TABLE, an SVI in neither),
+// and a composite additionally reports its member ports. Beyond a physical port's
+// PORT_TABLE row (whose absence is a genuine fault), every section is best-effort
+// observation: a DB or table a platform doesn't populate yields a nil/empty
+// section, not an error — the read reports what exists (§4).
 func (i *Interface) Status(ctx context.Context) (*InterfaceStatus, error) {
 	st := &InterfaceStatus{Name: i.name}
+	switch interfaceKindOf(i.name) {
+	case KindPortChannel:
+		i.readLAGStatus(ctx, st)
+	case KindIRB:
+		i.readSVIStatus(ctx, st)
+	default:
+		// Physical port (and any other name): its PORT_TABLE row must exist.
+		if err := i.readPortStatus(ctx, st); err != nil {
+			return nil, err
+		}
+	}
+	return st, nil
+}
 
-	// Link state — STATE_DB PORT_TABLE is the substrate; oper_status lives
-	// in APPL_DB PORT_TABLE (portsyncd publishes it there, not to STATE_DB).
-	port, err := i.node.OperDBEntry(ctx, "STATE_DB", "PORT_TABLE", i.name)
+// portLink is the link-state slice of a physical port, read from STATE_DB
+// PORT_TABLE and APPL_DB PORT_TABLE. Shared by the physical-port path and the member
+// reader so both draw the same fields from the same tables (§30).
+type portLink struct{ admin, oper, speed, mtu, fec, hostTxReady string }
+
+// readPortLink reads a physical port's link state. STATE_DB PORT_TABLE is the
+// substrate; oper_status lives in APPL_DB PORT_TABLE (portsyncd publishes it
+// there, not to STATE_DB). The error is the STATE_DB miss — the caller decides
+// whether that is a fault (a physical port) or an empty member.
+func (i *Interface) readPortLink(ctx context.Context, name string) (portLink, error) {
+	port, err := i.node.OperDBEntry(ctx, "STATE_DB", "PORT_TABLE", name)
 	if err != nil {
-		return nil, fmt.Errorf("reading STATE_DB PORT_TABLE for %s: %w", i.name, err)
+		return portLink{}, err
 	}
-	st.AdminStatus = port["admin_status"]
-	st.Speed = port["speed"]
-	st.MTU = port["mtu"]
-	st.FEC = port["fec"]
-	st.HostTxReady = port["host_tx_ready"]
-	if applPort, err := i.node.OperDBEntry(ctx, "APPL_DB", "PORT_TABLE", i.name); err == nil {
-		st.OperStatus = applPort["oper_status"]
-		if st.AdminStatus == "" {
-			st.AdminStatus = applPort["admin_status"]
+	l := portLink{admin: port["admin_status"], speed: port["speed"], mtu: port["mtu"], fec: port["fec"], hostTxReady: port["host_tx_ready"]}
+	if appl, err := i.node.OperDBEntry(ctx, "APPL_DB", "PORT_TABLE", name); err == nil {
+		l.oper = appl["oper_status"]
+		if l.admin == "" {
+			l.admin = appl["admin_status"]
 		}
 	}
+	return l, nil
+}
 
-	// Counters + rates — resolve the interface's OID through
-	// COUNTERS_PORT_NAME_MAP (a flat hash: key "" is the whole table).
-	nameMap, err := i.node.OperDBEntry(ctx, "COUNTERS_DB", "COUNTERS_PORT_NAME_MAP", "")
-	if err == nil {
-		if oid := nameMap[i.name]; oid != "" {
-			if raw, err := i.node.OperDBEntry(ctx, "COUNTERS_DB", "COUNTERS", oid); err == nil && len(raw) > 0 {
-				st.Counters = parseCounters(raw)
-			}
-			if raw, err := i.node.OperDBEntry(ctx, "COUNTERS_DB", "RATES", oid); err == nil && len(raw) > 0 {
-				st.Rates = parseRates(raw)
-			}
-		}
+// readPortStatus fills st for a physical port: link state, counters, resolved
+// neighbors, LLDP far end, and optics. The PORT_TABLE read is the one hard error —
+// a physical port without a STATE_DB row is a genuine fault, not an empty read.
+func (i *Interface) readPortStatus(ctx context.Context, st *InterfaceStatus) error {
+	l, err := i.readPortLink(ctx, i.name)
+	if err != nil {
+		return fmt.Errorf("reading STATE_DB PORT_TABLE for %s: %w", i.name, err)
 	}
+	st.AdminStatus, st.OperStatus, st.Speed = l.admin, l.oper, l.speed
+	st.MTU, st.FEC, st.HostTxReady = l.mtu, l.fec, l.hostTxReady
+	i.readCountersVia(ctx, st, "COUNTERS_PORT_NAME_MAP")
+	st.Neighbors = i.readNeighbors(ctx)
 
-	// Resolved neighbors — APPL_DB NEIGH_TABLE keys are
-	// "<iface>:<address>"; scan the table and keep this interface's rows.
-	st.Neighbors = []ARPNeighbor{}
-	if neigh, err := i.node.OperDBTable(ctx, "APPL_DB", "NEIGH_TABLE"); err == nil {
-		prefix := i.name + ":"
-		for key, fields := range neigh {
-			if !strings.HasPrefix(key, prefix) {
-				continue
-			}
-			st.Neighbors = append(st.Neighbors, ARPNeighbor{
-				Address: strings.TrimPrefix(key, prefix),
-				MAC:     fields["neigh"],
-				Family:  fields["family"],
-			})
-		}
-		sort.Slice(st.Neighbors, func(a, b int) bool { return st.Neighbors[a].Address < st.Neighbors[b].Address })
-	}
-
-	// LLDP far end.
+	// LLDP far end + optics — physical-port only.
 	if lldp, err := i.node.OperDBEntry(ctx, "APPL_DB", "LLDP_ENTRY_TABLE", i.name); err == nil && len(lldp) > 0 {
 		st.LLDPPeer = &LLDPPeer{
 			ChassisID:       lldp["lldp_rem_chassis_id"],
@@ -222,14 +244,95 @@ func (i *Interface) Status(ctx context.Context) (*InterfaceStatus, error) {
 			SystemDesc:      lldp["lldp_rem_sys_desc"],
 		}
 	}
-
-	// Optics — present only where pmon populates the transceiver tables.
-	info, _ := i.node.OperDBEntry(ctx, "STATE_DB", "TRANSCEIVER_INFO", i.name)
-	if len(info) > 0 {
+	if info, _ := i.node.OperDBEntry(ctx, "STATE_DB", "TRANSCEIVER_INFO", i.name); len(info) > 0 {
 		dom, _ := i.node.OperDBEntry(ctx, "STATE_DB", "TRANSCEIVER_DOM_SENSOR", i.name)
 		status, _ := i.node.OperDBEntry(ctx, "STATE_DB", "TRANSCEIVER_STATUS", i.name)
 		st.Optics = &OpticsInfo{Present: true, Info: info, DOM: dom, Status: status}
 	}
+	return nil
+}
 
-	return st, nil
+// readLAGStatus fills st for a PortChannel from APPL_DB LAG_TABLE (the aggregate's
+// admin/oper as teamd/lagmgrd published it), its LAG counters, resolved neighbors
+// (a LAG can carry L3), and its member ports. No LLDP/optics — a LAG is not a
+// physical port. Best-effort: an unpopulated table yields an empty section.
+func (i *Interface) readLAGStatus(ctx context.Context, st *InterfaceStatus) {
+	if lag, err := i.node.OperDBEntry(ctx, "APPL_DB", "LAG_TABLE", i.name); err == nil {
+		st.AdminStatus = lag["admin_status"]
+		st.OperStatus = lag["oper_status"]
+		st.MTU = lag["mtu"]
+	}
+	i.readCountersVia(ctx, st, "COUNTERS_LAG_NAME_MAP")
+	st.Neighbors = i.readNeighbors(ctx)
+	st.Members = i.readMembers(ctx, i.PortChannelMembers())
+}
+
+// readSVIStatus fills st for an SVI (VlanN). An SVI has no PORT_TABLE or LAG_TABLE
+// row; its L2 oper lives in APPL_DB VLAN_TABLE (vlanmgrd), it can carry L3 (so
+// resolved neighbors apply), and its members are the VLAN's member ports. Best-effort.
+func (i *Interface) readSVIStatus(ctx context.Context, st *InterfaceStatus) {
+	if vlan, err := i.node.OperDBEntry(ctx, "APPL_DB", "VLAN_TABLE", i.name); err == nil {
+		st.AdminStatus = vlan["admin_status"]
+		st.OperStatus = vlan["oper_status"]
+		st.MTU = vlan["mtu"]
+	}
+	st.Neighbors = i.readNeighbors(ctx)
+	st.Members = i.readMembers(ctx, i.VLANMembers())
+}
+
+// readMembers reads each member port's link state, sorted for a stable list.
+// Shared by the LAG and SVI paths (§30); best-effort per member — a member with no
+// STATE_DB row yields an empty entry, not an error.
+func (i *Interface) readMembers(ctx context.Context, members []string) []MemberStatus {
+	out := make([]MemberStatus, 0, len(members))
+	for _, m := range members {
+		l, _ := i.readPortLink(ctx, m)
+		out = append(out, MemberStatus{Name: m, AdminStatus: l.admin, OperStatus: l.oper, Speed: l.speed})
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
+	return out
+}
+
+// readCountersVia resolves the interface's counter OID through the given
+// NAME_MAP (COUNTERS_PORT_NAME_MAP for ports, COUNTERS_LAG_NAME_MAP for LAGs — a
+// flat hash whose key "" is the whole table) and fills counters + rates.
+func (i *Interface) readCountersVia(ctx context.Context, st *InterfaceStatus, nameMapTable string) {
+	nameMap, err := i.node.OperDBEntry(ctx, "COUNTERS_DB", nameMapTable, "")
+	if err != nil {
+		return
+	}
+	oid := nameMap[i.name]
+	if oid == "" {
+		return
+	}
+	if raw, err := i.node.OperDBEntry(ctx, "COUNTERS_DB", "COUNTERS", oid); err == nil && len(raw) > 0 {
+		st.Counters = parseCounters(raw)
+	}
+	if raw, err := i.node.OperDBEntry(ctx, "COUNTERS_DB", "RATES", oid); err == nil && len(raw) > 0 {
+		st.Rates = parseRates(raw)
+	}
+}
+
+// readNeighbors scans APPL_DB NEIGH_TABLE (keys "<iface>:<address>") for this
+// interface's resolved adjacencies, sorted by address. Shared by every
+// L3-capable kind (physical, LAG, SVI).
+func (i *Interface) readNeighbors(ctx context.Context) []ARPNeighbor {
+	out := []ARPNeighbor{}
+	neigh, err := i.node.OperDBTable(ctx, "APPL_DB", "NEIGH_TABLE")
+	if err != nil {
+		return out
+	}
+	prefix := i.name + ":"
+	for key, fields := range neigh {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		out = append(out, ARPNeighbor{
+			Address: strings.TrimPrefix(key, prefix),
+			MAC:     fields["neigh"],
+			Family:  fields["family"],
+		})
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Address < out[b].Address })
+	return out
 }

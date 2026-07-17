@@ -364,6 +364,17 @@ type InterfaceStatus struct {
 	Neighbors   []ARPNeighbor      `json:"neighbors"`
 	LLDPPeer    *LLDPPeer          `json:"lldp_peer,omitempty"`
 	Optics      *OpticsInfo        `json:"optics,omitempty"`
+	Members     []MemberStatus     `json:"members,omitempty"`
+}
+
+// MemberStatus is one constituent member port of a composite interface — a
+// PortChannel member or an SVI's VLAN member — with its link state. Present on a
+// PortChannel or VlanN status; omitted on a physical port (it has no members).
+type MemberStatus struct {
+	Name        string `json:"name"`
+	AdminStatus string `json:"admin_status"`
+	OperStatus  string `json:"oper_status"`
+	Speed       string `json:"speed,omitempty"`
 }
 
 // InterfaceCounters holds the cumulative SAI port counters
