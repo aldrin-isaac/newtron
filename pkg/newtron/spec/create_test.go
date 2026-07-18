@@ -130,3 +130,25 @@ func TestScaffoldTopologyNode_HostAware(t *testing.T) {
 		t.Errorf("switch placement must scaffold setup-device, got %+v", sw.Steps)
 	}
 }
+
+// TestServiceSpec_VRFTypeInterfaceIPVPNConflict pins the author-time rejection of
+// the contradictory combination: vrf_type=interface (a per-interface VRF) plus an
+// ipvpn reference (which IS a shared VRF). Left unvalidated, it surfaced deep in
+// apply as a confusing "VRF not found" (newtcon RCA-051 arc).
+func TestServiceSpec_VRFTypeInterfaceIPVPNConflict(t *testing.T) {
+	// The contradiction — rejected.
+	bad := &ServiceSpec{ServiceType: ServiceTypeEVPNIRB, IPVPN: "IPVPN", MACVPN: "MV", VRFType: VRFTypeInterface}
+	if err := bad.ValidateConstraints("EVPNIRB"); err == nil {
+		t.Fatal("vrf_type=interface + ipvpn must be rejected")
+	}
+
+	// The two coherent alternatives — accepted.
+	shared := &ServiceSpec{ServiceType: ServiceTypeEVPNIRB, IPVPN: "IPVPN", MACVPN: "MV", VRFType: VRFTypeShared}
+	if err := shared.ValidateConstraints("EVPNIRB"); err != nil {
+		t.Errorf("vrf_type=shared + ipvpn must be accepted, got %v", err)
+	}
+	perIface := &ServiceSpec{ServiceType: ServiceTypeIRB, MACVPN: "MV", VRFType: VRFTypeInterface}
+	if err := perIface.ValidateConstraints("IRB"); err != nil {
+		t.Errorf("vrf_type=interface without ipvpn must be accepted, got %v", err)
+	}
+}

@@ -48,7 +48,7 @@ func createTestSpecDir(t *testing.T) string {
 				"description": "Customer L3 service",
 				"service_type": "evpn-routed",
 				"ipvpn": "CUSTOMER",
-				"vrf_type": "interface"
+				"vrf_type": "shared"
 			}
 		}
 	}`
@@ -1046,7 +1046,7 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 				"description": "Zone L3 service",
 				"service_type": "evpn-routed",
 				"ipvpn": "ZONE",
-				"vrf_type": "interface"
+				"vrf_type": "shared"
 			}
 		}
 	}`)

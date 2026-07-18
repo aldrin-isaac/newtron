@@ -137,6 +137,16 @@ func (s *ServiceSpec) validateConstraints(v *util.ValidationBuilder, prefix, nam
 	default:
 		v.AddErrorf("%sservice '%s' has unknown type '%s'", prefix, name, s.ServiceType)
 	}
+
+	// vrf_type=interface (a per-service, per-interface VRF) contradicts an ipvpn
+	// reference: an ipvpn IS a shared VRF, and vrf_type=shared is what uses it.
+	// With both set, the composite creates the per-interface VRF but binds the
+	// ipvpn to its own Vrf_<ipvpn>, which does not exist — surfacing as a confusing
+	// "VRF not found" deep in apply. Reject at author time (§13: schema and apply
+	// agree on one rule) so the operator picks a model up front.
+	if s.VRFType == VRFTypeInterface && s.IPVPN != "" {
+		v.AddErrorf("%sservice '%s' sets vrf_type=interface but references ipvpn '%s' — an ipvpn is a shared VRF; use vrf_type=shared to bind the ipvpn's VRF, or remove the ipvpn to use a per-interface VRF", prefix, name, s.IPVPN)
+	}
 }
 
 // ValidateConstraints checks a node spec's required fields and value formats.
