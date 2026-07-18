@@ -136,10 +136,10 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	}
 	// The composed edges (§5).
 	hasParent("macvpn|400", "vlan|400")            // L2VNI under the VLAN
-	hasParent("vrf|Vrf_IRB", "device")             // VRF at the root
-	hasParent("ipvpn|IRB", "vrf|Vrf_IRB")          // L3VNI under the VRF
+	hasParent("vrf|Vrf_EVPN_IRB", "device")             // VRF at the root
+	hasParent("ipvpn|IRB", "vrf|Vrf_EVPN_IRB")          // L3VNI under the VRF
 	hasParent("interface|Vlan400", "vlan|400")     // SVI under the VLAN
-	hasParent("interface|Vlan400", "vrf|Vrf_IRB")  // SVI bound into the VRF
+	hasParent("interface|Vlan400", "vrf|Vrf_EVPN_IRB")  // SVI bound into the VRF
 	hasParent("interface|Vlan400|service", "interface|Vlan400") // binding is the SVI's child
 	// QoS is delivered to the VLAN's members and recorded on the binding — NOT as an
 	// interface|Vlan400|qos IRB bind. SONiC cannot bind QoS to an IRB, and such an
@@ -168,7 +168,7 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	if _, err := irb.RemoveService(ctx); err != nil {
 		t.Fatalf("RemoveService: %v", err)
 	}
-	gone := []string{"interface|Vlan400|service", "interface|Vlan400", "vrf|Vrf_IRB", "ipvpn|IRB"}
+	gone := []string{"interface|Vlan400|service", "interface|Vlan400", "vrf|Vrf_EVPN_IRB", "ipvpn|IRB"}
 	for _, res := range gone {
 		if n.GetIntent(res) != nil {
 			t.Fatalf("intent %q must be reaped on remove (L3 the composite delivered / last consumer)", res)

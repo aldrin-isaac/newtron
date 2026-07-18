@@ -97,25 +97,27 @@ func SanitizeForName(name string) string {
 }
 
 // DeriveVRFName generates the on-device SONiC VRF name for a service's own VRF.
-// Service names are expected to already be normalized (uppercase, underscores).
+// The VRF is named after the service — the invariant — not the IP-VPN it joins
+// (a mutable binding). Service names are expected to already be normalized
+// (uppercase, underscores).
 //
-// A per-interface VRF (vrf_type=interface) is one interface, one VRF — a distinct
-// member of the IP-VPN — so its name is discriminated by the interface:
-// "Vrf_<service>_<shortIntf>" (e.g. "Vrf_EVPNIRB_ETH2"). It carries the IP-VPN's
-// shared L3VNI/route-targets (bound via BindIPVPN onto this VRF), but the VRF is
-// the service's, not the VPN's. Shorts the interface (TRANSIT_ETH0, not
-// TRANSIT_ETHERNET0).
+//   - shared:    "Vrf_<SERVICE>"          — one VRF shared across the service's
+//                                            interfaces (e.g. "Vrf_OVERLAY_IRB_A").
+//   - interface: "Vrf_<SERVICE>_<IFACE>"  — one VRF per interface (one interface,
+//                                            one VRF, e.g. "Vrf_EVPNIRB_ETH2").
+//
+// If the service joins an IP-VPN, that VPN's shared L3VNI/route-targets are bound
+// onto this VRF (BindIPVPN); connectivity between services in one VPN is by that
+// shared L3VNI across the fabric, independent of the device-local VRF name — so
+// two services in one VPN on different devices carry different VRF names and still
+// interoperate. The interface is shortened (ETH0, not ETHERNET0).
 //
 // The "Vrf_" prefix is mandatory, not cosmetic: intfmgrd silently drops INTERFACE
-// rows whose vrf_name lacks it (RCA-044) — the same rule DeriveVRFNameForIPVPN
-// enforces for shared VRFs. A shared VRF is named after the VPN it joins and is
-// derived through DeriveVRFNameForIPVPN instead (multiple services in one VPN
-// share it — one VRF, one L3VNI per device); DeriveVRFName is the interface-mode
-// namer.
+// rows whose vrf_name lacks it (RCA-044). (DeriveVRFNameForIPVPN — "Vrf_"+ipvpn —
+// is a separate namer, used only when an IP-VPN is bound directly to a device with
+// no service to name the VRF after, e.g. the `vrf bind-ipvpn` primitive.)
 func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
 	if vrfType == "shared" {
-		// Shared VRFs are named after the VPN, not the service — route through
-		// DeriveVRFNameForIPVPN at the call site. Kept total for safety.
 		return "Vrf_" + serviceName
 	}
 	shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))

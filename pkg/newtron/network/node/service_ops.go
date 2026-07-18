@@ -361,16 +361,17 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		vlanID = opts.VLAN
 	}
 
-	// Determine VRF name for binding and infrastructure. In shared
-	// mode the VRF name is derived from the IP-VPN spec name
-	// (util.DeriveVRFNameForIPVPN — "Vrf_"+ipvpn); in interface mode the
-	// name is derived from the service + interface pair.
+	// Determine VRF name for binding and infrastructure. The VRF is named
+	// after the service — the invariant — not the IP-VPN (a mutable binding):
+	// shared → "Vrf_<SERVICE>" (shared across the service's interfaces), interface
+	// → "Vrf_<SERVICE>_<IFACE>". If the service joins an IP-VPN, that VPN's shared
+	// L3VNI is bound onto this VRF (BindIPVPN below); connectivity between services
+	// is by shared L3VNI across the fabric, independent of the per-device VRF name.
+	// A service with no vrf_type carries no VRF (routes in default) — vrfName "".
 	var vrfName string
 	switch svc.VRFType {
-	case spec.VRFTypeInterface:
+	case spec.VRFTypeInterface, spec.VRFTypeShared:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-	case spec.VRFTypeShared:
-		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
 	}
 
 	// Capability gate, content-derived: what this service's resolved content
@@ -917,13 +918,13 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 
 	routing := svc.Routing
 
-	// Determine VRF key for route-map AF entries
+	// Determine VRF key for route-map AF entries — the service's own VRF
+	// ("Vrf_<SERVICE>" shared, "Vrf_<SERVICE>_<IFACE>" interface); a service
+	// with no vrf_type routes in the default VRF.
 	vrfName := ""
-	if svc.VRFType == spec.VRFTypeInterface {
+	switch svc.VRFType {
+	case spec.VRFTypeInterface, spec.VRFTypeShared:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-	} else if svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-		// Shared-mode VRF name is derived from the IP-VPN spec name.
-		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
 	}
 	vrfKey := "default"
 	if vrfName != "" {
@@ -1456,13 +1457,14 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 		}
 
 		// Per-interface VRF: delete VRF and related config. The composite
-		// created it (CreateVRF on apply), so it owns the teardown — reap on
-		// last consumer, the same rule the routed path uses.
+		// created it (CreateVRF on apply), so it owns the teardown. Use the VRF
+		// name recorded on the binding (§20 — teardown reads the binding, never
+		// re-resolves the name), so a later change to the derivation cannot strand
+		// an existing per-interface VRF.
 		if !deliveryOnly && vrfType == spec.VRFTypeInterface {
-			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
 			l3vni, l3vniVlan := bindingInt(b[sonic.FieldL3VNI]), bindingInt(b[sonic.FieldL3VNIVlan])
-			cs.Deletes(destroyVrfConfig(derivedVRF, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
-			destroyedVRF = derivedVRF
+			cs.Deletes(destroyVrfConfig(vrfName, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
+			destroyedVRF = vrfName
 		}
 
 		// Shared VRF: delete when the last ipvpn user is removed. The composite

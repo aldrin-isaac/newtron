@@ -111,13 +111,12 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 // by carrying them.
 //
 // vrfName is the on-device VRF that joins the VPN:
-//   - shared (vrf_type=shared, or a standalone CLI bind): pass "" and the VRF
-//     name defaults to the VPN's own — "Vrf_"+ipvpn (util.DeriveVRFNameForIPVPN;
-//     sonic-vrf.yang / RCA-044). Multiple services/interfaces in one VPN share
-//     this single VRF (one VRF, one L3VNI per device).
-//   - interface (vrf_type=interface): the composite passes the service's
-//     per-interface VRF ("Vrf_<service>_<iface>", util.DeriveVRFName) so the
-//     VPN's L3VNI lands on that VRF, not the VPN-named one.
+//   - a service (via the composite) passes its own VRF, named after the service:
+//     "Vrf_<SERVICE>" (shared) or "Vrf_<SERVICE>_<IFACE>" (interface) —
+//     util.DeriveVRFName. The VPN's L3VNI lands on the service's VRF.
+//   - the standalone `vrf bind-ipvpn` primitive (no service to name the VRF
+//     after) passes "" and the name defaults to the VPN's own — "Vrf_"+ipvpn
+//     (util.DeriveVRFNameForIPVPN; sonic-vrf.yang / RCA-044).
 //
 // vrfName is recorded in the intent (not re-derivable from the ipvpn name in
 // interface mode — §20) so replay and UnbindIPVPN target the same VRF. The
