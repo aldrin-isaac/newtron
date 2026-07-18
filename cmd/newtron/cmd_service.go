@@ -262,7 +262,7 @@ Examples:
 				fmt.Printf("  Neighbor IP: %s\n", derived.NeighborIP)
 			}
 			if svc != nil && svc.VRFType != "" {
-				fmt.Printf("  VRF Name: %s\n", derived.VRFName)
+				fmt.Printf("  VRF Name: %s\n", util.DeriveVRFName(svc.VRFType, serviceName, intfName))
 			}
 		}
 		if svc != nil {

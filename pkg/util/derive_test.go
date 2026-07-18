@@ -12,7 +12,6 @@ func TestDeriveFromInterface(t *testing.T) {
 		ipWithMask  string
 		serviceName string // expected to be pre-normalized (uppercase, underscores)
 		wantErr     bool
-		checkVRF    string
 		checkACL    string
 	}{
 		{
@@ -21,7 +20,6 @@ func TestDeriveFromInterface(t *testing.T) {
 			ipWithMask:  "10.1.1.1/30",
 			serviceName: "CUSTOMER",
 			wantErr:     false,
-			checkVRF:    "CUSTOMER_ETH0",
 			checkACL:    "CUSTOMER_ETH0",
 		},
 		{
@@ -30,7 +28,6 @@ func TestDeriveFromInterface(t *testing.T) {
 			ipWithMask:  "10.1.1.1/30",
 			serviceName: "TRANSIT",
 			wantErr:     false,
-			checkVRF:    "TRANSIT_PO100",
 			checkACL:    "TRANSIT_PO100",
 		},
 		{
@@ -39,7 +36,7 @@ func TestDeriveFromInterface(t *testing.T) {
 			ipWithMask:  "",
 			serviceName: "L2_ONLY",
 			wantErr:     false,
-			checkVRF:    "L2_ONLY_ETH0",
+			checkACL:    "L2_ONLY_ETH0",
 		},
 		{
 			name:        "invalid IP",
@@ -58,9 +55,6 @@ func TestDeriveFromInterface(t *testing.T) {
 				return
 			}
 			if !tt.wantErr {
-				if got.VRFName != tt.checkVRF {
-					t.Errorf("DeriveFromInterface() VRFName = %q, want %q", got.VRFName, tt.checkVRF)
-				}
 				if tt.checkACL != "" && got.ACLPrefix != tt.checkACL {
 					t.Errorf("DeriveFromInterface() ACLPrefix = %q, want %q", got.ACLPrefix, tt.checkACL)
 				}

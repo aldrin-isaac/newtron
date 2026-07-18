@@ -57,7 +57,6 @@ func DeriveVRFNameForIPVPN(ipvpn string) string {
 // DerivedValues contains auto-computed values from user input
 type DerivedValues struct {
 	NeighborIP  string // Computed from local IP for point-to-point
-	VRFName     string // Auto-generated VRF name
 	Description string // Auto-generated description
 	ACLPrefix   string // Prefix for per-interface ACL names (append "-in"/"-out")
 }
@@ -76,11 +75,8 @@ func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, 
 		d.NeighborIP = ComputeNeighborIP(ip.String(), mask)
 	}
 
-	// Generate VRF name from service and interface (using short names, uppercase)
-	shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(intf)))
-	d.VRFName = serviceName + "_" + shortIntf
-
 	// Generate ACL base name (using short names, uppercase)
+	shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(intf)))
 	d.ACLPrefix = serviceName + "_" + shortIntf
 
 	return d, nil
