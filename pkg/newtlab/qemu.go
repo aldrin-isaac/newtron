@@ -267,9 +267,19 @@ func IsRunningRemote(pid int, hostIP string) bool {
 	return cmd.Run() == nil
 }
 
-// processCmdline returns the argv of a local process (NULs turned to spaces),
-// or "" if the process is gone or unreadable.
-func processCmdline(pid int) string {
+// processExeBase returns the basename of a process's actual executable
+// (/proc/<pid>/exe — the real binary, immune to argv[0] tricks), or "" if
+// unreadable (process gone, or not ours).
+func processExeBase(pid int) string {
+	target, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(target)
+}
+
+// processArgs returns a process's argv joined by spaces (NULs→spaces), or "".
+func processArgs(pid int) string {
 	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
 		return ""
@@ -278,26 +288,24 @@ func processCmdline(pid int) string {
 }
 
 // processBelongsToLab reports whether pid is a live qemu/newtlink process this
-// lab launched: its argv names the qemu/newtlink binary AND references a path
-// under the lab's state dir (every VM carries -pidfile/-drive under it; the
-// bridge carries <stateDir>/bridge.json). The trailing separator prevents a
-// prefix collision (`2node-vs` must not match `2node-vs-service`). This is the
-// identity check that makes a kill safe against PID reuse and lets Destroy
-// sweep orphans the state ledger lost (issue #444).
+// lab launched — the identity check that makes a sweep-kill safe against PID
+// reuse and catches orphans the state ledger lost (#444).
 func processBelongsToLab(pid int, stateDir string) bool {
-	return cmdlineBelongsToLab(processCmdline(pid), stateDir)
+	return belongsToLab(processExeBase(pid), processArgs(pid), stateDir)
 }
 
-// cmdlineBelongsToLab is the pure predicate behind processBelongsToLab: the
-// argv must name the qemu/newtlink binary AND reference a path UNDER stateDir.
-// The trailing separator is load-bearing — it stops `2node-vs` from matching a
-// sibling `2node-vs-service`; the binary check stops an unrelated shell that
-// merely mentions the path (a grep, this very audit) from being reaped.
-func cmdlineBelongsToLab(cmdline, stateDir string) bool {
-	if cmdline == "" || !strings.Contains(cmdline, stateDir+string(os.PathSeparator)) {
+// belongsToLab is the pure predicate: the process's EXECUTABLE is qemu/newtlink
+// AND some argument references a path UNDER stateDir. Testing the executable
+// (not a substring of the whole command line) is load-bearing — the substring
+// form reaped any process that merely *mentioned* "qemu-system"/"newtlink",
+// which killed the very shell verifying this teardown. The trailing separator is
+// also load-bearing: it stops `2node-vs` from matching a sibling
+// `2node-vs-service`.
+func belongsToLab(exeBase, args, stateDir string) bool {
+	if !strings.HasPrefix(exeBase, "qemu-system") && exeBase != "newtlink" {
 		return false
 	}
-	return strings.Contains(cmdline, "qemu-system") || strings.Contains(cmdline, "newtlink")
+	return strings.Contains(args, stateDir+string(os.PathSeparator))
 }
 
 // findLabProcesses scans /proc for every live qemu/newtlink process that
