@@ -151,11 +151,15 @@ func (n *Node) refuseTrunkOnPolicyVLAN(member string, joiningVLAN int) error {
 	// The join makes the port multi-VLAN. Refuse if the VLAN being joined, or any
 	// VLAN the port already belongs to, carries a policy-bearing irb service.
 	if svc := n.vlanPolicyServiceName(joiningVLAN); svc != "" {
-		return fmt.Errorf("cannot add %s to VLAN %d as a trunk member: that VLAN has irb service %q carrying a filter/QoS, which SONiC cannot bind to the IRB and cannot deliver to a trunk member (%s would also be in VLANs %v) — remove the policy or keep %s single-VLAN", member, joiningVLAN, svc, member, others, member)
+		return util.NewPreconditionError(sonic.OpConfigureInterface, member,
+			fmt.Sprintf("cannot add %s to VLAN %d as a trunk member", member, joiningVLAN),
+			fmt.Sprintf("that VLAN has irb service %q carrying a filter/QoS, which SONiC cannot bind to the IRB and cannot deliver to a trunk member (%s would also be in VLANs %v) — remove the policy or keep %s single-VLAN", svc, member, others, member))
 	}
 	for _, v := range others {
 		if svc := n.vlanPolicyServiceName(v); svc != "" {
-			return fmt.Errorf("cannot make %s a trunk (adding VLAN %d): it is a single-VLAN member of VLAN %d whose irb service %q carries a filter/QoS that cannot be delivered to a trunk member — remove the policy or keep %s single-VLAN", member, joiningVLAN, v, svc, member)
+			return util.NewPreconditionError(sonic.OpConfigureInterface, member,
+				fmt.Sprintf("cannot make %s a trunk (adding VLAN %d)", member, joiningVLAN),
+				fmt.Sprintf("it is a single-VLAN member of VLAN %d whose irb service %q carries a filter/QoS that cannot be delivered to a trunk member — remove the policy or keep %s single-VLAN", v, svc, member))
 		}
 	}
 	return nil
@@ -269,17 +273,23 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			serviceName, svc.ServiceType)
 	}
 
-	// EVPN preconditions
+	// EVPN preconditions. Check the actual VTEP in the projection (HasVTEP), not a
+	// stored source_ip param: the VTEP source is re-derived from the node's
+	// loopback at replay and so is correctly NOT persisted on the device intent
+	// (§20), which made the param a false proxy — a node whose source comes from
+	// its loopback has a VTEP but no source_ip param. `evpn setup` no longer
+	// exists (absorbed into setup-device), so the hint names the real verb.
 	isOverlay := strings.HasPrefix(svc.ServiceType, "evpn-")
 	if isOverlay {
-		deviceIntent := n.GetIntent("device")
-		if deviceIntent == nil || deviceIntent.Params["source_ip"] == "" {
-			return nil, fmt.Errorf("service '%s' (%s) requires EVPN overlay, but no VTEP is configured on %s — run 'newtron -D %s evpn setup' first",
-				serviceName, svc.ServiceType, n.Name(), n.Name())
+		if !n.configDB.HasVTEP() {
+			return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
+				fmt.Sprintf("service '%s' (%s) requires an EVPN VTEP", serviceName, svc.ServiceType),
+				fmt.Sprintf("no VTEP is configured on %s — run 'newtron -D %s device setup', or set the node's loopback/VTEP source in its spec", n.Name(), n.Name()))
 		}
 		if !n.BGPConfigured() {
-			return nil, fmt.Errorf("service '%s' (%s) requires BGP, but no BGP_GLOBALS found on %s — run 'newtron -D %s evpn setup' or provision the device first",
-				serviceName, svc.ServiceType, n.Name(), n.Name())
+			return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
+				fmt.Sprintf("service '%s' (%s) requires the device to be set up", serviceName, svc.ServiceType),
+				fmt.Sprintf("device %s is not set up — run 'newtron -D %s device setup' or provision it first", n.Name(), n.Name()))
 		}
 	}
 
@@ -416,7 +426,9 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	if isIRB && !n.reconstructing && (svc.IngressFilter != "" || svc.EgressFilter != "" || svc.QoSPolicy != "") {
 		for _, member := range n.vlanMemberPorts(vlanID) {
 			if memberVLANs := n.vlanMembershipsOf(member); len(memberVLANs) > 1 {
-				return nil, fmt.Errorf("service %q carries a filter/QoS but VLAN %d member %s is a trunk (also in VLANs %v) — SONiC cannot bind a filter/QoS to the IRB, and a per-port policy on a trunk member would bleed to its other VLANs or miss untagged traffic; remove the filter/QoS from the service, or keep %s single-VLAN", serviceName, vlanID, member, memberVLANs, member)
+				return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
+					fmt.Sprintf("service %q carries a filter/QoS but VLAN %d member %s is a trunk", serviceName, vlanID, member),
+					fmt.Sprintf("%s is also in VLANs %v — SONiC cannot bind a filter/QoS to the IRB, and a per-port policy on a trunk member would bleed to its other VLANs or miss untagged traffic; remove the filter/QoS from the service, or keep %s single-VLAN", member, memberVLANs, member))
 			}
 		}
 	}
@@ -857,15 +869,22 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// (bindMemberQoS) — all single-VLAN, since the apply gate above refused a
 	// QoS-bearing service on a VLAN with any trunk member (§7).
 	if qosPolicy != nil {
-		if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
-			map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
-			[]string{"interface|" + i.name}); err != nil {
-			return nil, err
-		}
 		cs.Adds(GenerateDeviceQoSConfig(qosPolicyName, qosPolicy))
 		if isIRB {
+			// An irb delivers QoS to the VLAN's member ports (bindMemberQoS), NOT to
+			// the IRB — SONiC cannot bind QoS to a VLAN interface (RCA-051). Do NOT
+			// record an interface|Vlan{N}|qos bind-qos intent: it is unreplayable
+			// (the capability gate refuses bind-qos on an IRB), so on the next
+			// projection rebuild it would abort the whole load — bricking the node.
+			// The QoS is recorded on the binding's qos_policy param and re-derived
+			// per-member when apply-service replays; there is no IRB-level bind.
 			n.bindMemberQoS(cs, vlanID)
 		} else {
+			if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
+				map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
+				[]string{"interface|" + i.name}); err != nil {
+				return nil, err
+			}
 			cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
 		}
 	}

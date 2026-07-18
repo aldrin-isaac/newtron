@@ -195,9 +195,10 @@ func TestPreconditionChecker_RequireACLTableExists(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
-	// VTEP check reads "device" intent's source_ip param.
+	// VTEP check reads the projection's VXLAN_TUNNEL (HasVTEP), not a proxy param.
 	db := emptyConfigDB()
-	db.NewtronIntent["device"] = map[string]string{"operation": "setup-device", "source_ip": "10.0.0.1"}
+	db.NewtronIntent["device"] = map[string]string{"operation": "setup-device"}
+	db.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").

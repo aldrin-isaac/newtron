@@ -92,13 +92,19 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	sp := n.SpecProvider.(*testSpecProvider)
 	sp.macvpn["SVC_VLAN400"] = &spec.MACVPNSpec{VlanID: 400, VNI: 10400, AnycastIP: "10.4.0.1/24", AnycastMAC: "00:00:00:01:04:00", ARPSuppression: true}
 	sp.ipvpn["IRB"] = &spec.IPVPNSpec{L3VNI: 50400, RouteTargets: []string{"65000:50400"}}
-	// A QoS policy too, so the SVI gets a second child (interface|Vlan400|qos)
-	// besides the binding — proving the reap fires only once ALL children are gone.
+	// A QoS policy too — its delivery is per-member (bindMemberQoS) and it is recorded
+	// on the binding's qos_policy param, NOT as an IRB-level bind-qos intent (RCA-051,
+	// asserted below). The binding is the SVI's one child.
 	sp.qosPolicies["Q1"] = &spec.QoSPolicy{}
 	sp.services["EVPN_IRB"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeEVPNIRB, VRFType: spec.VRFTypeShared, IPVPN: "IRB", MACVPN: "SVC_VLAN400", QoSPolicy: "Q1"}
 
-	// EVPN preconditions: a VTEP source_ip on the device intent (BGP is present —
-	// the device intent exists). Seeded in the backing store, like other evpn tests.
+	// EVPN preconditions need a VTEP the projection carries (HasVTEP). This test
+	// has no resolved loopback and seeds after the initial setup, so give it both
+	// halves of "device set up with an explicit VTEP source": the VXLAN_TUNNEL in
+	// the current projection (for the ApplyService below) AND source_ip on the
+	// device intent, so the setup-device replay rebuilds that VXLAN_TUNNEL on the
+	// reconstruction this test performs later. BGP is present (device intent exists).
+	n.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
 	if dev, ok := n.configDB.NewtronIntent["device"]; ok {
 		dev["source_ip"] = "10.255.0.1"
 	}
@@ -135,7 +141,16 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	hasParent("interface|Vlan400", "vlan|400")     // SVI under the VLAN
 	hasParent("interface|Vlan400", "vrf|Vrf_IRB")  // SVI bound into the VRF
 	hasParent("interface|Vlan400|service", "interface|Vlan400") // binding is the SVI's child
-	hasParent("interface|Vlan400|qos", "interface|Vlan400")     // qos is a second SVI child
+	// QoS is delivered to the VLAN's members and recorded on the binding — NOT as an
+	// interface|Vlan400|qos IRB bind. SONiC cannot bind QoS to an IRB, and such an
+	// intent is unreplayable (the capability gate refuses bind-qos on rebuild → node
+	// bricks), so the composite must never record it (RCA-051).
+	if n.GetIntent("interface|Vlan400|qos") != nil {
+		t.Fatalf("irb service must not record an IRB-level bind-qos intent (unreplayable)")
+	}
+	if b := n.GetIntent("interface|Vlan400|service"); b == nil || b.Params["qos_policy"] != "Q1" {
+		t.Fatalf("binding must carry qos_policy=Q1 (per-member QoS is derived from it), got %v", b)
+	}
 	// The SVI records the binding as a child — this is what makes unconfigure-irb
 	// refuse (I5) while the service is bound.
 	svi := n.GetIntent("interface|Vlan400")
@@ -153,7 +168,7 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	if _, err := irb.RemoveService(ctx); err != nil {
 		t.Fatalf("RemoveService: %v", err)
 	}
-	gone := []string{"interface|Vlan400|service", "interface|Vlan400|qos", "interface|Vlan400", "vrf|Vrf_IRB", "ipvpn|IRB"}
+	gone := []string{"interface|Vlan400|service", "interface|Vlan400", "vrf|Vrf_IRB", "ipvpn|IRB"}
 	for _, res := range gone {
 		if n.GetIntent(res) != nil {
 			t.Fatalf("intent %q must be reaped on remove (L3 the composite delivered / last consumer)", res)

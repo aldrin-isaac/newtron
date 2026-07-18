@@ -1085,7 +1085,8 @@ func TestRoundTrip_BindUnbindMACVPN(t *testing.T) {
 	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
 		t.Fatalf("CreateVLAN prerequisite: %v", err)
 	}
-	// Seed device intent with source_ip for VTEPSourceIP and RequireVTEPConfigured
+	// Seed a VTEP (HasVTEP → RequireVTEPConfigured) + source_ip for VTEPSourceIP.
+	n.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
 	n.configDB.NewtronIntent["device"]["source_ip"] = "10.0.0.1"
 	n.SpecProvider.(*testSpecProvider).macvpn["TEST_MACVPN"] = &spec.MACVPNSpec{VNI: 20100}
 

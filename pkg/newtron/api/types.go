@@ -391,6 +391,15 @@ func httpStatusFromError(err error) int {
 		return http.StatusConflict
 	}
 
+	// Precondition failures — a request the current device/spec state does not
+	// permit (a resource that must or must not already exist, a missing VTEP, a
+	// trunk member that makes per-member policy undeliverable). Every
+	// util.PreconditionError unwraps to this sentinel, so one check covers the
+	// whole class. The conflict family: 409, not a bare 500.
+	if errors.Is(err, util.ErrPreconditionFailed) {
+		return http.StatusConflict
+	}
+
 	// auth-design.md L3: permission denials become 403. The
 	// AuthorizationError type wraps the internal auth.PermissionError
 	// so the wire response carries the typed Caller/Permission/
