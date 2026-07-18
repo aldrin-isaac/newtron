@@ -97,8 +97,13 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	sp.qosPolicies["Q1"] = &spec.QoSPolicy{}
 	sp.services["EVPN_IRB"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeEVPNIRB, VRFType: spec.VRFTypeShared, IPVPN: "IRB", MACVPN: "SVC_VLAN400", QoSPolicy: "Q1"}
 
-	// EVPN preconditions: a VTEP source_ip on the device intent (BGP is present —
-	// the device intent exists). Seeded in the backing store, like other evpn tests.
+	// EVPN preconditions need a VTEP the projection carries (HasVTEP). This test
+	// has no resolved loopback and seeds after the initial setup, so give it both
+	// halves of "device set up with an explicit VTEP source": the VXLAN_TUNNEL in
+	// the current projection (for the ApplyService below) AND source_ip on the
+	// device intent, so the setup-device replay rebuilds that VXLAN_TUNNEL on the
+	// reconstruction this test performs later. BGP is present (device intent exists).
+	n.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
 	if dev, ok := n.configDB.NewtronIntent["device"]; ok {
 		dev["source_ip"] = "10.255.0.1"
 	}

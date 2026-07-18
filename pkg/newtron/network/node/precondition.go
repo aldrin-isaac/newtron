@@ -153,15 +153,17 @@ func (p *PreconditionChecker) RequirePortChannelNotExists(name string) *Precondi
 	return p
 }
 
-// RequireVTEPConfigured checks that VTEP is configured (for EVPN) by checking
-// the device intent's source_ip param. SetupDevice with source_ip always calls
-// SetupVXLAN + ConfigureBGPOverlay, so the param is a reliable proxy for "VTEP is configured."
+// RequireVTEPConfigured checks that a VTEP is configured (for EVPN) against the
+// projection (HasVTEP → VXLAN_TUNNEL present), the same node view /projection
+// serves. The former source_ip-param proxy was wrong: the VTEP source is
+// re-derived from the loopback at replay and correctly not persisted (§20), so a
+// loopback-sourced node has a VTEP but no source_ip param. `evpn setup` is gone
+// (absorbed into setup-device), so the hint names the real verb.
 func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker {
-	intent := p.node.GetIntent("device")
-	if intent == nil || intent.Params["source_ip"] == "" {
+	if !p.node.configDB.HasVTEP() {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VTEP must be configured",
-			fmt.Sprintf("no VTEP found on %s — run 'newtron -D %s evpn setup' first", p.node.Name(), p.node.Name())))
+			fmt.Sprintf("no VTEP found on %s — run 'newtron -D %s device setup', or set the node's loopback/VTEP source", p.node.Name(), p.node.Name())))
 	}
 	return p
 }
