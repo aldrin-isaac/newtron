@@ -299,6 +299,18 @@ func (n *Node) replaySteps(ctx context.Context, steps []spec.TopologyStep) error
 				step.URL, notFound.Kind, notFound.Name)
 			continue
 		}
+		// An intent that fails a precondition on replay is invalid for the current
+		// device state (e.g. a bind-qos recorded against an IRB, which the capability
+		// gate refuses). Skip it with a warning rather than aborting the whole
+		// reconstruction — one bad intent must not brick the node's entire load. The
+		// intent is left in the device intent DB and surfaces as drift until removed
+		// (remove-service) or reconciled. This is the recovery path for a wedged node.
+		if errors.Is(err, util.ErrPreconditionFailed) {
+			util.WithDevice(n.name).Warnf(
+				"reconstruction: skipping unreplayable intent %s — %v; left in place, shows as drift until removed or reconciled",
+				step.URL, err)
+			continue
+		}
 		return fmt.Errorf("replaying step %s: %w", step.URL, err)
 	}
 	return nil

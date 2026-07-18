@@ -869,15 +869,22 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// (bindMemberQoS) — all single-VLAN, since the apply gate above refused a
 	// QoS-bearing service on a VLAN with any trunk member (§7).
 	if qosPolicy != nil {
-		if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
-			map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
-			[]string{"interface|" + i.name}); err != nil {
-			return nil, err
-		}
 		cs.Adds(GenerateDeviceQoSConfig(qosPolicyName, qosPolicy))
 		if isIRB {
+			// An irb delivers QoS to the VLAN's member ports (bindMemberQoS), NOT to
+			// the IRB — SONiC cannot bind QoS to a VLAN interface (RCA-051). Do NOT
+			// record an interface|Vlan{N}|qos bind-qos intent: it is unreplayable
+			// (the capability gate refuses bind-qos on an IRB), so on the next
+			// projection rebuild it would abort the whole load — bricking the node.
+			// The QoS is recorded on the binding's qos_policy param and re-derived
+			// per-member when apply-service replays; there is no IRB-level bind.
 			n.bindMemberQoS(cs, vlanID)
 		} else {
+			if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
+				map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
+				[]string{"interface|" + i.name}); err != nil {
+				return nil, err
+			}
 			cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
 		}
 	}

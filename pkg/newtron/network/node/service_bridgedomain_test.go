@@ -92,8 +92,9 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	sp := n.SpecProvider.(*testSpecProvider)
 	sp.macvpn["SVC_VLAN400"] = &spec.MACVPNSpec{VlanID: 400, VNI: 10400, AnycastIP: "10.4.0.1/24", AnycastMAC: "00:00:00:01:04:00", ARPSuppression: true}
 	sp.ipvpn["IRB"] = &spec.IPVPNSpec{L3VNI: 50400, RouteTargets: []string{"65000:50400"}}
-	// A QoS policy too, so the SVI gets a second child (interface|Vlan400|qos)
-	// besides the binding — proving the reap fires only once ALL children are gone.
+	// A QoS policy too — its delivery is per-member (bindMemberQoS) and it is recorded
+	// on the binding's qos_policy param, NOT as an IRB-level bind-qos intent (RCA-051,
+	// asserted below). The binding is the SVI's one child.
 	sp.qosPolicies["Q1"] = &spec.QoSPolicy{}
 	sp.services["EVPN_IRB"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeEVPNIRB, VRFType: spec.VRFTypeShared, IPVPN: "IRB", MACVPN: "SVC_VLAN400", QoSPolicy: "Q1"}
 
@@ -140,7 +141,16 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	hasParent("interface|Vlan400", "vlan|400")     // SVI under the VLAN
 	hasParent("interface|Vlan400", "vrf|Vrf_IRB")  // SVI bound into the VRF
 	hasParent("interface|Vlan400|service", "interface|Vlan400") // binding is the SVI's child
-	hasParent("interface|Vlan400|qos", "interface|Vlan400")     // qos is a second SVI child
+	// QoS is delivered to the VLAN's members and recorded on the binding — NOT as an
+	// interface|Vlan400|qos IRB bind. SONiC cannot bind QoS to an IRB, and such an
+	// intent is unreplayable (the capability gate refuses bind-qos on rebuild → node
+	// bricks), so the composite must never record it (RCA-051).
+	if n.GetIntent("interface|Vlan400|qos") != nil {
+		t.Fatalf("irb service must not record an IRB-level bind-qos intent (unreplayable)")
+	}
+	if b := n.GetIntent("interface|Vlan400|service"); b == nil || b.Params["qos_policy"] != "Q1" {
+		t.Fatalf("binding must carry qos_policy=Q1 (per-member QoS is derived from it), got %v", b)
+	}
 	// The SVI records the binding as a child — this is what makes unconfigure-irb
 	// refuse (I5) while the service is bound.
 	svi := n.GetIntent("interface|Vlan400")
@@ -158,7 +168,7 @@ func TestComposite_EVPNIRB_DAGAirtight(t *testing.T) {
 	if _, err := irb.RemoveService(ctx); err != nil {
 		t.Fatalf("RemoveService: %v", err)
 	}
-	gone := []string{"interface|Vlan400|service", "interface|Vlan400|qos", "interface|Vlan400", "vrf|Vrf_IRB", "ipvpn|IRB"}
+	gone := []string{"interface|Vlan400|service", "interface|Vlan400", "vrf|Vrf_IRB", "ipvpn|IRB"}
 	for _, res := range gone {
 		if n.GetIntent(res) != nil {
 			t.Fatalf("intent %q must be reaped on remove (L3 the composite delivered / last consumer)", res)
