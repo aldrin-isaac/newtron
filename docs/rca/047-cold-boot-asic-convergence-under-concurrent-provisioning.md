@@ -154,3 +154,64 @@ Cold-deploy `2node-vs` + `2node-vs-primitive` after the budget bump:
 sharing the host). `bridged` completed in 51s — within the old 60s
 budget on that run, but the 180s ceiling is the margin that absorbs
 the variance the cold-boot race produces under heavier concurrency.
+
+## Addendum — host degradation, reboot reset, and the diagnostic trap (2026-07-17)
+
+A second, harder instance during the PR #441 (kind-aware `/status`)
+validation adds three findings the original writeup does not capture.
+
+### The stall can be effectively permanent within a run, not merely late
+
+The original framing — "the SAI objects *do* get programmed, just later
+than the budget" — holds under transient contention. Under a **degraded
+host** it does not: orchagent stalls at **exactly 1 of 3** SAI bridge ports
+and stays there. Sampled repeatedly over 8+ minutes, `ASIC_DB` held 1
+`SAI_OBJECT_TYPE_VLAN_MEMBER` / 1 `SAI_OBJECT_TYPE_BRIDGE_PORT`, with
+orchagent **idle at 0% CPU** — no retry storm (`swss.rec` ~500 lines,
+`sairedis.rec` ~3k), no SAI error, CONFIG_DB/APP_DB fully correct. It is
+not draining a backlog; it is wedged, and the 240s poll budget does not
+save it.
+
+Distinguish from the RIF-starvation variant (orchagent *spinning*, tens of
+thousands of retry lines starving the vlan-member consumer): that one is
+busy, this one is idle. Same symptom at the poll (`ASIC_DB VLAN_MEMBER <
+2`), opposite daemon state — check orchagent CPU + log volume to tell them
+apart.
+
+### Host degradation inflates the rate to ~100%; a reboot resets it
+
+The load source here was not concurrent labs but **accumulated host churn**
+— a long session's many cold deploy/destroy cycles (bridge/tap/KVM state,
+memory pressure). Once degraded, `bridged` failed on **every** cold run,
+branch and `main` alike, and stopping the co-tenant peer lab did **not**
+help. Only a **host reboot** restored convergence; afterward `bridged`
+passed 51s cold on four consecutive commits, flaking once more on the
+fifth before passing the full 25/25 on rerun. The rate is a function of
+host health — intermittent when fresh, ~100% when degraded — and the reset
+lever is a reboot, not a code change and not a further poll-budget bump.
+
+### The diagnostic trap: a degraded-host A/B falsely implicates the diff
+
+Because a degraded host fails *everything*, a branch-vs-`main` comparison
+run on it is worthless — and actively misleading. A degraded-host `main`
+run failed identically to the branch, which briefly "confirmed" a
+pre-existing regression that did not exist. The bisect only converged after
+the reboot, and even then required confirming reproducibility (the branch
+flaked once, n=1, before a rerun cleared it 25/25).
+
+Discipline for the next time an ASIC-poll scenario fails with a diff in
+flight:
+
+1. **Reboot before any branch-vs-`main` A/B.** Never trust a comparison on
+   a host that has been churning labs for hours.
+2. **Confirm reproducibility with a rerun before blaming the diff.** One
+   `bridged` failure is noise, not a regression.
+3. **Compare the emitted projection, not just pass/fail.** A byte-identical
+   CONFIG_DB (`VLAN` / `VLAN_MEMBER` / `PORT`) across the good and bad
+   commits proves the diff cannot be the cause — the difference is device
+   timing, not newtron output. Here the suspect change was read-surface
+   only (`/status`) and provably never reached the `configure-interface`
+   write path.
+
+Cost of ignoring this: most of a session spent bisecting a phantom
+regression that a single post-reboot rerun would have exonerated.
