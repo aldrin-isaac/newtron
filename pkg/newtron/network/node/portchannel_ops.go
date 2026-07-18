@@ -43,9 +43,6 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	cs.OperationParams = map[string]string{"name": name}
 
 	intentParams := map[string]string{sonic.FieldName: name}
-	if len(opts.Members) > 0 {
-		intentParams[sonic.FieldMembers] = strings.Join(opts.Members, ",")
-	}
 	if opts.MTU > 0 {
 		intentParams["mtu"] = fmt.Sprintf("%d", opts.MTU)
 	}
@@ -80,7 +77,10 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 
 	cs.Adds(createPortChannelConfig(name, fields))
 
-	// Add members
+	// Add members as child membership intents — the one representation every
+	// reader scans (PortChannelMembers, PortChannelInfo, the projection), identical
+	// to add-portchannel-member (§27, §30). A denormalized `members` CSV on the LAG
+	// intent was invisible to those readers; child intents are not.
 	for _, member := range opts.Members {
 		if !n.InterfaceExists(member) {
 			return nil, fmt.Errorf("member interface %s does not exist", member)
@@ -89,6 +89,9 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 			return nil, fmt.Errorf("interface %s is already a PortChannel member", member)
 		}
 		cs.Adds(createPortChannelMemberConfig(name, member))
+		if err := n.writePortChannelMemberIntent(cs, name, member); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := n.render(cs); err != nil {
@@ -98,21 +101,53 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	return cs, nil
 }
 
-// DeletePortChannel removes a LAG/PortChannel.
+// DeletePortChannel removes a LAG/PortChannel and any members it still carries.
+// Members are recorded as child membership intents (portchannel|<pc>|<member>),
+// so the reverse tears them down bottom-up before the LAG itself (§15) — both
+// the PORTCHANNEL_MEMBER row and the child intent — else deleteIntent refuses the
+// parent for having children.
 func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error) {
 	name = util.NormalizeInterfaceName(name)
 
+	members := n.portChannelMembers(name)
+
 	cs, err := n.op("delete-portchannel", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
-		func() []sonic.Entry { return deletePortChannelConfig(name) })
+		func() []sonic.Entry {
+			entries := make([]sonic.Entry, 0, len(members)+1)
+			for _, member := range members {
+				entries = append(entries, deletePortChannelMemberConfig(name, member)...)
+			}
+			return append(entries, deletePortChannelConfig(name)...)
+		})
 	if err != nil {
 		return nil, err
+	}
+	for _, member := range members {
+		if err := n.deleteIntent(cs, "portchannel|"+name+"|"+member); err != nil {
+			return nil, err
+		}
 	}
 	if err := n.deleteIntent(cs, "portchannel|"+name); err != nil {
 		return nil, err
 	}
 	util.WithDevice(n.name).Infof("Deleted PortChannel %s", name)
 	return cs, nil
+}
+
+// portChannelMembers returns the member interface names of a LAG by scanning its
+// child membership intents (portchannel|<pc>|<member>). The member name is the
+// key's trailing segment — the identity — not a param: NewIntent lifts `name` into
+// Intent.Name, leaving Params[name] empty after the wire round-trip. This matches
+// the sibling key-parsing readers (InterfaceIsPortChannelMember, GetInterfacePortChannel).
+// Single owner of the member scan (§30) — Interface.PortChannelMembers delegates here.
+func (n *Node) portChannelMembers(name string) []string {
+	prefix := "portchannel|" + name + "|"
+	var members []string
+	for resource := range n.IntentsByPrefix(prefix) {
+		members = append(members, strings.TrimPrefix(resource, prefix))
+	}
+	return members
 }
 
 // AddPortChannelMember adds a member to a PortChannel.
@@ -139,17 +174,24 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 	}
 	cs.OperationParams = map[string]string{"name": pcName, "member": member}
 
-	if err := n.writeIntent(cs, sonic.OpAddPortChannelMember, "portchannel|"+pcName+"|"+member,
-		map[string]string{
-			sonic.FieldName: member,
-			"portchannel":   pcName,
-		},
-		[]string{"portchannel|" + pcName}); err != nil {
+	if err := n.writePortChannelMemberIntent(cs, pcName, member); err != nil {
 		return nil, err
 	}
 
 	util.WithDevice(n.name).Infof("Added %s to PortChannel %s", member, pcName)
 	return cs, nil
+}
+
+// writePortChannelMemberIntent records the child membership intent that marks a
+// port a member of a LAG — portchannel|<pc>|<member>, OpAddPortChannelMember. This
+// is the one representation every reader scans (PortChannelMembers, PortChannelInfo,
+// the projection), so it is shared by CreatePortChannel (bulk at create) and
+// AddPortChannelMember (§27 single representation, §30 single owner). Its reverse
+// is the deleteIntent in RemovePortChannelMember.
+func (n *Node) writePortChannelMemberIntent(cs *ChangeSet, pcName, member string) error {
+	return n.writeIntent(cs, sonic.OpAddPortChannelMember, "portchannel|"+pcName+"|"+member,
+		map[string]string{sonic.FieldName: member, "portchannel": pcName},
+		[]string{"portchannel|" + pcName})
 }
 
 // RemovePortChannelMember removes a member from a PortChannel.
@@ -205,12 +247,8 @@ func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
 		AdminStatus: "up", // PortChannels are always created with admin_status: up
 	}
 
-	// Collect members from sub-intents: portchannel|{name}|{member}
-	for _, intent := range n.IntentsByPrefix("portchannel|" + name + "|") {
-		if memberName := intent.Params[sonic.FieldName]; memberName != "" {
-			info.Members = append(info.Members, memberName)
-		}
-	}
+	// Collect members from child membership intents: portchannel|{name}|{member}
+	info.Members = n.portChannelMembers(name)
 
 	// For now, assume all members are active (would need state_db for real status)
 	info.ActiveMembers = info.Members

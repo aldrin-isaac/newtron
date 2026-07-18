@@ -281,14 +281,7 @@ func (i *Interface) PortChannelMembers() []string {
 	if !i.IsPortChannel() {
 		return nil
 	}
-	memberIntents := i.node.IntentsByPrefix("portchannel|" + i.name + "|")
-	var members []string
-	for _, intent := range memberIntents {
-		if memberName := intent.Params[sonic.FieldName]; memberName != "" {
-			members = append(members, memberName)
-		}
-	}
-	return members
+	return i.node.portChannelMembers(i.name)
 }
 
 // VLANMembers returns the member interfaces if this is a VLAN interface.
@@ -296,23 +289,17 @@ func (i *Interface) VLANMembers() []string {
 	if !i.IsVLAN() {
 		return nil
 	}
-	// Extract VLAN ID from name (e.g., "Vlan100" → "100")
-	vlanID := strings.TrimPrefix(i.name, "Vlan")
-
-	var members []string
-	for resource := range i.node.IntentsByParam(sonic.FieldVLANID, vlanID) {
-		// Only interface intents (not vlan|, macvpn|, etc.)
-		if !strings.HasPrefix(resource, "interface|") {
-			continue
-		}
-		intfName := strings.TrimPrefix(resource, "interface|")
-		// Skip IRB intents (interface|Vlan*)
-		if strings.HasPrefix(intfName, "Vlan") {
-			continue
-		}
-		members = append(members, intfName)
+	vlanID, err := strconv.Atoi(strings.TrimPrefix(i.name, "Vlan"))
+	if err != nil {
+		return nil
 	}
-	return members
+	// Single owner of the VLAN membership scan (§30): vlanMemberPorts counts
+	// only authored memberships (configure-interface access + add-trunk-vlan
+	// trunk) and excludes service bindings, which also carry vlan_id but are not
+	// membership (§5). The prior inline scan matched any interface| intent with
+	// the vlan_id, so it wrongly counted service-bound ports and mishandled
+	// trunk sub-resource keys.
+	return i.node.vlanMemberPorts(vlanID)
 }
 
 // BGPNeighbors returns BGP neighbors configured on this interface.

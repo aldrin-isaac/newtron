@@ -495,11 +495,13 @@ func TestIntentToStep_ConfigureInterface(t *testing.T) {
 }
 
 func TestIntentToStep_CreatePortChannel(t *testing.T) {
+	// A create-portchannel intent carries only the LAG's own config — members
+	// are recorded as separate portchannel|<pc>|<member> child intents that
+	// export to add-portchannel-member steps, not a members field here.
 	step := IntentToStep("portchannel|PortChannel1", map[string]string{
 		"state":     "actuated",
 		"operation": "create-portchannel",
 		"name":      "PortChannel1",
-		"members":   "Ethernet0,Ethernet4",
 		"mtu":       "9100",
 		"min_links": "2",
 		"fallback":  "true",
@@ -512,13 +514,8 @@ func TestIntentToStep_CreatePortChannel(t *testing.T) {
 	if step.Params["name"] != "PortChannel1" {
 		t.Errorf("Params[name] = %v, want PortChannel1", step.Params["name"])
 	}
-	// Members must be a slice, not a string
-	members, ok := step.Params["members"].([]any)
-	if !ok {
-		t.Fatalf("Params[members] should be []any, got %T: %v", step.Params["members"], step.Params["members"])
-	}
-	if len(members) != 2 || members[0] != "Ethernet0" || members[1] != "Ethernet4" {
-		t.Errorf("members = %v, want [Ethernet0 Ethernet4]", members)
+	if _, ok := step.Params["members"]; ok {
+		t.Errorf("create-portchannel step must carry no members field, got %v", step.Params["members"])
 	}
 	// All PortChannel config fields must round-trip
 	if step.Params["mtu"] != "9100" {
@@ -532,6 +529,27 @@ func TestIntentToStep_CreatePortChannel(t *testing.T) {
 	}
 	if step.Params["fast_rate"] != "true" {
 		t.Errorf("Params[fast_rate] = %v, want true", step.Params["fast_rate"])
+	}
+}
+
+func TestIntentToStep_AddPortChannelMember(t *testing.T) {
+	// The child membership intent exports to an add-portchannel-member step —
+	// the one representation that carries a LAG's members through the round-trip.
+	step := IntentToStep("portchannel|PortChannel1|Ethernet0", map[string]string{
+		"state":       "actuated",
+		"operation":   "add-portchannel-member",
+		"name":        "Ethernet0",
+		"portchannel": "PortChannel1",
+	})
+
+	if step.URL != "/add-portchannel-member" {
+		t.Errorf("URL = %q, want /add-portchannel-member", step.URL)
+	}
+	if step.Params["name"] != "Ethernet0" {
+		t.Errorf("Params[name] = %v, want Ethernet0", step.Params["name"])
+	}
+	if step.Params["portchannel"] != "PortChannel1" {
+		t.Errorf("Params[portchannel] = %v, want PortChannel1", step.Params["portchannel"])
 	}
 }
 

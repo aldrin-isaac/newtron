@@ -2911,6 +2911,18 @@ correctness. This is the read that turns "BGP neighbor Active" into a
 diagnosable interface picture: oper state, counters, rates, ARP
 resolution, and the LLDP-verified far end.
 
+The read is kind-aware — it dispatches on the interface kind and reads the
+table that actually holds each kind's link state, so it never fabricates a
+missing physical row for an aggregate:
+
+- **physical port** — STATE_DB/APPL_DB `PORT_TABLE`, plus LLDP and optics.
+- **PortChannel (LAG)** — APPL_DB `LAG_TABLE` for the aggregate's admin/oper/mtu,
+  LAG counters, plus a `members` list of its member ports (no LLDP/optics — a
+  LAG is not a physical port).
+- **SVI (`Vlan{N}`)** — APPL_DB `VLAN_TABLE` for admin/oper/mtu, plus a `members`
+  list of the VLAN's member ports (access and trunk); an SVI can carry L3, so
+  resolved `neighbors` apply.
+
 **Path parameters:** `name` -- interface name
 
 **Response (200):** `InterfaceStatus`:
@@ -2963,6 +2975,10 @@ Section semantics:
 - `optics` — the STATE_DB `TRANSCEIVER_INFO`/`_DOM_SENSOR`/`_STATUS`
   tables passed through as written; present on physical hardware only
   (`-vs` platforms have no sensors, so the section is omitted).
+- `members` — present only for a LAG or SVI; each entry is a member port's
+  `name`, `admin_status`, `oper_status`, and `speed` read from its own
+  `PORT_TABLE` row (best-effort — a member with no STATE_DB row yields an empty
+  entry, not an error). Sorted by name. Omitted for a physical port.
 
 **Status codes:** 200 success, 404 interface not found
 
