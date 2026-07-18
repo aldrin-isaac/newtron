@@ -436,36 +436,46 @@ primitive operations within a single method call.
 
 ### 9.1 ApplyService
 
-ApplyService creates infrastructure (VLAN, VRF if not existing), configures
-the interface, and sets up service-specific resources (BGP, ACLs, route
-policies):
+ApplyService is a *composite*: it assembles the infrastructure it delivers on —
+the VLAN, the L2VNI (for evpn types, from the service's macvpn), the VRF, and for
+an irb the SVI gateway — reusing whatever the operator already authored
+(idempotent), then writes one **binding**. It calls the same primitives an
+operator would (`CreateVLAN`, `bindMacvpn`, `CreateVRF`, `configureIrb`, …), so
+the disaggregated and composite paths produce identical intents.
 
-- Infrastructure intents (`vlan|ID`, `vrf|NAME`) are roots or have their own
-  parent relationships, created via their respective methods
-- The interface intent (`interface|INTF`) declares infrastructure as parents:
-  `_parents: ["vlan|ID", "vrf|NAME"]` (varies by service type — see §10.7)
-- Interface sub-resource intents (QoS, ACL bindings) declare the interface
-  intent as parent (§10.10.1)
+The binding is a sub-resource, `interface|INTF|service` (§10.7.1) — **not** the
+bare interface intent. Its `INTF` is the service's delivery point, which varies by
+service type:
 
-This creates a multi-level tree per service application:
+- **routed / bridged / evpn-bridged** deliver on the access port — the binding is
+  `interface|<port>|service`.
+- **irb / evpn-irb** deliver on the IRB (the SVI) — the binding is
+  `interface|Vlan{N}|service`. The gateway is the one delivery point for the whole
+  bridge domain (`irb-service-redesign.md`).
+
+The binding parents to the delivery-point interface's own role record plus the
+service's infrastructure intents (§10.7.1). Membership is *decoupled*: an access
+port joins the bridge domain through its own `interface|<port>` record
+(`configure-interface`, §10.7) parented to `vlan|ID`, independent of any service
+on the IRB. The tree for an irb service (`irb-service-redesign.md`):
 
 ```
-vlan|100                           vrf|CUSTOMER
-    ↑                                  ↑
-    └──── interface|Ethernet0 ─────────┘
-              (apply-service)
-              ↑               ↑
-              │               └── interface|Ethernet0|acl|ingress
-              └── interface|Ethernet0|qos
+device
+  └── vlan|100                         (create-vlan)
+        ├── interface|EthernetN         (configure-interface; vlan param)  [members]
+        └── interface|Vlan100           (configure-irb; + vrf|X)           [the IRB]
+              └── interface|Vlan100|service   (apply-service)             [the binding]
 ```
 
-The interface intent IS the service intent — `ApplyService` writes to
-`interface|INTF` (§10.7). There is no separate service key; the interface is
-the point of service delivery.
+Interface sub-resource intents the service also writes (QoS, ACL bindings) declare
+the delivery-point interface as parent (§10.10.1).
 
-RemoveService orchestrates bottom-up: remove sub-resource children (QoS,
-ACL bindings), then remove the interface intent (which deregisters from VLAN,
-VRF), then conditionally delete VLAN/VRF if no remaining children.
+RemoveService orchestrates bottom-up and reference-aware: it removes the binding's
+own sub-resource children (QoS, ACL bindings), then the `interface|INTF|service`
+binding, then reaps each piece of composed infrastructure — SVI, VRF, L2VNI, VLAN
+— only when no other consumer remains (`childlessExcept`). The one exception is an
+irb's own EVPN VLAN/L2VNI, which outlives the L3 service; see
+`irb-service-redesign.md` for the per-type reap.
 
 ### 9.2 Same-ChangeSet Parent-Child Creation
 
@@ -650,42 +660,59 @@ EVPN overlay BGP peer (loopback-to-loopback eBGP). Leaf intent — no children.
 
 ### 10.7 `interface|INTF`
 
-The interface anchor intent. Two operations write intent directly at
-`interface|INTF` (e.g., `"interface|Ethernet0"`): `ConfigureInterface` and
-`ApplyService`. `AddBGPPeer` creates a sub-resource intent at
-`interface|INTF|bgp-peer` (§10.17) and requires the interface intent to
-already exist (I4 enforcement).
+The interface's role record — the intent that puts an interface into a bridge
+domain or an L3 role. `ConfigureInterface` writes it directly at `interface|INTF`
+(e.g., `"interface|Ethernet0"`). Sub-resources hang off it: the service binding
+(`interface|INTF|service`, §10.7.1), ACL/QoS bindings (§10.8, §10.9), and BGP
+peers (`interface|INTF|bgp-peer`, §10.17), each requiring this record to exist
+first (I4 enforcement). The IRB is its own role record, `interface|Vlan{ID}`
+(§10.12).
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
 | Create | configure-interface | `ConfigureInterface` | interface_ops.go |
 | Read | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
 | Delete | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
+
+**Parents** (vary by role):
+- bridged (VLAN member): `[vlan|ID]`
+- routed: `[vrf|NAME]`
+- IP-only: `[device]`
+When the interface is a PortChannel, `portchannel|NAME` is added as an additional
+parent, so the container cannot be deleted while the interface role exists
+(e.g., `interface|PortChannel100` routed → `[vrf|CUST, portchannel|PortChannel100]`).
+
+**One role record at a time.** Changing roles requires removing the current intent
+(`UnconfigureInterface`) before applying a new one: `deleteIntent` deregisters from
+the old parents, `writeIntent` registers with the new — no in-place overwrite that
+would strand parent `_children`. The service binding (§10.7.1) is a separate
+sub-resource, not a role, so a routed/bridged service binding and its access-port
+role coexist on the same key prefix.
+
+---
+
+### 10.7.1 `interface|INTF|service`
+
+The service binding — the single intent an `ApplyService` composite writes to
+record a service delivered on an interface (§9.1). `INTF` is the delivery point:
+the access port for routed/bridged/evpn-bridged, the IRB (`Vlan{N}`) for
+irb/evpn-irb.
+
+| Action | Operation | Function | File |
+|--------|-----------|----------|------|
 | Create | apply-service | `ApplyService` | service_ops.go |
-| Read | remove-service | `RemoveService` (via `deleteRoutePoliciesFromIntent`) | service_ops.go |
+| Read | refresh-service | `RefreshService` (remove + reapply) | service_ops.go |
 | Delete | remove-service | `RemoveService` | service_ops.go |
 
-**Parents** (vary by operation, service type, and interface type):
-- configure-interface bridged: `[vlan|ID]`
-- configure-interface routed: `[vrf|NAME]`
-- configure-interface IP-only: `[device]`
-- apply-service bridged/evpn-bridged: `[vlan|ID]`
-- apply-service routed: `[vrf|NAME]`
-- apply-service irb/evpn-irb: `[vlan|ID, vrf|NAME]`
-- apply-service (no VLAN, no VRF): `[device]`
-When the interface is a PortChannel, `portchannel|NAME` is added as an
-additional parent. This ensures the container cannot be deleted while the
-interface role exists. Example: `interface|PortChannel100` configured as
-routed has parents `[vrf|CUST, portchannel|PortChannel100]`.
+**Parents**: the delivery-point interface's own role record plus the service's
+infrastructure intents (`bindingParents` = `["interface|INTF"] + intentParents`,
+varying by type):
+- routed: `[interface|INTF, vrf|NAME]`
+- bridged / evpn-bridged: `[interface|INTF, vlan|ID]`
+- irb / evpn-irb: `[interface|Vlan{N}, vlan|ID, vrf|NAME]`
 
-**Mutual exclusivity**: An interface has exactly one role at a time. Changing
-roles requires the caller to remove the current intent (via the appropriate
-reverse operation — `UnconfigureInterface`, `RemoveService`, or
-`RemoveBGPPeer`) before applying a new one. The reverse operation calls
-`deleteIntent`, which deregisters from the old parents. The new forward
-operation calls `writeIntent`, which registers with the new parents. This
-sequence preserves DAG consistency — there is no in-place overwrite that
-would leave stale parent `_children` entries.
+Neither the interface record nor the infrastructure can be deleted while the
+binding exists; RemoveService reaps composed infrastructure reference-aware (§9.1).
 
 ---
 
@@ -929,9 +956,10 @@ All 17 intent resource keys at a glance:
                                 CUST|        evpn-peer|10.0.0.2
                                 10/8
 
-              * = interface|INTF key is shared by configure-interface
-                  and apply-service; add-bgp-peer creates at
-                  interface|INTF|bgp-peer (sub-resource, §10.17)
+              * = interface|INTF is the role record (configure-interface);
+                  apply-service creates the binding sub-resource
+                  interface|INTF|service, and add-bgp-peer creates
+                  interface|INTF|bgp-peer (§10.7.1, §10.17)
 
               Interface sub-resources (qos, acl binding, bgp-peer,
               property) are children of their interface intent
@@ -952,23 +980,23 @@ All 17 intent resource keys at a glance:
 
 ### 10.20 Multi-Parent Example
 
-A service application depends on both VLAN and VRF infrastructure:
+An irb service binding depends on the IRB record and both the VLAN and VRF
+infrastructure — three parents:
 
 ```
 device
-├── vlan|100
-│       ↑
-│       └──── interface|Ethernet0 (apply-service) ─┐
-│                                                    │
-└── vrf|CUSTOMER ────────────────────────────────────┘
-         ↑
-    (_parents: "vlan|100,vrf|CUSTOMER")
+├── vlan|100 ─────────────────────┐
+├── vrf|CUSTOMER ──────────────────┤
+└── interface|Vlan100 ─────────────┤   (the IRB — configure-irb)
+          ↑                        │
+    interface|Vlan100|service ─────┘   (apply-service)
+       _parents: interface|Vlan100, vlan|100, vrf|CUSTOMER
 ```
 
-Both parents must exist before the service intent can be created. Neither
-parent can be deleted while the service intent exists. RemoveService deletes
-the service intent, which deregisters from both parents. If VLAN 100 and VRF
-CUSTOMER have no other children, they can then be deleted.
+All three parents must exist before the binding can be created; none can be
+deleted while the binding exists. RemoveService deletes the binding, which
+deregisters from every parent; the composed infrastructure (SVI, VRF, VLAN) is
+then reaped reference-aware — only what has no other consumer (§9.1).
 
 ### 10.21 Single-Root Discoverability
 

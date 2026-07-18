@@ -332,7 +332,7 @@ Specs are network-scoped; execution is device-scoped. A service can be defined b
 
 Services are the primary abstraction — they bundle VPN, routing, filter, and QoS intent into reusable templates applied to interfaces. Six service types span local and overlay use cases. For the full service spec structure and per-type details, see the [LLD](lld.md) §2 and [HOWTO](howto.md) §5.
 
-- **ApplyService** — translates spec + context into CONFIG_DB entries, applying them to the interface. Creates VRF, ACL, IP, BGP neighbor, EVPN mappings as needed.
+- **ApplyService** — a composite: it assembles the infrastructure it delivers (VLAN, L2VNI, VRF, and for an irb the SVI gateway), reusing any pre-authored piece, then binds the service at the delivery-point interface — the access port for routed/bridged, the IRB (`Vlan{N}`) for irb/evpn-irb. Creates VRF, ACL, IP, BGP neighbor, EVPN mappings as needed. The binding is a sub-resource intent (`interface|<name>|service`); see [intent-dag-architecture](intent-dag-architecture.md) §9.1.
 - **RemoveService** — reverse of ApplyService. Reads the intent record to determine what was applied. Uses intent DAG `_children` to protect shared resources — scans for remaining consumers before deleting shared infrastructure.
 - **RefreshService** — full remove+reapply cycle. The two ChangeSets merge, preserving intermediate DEL operations (required because Redis HSET merges fields, so DEL is needed to remove stale fields).
 
