@@ -1084,36 +1084,69 @@ func (l *Lab) Destroy(ctx context.Context) error {
 		return err
 	}
 	l.State = state
+	return l.teardown(state, true)
+}
 
+// teardown reaps everything a deployment created and then removes the local
+// state ledger. Remote VMs/bridges are killed via SSH from the ledger; local
+// qemu/newtlink are reaped by a /proc sweep (findLabProcesses) that catches
+// orphans the ledger lost — a half-failed deploy, a redeploy that overwrote a
+// PID, a kill that failed on a prior teardown — each with a PID-reuse-safe
+// identity check. State is removed only once no local process this lab launched
+// is still alive: erasing the ledger while one survives would remove the only
+// record of its PID and orphan it permanently (§15 teardown completeness, #444).
+// Shared by Destroy and the redeploy-time destroyExisting.
+func (l *Lab) teardown(state *LabState, progress bool) error {
 	var errs []error
 
-	// Kill QEMU processes (skip virtual host entries — killed with parent VM)
+	// Remote nodes + bridges: ledger-driven SSH kill — a remote host cannot be
+	// /proc-swept from here.
 	for name, node := range state.Nodes {
-		if node.VMName != "" {
-			continue // virtual host — killed with parent VM
+		if node.VMName != "" || node.HostIP == "" {
+			continue // virtual host (dies with parent) or local (swept below)
 		}
 		if IsRunning(node.PID, node.HostIP) {
-			l.progress("stop", fmt.Sprintf("stopping %s", name))
-			if err := StopNode(node.PID, node.HostIP); err != nil {
+			if progress {
+				l.progress("stop", fmt.Sprintf("stopping %s", name))
+			}
+			if err := StopNodeRemote(node.PID, node.HostIP); err != nil {
 				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
 			}
 		}
 	}
+	for host, bs := range state.Bridges {
+		if bs.HostIP != "" {
+			if err := stopBridgeProcessRemote(bs.PID, bs.HostIP); err != nil {
+				errs = append(errs, fmt.Errorf("stop bridge on %s (pid %d): %w", host, bs.PID, err))
+			}
+		}
+	}
 
-	// Stop bridge processes (per-host)
-	l.progress("bridges", "stopping bridge workers")
-	errs = append(errs, stopAllBridges(state)...)
+	// Local processes: sweep + identity-checked reap (tracked or orphaned).
+	if progress {
+		l.progress("bridges", "reaping local VMs + bridge workers")
+	}
+	for _, pid := range findLabProcesses(l.StateDir) {
+		if !killLabProcess(pid, l.StateDir) {
+			errs = append(errs, fmt.Errorf("local pid %d survived SIGKILL", pid))
+		}
+	}
 
-	// Clean up remote state directories
 	errs = append(errs, cleanupAllRemoteHosts(l.NetworkID, state)...)
 
-	// Remove local state directory
+	// Gate ledger removal on a clean local host. Remote/cleanup errors do not
+	// gate it — a stuck remote host is unreachable whether or not state survives,
+	// and retaining it would only strand the lab.
+	if survivors := findLabProcesses(l.StateDir); len(survivors) > 0 {
+		return fmt.Errorf("newtlab: teardown incomplete — %d local process(es) still alive %v; state retained, re-run destroy: %v",
+			len(survivors), survivors, errs)
+	}
+
 	if err := RemoveState(l.NetworkID); err != nil {
 		errs = append(errs, fmt.Errorf("remove state: %w", err))
 	}
-
 	if len(errs) > 0 {
-		return fmt.Errorf("newtlab: destroy had %d errors: %v", len(errs), errs)
+		return fmt.Errorf("newtlab: teardown had %d errors: %v", len(errs), errs)
 	}
 	return nil
 }
@@ -1125,14 +1158,20 @@ func (l *Lab) Status() (*LabState, error) {
 	if err != nil {
 		return nil, err
 	}
+	ReconcileNodeStatuses(state)
+	return state, nil
+}
 
+// ReconcileNodeStatuses flips any node the ledger calls "running" to "stopped"
+// when its PID is no longer alive — so a stale ledger (e.g. every PID dead after
+// a host reboot, yet state still says "deployed N/N running") reports reality.
+// Any status reader must call this; the ledger alone is not ground truth (#444).
+func ReconcileNodeStatuses(state *LabState) {
 	for _, node := range state.Nodes {
 		if node.Status == "running" && !IsRunning(node.PID, node.HostIP) {
 			node.Status = "stopped"
 		}
 	}
-
-	return state, nil
 }
 
 // FilterHost removes nodes not assigned to the given host name.
@@ -1371,26 +1410,6 @@ func findSiblingBinary(name string) string {
 	return name
 }
 
-// stopAllBridges stops all bridge processes tracked in a lab state.
-// Returns a list of errors encountered during shutdown.
-func stopAllBridges(state *LabState) []error {
-	var errs []error
-	if len(state.Bridges) > 0 {
-		for host, bs := range state.Bridges {
-			if bs.HostIP != "" {
-				if err := stopBridgeProcessRemote(bs.PID, bs.HostIP); err != nil {
-					errs = append(errs, fmt.Errorf("stop bridge on %s (pid %d): %w", host, bs.PID, err))
-				}
-			} else if isRunningLocal(bs.PID) {
-				if err := stopNodeLocal(bs.PID); err != nil {
-					errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", bs.PID, err))
-				}
-			}
-		}
-	}
-	return errs
-}
-
 // cleanupAllRemoteHosts removes remote state directories for all unique
 // remote hosts referenced in the lab state. Returns a list of errors.
 func cleanupAllRemoteHosts(labName string, state *LabState) []error {
@@ -1407,38 +1426,11 @@ func cleanupAllRemoteHosts(labName string, state *LabState) []error {
 	return errs
 }
 
-// destroyExisting tears down a stale deployment found via state.json.
-// Collects all errors instead of logging to stderr.
+// destroyExisting tears down a stale deployment found via state.json (called at
+// redeploy time). Delegates to the shared teardown — including the /proc sweep
+// that reaps PIDs a redeploy would otherwise overwrite and orphan (#444).
 func (l *Lab) destroyExisting(existing *LabState) error {
-	var errs []error
-
-	// Kill QEMU processes (skip virtual host entries)
-	for name, node := range existing.Nodes {
-		if node.VMName != "" {
-			continue
-		}
-		if IsRunning(node.PID, node.HostIP) {
-			if err := StopNode(node.PID, node.HostIP); err != nil {
-				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
-			}
-		}
-	}
-
-	// Kill bridge processes (per-host)
-	errs = append(errs, stopAllBridges(existing)...)
-
-	// Clean up remote state directories
-	errs = append(errs, cleanupAllRemoteHosts(l.NetworkID, existing)...)
-
-	// Remove local state
-	if err := RemoveState(l.NetworkID); err != nil {
-		errs = append(errs, fmt.Errorf("remove state: %w", err))
-	}
-
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
+	return l.teardown(existing, false)
 }
 
 // resolveNewtLabConfig returns a VMLabConfig with defaults applied.

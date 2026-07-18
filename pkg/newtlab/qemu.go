@@ -267,6 +267,88 @@ func IsRunningRemote(pid int, hostIP string) bool {
 	return cmd.Run() == nil
 }
 
+// processCmdline returns the argv of a local process (NULs turned to spaces),
+// or "" if the process is gone or unreadable.
+func processCmdline(pid int) string {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return ""
+	}
+	return strings.ReplaceAll(string(b), "\x00", " ")
+}
+
+// processBelongsToLab reports whether pid is a live qemu/newtlink process this
+// lab launched: its argv names the qemu/newtlink binary AND references a path
+// under the lab's state dir (every VM carries -pidfile/-drive under it; the
+// bridge carries <stateDir>/bridge.json). The trailing separator prevents a
+// prefix collision (`2node-vs` must not match `2node-vs-service`). This is the
+// identity check that makes a kill safe against PID reuse and lets Destroy
+// sweep orphans the state ledger lost (issue #444).
+func processBelongsToLab(pid int, stateDir string) bool {
+	return cmdlineBelongsToLab(processCmdline(pid), stateDir)
+}
+
+// cmdlineBelongsToLab is the pure predicate behind processBelongsToLab: the
+// argv must name the qemu/newtlink binary AND reference a path UNDER stateDir.
+// The trailing separator is load-bearing — it stops `2node-vs` from matching a
+// sibling `2node-vs-service`; the binary check stops an unrelated shell that
+// merely mentions the path (a grep, this very audit) from being reaped.
+func cmdlineBelongsToLab(cmdline, stateDir string) bool {
+	if cmdline == "" || !strings.Contains(cmdline, stateDir+string(os.PathSeparator)) {
+		return false
+	}
+	return strings.Contains(cmdline, "qemu-system") || strings.Contains(cmdline, "newtlink")
+}
+
+// findLabProcesses scans /proc for every live qemu/newtlink process that
+// belongs to the given lab state dir — tracked or orphaned. Local only.
+func findLabProcesses(stateDir string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue // not a pid dir
+		}
+		if processBelongsToLab(pid, stateDir) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// killLabProcess SIGTERMs, then (after a grace period) SIGKILLs pid — but only
+// while it still belongs to the lab, so a recycled PID is never signalled.
+// Returns true once the pid is gone.
+func killLabProcess(pid int, stateDir string) bool {
+	if !processBelongsToLab(pid, stateDir) {
+		return true // not ours (reused or already gone)
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return true
+	}
+	proc.Signal(syscall.SIGTERM)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !isRunningLocal(pid) {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	proc.Signal(syscall.SIGKILL)
+	for i := 0; i < 8; i++ {
+		if !isRunningLocal(pid) {
+			return true
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return !isRunningLocal(pid)
+}
+
 // kvmAvailable returns true if /dev/kvm exists and is writable.
 func kvmAvailable() bool {
 	f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
