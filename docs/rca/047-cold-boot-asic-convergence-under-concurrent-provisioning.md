@@ -158,18 +158,20 @@ the variance the cold-boot race produces under heavier concurrency.
 ## Addendum — host degradation, reboot reset, and the diagnostic trap (2026-07-17)
 
 A second, harder instance during the PR #441 (kind-aware `/status`)
-validation adds three findings the original writeup does not capture.
+validation records three things the original writeup does not: a
+wedged-not-just-slow failure mode, an **unexplained** reboot recovery
+(mechanism not found — see the correction below), and a diagnostic trap.
 
 ### The stall can be effectively permanent within a run, not merely late
 
 The original framing — "the SAI objects *do* get programmed, just later
-than the budget" — holds under transient contention. Under a **degraded
-host** it does not: orchagent stalls at **exactly 1 of 3** SAI bridge ports
-and stays there. Sampled repeatedly over 8+ minutes, `ASIC_DB` held 1
+than the budget" — did not always hold this session: in the failing runs
+orchagent stalled at **exactly 1 of 3** SAI bridge ports and stayed there.
+Sampled repeatedly over 8+ minutes, `ASIC_DB` held 1
 `SAI_OBJECT_TYPE_VLAN_MEMBER` / 1 `SAI_OBJECT_TYPE_BRIDGE_PORT`, with
 orchagent **idle at 0% CPU** — no retry storm (`swss.rec` ~500 lines,
-`sairedis.rec` ~3k), no SAI error, CONFIG_DB/APP_DB fully correct. It is
-not draining a backlog; it is wedged, and the 240s poll budget does not
+`sairedis.rec` ~3k), no SAI error, CONFIG_DB/APP_DB fully correct. It was
+not draining a backlog; it was wedged, and the 240s poll budget did not
 save it.
 
 Distinguish from the RIF-starvation variant (orchagent *spinning*, tens of
@@ -178,17 +180,34 @@ busy, this one is idle. Same symptom at the poll (`ASIC_DB VLAN_MEMBER <
 2`), opposite daemon state — check orchagent CPU + log volume to tell them
 apart.
 
-### Host degradation inflates the rate to ~100%; a reboot resets it
+### A reboot restored convergence — but the mechanism is unidentified
 
-The load source here was not concurrent labs but **accumulated host churn**
-— a long session's many cold deploy/destroy cycles (bridge/tap/KVM state,
-memory pressure). Once degraded, `bridged` failed on **every** cold run,
-branch and `main` alike, and stopping the co-tenant peer lab did **not**
-help. Only a **host reboot** restored convergence; afterward `bridged`
-passed 51s cold on four consecutive commits, flaking once more on the
-fifth before passing the full 25/25 on rerun. The rate is a function of
-host health — intermittent when fresh, ~100% when degraded — and the reset
-lever is a reboot, not a code change and not a further poll-budget bump.
+The pass rate shifted sharply across a reboot: **0 of 3** cold `bridged`
+runs passed before (branch and `main` alike; stopping the co-tenant peer
+lab did **not** help), and **~4 of 5** passed after — 51s cold on four
+consecutive commits, with one more flake before a rerun cleared the full
+25/25. So the reboot demonstrably helped, and the lever is a reboot, not a
+code change or a further poll-budget bump.
+
+**But do not read a resource-leak mechanism into that.** A follow-up audit
+of the host after the session's many deploy/destroy cycles found the
+teardown clean: **zero orphaned `qemu`/`newtlink` processes, no socket or
+FD accumulation, 1 TIME_WAIT total, no ephemeral-port pressure.** newtlab's
+links are `-netdev socket,connect=` — no host TAP/bridge/veth/netns — so
+there is little to leak, and what there is (processes + their sockets) was
+reaped. An earlier draft of this addendum blamed "accumulated bridge/tap/
+KVM state / memory pressure"; that is **not supported** — there was no such
+accumulation to find. What a reboot actually cleared is unknown: candidates
+are unobservable host state (KVM/kernel internals, page-cache/writeback
+backlog) that leaves no process/socket signature, or the "100% before" was
+a short unlucky streak of an intrinsically intermittent flake over-read as
+"degradation" (note the post-reboot run *also* flaked once). Recorded as an
+honest open question, not a mechanism.
+
+(The teardown audit did surface real but *latent* §15 completeness gaps —
+state-ledger-driven kills with no orphan sweep, unconditional state removal
+on a failed kill, and no reboot/reality reconcile. They did not fire this
+session; tracked in issue #444.)
 
 ### The diagnostic trap: a degraded-host A/B falsely implicates the diff
 
