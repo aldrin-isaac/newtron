@@ -282,6 +282,9 @@ func newListCmd() *cobra.Command {
 			for _, name := range labs {
 				state, err := newtlab.LoadState(name)
 				if err == nil {
+					// Reconcile against live PIDs — the ledger alone lies after a
+					// reboot (says "running" while every PID is dead) (#444).
+					newtlab.ReconcileNodeStatuses(state)
 					deployedLabs[name] = state
 				}
 			}
