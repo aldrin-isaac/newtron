@@ -103,17 +103,32 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 // IP-VPN Binding (L3VNI)
 // ============================================================================
 
-// BindIPVPN binds an IP-VPN on this device — materializes the SONiC
-// VRF binding, the L3VNI mapping, and the BGP EVPN configuration. The
-// on-device VRF name is derived from the IP-VPN spec name, never the
-// name itself: VRF = "Vrf_"+ipvpn (util.DeriveVRFNameForIPVPN; sonic-vrf.yang
-// / RCA-044). The intent record is keyed by the spec name (ipvpn|<name>);
-// every CONFIG_DB write and the vrf| parent reference use the derived
-// VRF name.
+// BindIPVPN enrolls a VRF as a member of an IP-VPN on this device — it
+// materializes the VRF's L3VNI binding, the L3VNI transit infrastructure, and
+// the BGP EVPN route-target config that make the VRF carry the VPN's shared
+// L3VNI. An IP-VPN is the virtual network; a VRF is a member (virtual router)
+// that joins it — the L3VNI and route-targets belong to the VPN, the VRF joins
+// by carrying them.
 //
-// Intent-idempotent: if the ipvpn intent already exists, returns
-// empty ChangeSet.
-func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, error) {
+// vrfName is the on-device VRF that joins the VPN:
+//   - shared (vrf_type=shared, or a standalone CLI bind): pass "" and the VRF
+//     name defaults to the VPN's own — "Vrf_"+ipvpn (util.DeriveVRFNameForIPVPN;
+//     sonic-vrf.yang / RCA-044). Multiple services/interfaces in one VPN share
+//     this single VRF (one VRF, one L3VNI per device).
+//   - interface (vrf_type=interface): the composite passes the service's
+//     per-interface VRF ("Vrf_<service>_<iface>", util.DeriveVRFName) so the
+//     VPN's L3VNI lands on that VRF, not the VPN-named one.
+//
+// vrfName is recorded in the intent (not re-derivable from the ipvpn name in
+// interface mode — §20) so replay and UnbindIPVPN target the same VRF. The
+// intent record is keyed by the spec name (ipvpn|<name>); every CONFIG_DB write
+// and the vrf| parent reference use vrfName.
+//
+// Intent-idempotent: if the ipvpn intent already exists, returns empty
+// ChangeSet. This keeps the VPN bound once per device — a second interface-mode
+// VRF cannot also carry the same L3VNI (one L3VNI per device); it is left
+// unenrolled rather than colliding.
+func (n *Node) BindIPVPN(ctx context.Context, ipvpnName, vrfName string) (*ChangeSet, error) {
 	resource := "ipvpn|" + ipvpnName
 	if n.GetIntent(resource) != nil {
 		return NewChangeSet(n.name, "device.bind-ipvpn"), nil
@@ -122,7 +137,9 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, err
 	if err != nil {
 		return nil, fmt.Errorf("bind-ipvpn: %w", err)
 	}
-	vrfName := util.DeriveVRFNameForIPVPN(ipvpnName)
+	if vrfName == "" {
+		vrfName = util.DeriveVRFNameForIPVPN(ipvpnName)
+	}
 	resolved := n.Resolved()
 	cs, err := n.op(sonic.OpBindIPVPN, ipvpnName, ChangeModify,
 		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
@@ -133,6 +150,7 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, err
 	}
 	intentParams := map[string]string{
 		sonic.FieldIPVPN:     ipvpnName,
+		sonic.FieldVRFName:   vrfName,
 		sonic.FieldL3VNI:     strconv.Itoa(ipvpnDef.L3VNI),
 		sonic.FieldL3VNIVlan: strconv.Itoa(ipvpnDef.L3VNIVlan),
 	}
@@ -165,11 +183,19 @@ func (n *Node) routeTargetsFromIntent(ipvpnName string) []string {
 // services first. RemoveService calls destroyVrfConfig directly (not UnbindIPVPN),
 // so this guard only protects standalone CLI/test usage.
 //
-// The argument is the IP-VPN spec name; the on-device VRF name is derived
-// from it (util.DeriveVRFNameForIPVPN). The ipvpn intent record is keyed by the
-// spec name; CONFIG_DB teardown and the FieldVRFName scan use the VRF name.
+// The argument is the IP-VPN spec name; the on-device VRF that joined the VPN is
+// read back from the intent record (BindIPVPN recorded it in FieldVRFName —
+// interface mode uses a per-interface VRF, not "Vrf_"+ipvpn, so it is not
+// re-derivable from the name). Falls back to util.DeriveVRFNameForIPVPN for a
+// legacy record written without the field. CONFIG_DB teardown and the
+// FieldVRFName reference scan use that VRF name.
 func (n *Node) UnbindIPVPN(ctx context.Context, ipvpnName string) (*ChangeSet, error) {
 	vrfName := util.DeriveVRFNameForIPVPN(ipvpnName)
+	if intent := n.GetIntent("ipvpn|" + ipvpnName); intent != nil {
+		if recorded := intent.Params[sonic.FieldVRFName]; recorded != "" {
+			vrfName = recorded
+		}
+	}
 	if err := n.precondition("unbind-ipvpn", ipvpnName).Result(); err != nil {
 		return nil, err
 	}

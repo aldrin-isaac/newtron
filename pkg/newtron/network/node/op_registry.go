@@ -196,16 +196,20 @@ func buildOpRegistry() map[string]*OpSpec {
 			Op: sonic.OpBindIPVPN, Scope: ScopeNode, Inverse: "device.unbind-ipvpn",
 			Params: []ParamSpec{
 				required(sonic.FieldIPVPN),
+				recorded(sonic.FieldVRFName),
 				recorded(sonic.FieldL3VNI), recorded(sonic.FieldL3VNIVlan), recorded(sonic.FieldRouteTargets),
 			},
 			Replay: func(ctx context.Context, n *Node, _ *Interface, p map[string]any) error {
-				// The intent records the IP-VPN spec name in "ipvpn"; BindIPVPN
-				// derives the on-device VRF name from it (util.DeriveVRFNameForIPVPN).
+				// The intent records the VPN spec name in "ipvpn" and the VRF that
+				// joined it in "vrf_name". The VRF is recorded (not re-derived):
+				// interface-mode binds the VPN's L3VNI onto a per-interface VRF,
+				// not "Vrf_"+ipvpn (§20). An empty vrf_name defaults inside
+				// BindIPVPN to the shared "Vrf_"+ipvpn.
 				ipvpnName := paramString(p, "ipvpn")
 				if ipvpnName == "" {
 					return fmt.Errorf("bind-ipvpn: requires 'ipvpn' param")
 				}
-				_, err := n.BindIPVPN(ctx, ipvpnName)
+				_, err := n.BindIPVPN(ctx, ipvpnName, paramString(p, sonic.FieldVRFName))
 				return err
 			},
 		},

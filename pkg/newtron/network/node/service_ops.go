@@ -656,10 +656,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// IPVPN binding (intent-idempotent: BindIPVPN checks ipvpn intent).
-	// BindIPVPN derives the VRF name from svc.IPVPN internally; vrfName
-	// here is the same derived value (util.DeriveVRFNameForIPVPN).
+	// Enroll this service's VRF (vrfName) as a member of the IP-VPN: shared
+	// mode passes the VPN-named "Vrf_"+ipvpn, interface mode passes the
+	// per-interface "Vrf_<service>_<iface>" — either way the VPN's shared
+	// L3VNI/route-targets land on the VRF the composite just created and bound.
 	if ipvpnDef != nil && vrfName != "" {
-		ipvpnCS, err := n.BindIPVPN(ctx, svc.IPVPN)
+		ipvpnCS, err := n.BindIPVPN(ctx, svc.IPVPN, vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("bind IPVPN %s: %w", svc.IPVPN, err)
 		}
@@ -1567,14 +1569,25 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 	// above. Must happen AFTER deleting the interface intent (which deregisters
 	// from its parents), so the parent intents satisfy I5 (no children).
 	// Explicit ordered deletion: ipvpn (child of vrf) → vrf → vlan. The ipvpn
-	// intent is keyed by the IP-VPN spec name (b[FieldIPVPN]), not the derived
-	// VRF name; interface-mode VRFs have no IP-VPN, so the spec name is empty
-	// and only the vrf intent is removed.
+	// intent is keyed by the IP-VPN spec name (b[FieldIPVPN]).
+	//
+	// The ipvpn|<name> binding is shared — one per device, keyed by the VPN, not
+	// the service — so it is unbound only when the VRF it is bound to is the VRF
+	// we just destroyed. In shared mode destroyedVRF is set only on the last
+	// consumer (isLastIPVPN above), so this always matches the VPN-named VRF. In
+	// interface mode a service may reference a VPN whose L3VNI is bound to some
+	// OTHER VRF (a shared-mode peer holds it; this service's BindIPVPN no-op'd on
+	// the one-L3VNI-per-device guard) — its recorded vrf_name then differs from
+	// the per-interface VRF we destroyed, and unbinding it would strand the peer.
+	// The recorded vrf_name is the reference check (§15 reference-aware reverse).
 	if destroyedVRF != "" {
 		if ipvpnName := b[sonic.FieldIPVPN]; ipvpnName != "" {
-			// Delete ipvpn intent first (child of vrf per DAG)
-			if err := n.deleteIntent(cs, "ipvpn|"+ipvpnName); err != nil {
-				return nil, err
+			if ipvpnIntent := n.GetIntent("ipvpn|" + ipvpnName); ipvpnIntent != nil &&
+				ipvpnIntent.Params[sonic.FieldVRFName] == destroyedVRF {
+				// Delete ipvpn intent first (child of vrf per DAG)
+				if err := n.deleteIntent(cs, "ipvpn|"+ipvpnName); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if err := n.deleteIntent(cs, "vrf|"+destroyedVRF); err != nil {

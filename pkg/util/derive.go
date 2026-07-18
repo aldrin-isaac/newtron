@@ -96,20 +96,30 @@ func SanitizeForName(name string) string {
 	return sanitizeRegexp.ReplaceAllString(name, "")
 }
 
-// DeriveVRFName generates a VRF name based on type.
+// DeriveVRFName generates the on-device SONiC VRF name for a service's own VRF.
 // Service names are expected to already be normalized (uppercase, underscores).
-// Uses short interface names: TRANSIT_ETH0 instead of TRANSIT_ETHERNET0
+//
+// A per-interface VRF (vrf_type=interface) is one interface, one VRF — a distinct
+// member of the IP-VPN — so its name is discriminated by the interface:
+// "Vrf_<service>_<shortIntf>" (e.g. "Vrf_EVPNIRB_ETH2"). It carries the IP-VPN's
+// shared L3VNI/route-targets (bound via BindIPVPN onto this VRF), but the VRF is
+// the service's, not the VPN's. Shorts the interface (TRANSIT_ETH0, not
+// TRANSIT_ETHERNET0).
+//
+// The "Vrf_" prefix is mandatory, not cosmetic: intfmgrd silently drops INTERFACE
+// rows whose vrf_name lacks it (RCA-044) — the same rule DeriveVRFNameForIPVPN
+// enforces for shared VRFs. A shared VRF is named after the VPN it joins and is
+// derived through DeriveVRFNameForIPVPN instead (multiple services in one VPN
+// share it — one VRF, one L3VNI per device); DeriveVRFName is the interface-mode
+// namer.
 func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
-	switch vrfType {
-	case "interface":
-		shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))
-		return serviceName + "_" + shortIntf
-	case "shared":
-		return serviceName
-	default:
-		shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))
-		return serviceName + "_" + shortIntf
+	if vrfType == "shared" {
+		// Shared VRFs are named after the VPN, not the service — route through
+		// DeriveVRFNameForIPVPN at the call site. Kept total for safety.
+		return "Vrf_" + serviceName
 	}
+	shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))
+	return "Vrf_" + serviceName + "_" + shortIntf
 }
 
 // DeriveACLName generates a content-hashed ACL name from filter name, direction,

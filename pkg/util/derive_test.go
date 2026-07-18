@@ -99,10 +99,13 @@ func TestDeriveVRFName(t *testing.T) {
 		interfaceName string
 		want          string
 	}{
-		{"interface", "CUSTOMER", "Ethernet0", "CUSTOMER_ETH0"},
-		{"shared", "CUSTOMER", "Ethernet0", "CUSTOMER"},
-		{"", "CUSTOMER", "Ethernet0", "CUSTOMER_ETH0"}, // default to interface
-		{"interface", "TRANSIT", "PortChannel100", "TRANSIT_PO100"},
+		// The "Vrf_" prefix is mandatory: intfmgrd silently drops INTERFACE rows
+		// whose vrf_name lacks it (RCA-044), the same rule DeriveVRFNameForIPVPN
+		// enforces. Interface mode discriminates by the short interface name.
+		{"interface", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER_ETH0"},
+		{"shared", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER"}, // shared normally routes through DeriveVRFNameForIPVPN
+		{"", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER_ETH0"},  // default to interface
+		{"interface", "TRANSIT", "PortChannel100", "Vrf_TRANSIT_PO100"},
 	}
 
 	for _, tt := range tests {

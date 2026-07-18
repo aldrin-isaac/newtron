@@ -528,7 +528,10 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) error {
 	if err := n.gate(ctx, auth.PermVRFBind, util.DeriveVRFNameForIPVPN(ipvpnName)); err != nil {
 		return err
 	}
-	cs, err := n.internal.BindIPVPN(ctx, ipvpnName)
+	// Standalone bind: enroll the VPN's own VRF ("Vrf_"+ipvpn) — an empty
+	// vrfName defaults to it inside BindIPVPN. The per-interface case is driven
+	// through the service composite, not this device-level entry point.
+	cs, err := n.internal.BindIPVPN(ctx, ipvpnName, "")
 	n.appendPending(cs)
 	return err
 }

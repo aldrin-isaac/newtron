@@ -128,11 +128,17 @@ var roundTripSequence = []opInvocation{
 		return err
 	}},
 	{"create-vrf (ipvpn target)", func(ctx context.Context, n *Node) error {
-		_, err := n.CreateVRF(ctx, "Vrf_CUST", VRFConfig{})
+		// A per-interface VRF (interface-mode name), not the VPN-named
+		// "Vrf_CUST" — so bind-ipvpn's recorded vrf_name is a value that
+		// cannot be re-derived from the ipvpn name at replay (§20).
+		_, err := n.CreateVRF(ctx, "Vrf_CUST_ETH9", VRFConfig{})
 		return err
 	}},
 	{"bind-ipvpn", func(ctx context.Context, n *Node) error {
-		_, err := n.BindIPVPN(ctx, "CUST")
+		// Enroll the per-interface VRF as a member of IP-VPN CUST — the
+		// recorded vrf_name must survive export → replay for the projection
+		// to match (the interface-mode round-trip the composite exercises).
+		_, err := n.BindIPVPN(ctx, "CUST", "Vrf_CUST_ETH9")
 		return err
 	}},
 	{"create-portchannel", func(ctx context.Context, n *Node) error {
