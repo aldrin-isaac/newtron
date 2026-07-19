@@ -2,6 +2,12 @@
   "mgmt_ip": "127.0.0.1",
   "loopback_ip": "10.2.0.3",
   "zone": "zoneb",
+  "evpn": {
+    "peers": [
+      "switch1",
+      "switch2"
+    ]
+  },
   "platform": "cisco-p200-32x100-vs",
   "underlay_asn": 64514
 }

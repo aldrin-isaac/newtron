@@ -93,6 +93,24 @@ type FieldMeta struct {
 	// Used on type=ref fields in place of the single static RefKind. Evaluated
 	// client-side like RequiredWhen/AppliesWhen; newtron does not evaluate it.
 	RefWhen []RefCondition `json:"ref_when,omitempty"`
+
+	// MaxLength caps the string length a UI accepts for this field (the server
+	// still validates on POST). MaxLengthWhen overrides it when a sibling
+	// predicate matches — e.g. a service name is ≤11 chars normally but ≤5 when
+	// vrf_type=interface, because the derived on-device VRF name (Vrf_<name>
+	// [_<iface>]) must fit the 15-char Linux interface-name limit (IFNAMSIZ).
+	// UIs evaluate MaxLengthWhen client-side like RequiredWhen (first match
+	// wins); newtron does NOT evaluate it — validateConstraints is the
+	// server-side back-stop.
+	MaxLength     *int              `json:"max_length,omitempty"`
+	MaxLengthWhen []LengthCondition `json:"max_length_when,omitempty"`
+}
+
+// LengthCondition is a sibling-conditional maximum length: when When matches the
+// live form, this field's max length becomes Max, overriding FieldMeta.MaxLength.
+type LengthCondition struct {
+	When *RequiredWhen `json:"when"`
+	Max  int           `json:"max"`
 }
 
 // RefCondition is one branch of a FieldMeta.RefWhen: when the When predicate

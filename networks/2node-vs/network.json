@@ -5,7 +5,7 @@
   "permissions": null,
   "filters": {
     "FILTER_IRB": {
-      "description": "Per-member ingress filter for the evpn-irb §38 witness",
+      "description": "Per-member ingress filter for the evpn-irb \u00a738 witness",
       "type": "ipv4",
       "rules": [
         {
@@ -115,7 +115,7 @@
       "arp_suppression": true
     },
     "VLAN300": {
-      "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
+      "description": "L2 overlay VLAN 300 (VNI 50300) \u2014 used by evpn-l2-bridge and evpn-irb scenarios",
       "vlan_id": 300,
       "vni": 50300,
       "route_targets": [
@@ -125,12 +125,12 @@
     }
   },
   "services": {
-    "SVC_BRIDGED": {
+    "BRD": {
       "description": "Bridged service for composite testing",
       "service_type": "bridged",
       "macvpn": "SVC_VLAN200"
     },
-    "SVC_EVPN_IRB": {
+    "EIRB": {
       "description": "EVPN IRB service for composite testing",
       "service_type": "evpn-irb",
       "ipvpn": "IRB",
@@ -138,7 +138,7 @@
       "vrf_type": "shared",
       "ingress_filter": "FILTER_IRB"
     },
-    "TRANSIT": {
+    "RTD": {
       "description": "Transit peering interface",
       "service_type": "routed",
       "routing": {

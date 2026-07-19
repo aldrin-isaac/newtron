@@ -884,7 +884,7 @@ func TestWriteError_ConflictEnvelope(t *testing.T) {
 	specConflict := &newtron.ConflictError{
 		Resource:   "IPVPNSpec",
 		Name:       "IRB",
-		References: []string{"ServiceSpec 'OVERLAY_IRB_A' (ipvpn)", "ServiceSpec 'OVERLAY_IRB_B' (ipvpn)"},
+		References: []string{"ServiceSpec 'EIRBA' (ipvpn)", "ServiceSpec 'EIRBB' (ipvpn)"},
 		// Force defaults false — specs have no force-cascade.
 	}
 
@@ -948,7 +948,7 @@ func TestDeleteService_ActiveBindingReturns409(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost,
 		"/newtron/v1/networks/svc/delete-service",
-		strings.NewReader(`{"name":"transit"}`))
+		strings.NewReader(`{"name":"rtd"}`))
 	w := httptest.NewRecorder()
 	s.HTTPServer().Handler.ServeHTTP(w, req)
 
@@ -964,8 +964,8 @@ func TestDeleteService_ActiveBindingReturns409(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("decode ConflictError from Data: %v", err)
 	}
-	if got.Resource != "ServiceSpec" || got.Name != "transit" {
-		t.Errorf("conflict = %+v, want Resource=ServiceSpec Name=transit", got)
+	if got.Resource != "ServiceSpec" || got.Name != "rtd" {
+		t.Errorf("conflict = %+v, want Resource=ServiceSpec Name=rtd", got)
 	}
 	if !got.Force {
 		t.Error("force_available should be true — bindings can be cascade-removed with ?force=true")

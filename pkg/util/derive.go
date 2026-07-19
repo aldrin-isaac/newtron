@@ -73,32 +73,97 @@ func SanitizeForName(name string) string {
 	return sanitizeRegexp.ReplaceAllString(name, "")
 }
 
+const (
+	// VRFNameMaxLen is the usable Linux interface/VRF device-name length
+	// (IFNAMSIZ = 16 → 15 usable). A derived VRF name longer than this makes
+	// vrfmgrd's `ip link add <name> type vrf` FAIL, so the kernel VRF is never
+	// created — intfmgrd then can't program the SVI's IP and the dataplane dies.
+	// This is invisible to CONFIG_DB/drift/snapshot (the row exists there); it
+	// only surfaces in the dataplane. So the derivation stays within the limit,
+	// and the length is enforced fail-closed at author time and apply time.
+	VRFNameMaxLen = 15
+	vrfPrefix     = "Vrf_"
+	shortIfaceMax = 5 // budget reserved for the shortened interface (E12, P1, V400)
+
+	// MaxSharedServiceName / MaxInterfaceServiceName are the author-time service
+	// name budgets DERIVED from VRFNameMaxLen — not independent magic numbers:
+	//   shared:    "Vrf_" + name            ≤ 15 → name ≤ 11
+	//   interface: "Vrf_" + name + "_" + I  ≤ 15 → name ≤ 5 (I ≤ 5)
+	MaxSharedServiceName    = VRFNameMaxLen - len(vrfPrefix)                    // 11
+	MaxInterfaceServiceName = VRFNameMaxLen - len(vrfPrefix) - 1 - shortIfaceMax // 5
+)
+
+// MaxServiceNameLen returns the author-time service-name budget for a vrf_type,
+// so the schema/CLI can cap the name field and validateConstraints can reject an
+// over-long name before it ever derives an oversized VRF name. A service with no
+// VRF (bridged/evpn-bridged, or routed in the default VRF) has no derived VRF
+// name — callers skip the check (returns MaxSharedServiceName as a safe default).
+func MaxServiceNameLen(vrfType string) int {
+	if vrfType == "interface" {
+		return MaxInterfaceServiceName
+	}
+	return MaxSharedServiceName
+}
+
+// ifaceVRFLetter collapses an interface type to a single letter for VRF naming —
+// the tightest budget (interface-mode VRFs) needs the interface as short as
+// possible: Ethernet12→E12, PortChannel1→P1, Vlan400→V400.
+var ifaceVRFLetter = map[string]string{
+	"Ethernet": "E", "PortChannel": "P", "Vlan": "V", "Loopback": "L", "Management": "M",
+}
+
+// shortenInterfaceForVRF renders an interface as its single-letter VRF form.
+func shortenInterfaceForVRF(name string) string {
+	ifType, num, subintf := ParseInterfaceName(name)
+	letter, ok := ifaceVRFLetter[ifType]
+	if !ok {
+		return strings.ToUpper(SanitizeForName(name))
+	}
+	out := letter + num
+	if subintf != "" {
+		out += "_" + subintf
+	}
+	return strings.ToUpper(out)
+}
+
 // DeriveVRFName generates the on-device SONiC VRF name for a service's own VRF.
 // The VRF is named after the service — the invariant — not the IP-VPN it joins
 // (a mutable binding). Service names are expected to already be normalized
 // (uppercase, underscores).
 //
-//   - shared:    "Vrf_<SERVICE>"          — one VRF shared across the service's
-//                                            interfaces (e.g. "Vrf_OVERLAY_IRB_A").
-//   - interface: "Vrf_<SERVICE>_<IFACE>"  — one VRF per interface (one interface,
-//                                            one VRF, e.g. "Vrf_EVPNIRB_ETH2").
+//   - shared:    "Vrf_<SERVICE>"           — one VRF shared across the service's
+//                                             interfaces (e.g. "Vrf_OVERLAY_A").
+//   - interface: "Vrf_<SERVICE>_<IFACE>"   — one VRF per interface, the interface
+//                                             single-lettered (e.g. "Vrf_IRB_E2").
 //
-// If the service joins an IP-VPN, that VPN's shared L3VNI/route-targets are bound
-// onto this VRF (BindIPVPN); connectivity between services in one VPN is by that
-// shared L3VNI across the fabric, independent of the device-local VRF name — so
-// two services in one VPN on different devices carry different VRF names and still
-// interoperate. The interface is shortened (ETH0, not ETHERNET0).
+// Both must fit VRFNameMaxLen; the service-name budgets (MaxServiceNameLen) keep
+// them there, and ValidateVRFNameLength is the fail-closed backstop for the runtime
+// interface edge (a 5-digit port or a sub-interface that overruns the 5-char
+// interface budget). If the service joins an IP-VPN, that VPN's L3VNI/route-targets
+// bind onto this VRF (BindIPVPN); inter-service connectivity is by the shared L3VNI
+// across the fabric, independent of the device-local VRF name.
 //
 // The "Vrf_" prefix is mandatory, not cosmetic: intfmgrd silently drops INTERFACE
-// rows whose vrf_name lacks it (RCA-044). (A VRF authored by an operator via
-// `vrf bind-ipvpn` gets the prefix from NormalizeVRFName instead; an IP-VPN has
-// no derived VRF name of its own — VRFs join a VPN, they are not named after it.)
+// rows whose vrf_name lacks it (RCA-044). (A VRF authored via `vrf bind-ipvpn`
+// gets the prefix from NormalizeVRFName instead; an IP-VPN has no derived VRF name
+// of its own — VRFs join a VPN, they are not named after it.)
 func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
 	if vrfType == "shared" {
-		return "Vrf_" + serviceName
+		return vrfPrefix + serviceName
 	}
-	shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))
-	return "Vrf_" + serviceName + "_" + shortIntf
+	return vrfPrefix + serviceName + "_" + shortenInterfaceForVRF(interfaceName)
+}
+
+// ValidateVRFNameLength is the authoritative fail-closed guard: a derived VRF
+// name over VRFNameMaxLen must be rejected before it reaches the device, where
+// vrfmgrd would silently fail to create the kernel VRF. The service-name budgets
+// prevent this at author time; this catches the apply-time interface edge.
+func ValidateVRFNameLength(vrfName string) error {
+	if len(vrfName) > VRFNameMaxLen {
+		return fmt.Errorf("VRF name %q is %d characters — exceeds the %d-char Linux interface-name limit (IFNAMSIZ); the kernel VRF would silently fail to create. Use a shorter service name",
+			vrfName, len(vrfName), VRFNameMaxLen)
+	}
+	return nil
 }
 
 // DeriveACLName generates a content-hashed ACL name from filter name, direction,

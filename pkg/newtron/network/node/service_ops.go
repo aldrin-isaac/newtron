@@ -373,6 +373,17 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	case spec.VRFTypeInterface, spec.VRFTypeShared:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	}
+	// Fail closed at the optimal point — before any CONFIG_DB write — if the
+	// derived VRF name overruns IFNAMSIZ. Author-time caps the service name, but
+	// the interface is only known here, so a long port/sub-interface edge is
+	// caught at apply, not silently by vrfmgrd on the device (RCA: 16-char
+	// Vrf_SVC_EVPN_IRB → kernel VRF never created → dataplane dead).
+	if vrfName != "" {
+		if err := util.ValidateVRFNameLength(vrfName); err != nil {
+			return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
+				"the service's derived VRF name must fit the 15-char Linux interface-name limit", err.Error())
+		}
+	}
 
 	// Capability gate, content-derived: what this service's resolved content
 	// asks of the delivery interface must be within the interface kind's

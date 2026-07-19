@@ -1,5 +1,25 @@
 package spec
 
+import "github.com/aldrin-isaac/newtron/pkg/util"
+
+// serviceNameIdentifierField is the service `name` identifier with a conditional
+// max-length: ≤11 chars normally (shared VRF: "Vrf_"+name ≤ 15) but ≤5 when
+// vrf_type=interface ("Vrf_"+name+"_"+iface ≤ 15). This lets a schema-driven UI
+// cap the name field live as vrf_type changes, so the operator can't author a
+// name that would derive a VRF name over the Linux IFNAMSIZ limit (which vrfmgrd
+// silently fails to create). validateConstraints is the server-side back-stop.
+func serviceNameIdentifierField() *FieldMeta {
+	f := nameIdentifierField()
+	shared := util.MaxSharedServiceName
+	f.MaxLength = &shared
+	f.MaxLengthWhen = []LengthCondition{{
+		When: &RequiredWhen{Field: "vrf_type", Equals: VRFTypeInterface},
+		Max:  util.MaxInterfaceServiceName,
+	}}
+	f.Description += " A VRF-bearing service's name is capped so the derived VRF name (Vrf_<name>[_<iface>]) fits the 15-char Linux limit: ≤11 shared, ≤5 interface."
+	return f
+}
+
 // nameIdentifierField returns the synthetic `name` identifier field used
 // by every top-level kind. The name lives in the create-X request body,
 // not on the spec struct, so universal UIs need it injected as a form
@@ -49,7 +69,7 @@ func init() {
 		Description:     "A reusable template that binds VPN references, routing, filters, and QoS — applied to interfaces.",
 		Sample:          ServiceSpec{},
 		Identifier:      "name",
-		IdentifierField: nameIdentifierField(),
+		IdentifierField: serviceNameIdentifierField(),
 		Paths: SchemaPaths{
 			List:   "/newtron/v1/networks/{netID}/services",
 			Show:   "/newtron/v1/networks/{netID}/services/{name}",

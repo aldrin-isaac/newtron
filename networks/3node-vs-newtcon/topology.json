@@ -8,16 +8,26 @@
     "switch1": {
       "steps": [
         {
-          "url": "/setup-device",
+          "url": "/setup-device"
+        },
+        {
+          "url": "/create-acl",
           "params": {
-            "fields": {
-              "bgp_asn": "64512",
-              "docker_routing_config_mode": "unified",
-              "frr_mgmt_framework_config": "true",
-              "hostname": "switch1",
-              "hwsku": "cisco-p200-32x100-vs",
-              "type": "LeafRouter"
-            }
+            "description": "Ingress filter for EVPNIRB",
+            "name": "FILTER1_IN_8C5EA5AD",
+            "ports": "Ethernet2",
+            "stage": "ingress",
+            "type": "L3"
+          }
+        },
+        {
+          "url": "/create-acl",
+          "params": {
+            "description": "Egress filter for EVPNIRB",
+            "name": "FILTER1_OUT_8C5EA5AD",
+            "ports": "Ethernet2",
+            "stage": "egress",
+            "type": "L3"
           }
         },
         {
@@ -29,6 +39,12 @@
           }
         },
         {
+          "url": "/interfaces/Ethernet1/configure-interface",
+          "params": {
+            "ip": "10.10.1.1/24"
+          }
+        },
+        {
           "url": "/interfaces/Ethernet4/apply-service",
           "params": {
             "ip_address": "10.255.255.5/31",
@@ -37,9 +53,56 @@
           }
         },
         {
-          "url": "/interfaces/Ethernet1/configure-interface",
+          "url": "/create-vlan",
           "params": {
-            "ip": "10.10.1.1/24"
+            "vlan_id": "100"
+          }
+        },
+        {
+          "url": "/create-vrf",
+          "params": {
+            "name": "Vrf_EVPNIRB"
+          }
+        },
+        {
+          "url": "/interfaces/Ethernet2/add-trunk-vlan",
+          "params": {
+            "tagged": "true",
+            "vlan_id": "100"
+          }
+        },
+        {
+          "url": "/bind-macvpn",
+          "params": {
+            "macvpn": "MACVPN",
+            "vlan_id": "100",
+            "vni": "10100"
+          }
+        },
+        {
+          "url": "/configure-irb",
+          "params": {
+            "anycast_mac": "01:01:01:01:01:01",
+            "ip_address": "10.100.0.1/24",
+            "vlan_id": "100",
+            "vrf": "Vrf_EVPNIRB"
+          }
+        },
+        {
+          "url": "/bind-ipvpn",
+          "params": {
+            "ipvpn": "IPVPN",
+            "l3vni": "10001",
+            "l3vni_vlan": "0",
+            "route_targets": "65001:300",
+            "vrf_name": "Vrf_EVPNIRB"
+          }
+        },
+        {
+          "url": "/interfaces/Vlan100/apply-service",
+          "params": {
+            "service": "EVPNIRB",
+            "vlan_id": "100"
           }
         }
       ],

@@ -39,14 +39,14 @@ steps:
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/interfaces/PortChannel2/apply-service
-    params: {service: TRANSIT, ip_address: "10.59.0.0/31", peer_as: 65002}
+    params: {service: RTD, ip_address: "10.59.0.0/31", peer_as: 65002}
 
   - name: apply-transit-on-lag-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /nodes/{{device}}/interfaces/PortChannel2/apply-service
-    params: {service: TRANSIT, ip_address: "10.59.0.1/31", peer_as: 65001}
+    params: {service: RTD, ip_address: "10.59.0.1/31", peer_as: 65001}
 
   # 3. The service's L3 landed in the canonical LAG table
   - name: verify-service-lag-l3-table-sw1
@@ -61,7 +61,7 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/interfaces/PortChannel2/binding
     expect:
-      jq: '.service == "TRANSIT"'
+      jq: '.service == "RTD"'
 
   # 4. Session over the LAG
   - name: wait-lag-session-established

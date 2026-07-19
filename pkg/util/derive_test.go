@@ -93,13 +93,14 @@ func TestDeriveVRFName(t *testing.T) {
 		interfaceName string
 		want          string
 	}{
-		// The "Vrf_" prefix is mandatory: intfmgrd silently drops INTERFACE rows
-		// whose vrf_name lacks it (RCA-044). Both modes name the VRF after the
-		// service; interface mode also discriminates by the short interface name.
-		{"interface", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER_ETH0"},
-		{"shared", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER"}, // shared: service name only
-		{"", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER_ETH0"},  // default to interface
-		{"interface", "TRANSIT", "PortChannel100", "Vrf_TRANSIT_PO100"},
+		// The "Vrf_" prefix is mandatory (RCA-044). Both modes name the VRF after
+		// the service; interface mode single-letters the interface (E/P/V) to
+		// keep the name inside the 15-char Linux limit (IFNAMSIZ).
+		{"interface", "CUST", "Ethernet0", "Vrf_CUST_E0"},
+		{"shared", "CUSTOMER_L3", "Ethernet0", "Vrf_CUSTOMER_L3"}, // shared: service name only (11 chars → 14)
+		{"", "CUST", "Ethernet0", "Vrf_CUST_E0"},                  // default to interface
+		{"interface", "TRAN", "PortChannel100", "Vrf_TRAN_P100"},
+		{"interface", "IRB", "Vlan400", "Vrf_IRB_V400"},
 	}
 
 	for _, tt := range tests {
