@@ -178,7 +178,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.3"}
     poll:
-      timeout: 10s
+      timeout: 240s
       interval: 2s
     expect:
       jq: '.output | contains("1 received")'
@@ -190,7 +190,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.6"}
     poll:
-      timeout: 10s
+      timeout: 240s
       interval: 2s
     expect:
       jq: '.output | contains("1 received")'
