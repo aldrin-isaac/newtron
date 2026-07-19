@@ -518,30 +518,31 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) error {
 // Device-level write ops — IPVPN
 // ============================================================================
 
-// BindIPVPN binds the named IP-VPN on this device. The argument is the
-// IP-VPN spec name; the on-device VRF name is derived from it
-// (util.DeriveVRFNameForIPVPN — "Vrf_"+name; sonic-vrf.yang / RCA-044). The
-// permission Resource is the derived VRF name (PermVRFBind stamps the
-// VRF name).
-func (n *Node) BindIPVPN(ctx context.Context, ipvpnName string) error {
+// BindIPVPN enrolls an existing VRF as a member of the named IP-VPN on this
+// device. vrfName is the VRF that joins the VPN (must already exist), normalized
+// to the "Vrf_" prefix (FOO → Vrf_FOO); ipvpnName is the IP-VPN spec name whose
+// L3VNI/route-targets land on that VRF. The permission Resource is the VRF name.
+func (n *Node) BindIPVPN(ctx context.Context, vrfName, ipvpnName string) error {
+	vrfName = util.NormalizeVRFName(vrfName)
 	ipvpnName = util.NormalizeName(ipvpnName)
-	if err := n.gate(ctx, auth.PermVRFBind, util.DeriveVRFNameForIPVPN(ipvpnName)); err != nil {
+	if err := n.gate(ctx, auth.PermVRFBind, vrfName); err != nil {
 		return err
 	}
-	// Standalone bind: enroll the VPN's own VRF ("Vrf_"+ipvpn) — an empty
-	// vrfName defaults to it inside BindIPVPN. The per-interface case is driven
-	// through the service composite, not this device-level entry point.
-	cs, err := n.internal.BindIPVPN(ctx, ipvpnName, "")
+	// Enroll an existing VRF (named by the caller) as a member of the IP-VPN.
+	cs, err := n.internal.BindIPVPN(ctx, ipvpnName, vrfName)
 	n.appendPending(cs)
 	return err
 }
 
-// UnbindIPVPN unbinds the named IP-VPN on this device (collapsing
-// the on-device VRF + its overlay infrastructure). The argument is the
-// IP-VPN spec name; the permission Resource is the derived VRF name.
-func (n *Node) UnbindIPVPN(ctx context.Context, ipvpnName string) error {
+// UnbindIPVPN removes the named IP-VPN's L3VNI/route-targets from the VRF that
+// joined it (the VRF row and other config it created survive; only the VPN
+// enrollment is undone). vrfName is that VRF (normalized to the "Vrf_" prefix) —
+// the permission Resource; ipvpnName is the IP-VPN spec name. The teardown reads
+// the authoritative VRF from the recorded intent (§20).
+func (n *Node) UnbindIPVPN(ctx context.Context, vrfName, ipvpnName string) error {
+	vrfName = util.NormalizeVRFName(vrfName)
 	ipvpnName = util.NormalizeName(ipvpnName)
-	if err := n.gate(ctx, auth.PermVRFBind, util.DeriveVRFNameForIPVPN(ipvpnName)); err != nil {
+	if err := n.gate(ctx, auth.PermVRFBind, vrfName); err != nil {
 		return err
 	}
 	cs, err := n.internal.UnbindIPVPN(ctx, ipvpnName)

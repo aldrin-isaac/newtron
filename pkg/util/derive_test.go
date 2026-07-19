@@ -94,10 +94,10 @@ func TestDeriveVRFName(t *testing.T) {
 		want          string
 	}{
 		// The "Vrf_" prefix is mandatory: intfmgrd silently drops INTERFACE rows
-		// whose vrf_name lacks it (RCA-044), the same rule DeriveVRFNameForIPVPN
-		// enforces. Interface mode discriminates by the short interface name.
+		// whose vrf_name lacks it (RCA-044). Both modes name the VRF after the
+		// service; interface mode also discriminates by the short interface name.
 		{"interface", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER_ETH0"},
-		{"shared", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER"}, // shared normally routes through DeriveVRFNameForIPVPN
+		{"shared", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER"}, // shared: service name only
 		{"", "CUSTOMER", "Ethernet0", "Vrf_CUSTOMER_ETH0"},  // default to interface
 		{"interface", "TRANSIT", "PortChannel100", "Vrf_TRANSIT_PO100"},
 	}
@@ -221,25 +221,6 @@ func TestNormalizeVRFName(t *testing.T) {
 	}
 }
 
-func TestDeriveVRFNameForIPVPN(t *testing.T) {
-	tests := []struct {
-		ipvpn string
-		want  string
-	}{
-		{"IRB", "Vrf_IRB"},                     // canonical name → Vrf_ prefix
-		{"irb", "Vrf_IRB"},                     // normalizes the suffix
-		{"customer-edge", "Vrf_CUSTOMER_EDGE"}, // hyphen → underscore
-		{"", ""},                               // empty stays empty
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.ipvpn, func(t *testing.T) {
-			if got := DeriveVRFNameForIPVPN(tt.ipvpn); got != tt.want {
-				t.Errorf("DeriveVRFNameForIPVPN(%q) = %q, want %q", tt.ipvpn, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestParseInterfaceName(t *testing.T) {
 	tests := []struct {

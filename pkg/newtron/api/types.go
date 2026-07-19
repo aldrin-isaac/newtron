@@ -285,10 +285,12 @@ type UnconfigureIRBRequest struct {
 	VlanID int `json:"vlan_id"`
 }
 
-// BindIPVPNRequest is the body for POST .../bind-ipvpn. IPVPN is the
-// IP-VPN spec name; the on-device SONiC VRF name is derived from it as
-// "Vrf_"+name (util.DeriveVRFNameForIPVPN; sonic-vrf.yang / RCA-044).
+// BindIPVPNRequest is the body for POST .../bind-ipvpn (and .../unbind-ipvpn).
+// VRF is the existing on-device VRF that joins the VPN (normalized to the "Vrf_"
+// prefix server-side); IPVPN is the IP-VPN spec name whose L3VNI/route-targets
+// land on that VRF.
 type BindIPVPNRequest struct {
+	VRF   string `json:"vrf_name"`
 	IPVPN string `json:"ipvpn"`
 }
 

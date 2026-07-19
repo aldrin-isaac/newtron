@@ -659,12 +659,11 @@ type RoutingDetail struct {
 }
 
 // IPVPNDetail is the API view of an IP-VPN definition. Name is the
-// operator-facing identifier; VRFName is the on-device SONiC VRF name,
-// derived read-only as "Vrf_"+Name (util.DeriveVRFNameForIPVPN; sonic-vrf.yang
-// requires the "Vrf" prefix — RCA-044).
+// operator-facing identifier. There is no single VRF name: an IP-VPN is a
+// virtual network, and any number of VRFs (named after their services, or by an
+// operator via `vrf bind-ipvpn`) join it as members carrying its shared L3VNI.
 type IPVPNDetail struct {
 	Name         string   `json:"name"`
-	VRFName      string   `json:"vrf_name"`
 	Description  string   `json:"description,omitempty"`
 	L3VNI        int      `json:"l3vni"`
 	RouteTargets []string `json:"route_targets"`
@@ -887,9 +886,9 @@ type CreateServiceRouting struct {
 }
 
 // CreateIPVPNRequest is the request for creating an IP-VPN definition.
-// Name is a normal, canonicalized spec name; the on-device VRF name is
-// derived from it as "Vrf_"+name (util.DeriveVRFNameForIPVPN; sonic-vrf.yang /
-// RCA-044), read-only and never authored here.
+// Name is a normal, canonicalized spec name. An IP-VPN has no VRF name of its
+// own — VRFs (named after their services, or by an operator via `vrf
+// bind-ipvpn`) join the VPN as members carrying its shared L3VNI.
 type CreateIPVPNRequest struct {
 	ScopeSelector
 	Name         string   `json:"name"`

@@ -35,25 +35,6 @@ func NormalizeVRFName(name string) string {
 	return "Vrf_" + NormalizeName(name)
 }
 
-// DeriveVRFNameForIPVPN derives the on-device SONiC VRF name for an IP-VPN
-// from its spec name: "Vrf_" + the canonical name (IP-VPN "IRB" → VRF
-// "Vrf_IRB"). The VRF name is read-only and derived, never authored. SONiC
-// requires VRF names to carry the "Vrf" prefix (sonic-vrf.yang); intfmgrd
-// silently drops INTERFACE entries whose vrf_name lacks it (RCA-044) — the
-// derivation supplies that prefix. This is the single source of the rule:
-// bind/unbind, service apply, and the IPVPNDetail wire view all route through
-// it so the spec name and the VRF name can never drift.
-//
-// Distinct from NormalizeVRFName, which canonicalizes an existing VRF name
-// (and strips a stray "Vrf_" prefix). IP-VPN spec names never carry the
-// prefix, so the derivation simply prepends it to the canonical name.
-func DeriveVRFNameForIPVPN(ipvpn string) string {
-	if ipvpn == "" {
-		return ""
-	}
-	return "Vrf_" + NormalizeName(ipvpn)
-}
-
 // DerivedValues contains auto-computed values from user input
 type DerivedValues struct {
 	NeighborIP  string // Computed from local IP for point-to-point
@@ -109,9 +90,9 @@ func SanitizeForName(name string) string {
 // interoperate. The interface is shortened (ETH0, not ETHERNET0).
 //
 // The "Vrf_" prefix is mandatory, not cosmetic: intfmgrd silently drops INTERFACE
-// rows whose vrf_name lacks it (RCA-044). (DeriveVRFNameForIPVPN — "Vrf_"+ipvpn —
-// is a separate namer, used only when an IP-VPN is bound directly to a device with
-// no service to name the VRF after, e.g. the `vrf bind-ipvpn` primitive.)
+// rows whose vrf_name lacks it (RCA-044). (A VRF authored by an operator via
+// `vrf bind-ipvpn` gets the prefix from NormalizeVRFName instead; an IP-VPN has
+// no derived VRF name of its own — VRFs join a VPN, they are not named after it.)
 func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
 	if vrfType == "shared" {
 		return "Vrf_" + serviceName

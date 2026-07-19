@@ -64,8 +64,8 @@ func roundTripNode() *Node {
 		RouteTargets:   []string{"65000:200"},
 		ARPSuppression: true,
 	}
-	// IP-VPN spec names never carry the Vrf_ prefix — DeriveVRFNameForIPVPN
-	// prepends it, so ipvpn "CUST" binds into VRF "Vrf_CUST".
+	// A VRF joins IP-VPN "CUST" by name; the bind-ipvpn step below enrolls the
+	// explicitly-named VRF "Vrf_CUST_ETH9" (there is no ipvpn-derived VRF name).
 	sp.ipvpn["CUST"] = &spec.IPVPNSpec{
 		Description:  "customer ipvpn",
 		L3VNI:        50400,

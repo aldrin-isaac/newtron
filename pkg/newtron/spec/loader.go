@@ -740,11 +740,9 @@ func splitEndpoint(endpoint string) []string {
 func normalizeOverridableSpecs(s *OverridableSpecs) {
 	s.Services = normalizeMap(s.Services)
 	s.Filters = normalizeMap(s.Filters)
-	// IPVPN names are canonicalized like every other spec kind. The
-	// on-device SONiC VRF name is no longer the IPVPN name itself — it
-	// is derived as "Vrf_"+canonical (util.DeriveVRFNameForIPVPN), so the
-	// "Vrf" prefix that sonic-vrf.yang requires (RCA-044) is supplied by
-	// the derivation, not by the authored name.
+	// IPVPN names are canonicalized like every other spec kind. An IP-VPN has
+	// no on-device VRF of its own — VRFs (named after their services, or
+	// authored via `vrf bind-ipvpn`) join the VPN as members.
 	s.IPVPNs = normalizeMap(s.IPVPNs)
 	s.MACVPNs = normalizeMap(s.MACVPNs)
 	s.QoSPolicies = normalizeMap(s.QoSPolicies)
@@ -783,9 +781,9 @@ func NormalizeServiceRefs(svc *ServiceSpec) {
 	svc.IngressFilter = normalizeRef(svc.IngressFilter)
 	svc.EgressFilter = normalizeRef(svc.EgressFilter)
 	// svc.IPVPN references an IP-VPN by its (canonical) spec name; the
-	// on-device VRF name is derived from it (util.DeriveVRFNameForIPVPN).
-	// That the referenced IPVPN exists is checked by the declarative
-	// MissingRefs (references.go), at both load and write.
+	// service's VRF (util.DeriveVRFName) joins that VPN. That the referenced
+	// IPVPN exists is checked by the declarative MissingRefs (references.go),
+	// at both load and write.
 	svc.IPVPN = normalizeRef(svc.IPVPN)
 	svc.MACVPN = normalizeRef(svc.MACVPN)
 	svc.QoSPolicy = normalizeRef(svc.QoSPolicy)

@@ -450,8 +450,8 @@ func (n *Network) GetQoSPolicyAt(scope, instance, name string) (*spec.QoSPolicy,
 }
 
 // GetIPVPN returns an IP-VPN definition by name (network base). The name is
-// canonicalized like every other spec kind; the on-device VRF name is derived
-// from it (util.DeriveVRFNameForIPVPN).
+// canonicalized like every other spec kind. An IP-VPN is a virtual network with
+// no VRF of its own; VRFs join it as members (see BindIPVPN).
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
 	return n.GetIPVPNAt("", "", name)
 }
