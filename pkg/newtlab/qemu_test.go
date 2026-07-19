@@ -36,3 +36,15 @@ func TestBelongsToLab(t *testing.T) {
 		})
 	}
 }
+
+// TestBelongsToLabEmptyStateDir pins the fail-safe: an empty scope must match
+// NOTHING. Without the guard, stateDir+"/" is "/", which every qemu process's
+// args contain, so an empty StateDir would reap every VM on the host — including
+// other labs' and a concurrent session's. A real qemu process under a real lab
+// dir must not match the empty scope.
+func TestBelongsToLabEmptyStateDir(t *testing.T) {
+	realQemuArgs := "qemu-system-x86_64 -drive file=/home/u/.newtlab/labs/2node-vs/disks/switch1.qcow2"
+	if belongsToLab("qemu-system-x86_64", realQemuArgs, "") {
+		t.Error("belongsToLab with empty stateDir matched a real qemu process — an empty scope must reap NOTHING, not the whole host")
+	}
+}

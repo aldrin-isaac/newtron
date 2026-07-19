@@ -305,6 +305,14 @@ func belongsToLab(exeBase, args, stateDir string) bool {
 	if !strings.HasPrefix(exeBase, "qemu-system") && exeBase != "newtlink" {
 		return false
 	}
+	// An empty stateDir must match NOTHING, not everything: stateDir+"/" collapses
+	// to "/", which every process's args contain — a host-wide reap that would kill
+	// every other lab's VMs (and a concurrent session's). NewLab guarantees a real
+	// path today, so no caller reaches here with "", but the blast radius of an
+	// empty scope is catastrophic, so fail closed rather than trust every caller.
+	if stateDir == "" {
+		return false
+	}
 	return strings.Contains(args, stateDir+string(os.PathSeparator))
 }
 
