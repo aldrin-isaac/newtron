@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -272,24 +271,12 @@ var roundTripSequence = []opInvocation{
 // normalizeIntentFields returns a copy with the DAG-link CSVs sorted: replay
 // re-registers children in topo-sort order, which may legitimately differ
 // from original creation order. Set membership is the contract, not order.
-func normalizeIntentFields(fields map[string]string) map[string]string {
-	out := make(map[string]string, len(fields))
-	for k, v := range fields {
-		if k == "_children" || k == "_parents" {
-			parts := strings.Split(v, ",")
-			sort.Strings(parts)
-			v = strings.Join(parts, ",")
-		}
-		out[k] = v
-	}
-	return out
-}
 
 // normalizedIntentDB returns the node's intent table with DAG links normalized.
 func normalizedIntentDB(n *Node) map[string]map[string]string {
 	out := make(map[string]map[string]string, len(n.configDB.NewtronIntent))
 	for res, fields := range n.configDB.NewtronIntent {
-		out[res] = normalizeIntentFields(fields)
+		out[res] = NormalizeIntentFields(fields)
 	}
 	return out
 }
@@ -430,8 +417,8 @@ func TestOpRoundTrip(t *testing.T) {
 				continue
 			}
 			if table == "NEWTRON_INTENT" {
-				fieldsA = normalizeIntentFields(fieldsA)
-				fieldsB = normalizeIntentFields(fieldsB)
+				fieldsA = NormalizeIntentFields(fieldsA)
+				fieldsB = NormalizeIntentFields(fieldsB)
 			}
 			diffStringMaps(t, "projection "+table+"|"+key, fieldsA, fieldsB)
 		}

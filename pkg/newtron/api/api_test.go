@@ -207,6 +207,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ConfigDBTableKeys":   true,
 			"ConfigDBEntryExists": true,
 			"ConfigDBSnapshot":    true, // #17: GET /networks/{netID}/nodes/{device}/configdb
+			"IntentSnapshot":      true, // GET /networks/{netID}/nodes/{device}/intent/snapshot
 			"OperDBSnapshot":      true, // GET /networks/{netID}/nodes/{device}/db/{db}
 			"OperDBTable":         true, // GET /networks/{netID}/nodes/{device}/db/{db}/{table}
 			"OperDBEntry":         true, // GET /networks/{netID}/nodes/{device}/db/{db}/{table}/{key...}
@@ -494,6 +495,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ConfigDBTableKeys":       "device read",
 			"ConfigDBEntryExists":     "device read",
 			"ConfigDBSnapshot":        "device read",
+			"IntentSnapshot":          "device read",
 			"OperDBSnapshot":          "device read",
 			"OperDBTable":             "device read",
 			"OperDBEntry":             "device read",

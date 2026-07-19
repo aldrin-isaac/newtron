@@ -9,6 +9,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/cli"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 	"github.com/spf13/cobra"
 )
 
@@ -497,6 +498,98 @@ func printRawConfigDB(raw map[string]map[string]map[string]string) {
 	}
 }
 
+// intent snapshot — canonical NEWTRON_INTENT dump for before/after comparison
+var intentSnapshotCmd = &cobra.Command{
+	Use:   "snapshot",
+	Short: "Show the device's NEWTRON_INTENT records in canonical form",
+	Long: `Dump the device's NEWTRON_INTENT table with DAG links normalized —
+the substrate for "is the device back where it started?" comparisons. Unlike
+'intent tree' it includes every record (no side-effect/orphan filtering), and
+unlike 'intent drift' it does not exclude NEWTRON_INTENT, so a residual or
+orphaned intent record is visible here.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 intent snapshot
+  newtron leaf1 intent snapshot --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		snap, err := app.client.IntentSnapshot(app.deviceName)
+		if err != nil {
+			return err
+		}
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(snap)
+		}
+		if len(snap) == 0 {
+			fmt.Println("(no intent records)")
+			return nil
+		}
+		keys := make([]string, 0, len(snap))
+		for k := range snap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fields := snap[key]
+			fnames := make([]string, 0, len(fields))
+			for f := range fields {
+				fnames = append(fnames, f)
+			}
+			sort.Strings(fnames)
+			parts := make([]string, 0, len(fnames))
+			for _, f := range fnames {
+				parts = append(parts, f+"="+fields[f])
+			}
+			fmt.Printf("%s: %s\n", key, strings.Join(parts, " "))
+		}
+		return nil
+	},
+}
+
+// intent snapshot-diff — compare the device's current intent DB to a saved baseline
+var intentSnapshotDiffCmd = &cobra.Command{
+	Use:   "snapshot-diff <baseline.json>",
+	Short: "Diff the device's current NEWTRON_INTENT against a saved snapshot",
+	Long: `Compare the device's current intent DB to a baseline captured earlier
+with 'intent snapshot --json > baseline.json'. Reports records that are residual
+(present now, not in the baseline), missing (in the baseline, gone now), or
+changed. Exits non-zero when they diverge, so it composes as a before/after gate.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 intent snapshot --json > baseline.json
+  newtron leaf1 intent snapshot-diff baseline.json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(args[0])
+		if err != nil {
+			return fmt.Errorf("reading baseline %q: %w", args[0], err)
+		}
+		var baseline util.IntentRecords
+		if err := json.Unmarshal(data, &baseline); err != nil {
+			return fmt.Errorf("parsing baseline %q: %w", args[0], err)
+		}
+		current, err := app.client.IntentSnapshot(app.deviceName)
+		if err != nil {
+			return err
+		}
+		diff := util.DiffIntentRecords(baseline, current)
+		fmt.Println(diff.Summary(args[0]))
+		if !diff.Empty() {
+			return fmt.Errorf("intent DB diverged from %s", args[0])
+		}
+		return nil
+	},
+}
+
 func init() {
 	// intent tree
 	intentTreeCmd.Flags().BoolVar(&intentAncestors, "ancestors", false, "Show path from resource to root")
@@ -516,6 +609,8 @@ func init() {
 	// Register all under intentCmd
 	intentCmd.AddCommand(intentTreeCmd)
 	intentCmd.AddCommand(intentProjectionCmd)
+	intentCmd.AddCommand(intentSnapshotCmd)
+	intentCmd.AddCommand(intentSnapshotDiffCmd)
 	intentCmd.AddCommand(intentDriftCmd)
 	intentCmd.AddCommand(intentReconcileCmd)
 	intentCmd.AddCommand(intentSaveCmd)

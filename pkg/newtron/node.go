@@ -110,6 +110,16 @@ func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawC
 	return n.internal.ConfigDBSnapshot(ctx, ownedOnly)
 }
 
+// IntentSnapshot returns the device's NEWTRON_INTENT records in canonical form
+// (every record, DAG-link CSVs sorted) — the substrate for "is the device back
+// where it started?" before/after comparisons. NEWTRON_INTENT is drift-excluded
+// (Drift treats it as ephemeral), so this is the only read that surfaces a
+// residual or orphaned intent record. Reads fresh from the device in actuated
+// mode; falls back to the in-memory intent DB with no transport.
+func (n *Node) IntentSnapshot(ctx context.Context) (map[string]map[string]string, error) {
+	return n.internal.IntentSnapshot(ctx)
+}
+
 // OperDBSnapshot reads an entire operational DB (STATE_DB, APPL_DB,
 // COUNTERS_DB, ASIC_DB) as table → key → fields — the device's runtime
 // state, observed as-is (§1, §4). CONFIG_DB is not served here; it has its

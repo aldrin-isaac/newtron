@@ -177,6 +177,14 @@ type stepValidation struct {
 	custom       func(prefix string, step *Step) error
 }
 
+// requireSnapshotName validates the snapshot / verify-snapshot name.
+func requireSnapshotName(prefix string, step *Step) error {
+	if step.Snapshot == "" {
+		return fmt.Errorf("%s: snapshot name is required (snapshot: <name>)", prefix)
+	}
+	return nil
+}
+
 // stepValidations is the declarative validation table for all step actions.
 // Actions not listed here have no field requirements.
 var stepValidations = map[StepAction]stepValidation{
@@ -189,6 +197,8 @@ var stepValidations = map[StepAction]stepValidation{
 	ActionProvision:          {needsDevices: true},
 	ActionVerifyProvisioning: {needsDevices: true},
 	ActionHostExec:           {singleDevice: true, fields: []string{"command"}},
+	ActionSnapshot:           {needsDevices: true, custom: requireSnapshotName},
+	ActionVerifySnapshot:     {needsDevices: true, custom: requireSnapshotName},
 	ActionNewtron: {custom: func(prefix string, step *Step) error {
 		if step.URL == "" && len(step.Batch) == 0 {
 			return fmt.Errorf("%s: newtron requires url or batch", prefix)

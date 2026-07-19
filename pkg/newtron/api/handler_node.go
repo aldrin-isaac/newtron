@@ -994,6 +994,25 @@ func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
 // single internally-consistent snapshot (`sonic.RawConfigDB`). Default is
 // newtron-owned tables only; ?owned_only=false expands to every schema-known
 // table. §46: canonical device-reality substrate exposed directly.
+// handleIntentSnapshot returns the device's NEWTRON_INTENT records in canonical
+// form (normalized DAG links). The substrate for before/after "back where we
+// started?" comparisons — NEWTRON_INTENT is drift-excluded, so this is the only
+// read that surfaces residual/orphaned intent records.
+func (s *Server) handleIntentSnapshot(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.IntentSnapshot(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleConfigDBSnapshot(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

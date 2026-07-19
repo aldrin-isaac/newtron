@@ -539,6 +539,17 @@ func (c *Client) IntentProjection(device string) (sonic.RawConfigDB, error) {
 	return result, nil
 }
 
+// IntentSnapshot returns the device's NEWTRON_INTENT records in canonical form
+// (every record, DAG links normalized) — the substrate for before/after
+// "back where we started?" comparisons.
+func (c *Client) IntentSnapshot(device string) (map[string]map[string]string, error) {
+	var result map[string]map[string]string
+	if err := c.doGet(c.nodePath(device)+"/intent/snapshot", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // ConfigDBSnapshot returns the device's actual CONFIG_DB as a single
 // internally-consistent snapshot. ownedOnly=true returns only newtron-owned
 // tables; ownedOnly=false returns the device's entire CONFIG_DB. The param

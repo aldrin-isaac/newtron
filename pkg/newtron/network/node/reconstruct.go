@@ -10,6 +10,53 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
+// NormalizeIntentFields returns a copy of an intent record's fields with the
+// DAG-link CSVs (_children/_parents) sorted, so two records that differ only in
+// link ordering compare equal. This is the canonical form for stable before/
+// after intent comparison (IntentSnapshot) and the round-trip equality check.
+func NormalizeIntentFields(fields map[string]string) map[string]string {
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		if k == "_children" || k == "_parents" {
+			if v == "" {
+				out[k] = v
+				continue
+			}
+			parts := strings.Split(v, ",")
+			sort.Strings(parts)
+			v = strings.Join(parts, ",")
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// IntentSnapshot returns the device's NEWTRON_INTENT records in canonical form
+// (every record, DAG-link CSVs sorted) — the substrate for "is the device back
+// where it started?" comparisons. Unlike Tree()/IntentsToSteps it does not drop
+// side-effect or unreachable records, so a residual/orphaned intent is visible.
+//
+// In actuated mode it reads the table FRESH from the device (the authority), so
+// it catches on-device residual the in-memory projection might not reflect;
+// with no transport it falls back to the in-memory intent DB.
+func (n *Node) IntentSnapshot(ctx context.Context) (map[string]map[string]string, error) {
+	intents := n.configDB.NewtronIntent
+	if n.conn != nil {
+		if client := n.conn.Client(); client != nil {
+			fresh, err := client.GetRawTable("NEWTRON_INTENT")
+			if err != nil {
+				return nil, fmt.Errorf("reading NEWTRON_INTENT for snapshot: %w", err)
+			}
+			intents = fresh
+		}
+	}
+	out := make(map[string]map[string]string, len(intents))
+	for resource, fields := range intents {
+		out[resource] = NormalizeIntentFields(fields)
+	}
+	return out, nil
+}
+
 // ReplayStep dispatches a topology step to the operation registry
 // (op_registry.go). The step URL identifies the operation; interface-scoped
 // operations include the interface name in the URL
