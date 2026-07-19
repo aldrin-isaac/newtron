@@ -126,7 +126,8 @@
         {
           "url": "/bind-ipvpn",
           "params": {
-            "ipvpn": "IRB"
+            "ipvpn": "IRB",
+            "vrf_name": "Vrf_IRB"
           }
         },
         {
@@ -296,7 +297,8 @@
         {
           "url": "/bind-ipvpn",
           "params": {
-            "ipvpn": "IRB"
+            "ipvpn": "IRB",
+            "vrf_name": "Vrf_IRB"
           }
         },
         {
