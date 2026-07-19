@@ -1255,7 +1255,12 @@ newtron leaf1 vrf create Vrf_CUST1 -x
 newtron leaf1 vrf delete Vrf_CUST1 -x
 ```
 
-**Create preconditions:** VRF must not already exist.
+**Create preconditions:** VRF must not already exist. The name must be ≤ 15
+characters (Linux IFNAMSIZ) — `vrfmgrd` cannot create a longer kernel device, and
+the failure is invisible to CONFIG_DB/drift (only the dataplane catches it), so
+newtron fail-closes at apply time. Service-derived VRF names (`Vrf_<service>` for
+shared, `Vrf_<service>_<iface>` for interface) get the same budget enforced at
+spec-author time via a per-`vrf_type` service-name cap.
 
 **Delete preconditions:**
 
@@ -1275,14 +1280,16 @@ newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet8 -x
 
 ### 9.4 IP-VPN Binding
 
-Bind an IP-VPN definition to configure L3VNI, route targets, and VXLAN tunnel
-mapping. The argument is the IP-VPN spec name; the on-device VRF name is derived
-from it as `"Vrf_"+name` (so IP-VPN `CUST1` materializes VRF `Vrf_CUST1`, which
-must already exist via `vrf create`):
+Enroll an existing VRF as a *member* of an IP-VPN — the VPN's shared L3VNI, route
+targets, and VXLAN tunnel mapping are bound onto the VRF. A VRF is a member of an
+IP-VPN, not the IP-VPN itself: the binding is mutable (rebind the same VRF to a
+different IP-VPN) while the VRF name is the invariant. Both arguments are explicit
+— the on-device VRF name (which must already exist via `vrf create`) and the
+IP-VPN spec name:
 
 ```bash
-newtron leaf1 vrf bind-ipvpn CUST1 -x
-newtron leaf1 vrf unbind-ipvpn CUST1 -x
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
+newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 customer-vpn -x
 ```
 
 ### 9.5 BGP Neighbors
@@ -2742,7 +2749,7 @@ newtron leaf1 vrf remove-neighbor Vrf_CUST1 Ethernet8 -x
 newtron leaf1 vrf remove-neighbor Vrf_CUST1 Ethernet12 -x
 
 # 3. Unbind IP-VPN
-newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 -x
+newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 customer-vpn -x
 
 # 4. Remove interfaces
 newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet8 -x
