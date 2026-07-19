@@ -294,7 +294,7 @@ steps:
   - name: no-vni-map-50400-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vrf_EIRB1/exists
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan3998/exists
     expect:
       jq: '.exists == false'
 
@@ -307,7 +307,7 @@ steps:
   - name: no-vni-map-50400-sw2
     action: newtron
     devices: [switch2]
-    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vrf_EIRB2/exists
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan3998/exists
     expect:
       jq: '.exists == false'
 
