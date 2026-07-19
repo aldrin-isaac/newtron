@@ -141,7 +141,7 @@
         {
           "url": "/interfaces/Vlan400/apply-service",
           "params": {
-            "service": "eirba"
+            "service": "eirb1"
           }
         }
       ],
@@ -311,7 +311,7 @@
         {
           "url": "/interfaces/Vlan401/apply-service",
           "params": {
-            "service": "eirbb"
+            "service": "eirb2"
           }
         }
       ],

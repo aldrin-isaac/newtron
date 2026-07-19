@@ -884,7 +884,7 @@ func TestWriteError_ConflictEnvelope(t *testing.T) {
 	specConflict := &newtron.ConflictError{
 		Resource:   "IPVPNSpec",
 		Name:       "IRB",
-		References: []string{"ServiceSpec 'EIRBA' (ipvpn)", "ServiceSpec 'EIRBB' (ipvpn)"},
+		References: []string{"ServiceSpec 'EIRB1' (ipvpn)", "ServiceSpec 'EIRB2' (ipvpn)"},
 		// Force defaults false — specs have no force-cascade.
 	}
 

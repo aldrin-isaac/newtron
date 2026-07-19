@@ -72,14 +72,14 @@
       "service_type": "irb",
       "macvpn": "IRB_VLAN100"
     },
-    "EIRBA": {
+    "EIRB1": {
       "description": "EVPN IRB subnet A (10.1.40.0/24)",
       "service_type": "evpn-irb",
       "ipvpn": "IRB",
       "macvpn": "IRB_VLAN400",
       "vrf_type": "shared"
     },
-    "EIRBB": {
+    "EIRB2": {
       "description": "EVPN IRB subnet B (10.1.41.0/24)",
       "service_type": "evpn-irb",
       "ipvpn": "IRB",

@@ -44,7 +44,7 @@ func createTestSpecDir(t *testing.T) string {
 			}
 		},
 		"services": {
-			"ertda": {
+			"ertd1": {
 				"description": "Customer L3 service",
 				"service_type": "evpn-routed",
 				"ipvpn": "CUSTOMER",
@@ -1042,7 +1042,7 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 			}
 		},
 		"services": {
-			"ertdb": {
+			"ertd2": {
 				"description": "Zone L3 service",
 				"service_type": "evpn-routed",
 				"ipvpn": "ZONE",

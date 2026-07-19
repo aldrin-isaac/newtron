@@ -25,14 +25,14 @@
       "service_type": "evpn-bridged",
       "macvpn": "EXTEND_VLAN300"
     },
-    "EIRBA": {
+    "EIRB1": {
       "description": "EVPN IRB subnet A (10.1.40.0/24)",
       "service_type": "evpn-irb",
       "vrf_type": "shared",
       "ipvpn": "IRB",
       "macvpn": "IRB_VLAN400"
     },
-    "EIRBB": {
+    "EIRB2": {
       "description": "EVPN IRB subnet B (10.1.41.0/24)",
       "service_type": "evpn-irb",
       "vrf_type": "shared",
