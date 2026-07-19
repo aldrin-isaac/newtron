@@ -120,21 +120,21 @@
         {
           "url": "/create-vrf",
           "params": {
-            "name": "Vrf_IRB"
+            "name": "Vrf_EIRB1"
           }
         },
         {
           "url": "/bind-ipvpn",
           "params": {
             "ipvpn": "IRB",
-            "vrf_name": "Vrf_IRB"
+            "vrf_name": "Vrf_EIRB1"
           }
         },
         {
           "url": "/configure-irb",
           "params": {
             "vlan_id": 400,
-            "vrf": "Vrf_IRB",
+            "vrf": "Vrf_EIRB1",
             "ip_address": "10.1.40.1/24",
             "anycast_mac": "00:00:00:01:04:00"
           }
@@ -291,21 +291,21 @@
         {
           "url": "/create-vrf",
           "params": {
-            "name": "Vrf_IRB"
+            "name": "Vrf_EIRB2"
           }
         },
         {
           "url": "/bind-ipvpn",
           "params": {
             "ipvpn": "IRB",
-            "vrf_name": "Vrf_IRB"
+            "vrf_name": "Vrf_EIRB2"
           }
         },
         {
           "url": "/configure-irb",
           "params": {
             "vlan_id": 401,
-            "vrf": "Vrf_IRB",
+            "vrf": "Vrf_EIRB2",
             "ip_address": "10.1.41.1/24",
             "anycast_mac": "00:00:00:01:04:00"
           }

@@ -111,9 +111,10 @@ steps:
     url: /nodes/{{device}}/delete-vlan
     params: {id: 100}
 
-  # Overlay IRB (Vlan400 sw1 / Vlan401 sw2): the SVI, the shared Vrf_IRB, and the
-  # L3VNI were all reaped by remove-service on the last consumer — only the L2
-  # overlay, membership, and VLAN remain below.
+  # Overlay IRB (Vlan400 sw1 / Vlan401 sw2): the SVI, the per-service VRF
+  # (Vrf_EIRB1 sw1 / Vrf_EIRB2 sw2 — the manual pre-provisioning and the eirb
+  # service share it), and the L3VNI were all reaped by remove-service on the last
+  # consumer — only the L2 overlay, membership, and VLAN remain below.
   - name: unconfigure-eth4
     action: newtron
     devices: [switch1, switch2]
