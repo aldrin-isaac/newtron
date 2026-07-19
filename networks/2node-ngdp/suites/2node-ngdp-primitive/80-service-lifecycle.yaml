@@ -123,7 +123,7 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400
     expect:
-      jq: '.vrf_name == "Vrf_IRB"'
+      jq: '.vrf_name == "Vrf_SVC_EVPN_IRB"'
 
   # The composite sourced the anycast gateway from the SVC_VLAN400 macvpn (§7).
   - name: verify-svi-anycast-ip-sw1
@@ -292,7 +292,7 @@ steps:
   - name: verify-vrf-reaped-on-remove-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_SVC_EVPN_IRB/exists
     expect:
       jq: '.exists == false'
 
