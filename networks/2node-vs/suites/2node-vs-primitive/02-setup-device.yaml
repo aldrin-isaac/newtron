@@ -161,3 +161,15 @@ steps:
     url: /nodes/{{device}}/configdb/NEWTRON_INTENT/device/exists
     expect:
       jq: '.exists == true'
+
+  # Capture the post-setup-device baseline: the state the suite must return to.
+  # setup-device infra (loopback, BGP globals, VTEP, EVPN peer group, overlay
+  # peers) persists through the run; the teardown arc reverses only the
+  # per-operation entries, back to exactly this point. 92-verify-clean asserts
+  # the return with verify-snapshot against this name — a total NEWTRON_INTENT
+  # check that catches residual/orphaned intent records the per-key exists==false
+  # checks (and drift, which excludes NEWTRON_INTENT) cannot see.
+  - name: capture-post-setup-baseline
+    action: snapshot
+    devices: [switch1, switch2]
+    snapshot: post-setup

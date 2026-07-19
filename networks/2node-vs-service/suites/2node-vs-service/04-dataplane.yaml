@@ -10,6 +10,15 @@ requires: [provision]
 after: [verify-health]
 
 steps:
+  # Capture the device intent DB before any dataplane traffic tests run. The
+  # dataplane phase is pure observation (host pings, counter reads) and MUST NOT
+  # mutate device intent — verify-dataplane-nonmutating asserts that at the end.
+  # A read/verify op that silently wrote intent would show here as a diff.
+  - name: capture-pre-dataplane
+    action: snapshot
+    devices: [switch1, switch2]
+    snapshot: pre-dataplane
+
   # =========================================================================
   # Test 1: EVPN L2 cross-switch (host3 ↔ host6, VLAN 300, VNI 10300)
   # =========================================================================
@@ -171,3 +180,10 @@ steps:
     command: "ip link del eth0.401 2>/dev/null || true"
     expect:
       contains: ""
+
+  # The dataplane phase must have left device intent byte-identical to its start
+  # (§1: the device is the source of reality; observing it must not mutate it).
+  - name: verify-dataplane-nonmutating
+    action: verify-snapshot
+    devices: [switch1, switch2]
+    snapshot: pre-dataplane

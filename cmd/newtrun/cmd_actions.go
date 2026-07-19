@@ -111,6 +111,26 @@ var actionMeta = map[newtrun.StepAction]actionMetadata{
   expect:
     jq: '.name == "Servers"'`,
 	},
+	newtrun.ActionSnapshot: {
+		short:    "Capture a named NEWTRON_INTENT snapshot for later before/after comparison",
+		long:     "Reads each device's canonical NEWTRON_INTENT (every record, DAG links normalized) and stores it run-scoped under `snapshot: <name>`. Named snapshots survive across scenarios within a run — capture a baseline after setup, compare it at verify-clean with verify-snapshot.",
+		required: "snapshot (name), devices",
+		devices:  "one or more switches",
+		example: `- name: capture-baseline
+  action: snapshot
+  devices: [switch1, switch2]
+  snapshot: post-setup`,
+	},
+	newtrun.ActionVerifySnapshot: {
+		short:    "Assert a device's NEWTRON_INTENT is byte-identical to a captured snapshot",
+		long:     "Re-reads each device's NEWTRON_INTENT and diffs it against the named snapshot. PASSes only when identical; FAILs listing residual (present now, not in the baseline), missing, or changed records — the residual/missing-config check that Drift cannot make (NEWTRON_INTENT is drift-excluded).",
+		required: "snapshot (name), devices",
+		devices:  "one or more switches",
+		example: `- name: verify-return-to-baseline
+  action: verify-snapshot
+  devices: [switch1, switch2]
+  snapshot: post-setup`,
+	},
 }
 
 // init enforces that every StepAction constant has matching metadata.
@@ -123,6 +143,8 @@ func init() {
 		newtrun.ActionHostExec,
 		newtrun.ActionNewtron,
 		newtrun.ActionNewtronCLI,
+		newtrun.ActionSnapshot,
+		newtrun.ActionVerifySnapshot,
 	}
 	for _, a := range known {
 		if _, ok := actionMeta[a]; !ok {
@@ -144,6 +166,8 @@ var orderedActions = []newtrun.StepAction{
 	newtrun.ActionHostExec,
 	newtrun.ActionNewtron,
 	newtrun.ActionNewtronCLI,
+	newtrun.ActionSnapshot,
+	newtrun.ActionVerifySnapshot,
 }
 
 func listActions() error {
