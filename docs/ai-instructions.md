@@ -222,8 +222,39 @@ citing a document as justification — "CLAUDE.md says X", "the architecture doc
 requires Y" — verify the claim against the current code. A document that described
 the system accurately last month may be stale today.
 
-If you haven't verified it in source, say "I don't know, let me check" — never
-state it as fact.
+The discipline extends past code and documents to every claim about the running
+system. Three classes recur, each one earned here:
+
+- **Runtime and environment state** — "the host is degraded", "swss is wedged",
+  "that key is in CONFIG_DB". Measure before asserting: query the host (load,
+  memory, iowait), read syslog, `redis-cli` the key, check `/proc`. Never infer a
+  live condition by pattern-matching a past one. A cold-boot failure was blamed on
+  a "degraded host" that measured at ~8% load with 85 GB free. When a failure
+  looks like the platform's fault, that is the cue to measure — the platform
+  almost always did exactly what it was told (a suspected platform "killing EVPN
+  updates" was newtron's own `DEL` of the BGP EVPN address-family row, caught by
+  redis MONITOR — RCA-049).
+
+- **Causal attribution of an event** — "my change killed it", "the reload wiped
+  it", "the other engine deleted the lab". Establish the mechanism and the actor
+  from evidence: reconstruct the timeline, ask who owns the resource, and check
+  which mechanism could actually produce the state you see. Distinguish
+  look-alikes — a VM-kill is not a state-directory delete. A lab's loss was pinned
+  on a local reap when its owner had `destroy`ed it; the same drift was pinned on
+  config reload when the timeline showed it was reaped at teardown.
+
+- **Stale artifacts versus source** — a behavior seen from a running binary, a
+  cached build, or a prior session's memory is evidence about that artifact, not
+  the current code. Before calling an observed behavior a live bug, confirm the
+  artifact was built from current `HEAD`. A "live" teardown bug came from a binary
+  built that morning off a pre-fix checkout; the fix had merged two days earlier.
+
+If you haven't verified it — in source, by measurement, or against the event
+record — say "I don't know, let me check"; never state it as fact. When a cause
+must go out before you can verify it, mark it a hypothesis and carry its evidence
+in the same breath ("drift after reload — hypothesis, haven't read the timeline
+yet"). A bare cause asserted as a finding is the failure this section exists to
+prevent.
 
 ---
 
