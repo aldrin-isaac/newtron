@@ -1,9 +1,10 @@
 # Platform Port Model — Implementation Tracker
 
-**Status: planning tracker — implementation not started.** Companion to the
-design note [`platform-port-model.md`](platform-port-model.md), which is the
-authority for *what* and *why*; this document is the *how* and *in what order*
-(ai-instructions §15). Phases are sequenced additive-first → rewire → delete so
+**Status: complete — all phases (1–4, incl. vJunos native naming) shipped and
+cold-validated (PRs #306, #307, and the vJunos follow-up).** Retained as the
+phase-by-phase historical record that [`platform-port-model.md`](platform-port-model.md)
+points to. That design note is the authority for *what* and *why*; this document
+is the *how* and *in what order* (ai-instructions §15). Phases are sequenced additive-first → rewire → delete so
 every phase is independently shippable, build-green, and behavior-preserving
 until the new path is proven (CLAUDE.md Regression Prevention). Mark `[x]` per
 task as completed — do not batch. CLAUDE.md's doc index is not updated until the

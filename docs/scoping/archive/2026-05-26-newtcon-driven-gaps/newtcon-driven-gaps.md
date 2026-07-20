@@ -34,7 +34,7 @@ The ten gaps are not independent design decisions. Each is an
 instance of the same principle: **newtron's HTTP API should expose
 its canonical in-memory substrate types directly, not derivatives,
 summaries, or opaque handles.** This is codified as
-[`DESIGN_PRINCIPLES_NEWTRON.md` §46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
+[`DESIGN_PRINCIPLES_NEWTRON.md` §46](../../../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
 ("HTTP API Boundary — Wire Shape Mirrors Canonical Types").
 
 Re-reading the ten issues through the §46 lens, grouped by the
@@ -235,17 +235,17 @@ as to this parent.
 
 ## Cross-references
 
-- newtron principles: [`../DESIGN_PRINCIPLES_NEWTRON.md`](../DESIGN_PRINCIPLES_NEWTRON.md), especially
-  [§46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
+- newtron principles: [`../DESIGN_PRINCIPLES_NEWTRON.md`](../../../DESIGN_PRINCIPLES_NEWTRON.md), especially
+  [§46](../../../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
   (HTTP API Boundary — Wire Shape Mirrors Canonical Types; the unifying
   principle for this batch),
-  [§11](../DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract)
+  [§11](../../../DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract)
   (ChangeSet is the Universal Contract),
-  [§33](../DESIGN_PRINCIPLES_NEWTRON.md#33-public-api-boundary--types-express-intent-not-implementation)
+  [§33](../../../DESIGN_PRINCIPLES_NEWTRON.md#33-public-api-boundary--types-express-intent-not-implementation)
   (Public API Boundary — Types Express Intent, Not Implementation),
-  [§7](../DESIGN_PRINCIPLES_NEWTRON.md#7-definition-is-network-scoped-execution-is-device-scoped)
+  [§7](../../../DESIGN_PRINCIPLES_NEWTRON.md#7-definition-is-network-scoped-execution-is-device-scoped)
   (Definition Is Network-Scoped).
-- newtron pipeline: [`../newtron/unified-pipeline-architecture.md`](../newtron/unified-pipeline-architecture.md).
+- newtron pipeline: [`../newtron/unified-pipeline-architecture.md`](../../../newtron/unified-pipeline-architecture.md).
 - newtcon Gap-Handling Protocol (the originating discipline):
   `../../../newtcon/CLAUDE.md` §Gap-Handling Protocol.
 - Cluster scope docs:
