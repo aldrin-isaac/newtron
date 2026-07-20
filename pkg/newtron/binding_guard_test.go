@@ -14,9 +14,9 @@ import (
 
 // loadServiceFixture copies the 2node-vs-service network into a temp dir and
 // loads it. The copy isolates the committed fixture from the force-cascade
-// path, which persists topology.json. The fixture applies service "transit" on
+// path, which persists topology.json. The fixture applies service "rtd" on
 // switch1:Ethernet0 and switch2:Ethernet0 (two bindings across two devices) and
-// "local-irb" on Ethernet4 of each — used to prove the cascade is scoped.
+// "irb" on Ethernet4 of each — used to prove the cascade is scoped.
 func loadServiceFixture(t *testing.T) (*Network, string) {
 	t.Helper()
 	src := filepath.Join("..", "..", "networks", "2node-vs-service")
@@ -42,20 +42,20 @@ func TestDeleteService_RefusedWhenApplied(t *testing.T) {
 	ctx := context.Background()
 	exec := ExecOpts{Execute: true}
 
-	err := net.DeleteService(ctx, ScopeSelector{}, "transit", exec, false)
+	err := net.DeleteService(ctx, ScopeSelector{}, "rtd", exec, false)
 	var conflict *util.ConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("DeleteService without force: err=%v, want *util.ConflictError", err)
 	}
-	if conflict.Resource != "ServiceSpec" || conflict.Name != "transit" || !conflict.Force {
-		t.Errorf("conflict = %+v, want Resource=ServiceSpec Name=transit Force=true", conflict)
+	if conflict.Resource != "ServiceSpec" || conflict.Name != "rtd" || !conflict.Force {
+		t.Errorf("conflict = %+v, want Resource=ServiceSpec Name=rtd Force=true", conflict)
 	}
 	want := []string{"switch1:Ethernet0", "switch2:Ethernet0"}
 	if !reflect.DeepEqual(conflict.References, want) {
 		t.Errorf("references = %v, want %v", conflict.References, want)
 	}
 	// The refusal must not have deleted the spec.
-	if got := net.bindingsFor(SpecKindService, "transit"); len(got) != 2 {
+	if got := net.bindingsFor(SpecKindService, "rtd"); len(got) != 2 {
 		t.Errorf("after refusal: bindings=%v, want 2 (nothing removed)", got)
 	}
 }
@@ -73,32 +73,32 @@ func TestDeleteService_RefusedWhenApplied(t *testing.T) {
 func TestDeleteService_ForceCascadesBindings(t *testing.T) {
 	net, dir := loadServiceFixture(t)
 
-	if got := net.bindingsFor(SpecKindService, "transit"); len(got) != 2 {
-		t.Fatalf("precondition: transit bindings=%v, want 2", got)
+	if got := net.bindingsFor(SpecKindService, "rtd"); len(got) != 2 {
+		t.Fatalf("precondition: rtd bindings=%v, want 2", got)
 	}
 
-	if err := net.guardSpecBindings(spec.ScopeNetwork, SpecKindService, "ServiceSpec", "transit", true); err != nil {
+	if err := net.guardSpecBindings(spec.ScopeNetwork, SpecKindService, "ServiceSpec", "rtd", true); err != nil {
 		t.Fatalf("force cascade: %v", err)
 	}
 
-	if got := net.bindingsFor(SpecKindService, "transit"); len(got) != 0 {
-		t.Errorf("after force: transit bindings=%v, want none", got)
+	if got := net.bindingsFor(SpecKindService, "rtd"); len(got) != 0 {
+		t.Errorf("after force: rtd bindings=%v, want none", got)
 	}
-	// The cascade is scoped to the deleted service — local-irb stays applied.
-	if got := net.bindingsFor(SpecKindService, "local-irb"); len(got) != 2 {
-		t.Errorf("force cascade touched an unrelated service: local-irb=%v, want 2", got)
+	// The cascade is scoped to the deleted service — irb stays applied.
+	if got := net.bindingsFor(SpecKindService, "irb"); len(got) != 2 {
+		t.Errorf("force cascade touched an unrelated service: irb=%v, want 2", got)
 	}
 
-	// Persisted: a fresh load from disk sees the transit steps gone and local-irb intact.
+	// Persisted: a fresh load from disk sees the rtd steps gone and irb intact.
 	reload, err := LoadNetwork(dir, "", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got := reload.bindingsFor(SpecKindService, "transit"); len(got) != 0 {
-		t.Errorf("after reload: transit bindings=%v, want none (cascade not persisted)", got)
+	if got := reload.bindingsFor(SpecKindService, "rtd"); len(got) != 0 {
+		t.Errorf("after reload: rtd bindings=%v, want none (cascade not persisted)", got)
 	}
-	if got := reload.bindingsFor(SpecKindService, "local-irb"); len(got) != 2 {
-		t.Errorf("after reload: local-irb bindings=%v, want 2", got)
+	if got := reload.bindingsFor(SpecKindService, "irb"); len(got) != 2 {
+		t.Errorf("after reload: irb bindings=%v, want 2", got)
 	}
 }
 
@@ -110,16 +110,16 @@ func TestDeleteService_ForceCascadesBindings(t *testing.T) {
 // internal scope-gated guards correctly allow.
 func TestGuardSpecBindings_ScopeGated(t *testing.T) {
 	net, _ := loadServiceFixture(t)
-	if got := net.bindingsFor(SpecKindService, "transit"); len(got) != 2 {
-		t.Fatalf("precondition: transit applied on 2 interfaces, got %v", got)
+	if got := net.bindingsFor(SpecKindService, "rtd"); len(got) != 2 {
+		t.Fatalf("precondition: rtd applied on 2 interfaces, got %v", got)
 	}
 	for _, scope := range []string{spec.ScopeZone, spec.ScopeNode} {
-		if err := net.guardSpecBindings(scope, SpecKindService, "ServiceSpec", "transit", false); err != nil {
+		if err := net.guardSpecBindings(scope, SpecKindService, "ServiceSpec", "rtd", false); err != nil {
 			t.Errorf("scope %q: guard over-blocked an override delete of an applied spec: %v", scope, err)
 		}
 	}
 	// Network scope still refuses — the guard is scope-gated, not disabled.
-	if err := net.guardSpecBindings(spec.ScopeNetwork, SpecKindService, "ServiceSpec", "transit", false); err == nil {
+	if err := net.guardSpecBindings(spec.ScopeNetwork, SpecKindService, "ServiceSpec", "rtd", false); err == nil {
 		t.Error("network scope: guard failed to refuse deleting an applied service")
 	}
 }
@@ -133,13 +133,13 @@ func TestBindingsFor_GeneralizesAcrossKinds(t *testing.T) {
 	if got := net.bindingsFor(SpecKindService, "no-such-service"); got != nil {
 		t.Errorf("unbound service: bindings=%v, want nil", got)
 	}
-	// "transit" is a service binding, not a filter binding — kind must discriminate.
-	if got := net.bindingsFor(SpecKindFilter, "transit"); got != nil {
-		t.Errorf("transit as filter: bindings=%v, want nil (wrong kind)", got)
+	// "rtd" is a service binding, not a filter binding — kind must discriminate.
+	if got := net.bindingsFor(SpecKindFilter, "rtd"); got != nil {
+		t.Errorf("rtd as filter: bindings=%v, want nil (wrong kind)", got)
 	}
-	// Canonicalization: the raw step casing ("transit") and a typed query
-	// ("TRANSIT") resolve to the same bindings.
-	if got := net.bindingsFor(SpecKindService, "TRANSIT"); len(got) != 2 {
+	// Canonicalization: the raw step casing ("rtd") and a typed query
+	// ("RTD") resolve to the same bindings.
+	if got := net.bindingsFor(SpecKindService, "RTD"); len(got) != 2 {
 		t.Errorf("canonical query: bindings=%v, want 2", got)
 	}
 }

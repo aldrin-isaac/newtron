@@ -12,7 +12,6 @@ func TestDeriveFromInterface(t *testing.T) {
 		ipWithMask  string
 		serviceName string // expected to be pre-normalized (uppercase, underscores)
 		wantErr     bool
-		checkVRF    string
 		checkACL    string
 	}{
 		{
@@ -21,7 +20,6 @@ func TestDeriveFromInterface(t *testing.T) {
 			ipWithMask:  "10.1.1.1/30",
 			serviceName: "CUSTOMER",
 			wantErr:     false,
-			checkVRF:    "CUSTOMER_ETH0",
 			checkACL:    "CUSTOMER_ETH0",
 		},
 		{
@@ -30,7 +28,6 @@ func TestDeriveFromInterface(t *testing.T) {
 			ipWithMask:  "10.1.1.1/30",
 			serviceName: "TRANSIT",
 			wantErr:     false,
-			checkVRF:    "TRANSIT_PO100",
 			checkACL:    "TRANSIT_PO100",
 		},
 		{
@@ -39,7 +36,7 @@ func TestDeriveFromInterface(t *testing.T) {
 			ipWithMask:  "",
 			serviceName: "L2_ONLY",
 			wantErr:     false,
-			checkVRF:    "L2_ONLY_ETH0",
+			checkACL:    "L2_ONLY_ETH0",
 		},
 		{
 			name:        "invalid IP",
@@ -58,9 +55,6 @@ func TestDeriveFromInterface(t *testing.T) {
 				return
 			}
 			if !tt.wantErr {
-				if got.VRFName != tt.checkVRF {
-					t.Errorf("DeriveFromInterface() VRFName = %q, want %q", got.VRFName, tt.checkVRF)
-				}
 				if tt.checkACL != "" && got.ACLPrefix != tt.checkACL {
 					t.Errorf("DeriveFromInterface() ACLPrefix = %q, want %q", got.ACLPrefix, tt.checkACL)
 				}
@@ -99,10 +93,14 @@ func TestDeriveVRFName(t *testing.T) {
 		interfaceName string
 		want          string
 	}{
-		{"interface", "CUSTOMER", "Ethernet0", "CUSTOMER_ETH0"},
-		{"shared", "CUSTOMER", "Ethernet0", "CUSTOMER"},
-		{"", "CUSTOMER", "Ethernet0", "CUSTOMER_ETH0"}, // default to interface
-		{"interface", "TRANSIT", "PortChannel100", "TRANSIT_PO100"},
+		// The "Vrf_" prefix is mandatory (RCA-044). Both modes name the VRF after
+		// the service; interface mode single-letters the interface (E/P/V) to
+		// keep the name inside the 15-char Linux limit (IFNAMSIZ).
+		{"interface", "CUST", "Ethernet0", "Vrf_CUST_E0"},
+		{"shared", "CUSTOMER_L3", "Ethernet0", "Vrf_CUSTOMER_L3"}, // shared: service name only (11 chars → 14)
+		{"", "CUST", "Ethernet0", "Vrf_CUST_E0"},                  // default to interface
+		{"interface", "TRAN", "PortChannel100", "Vrf_TRAN_P100"},
+		{"interface", "IRB", "Vlan400", "Vrf_IRB_V400"},
 	}
 
 	for _, tt := range tests {
@@ -224,25 +222,6 @@ func TestNormalizeVRFName(t *testing.T) {
 	}
 }
 
-func TestDeriveVRFNameForIPVPN(t *testing.T) {
-	tests := []struct {
-		ipvpn string
-		want  string
-	}{
-		{"IRB", "Vrf_IRB"},                     // canonical name → Vrf_ prefix
-		{"irb", "Vrf_IRB"},                     // normalizes the suffix
-		{"customer-edge", "Vrf_CUSTOMER_EDGE"}, // hyphen → underscore
-		{"", ""},                               // empty stays empty
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.ipvpn, func(t *testing.T) {
-			if got := DeriveVRFNameForIPVPN(tt.ipvpn); got != tt.want {
-				t.Errorf("DeriveVRFNameForIPVPN(%q) = %q, want %q", tt.ipvpn, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestParseInterfaceName(t *testing.T) {
 	tests := []struct {

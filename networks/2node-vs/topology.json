@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "2-node sonic-vs topology: switch1 + switch2 with 6 test hosts — Force10-S6000 stride-4 ports",
+  "description": "2-node sonic-vs topology: switch1 + switch2 with 6 test hosts \u2014 Force10-S6000 stride-4 ports",
   "nodes": {
     "host1": {},
     "host2": {},

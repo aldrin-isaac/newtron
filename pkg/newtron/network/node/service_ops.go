@@ -361,16 +361,28 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		vlanID = opts.VLAN
 	}
 
-	// Determine VRF name for binding and infrastructure. In shared
-	// mode the VRF name is derived from the IP-VPN spec name
-	// (util.DeriveVRFNameForIPVPN — "Vrf_"+ipvpn); in interface mode the
-	// name is derived from the service + interface pair.
+	// Determine VRF name for binding and infrastructure. The VRF is named
+	// after the service — the invariant — not the IP-VPN (a mutable binding):
+	// shared → "Vrf_<SERVICE>" (shared across the service's interfaces), interface
+	// → "Vrf_<SERVICE>_<IFACE>". If the service joins an IP-VPN, that VPN's shared
+	// L3VNI is bound onto this VRF (BindIPVPN below); connectivity between services
+	// is by shared L3VNI across the fabric, independent of the per-device VRF name.
+	// A service with no vrf_type carries no VRF (routes in default) — vrfName "".
 	var vrfName string
 	switch svc.VRFType {
-	case spec.VRFTypeInterface:
+	case spec.VRFTypeInterface, spec.VRFTypeShared:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-	case spec.VRFTypeShared:
-		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
+	}
+	// Fail closed at the optimal point — before any CONFIG_DB write — if the
+	// derived VRF name overruns IFNAMSIZ. Author-time caps the service name, but
+	// the interface is only known here, so a long port/sub-interface edge is
+	// caught at apply, not silently by vrfmgrd on the device (RCA: 16-char
+	// Vrf_SVC_EVPN_IRB → kernel VRF never created → dataplane dead).
+	if vrfName != "" {
+		if err := util.ValidateVRFNameLength(vrfName); err != nil {
+			return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
+				"the service's derived VRF name must fit the 15-char Linux interface-name limit", err.Error())
+		}
 	}
 
 	// Capability gate, content-derived: what this service's resolved content
@@ -656,10 +668,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// IPVPN binding (intent-idempotent: BindIPVPN checks ipvpn intent).
-	// BindIPVPN derives the VRF name from svc.IPVPN internally; vrfName
-	// here is the same derived value (util.DeriveVRFNameForIPVPN).
+	// Enroll this service's VRF (vrfName) as a member of the IP-VPN: shared
+	// mode passes the VPN-named "Vrf_"+ipvpn, interface mode passes the
+	// per-interface "Vrf_<service>_<iface>" — either way the VPN's shared
+	// L3VNI/route-targets land on the VRF the composite just created and bound.
 	if ipvpnDef != nil && vrfName != "" {
-		ipvpnCS, err := n.BindIPVPN(ctx, svc.IPVPN)
+		ipvpnCS, err := n.BindIPVPN(ctx, svc.IPVPN, vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("bind IPVPN %s: %w", svc.IPVPN, err)
 		}
@@ -915,13 +929,13 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 
 	routing := svc.Routing
 
-	// Determine VRF key for route-map AF entries
+	// Determine VRF key for route-map AF entries — the service's own VRF
+	// ("Vrf_<SERVICE>" shared, "Vrf_<SERVICE>_<IFACE>" interface); a service
+	// with no vrf_type routes in the default VRF.
 	vrfName := ""
-	if svc.VRFType == spec.VRFTypeInterface {
+	switch svc.VRFType {
+	case spec.VRFTypeInterface, spec.VRFTypeShared:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-	} else if svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-		// Shared-mode VRF name is derived from the IP-VPN spec name.
-		vrfName = util.DeriveVRFNameForIPVPN(svc.IPVPN)
 	}
 	vrfKey := "default"
 	if vrfName != "" {
@@ -1454,13 +1468,14 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 		}
 
 		// Per-interface VRF: delete VRF and related config. The composite
-		// created it (CreateVRF on apply), so it owns the teardown — reap on
-		// last consumer, the same rule the routed path uses.
+		// created it (CreateVRF on apply), so it owns the teardown. Use the VRF
+		// name recorded on the binding (§20 — teardown reads the binding, never
+		// re-resolves the name), so a later change to the derivation cannot strand
+		// an existing per-interface VRF.
 		if !deliveryOnly && vrfType == spec.VRFTypeInterface {
-			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
 			l3vni, l3vniVlan := bindingInt(b[sonic.FieldL3VNI]), bindingInt(b[sonic.FieldL3VNIVlan])
-			cs.Deletes(destroyVrfConfig(derivedVRF, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
-			destroyedVRF = derivedVRF
+			cs.Deletes(destroyVrfConfig(vrfName, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
+			destroyedVRF = vrfName
 		}
 
 		// Shared VRF: delete when the last ipvpn user is removed. The composite
@@ -1567,14 +1582,25 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 	// above. Must happen AFTER deleting the interface intent (which deregisters
 	// from its parents), so the parent intents satisfy I5 (no children).
 	// Explicit ordered deletion: ipvpn (child of vrf) → vrf → vlan. The ipvpn
-	// intent is keyed by the IP-VPN spec name (b[FieldIPVPN]), not the derived
-	// VRF name; interface-mode VRFs have no IP-VPN, so the spec name is empty
-	// and only the vrf intent is removed.
+	// intent is keyed by the IP-VPN spec name (b[FieldIPVPN]).
+	//
+	// The ipvpn|<name> binding is shared — one per device, keyed by the VPN, not
+	// the service — so it is unbound only when the VRF it is bound to is the VRF
+	// we just destroyed. In shared mode destroyedVRF is set only on the last
+	// consumer (isLastIPVPN above), so this always matches the VPN-named VRF. In
+	// interface mode a service may reference a VPN whose L3VNI is bound to some
+	// OTHER VRF (a shared-mode peer holds it; this service's BindIPVPN no-op'd on
+	// the one-L3VNI-per-device guard) — its recorded vrf_name then differs from
+	// the per-interface VRF we destroyed, and unbinding it would strand the peer.
+	// The recorded vrf_name is the reference check (§15 reference-aware reverse).
 	if destroyedVRF != "" {
 		if ipvpnName := b[sonic.FieldIPVPN]; ipvpnName != "" {
-			// Delete ipvpn intent first (child of vrf per DAG)
-			if err := n.deleteIntent(cs, "ipvpn|"+ipvpnName); err != nil {
-				return nil, err
+			if ipvpnIntent := n.GetIntent("ipvpn|" + ipvpnName); ipvpnIntent != nil &&
+				ipvpnIntent.Params[sonic.FieldVRFName] == destroyedVRF {
+				// Delete ipvpn intent first (child of vrf per DAG)
+				if err := n.deleteIntent(cs, "ipvpn|"+ipvpnName); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if err := n.deleteIntent(cs, "vrf|"+destroyedVRF); err != nil {

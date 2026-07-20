@@ -8,6 +8,17 @@ description: |
 requires: [teardown-infra]
 
 steps:
+  # Total intent check: the device's NEWTRON_INTENT must be byte-identical to
+  # the post-setup baseline captured at the end of setup-device — i.e. the
+  # teardown arc left ZERO residual and lost nothing. This subsumes the
+  # per-key exists==false checks below (which enumerate CONFIG_DB config tables)
+  # on the intent side, and catches residual/orphaned intent records no one
+  # enumerated — the class Drift is blind to (NEWTRON_INTENT is drift-excluded).
+  - name: verify-return-to-post-setup
+    action: verify-snapshot
+    devices: [switch1, switch2]
+    snapshot: post-setup
+
   # BGP_NEIGHBOR — underlay peers (removed by teardown-infra)
   - name: verify-no-bgp-neighbor-underlay-sw1
     action: newtron

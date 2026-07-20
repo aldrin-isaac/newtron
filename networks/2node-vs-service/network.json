@@ -57,36 +57,36 @@
     }
   },
   "services": {
-    "L2_EXTEND": {
+    "EBRD": {
       "description": "EVPN L2 overlay",
       "service_type": "evpn-bridged",
       "macvpn": "EXTEND_VLAN300"
     },
-    "LOCAL_BRIDGE": {
+    "BRD": {
       "description": "Local L2 bridge (no routing)",
       "service_type": "bridged",
       "macvpn": "BRIDGE_VLAN200"
     },
-    "LOCAL_IRB": {
+    "IRB": {
       "description": "Local VLAN with SVI gateway",
       "service_type": "irb",
       "macvpn": "IRB_VLAN100"
     },
-    "OVERLAY_IRB_A": {
+    "EIRB1": {
       "description": "EVPN IRB subnet A (10.1.40.0/24)",
       "service_type": "evpn-irb",
       "ipvpn": "IRB",
       "macvpn": "IRB_VLAN400",
       "vrf_type": "shared"
     },
-    "OVERLAY_IRB_B": {
+    "EIRB2": {
       "description": "EVPN IRB subnet B (10.1.41.0/24)",
       "service_type": "evpn-irb",
       "ipvpn": "IRB",
       "macvpn": "IRB_VLAN401",
       "vrf_type": "shared"
     },
-    "TRANSIT": {
+    "RTD": {
       "description": "Inter-switch underlay link",
       "service_type": "routed",
       "routing": {

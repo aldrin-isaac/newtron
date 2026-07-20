@@ -137,6 +137,19 @@ func (s *ServiceSpec) validateConstraints(v *util.ValidationBuilder, prefix, nam
 	default:
 		v.AddErrorf("%sservice '%s' has unknown type '%s'", prefix, name, s.ServiceType)
 	}
+
+	// VRF-name fit: a VRF-bearing service derives its on-device VRF name from its
+	// own name — "Vrf_<name>" (shared) or "Vrf_<name>_<iface>" (interface) — and
+	// that must fit the 15-char Linux interface-name limit (IFNAMSIZ), or vrfmgrd
+	// silently fails to create the kernel VRF and the dataplane dies (invisible to
+	// CONFIG_DB/drift). Cap the name at author time by vrf_type. The full check
+	// including the runtime interface is fail-closed at apply time.
+	if s.VRFType == VRFTypeInterface || s.VRFType == VRFTypeShared {
+		if maxLen := util.MaxServiceNameLen(s.VRFType); len(name) > maxLen {
+			v.AddErrorf("%sservice '%s' name is %d chars but vrf_type=%s caps it at %d — the derived VRF name (Vrf_%s…) must fit the 15-char Linux interface-name limit (IFNAMSIZ)",
+				prefix, name, len(name), s.VRFType, maxLen, name)
+		}
+	}
 }
 
 // ValidateConstraints checks a node spec's required fields and value formats.

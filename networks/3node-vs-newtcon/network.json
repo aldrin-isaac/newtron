@@ -101,7 +101,7 @@
       "service_type": "evpn-irb",
       "ipvpn": "IPVPN",
       "macvpn": "MACVPN",
-      "vrf_type": "interface",
+      "vrf_type": "shared",
       "routing": {
         "protocol": "bgp",
         "redistribute": false

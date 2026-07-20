@@ -745,7 +745,7 @@ func (s *Server) handleBindIPVPN(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.BindIPVPN(ctx, req.IPVPN)
+		return n.BindIPVPN(ctx, req.VRF, req.IPVPN)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -759,16 +759,14 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	var req struct {
-		IPVPN string `json:"ipvpn"`
-	}
+	var req BindIPVPNRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.UnbindIPVPN(ctx, req.IPVPN)
+		return n.UnbindIPVPN(ctx, req.VRF, req.IPVPN)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -996,6 +994,25 @@ func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
 // single internally-consistent snapshot (`sonic.RawConfigDB`). Default is
 // newtron-owned tables only; ?owned_only=false expands to every schema-known
 // table. §46: canonical device-reality substrate exposed directly.
+// handleIntentSnapshot returns the device's NEWTRON_INTENT records in canonical
+// form (normalized DAG links). The substrate for before/after "back where we
+// started?" comparisons — NEWTRON_INTENT is drift-excluded, so this is the only
+// read that surfaces residual/orphaned intent records.
+func (s *Server) handleIntentSnapshot(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.IntentSnapshot(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleConfigDBSnapshot(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

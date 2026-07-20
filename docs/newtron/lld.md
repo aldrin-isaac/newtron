@@ -323,7 +323,7 @@ When `PeerAS` is `"request"`, the caller must provide the peer AS at apply time 
 
 ### 2.5 IPVPNSpec
 
-IP-VPN definition for L3 overlay routing. The VRF name is derived from the IPVPN name at apply time (canonical uppercase).
+IP-VPN definition for L3 overlay routing. An IP-VPN carries no VRF name — a VRF is enrolled as a member via `bind-ipvpn`, named after the service that owns it (`Vrf_<service>`).
 
 ```go
 type IPVPNSpec struct {
@@ -954,10 +954,12 @@ type ServiceDetail struct {
 type IPVPNDetail struct {
     Name         string   `json:"name"`
     Description  string   `json:"description,omitempty"`
-    VRF          string   `json:"vrf"`
     L3VNI        int      `json:"l3vni"`
     RouteTargets []string `json:"route_targets"`
 }
+// An IP-VPN carries no VRF name — a VRF is a *member* of the IP-VPN (bound via
+// vrf bind-ipvpn), and multiple VRFs on different devices can bind the same
+// IP-VPN under different names. Connectivity is by the shared L3VNI, not the name.
 
 type MACVPNDetail struct {
     Name           string   `json:"name"`
@@ -1288,6 +1290,7 @@ Operations on the expected state. These operate on the abstract node's intent DB
 |--------|------|----------|---------|
 | GET | `.../nodes/{node}/intent/projection` | `sonic.RawConfigDB` | Per-Node projection (from intent replay). The decision substrate for newtron-owned tables |
 | POST | `.../nodes/{node}/intent/projection-diff` | `{before, after, diff}` | Pre-commit preview: replays a `ProjectionDiffRequest.Operations` set on a snapshot of the projection without touching the device. `diff` is `[]sonic.DriftEntry` (canonical §11 vocab) |
+| GET | `.../nodes/{node}/intent/snapshot` | `map[table]map[key]fields` | Normalized NEWTRON_INTENT snapshot (DAG-link CSVs sorted) for before/after diffing. NEWTRON_INTENT is drift-excluded, so this is the only surface that catches residual/orphaned intent |
 | GET | `.../nodes/{node}/intent/tree` | `IntentTreeNode` | Read intent DAG |
 | GET | `.../nodes/{node}/intent/drift` | `[]DriftEntry` | Compare projection vs device CONFIG_DB; empty array ≡ all newtron writes actualized |
 | POST | `.../nodes/{node}/intent/reconcile` | `ReconcileResult` | Push projection to device. Query params: `mode=topology` (intent source), `reconcile=full\|delta` (delivery mechanism, default: topology→full, actuated→delta), `dry_run=true`, `no_save=true` |
@@ -1902,7 +1905,7 @@ The CLI (`cmd/newtron/`) is an HTTP client — it sends requests to newtron-serv
 | `interface` | `list`, `show`, `configure`, `unconfigure`, `set`, `clear`, `binding` | Node |
 | `lag` | `list`, `show`, `create`, `delete`, `add-member`, `remove-member` | Node |
 | `device` | `setup` | Node |
-| `intent` | `tree`, `drift`, `reconcile`, `save`, `reload`, `clear` | Node |
+| `intent` | `tree`, `drift`, `reconcile`, `save`, `reload`, `clear`, `projection`, `snapshot`, `snapshot-diff` | Node |
 | `health` | (default) | Node |
 | `init` | (default) | Node |
 | `show` | (default — device info) | Node |

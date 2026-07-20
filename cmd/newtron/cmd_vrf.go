@@ -12,6 +12,7 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/cli"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 var vrfCmd = &cobra.Command{
@@ -271,26 +272,32 @@ Examples:
 }
 
 var vrfBindIPVPNCmd = &cobra.Command{
-	Use:   "bind-ipvpn <ipvpn-name>",
-	Short: "Bind an IP-VPN on this device",
-	Long: `Bind an IP-VPN defined in network.json. The on-device SONiC
-VRF name is derived from the IP-VPN name as "Vrf_"+name (sonic-vrf.yang
-requires the "Vrf" prefix) — there's no separate VRF parameter.
+	Use:   "bind-ipvpn <vrf-name> <ipvpn-name>",
+	Short: "Enroll a VRF as a member of an IP-VPN",
+	Long: `Enroll an existing VRF as a member of an IP-VPN — the VPN's shared
+L3VNI and route-targets are bound onto the VRF. The VRF must already exist
+(create it with 'vrf create' or via a service); bind-ipvpn does not create it.
+
+The vrf-name is normalized to the "Vrf_" prefix (sonic-vrf.yang / RCA-044): pass
+"Vrf_FOO" or just "FOO" — both become "Vrf_FOO".
 
 Requires -D (device) flag.
 
 Examples:
-  newtron leaf1 vrf bind-ipvpn CUST1 -x   # binds, materializing VRF Vrf_CUST1`,
-	Args: cobra.ExactArgs(1),
+  newtron leaf1 vrf create Vrf_FOO -x
+  newtron leaf1 vrf bind-ipvpn Vrf_FOO CUST1 -x   # Vrf_FOO joins IP-VPN CUST1
+  newtron leaf1 vrf bind-ipvpn FOO CUST1 -x       # same (FOO → Vrf_FOO)`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ipvpnName := args[0]
+		vrfName := args[0]
+		ipvpnName := args[1]
 
 		ipvpnDef, err := app.client.ShowIPVPN(ipvpnName)
 		if err != nil {
 			return fmt.Errorf("ipvpn '%s' not found in network.json", ipvpnName)
 		}
 
-		fmt.Printf("IP-VPN: %s\n", ipvpnName)
+		fmt.Printf("IP-VPN: %s → VRF %s\n", ipvpnName, util.NormalizeVRFName(vrfName))
 		fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
 		if len(ipvpnDef.RouteTargets) > 0 {
 			fmt.Printf("  Route Targets: %v\n", ipvpnDef.RouteTargets)
@@ -300,28 +307,29 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.BindIPVPN(app.deviceName, ipvpnName, execOpts()))
+		return displayWriteResult(app.client.BindIPVPN(app.deviceName, vrfName, ipvpnName, execOpts()))
 	},
 }
 
 var vrfUnbindIPVPNCmd = &cobra.Command{
-	Use:   "unbind-ipvpn <ipvpn-name>",
-	Short: "Unbind the IP-VPN on this device",
-	Long: `Unbind an IP-VPN previously bound on this device, removing
-the on-device VRF and its L3VNI / route targets. The argument is the
-IP-VPN name; the VRF name is derived from it as "Vrf_"+name.
+	Use:   "unbind-ipvpn <vrf-name> <ipvpn-name>",
+	Short: "Remove a VRF from an IP-VPN",
+	Long: `Undo a VRF's membership in an IP-VPN — remove the VPN's L3VNI and
+route-targets from the VRF. The VRF row itself (and any other config) survives.
+The vrf-name is normalized to the "Vrf_" prefix.
 
 Requires -D (device) flag.
 
 Examples:
-  newtron leaf1 vrf unbind-ipvpn CUST1 -x`,
-	Args: cobra.ExactArgs(1),
+  newtron leaf1 vrf unbind-ipvpn Vrf_FOO CUST1 -x`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ipvpnName := args[0]
+		vrfName := args[0]
+		ipvpnName := args[1]
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.UnbindIPVPN(app.deviceName, ipvpnName, execOpts()))
+		return displayWriteResult(app.client.UnbindIPVPN(app.deviceName, vrfName, ipvpnName, execOpts()))
 	},
 }
 

@@ -98,6 +98,10 @@ type Step struct {
 	Command string         `yaml:"command,omitempty"`
 	Params  map[string]any `yaml:"params,omitempty"`
 
+	// snapshot / verify-snapshot: the run-scoped name to store the device's
+	// intent snapshot under (snapshot) or compare against (verify-snapshot).
+	Snapshot string `yaml:"snapshot,omitempty"`
+
 	// newtron (generic server action)
 	Method string      `yaml:"method,omitempty"` // HTTP method: GET, POST, DELETE
 	URL    string      `yaml:"url,omitempty"`    // URL template (e.g., /node/{{device}}/vlan)
@@ -148,6 +152,8 @@ const (
 	ActionNewtron            StepAction = "newtron"
 	ActionNewtronCLI         StepAction = "newtron-cli"
 	ActionRunSuite           StepAction = "run-suite"
+	ActionSnapshot           StepAction = "snapshot"
+	ActionVerifySnapshot     StepAction = "verify-snapshot"
 )
 
 // validActions is the set of all recognized step actions, derived from the

@@ -125,12 +125,12 @@
     }
   },
   "services": {
-    "SVC_BRIDGED": {
+    "BRD": {
       "description": "Bridged service for composite testing",
       "service_type": "bridged",
       "macvpn": "SVC_VLAN200"
     },
-    "SVC_EVPN_IRB": {
+    "EIRB": {
       "description": "EVPN IRB service for composite testing",
       "service_type": "evpn-irb",
       "ipvpn": "IRB",
@@ -138,7 +138,7 @@
       "vrf_type": "shared",
       "ingress_filter": "FILTER_IRB"
     },
-    "TRANSIT": {
+    "RTD": {
       "description": "Transit peering interface",
       "service_type": "routed",
       "routing": {

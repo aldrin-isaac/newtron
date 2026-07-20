@@ -110,14 +110,23 @@ steps:
     expect:
       jq: '.exists == false'
 
-  - name: no-vlan401
+  - name: no-vlan401-sw1
     action: newtron
-    devices: [switch1, switch2]
+    devices: [switch1]
     url: /nodes/{{device}}/configdb/VLAN/Vlan401/exists
     expect:
       jq: '.exists == false'
 
-  # L3VNI VLAN for Vrf_IRB (evpn-irb shared VRF)
+  # L3VNI VLAN for Vrf_EIRB1 (evpn-irb shared VRF)
+
+  - name: no-vlan401-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/VLAN/Vlan401/exists
+    expect:
+      jq: '.exists == false'
+
+  # L3VNI VLAN for Vrf_EIRB2 (evpn-irb shared VRF)
   - name: no-vlan3998
     action: newtron
     devices: [switch1, switch2]
@@ -220,10 +229,25 @@ steps:
   # Reverse: RemoveService → destroyVrf (last IPVPN user)
   # =========================================================================
 
-  - name: no-vrf-irb
+  - name: no-vrf-irb-sw1
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB/exists
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VRF/Vrf_EIRB1/exists
+    expect:
+      jq: '.exists == false'
+
+  # =========================================================================
+  # VXLAN_TUNNEL_MAP — VNI-to-VLAN/VRF mappings
+  # Forward: createVniMap
+  # Reverse: RemoveService → deleteVniMap
+  # =========================================================================
+
+  # l2-extend: VNI 10300 → Vlan300
+
+  - name: no-vrf-irb-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/VRF/Vrf_EIRB2/exists
     expect:
       jq: '.exists == false'
 
@@ -250,18 +274,40 @@ steps:
       jq: '.exists == false'
 
   # overlay-irb-b: VNI 10401 → Vlan401
-  - name: no-vni-map-10401
+  - name: no-vni-map-10401-sw1
     action: newtron
-    devices: [switch1, switch2]
+    devices: [switch1]
     url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10401_Vlan401/exists
     expect:
       jq: '.exists == false'
 
-  # L3VNI: VNI 50400 → Vrf_IRB
-  - name: no-vni-map-50400
+  # L3VNI: VNI 50400 → Vrf_EIRB1
+
+  - name: no-vni-map-10401-sw2
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vrf_IRB/exists
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10401_Vlan401/exists
+    expect:
+      jq: '.exists == false'
+
+  # L3VNI: VNI 50400 → Vrf_EIRB2
+  - name: no-vni-map-50400-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan3998/exists
+    expect:
+      jq: '.exists == false'
+
+  # =========================================================================
+  # SUPPRESS_VLAN_NEIGH — ARP suppression on EVPN VLANs
+  # Forward: enableArpSuppression
+  # Reverse: RemoveService → disableArpSuppression
+  # =========================================================================
+
+  - name: no-vni-map-50400-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan3998/exists
     expect:
       jq: '.exists == false'
 
@@ -325,10 +371,10 @@ steps:
   # Reverse: RemoveService → unbindIpvpn → deleteBGPGlobals for VRF
   # =========================================================================
 
-  - name: no-bgp-globals-vrf-irb
+  - name: no-bgp-globals-vrf-irb-sw1
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/BGP_GLOBALS/Vrf_IRB/exists
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/Vrf_EIRB1/exists
     expect:
       jq: '.exists == false'
 
@@ -338,17 +384,37 @@ steps:
   # Reverse: RemoveService → unbindIpvpn → delete AF entries
   # =========================================================================
 
-  - name: no-bgp-af-vrf-irb-ipv4
+  - name: no-bgp-globals-vrf-irb-sw2
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cipv4_unicast/exists
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS/Vrf_EIRB2/exists
     expect:
       jq: '.exists == false'
 
-  - name: no-bgp-af-vrf-irb-l2vpn
+  # =========================================================================
+  # BGP_GLOBALS_AF — VRF-level address-family from bind-ipvpn
+  # Forward: bindIpvpn → CreateBGPGlobalsAF for VRF (ipv4_unicast + l2vpn_evpn)
+  # Reverse: RemoveService → unbindIpvpn → delete AF entries
+  # =========================================================================
+
+  - name: no-bgp-af-vrf-irb-ipv4-sw1
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cl2vpn_evpn/exists
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_EIRB1%7Cipv4_unicast/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: no-bgp-af-vrf-irb-ipv4-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_EIRB2%7Cipv4_unicast/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: no-bgp-af-vrf-irb-l2vpn-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_EIRB1%7Cl2vpn_evpn/exists
     expect:
       jq: '.exists == false'
 
@@ -358,10 +424,23 @@ steps:
   # Reverse: RemoveService → unbindIpvpn → deleteBgpEvpnRT
   # =========================================================================
 
-  - name: no-bgp-evpn-rt-vrf-irb
+  - name: no-bgp-af-vrf-irb-l2vpn-sw2
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_IRB/exists
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_EIRB2%7Cl2vpn_evpn/exists
+    expect:
+      jq: '.exists == false'
+
+  # =========================================================================
+  # BGP_GLOBALS_EVPN_RT — VRF route targets for EVPN
+  # Forward: bindIpvpn → createBgpEvpnRT
+  # Reverse: RemoveService → unbindIpvpn → deleteBgpEvpnRT
+  # =========================================================================
+
+  - name: no-bgp-evpn-rt-vrf-irb-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_EIRB1/exists
     expect:
       jq: '.exists == false'
 
@@ -372,9 +451,31 @@ steps:
 
   # VRF-level redistribute from bind-ipvpn (overlay-irb services) —
   # cleaned up by RemoveService → destroyVrf → unbindIpvpn
-  - name: no-route-redistribute-vrf-irb
+
+  - name: no-bgp-evpn-rt-vrf-irb-sw2
     action: newtron
-    devices: [switch1, switch2]
-    url: /nodes/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_EIRB2/exists
+    expect:
+      jq: '.exists == false'
+
+  # Baseline infrastructure (VXLAN_TUNNEL, VXLAN_EVPN_NVO, BGP_GLOBALS/default,
+  # BGP_GLOBALS_AF/default, ROUTE_REDISTRIBUTE/default, BGP_NEIGHBOR, LOOPBACK_INTERFACE)
+  # is NOT checked here — setup-device has no individual reverse.
+  # Reprovisioning (CompositeOverwrite) is the collective reverse.
+
+  # VRF-level redistribute from bind-ipvpn (overlay-irb services) —
+  # cleaned up by RemoveService → destroyVrf → unbindIpvpn
+  - name: no-route-redistribute-vrf-irb-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_EIRB1%7Cconnected%7Cbgp%7Cipv4/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: no-route-redistribute-vrf-irb-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_EIRB2%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
       jq: '.exists == false'

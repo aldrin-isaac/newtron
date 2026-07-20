@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -64,8 +63,8 @@ func roundTripNode() *Node {
 		RouteTargets:   []string{"65000:200"},
 		ARPSuppression: true,
 	}
-	// IP-VPN spec names never carry the Vrf_ prefix — DeriveVRFNameForIPVPN
-	// prepends it, so ipvpn "CUST" binds into VRF "Vrf_CUST".
+	// A VRF joins IP-VPN "CUST" by name; the bind-ipvpn step below enrolls the
+	// explicitly-named VRF "Vrf_CUST_ETH9" (there is no ipvpn-derived VRF name).
 	sp.ipvpn["CUST"] = &spec.IPVPNSpec{
 		Description:  "customer ipvpn",
 		L3VNI:        50400,
@@ -128,11 +127,17 @@ var roundTripSequence = []opInvocation{
 		return err
 	}},
 	{"create-vrf (ipvpn target)", func(ctx context.Context, n *Node) error {
-		_, err := n.CreateVRF(ctx, "Vrf_CUST", VRFConfig{})
+		// A per-interface VRF (interface-mode name), not the VPN-named
+		// "Vrf_CUST" — so bind-ipvpn's recorded vrf_name is a value that
+		// cannot be re-derived from the ipvpn name at replay (§20).
+		_, err := n.CreateVRF(ctx, "Vrf_CUST_ETH9", VRFConfig{})
 		return err
 	}},
 	{"bind-ipvpn", func(ctx context.Context, n *Node) error {
-		_, err := n.BindIPVPN(ctx, "CUST")
+		// Enroll the per-interface VRF as a member of IP-VPN CUST — the
+		// recorded vrf_name must survive export → replay for the projection
+		// to match (the interface-mode round-trip the composite exercises).
+		_, err := n.BindIPVPN(ctx, "CUST", "Vrf_CUST_ETH9")
 		return err
 	}},
 	{"create-portchannel", func(ctx context.Context, n *Node) error {
@@ -266,24 +271,12 @@ var roundTripSequence = []opInvocation{
 // normalizeIntentFields returns a copy with the DAG-link CSVs sorted: replay
 // re-registers children in topo-sort order, which may legitimately differ
 // from original creation order. Set membership is the contract, not order.
-func normalizeIntentFields(fields map[string]string) map[string]string {
-	out := make(map[string]string, len(fields))
-	for k, v := range fields {
-		if k == "_children" || k == "_parents" {
-			parts := strings.Split(v, ",")
-			sort.Strings(parts)
-			v = strings.Join(parts, ",")
-		}
-		out[k] = v
-	}
-	return out
-}
 
 // normalizedIntentDB returns the node's intent table with DAG links normalized.
 func normalizedIntentDB(n *Node) map[string]map[string]string {
 	out := make(map[string]map[string]string, len(n.configDB.NewtronIntent))
 	for res, fields := range n.configDB.NewtronIntent {
-		out[res] = normalizeIntentFields(fields)
+		out[res] = NormalizeIntentFields(fields)
 	}
 	return out
 }
@@ -424,8 +417,8 @@ func TestOpRoundTrip(t *testing.T) {
 				continue
 			}
 			if table == "NEWTRON_INTENT" {
-				fieldsA = normalizeIntentFields(fieldsA)
-				fieldsB = normalizeIntentFields(fieldsB)
+				fieldsA = NormalizeIntentFields(fieldsA)
+				fieldsB = NormalizeIntentFields(fieldsB)
 			}
 			diffStringMaps(t, "projection "+table+"|"+key, fieldsA, fieldsB)
 		}

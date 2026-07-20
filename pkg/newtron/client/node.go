@@ -376,17 +376,15 @@ func (c *Client) DeleteVRF(device, name string, opts newtron.ExecOpts) (*newtron
 
 // BindIPVPN binds an IP-VPN. ipvpn is the IP-VPN spec name; the on-device
 // VRF name is derived from it as "Vrf_"+name (sonic-vrf.yang).
-func (c *Client) BindIPVPN(device, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.BindIPVPNRequest{IPVPN: ipvpn}
+func (c *Client) BindIPVPN(device, vrf, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.BindIPVPNRequest{VRF: vrf, IPVPN: ipvpn}
 	return c.nodeWrite(device, "bind-ipvpn", body, opts)
 }
 
-// UnbindIPVPN unbinds an IP-VPN. ipvpn is the IP-VPN spec name; the VRF
-// name is derived from it as "Vrf_"+name.
-func (c *Client) UnbindIPVPN(device, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := struct {
-		IPVPN string `json:"ipvpn"`
-	}{IPVPN: ipvpn}
+// UnbindIPVPN removes an IP-VPN's enrollment from a VRF. vrf is the VRF that
+// joined the VPN; ipvpn is the IP-VPN spec name.
+func (c *Client) UnbindIPVPN(device, vrf, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.BindIPVPNRequest{VRF: vrf, IPVPN: ipvpn}
 	return c.nodeWrite(device, "unbind-ipvpn", body, opts)
 }
 
@@ -536,6 +534,17 @@ func (c *Client) SSHCommand(device, command string) (string, error) {
 func (c *Client) IntentProjection(device string) (sonic.RawConfigDB, error) {
 	var result sonic.RawConfigDB
 	if err := c.doGet(c.nodePath(device)+"/intent/projection", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// IntentSnapshot returns the device's NEWTRON_INTENT records in canonical form
+// (every record, DAG links normalized) — the substrate for before/after
+// "back where we started?" comparisons.
+func (c *Client) IntentSnapshot(device string) (map[string]map[string]string, error) {
+	var result map[string]map[string]string
+	if err := c.doGet(c.nodePath(device)+"/intent/snapshot", &result); err != nil {
 		return nil, err
 	}
 	return result, nil

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -102,6 +103,13 @@ type Runner struct {
 	// who wrote which value. A scenario that needs cross-step carry
 	// runs steps in sequence within itself.
 	captured map[string]any
+
+	// snapshots holds named per-device intent snapshots for the snapshot /
+	// verify-snapshot actions. Unlike `captured` this is RUN-scoped, not
+	// scenario-scoped — a baseline captured after setup must survive to the
+	// verify-clean scenario. name → device → canonical NEWTRON_INTENT records.
+	snapshots   map[string]map[string]intentRecords
+	snapshotsMu sync.Mutex
 
 	opts RunOptions
 

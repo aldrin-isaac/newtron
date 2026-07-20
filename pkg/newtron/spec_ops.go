@@ -6,7 +6,6 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
-	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -1111,7 +1110,6 @@ func convertServiceDetail(name string, s *spec.ServiceSpec) *ServiceDetail {
 func convertIPVPNDetail(name string, s *spec.IPVPNSpec) *IPVPNDetail {
 	return &IPVPNDetail{
 		Name:         name,
-		VRFName:      util.DeriveVRFNameForIPVPN(name),
 		Description:  s.Description,
 		L3VNI:        s.L3VNI,
 		RouteTargets: s.RouteTargets,
@@ -1220,6 +1218,17 @@ func (net *Network) UpdateService(ctx context.Context, req CreateServiceRequest,
 	}
 	if err := validateScopeSelector(req.ScopeSelector); err != nil {
 		return err
+	}
+	// vrf_type is immutable — it is a create-time structural choice that also
+	// governs the service-name length budget (interface-mode caps names tighter
+	// to fit IFNAMSIZ). Changing it could invalidate an already-legal name and
+	// re-key the on-device VRF. Delete and recreate to change it.
+	if existing, err := net.internal.GetServiceAt(req.Scope, req.ScopeInstance, req.Name); err == nil && existing != nil {
+		if existing.VRFType != req.VRFType {
+			return &ValidationError{Field: "vrf_type", Message: fmt.Sprintf(
+				"vrf_type is immutable (currently %q, cannot change to %q) — delete and recreate the service to change it",
+				existing.VRFType, req.VRFType)}
+		}
 	}
 	if opts.Execute {
 		if err := net.checkPermission(ctx, auth.PermSpecAuthor, auth.NewContext().WithField("services").WithResource(req.Name)); err != nil {

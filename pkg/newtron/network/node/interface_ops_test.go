@@ -51,15 +51,15 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 		"service_type": spec.ServiceTypeEVPNRouted,
 		"vrf_type":     spec.VRFTypeInterface,
 		"ip_address":   "10.1.0.0/31",
-		"vrf_name":     "CUSTOMER_L3_ETH0",
+		"vrf_name":     "Vrf_CUSTOMER_L3_ETH0",
 		"state":        "actuated",
 		"operation":    "apply-service",
 		"name":         "CUSTOMER_L3",
 		"_parents":     "interface|Ethernet0",
 	}
-	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "CUSTOMER_L3_ETH0"}
+	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUSTOMER_L3_ETH0"}
 	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
-	d.configDB.VRF["CUSTOMER_L3_ETH0"] = sonic.VRFEntry{}
+	d.configDB.VRF["Vrf_CUSTOMER_L3_ETH0"] = sonic.VRFEntry{}
 
 	cs, err := intf.RemoveService(ctx)
 	if err != nil {
@@ -71,10 +71,75 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	// INTERFACE base entry deleted (routed service — full cleanup)
 	assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeDelete)
 	// Per-interface VRF deleted (derived name: SERVICE_INTF)
-	assertChange(t, cs, "VRF", "CUSTOMER_L3_ETH0", ChangeDelete)
+	assertChange(t, cs, "VRF", "Vrf_CUSTOMER_L3_ETH0", ChangeDelete)
 	// Service binding removed, then the childless identity record
 	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|service", ChangeDelete)
 	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0", ChangeDelete)
+}
+
+// TestRemoveService_InterfaceMode_KeepsSharedIPVPN guards the §15
+// reference-aware reverse: removing an interface-mode service that references an
+// IP-VPN whose L3VNI is bound to a DIFFERENT VRF (a shared-mode peer holds it;
+// this service's BindIPVPN no-op'd on the one-L3VNI-per-device guard) must NOT
+// unbind that IP-VPN. The recorded vrf_name is the reference check — the ipvpn
+// intent's Vrf_IPVPN differs from the per-interface Vrf_CUSTOMER_L3_ETH0 we
+// destroy, so it survives (else the shared peer is stranded — the bug an
+// interface-mode + ipvpn apply first exposed).
+func TestRemoveService_InterfaceMode_KeepsSharedIPVPN(t *testing.T) {
+	d, intf := testInterface()
+	ctx := context.Background()
+
+	d.SpecProvider.(*testSpecProvider).services["CUSTOMER_L3"] = &spec.ServiceSpec{
+		ServiceType: spec.ServiceTypeEVPNRouted,
+		VRFType:     spec.VRFTypeInterface,
+		IPVPN:       "IPVPN",
+	}
+
+	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": sonic.OpInterfaceInit,
+		"state":     "actuated",
+		"_children": "interface|Ethernet0|service",
+	}
+	// Interface-mode binding: its own per-interface VRF, but referencing the
+	// shared IP-VPN (BindIPVPN no-op'd, so this VRF never carried the L3VNI).
+	d.configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{
+		"service_name": "CUSTOMER_L3",
+		"service_type": spec.ServiceTypeEVPNRouted,
+		"vrf_type":     spec.VRFTypeInterface,
+		"ip_address":   "10.1.0.0/31",
+		"vrf_name":     "Vrf_CUSTOMER_L3_ETH0",
+		"ipvpn":        "IPVPN",
+		"l3vni":        "10001",
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"name":         "CUSTOMER_L3",
+		"_parents":     "interface|Ethernet0",
+	}
+	// The shared peer's IP-VPN binding — bound to Vrf_IPVPN, NOT our VRF.
+	d.configDB.NewtronIntent["ipvpn|IPVPN"] = map[string]string{
+		"ipvpn":     "IPVPN",
+		"vrf_name":  "Vrf_IPVPN",
+		"l3vni":     "10001",
+		"operation": "bind-ipvpn",
+		"state":     "actuated",
+		"_parents":  "vrf|Vrf_IPVPN",
+	}
+	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUSTOMER_L3_ETH0"}
+	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
+	d.configDB.VRF["Vrf_CUSTOMER_L3_ETH0"] = sonic.VRFEntry{}
+	d.configDB.VRF["Vrf_IPVPN"] = sonic.VRFEntry{VNI: "10001"}
+
+	cs, err := intf.RemoveService(ctx)
+	if err != nil {
+		t.Fatalf("RemoveService: %v", err)
+	}
+
+	// Our per-interface VRF is destroyed...
+	assertChange(t, cs, "VRF", "Vrf_CUSTOMER_L3_ETH0", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|service", ChangeDelete)
+	// ...but the shared peer's IP-VPN binding and its VRF are untouched.
+	assertNoChange(t, cs, "NEWTRON_INTENT", "ipvpn|IPVPN")
+	assertNoChange(t, cs, "VRF", "Vrf_IPVPN")
 }
 
 func TestRemoveService_SharedACL_LastUser(t *testing.T) {

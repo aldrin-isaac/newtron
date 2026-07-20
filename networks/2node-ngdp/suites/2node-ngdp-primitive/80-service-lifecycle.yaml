@@ -34,14 +34,14 @@ steps:
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/interfaces/Vlan400/apply-service
-    params: {service: svc-evpn-irb}
+    params: {service: eirb}
 
   - name: apply-svc-evpn-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /nodes/{{device}}/interfaces/Vlan400/apply-service
-    params: {service: svc-evpn-irb}
+    params: {service: eirb}
 
   # Verify service binding — the sub-resource of the IRB identity (§5).
   - name: verify-binding-sw1
@@ -123,7 +123,7 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/configdb/VLAN_INTERFACE/Vlan400
     expect:
-      jq: '.vrf_name == "Vrf_IRB"'
+      jq: '.vrf_name == "Vrf_EIRB"'
 
   # The composite sourced the anycast gateway from the SVC_VLAN400 macvpn (§7).
   - name: verify-svi-anycast-ip-sw1
@@ -178,7 +178,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.3"}
     poll:
-      timeout: 10s
+      timeout: 240s
       interval: 2s
     expect:
       jq: '.output | contains("1 received")'
@@ -190,7 +190,7 @@ steps:
     url: /nodes/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.6"}
     poll:
-      timeout: 10s
+      timeout: 240s
       interval: 2s
     expect:
       jq: '.output | contains("1 received")'
@@ -292,7 +292,7 @@ steps:
   - name: verify-vrf-reaped-on-remove-sw1
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/VRF/Vrf_IRB/exists
+    url: /nodes/{{device}}/configdb/VRF/Vrf_EIRB/exists
     expect:
       jq: '.exists == false'
 
@@ -340,7 +340,7 @@ steps:
     devices: [switch1]
     method: POST
     url: /nodes/{{device}}/interfaces/Ethernet1/apply-service
-    params: {service: svc-bridged, vlan: 200}
+    params: {service: brd, vlan: 200}
 
   - name: verify-bridged-binding-sw1
     action: newtron

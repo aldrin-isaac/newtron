@@ -188,7 +188,7 @@ type ServiceSpec struct {
 	// VPN references (names from ipvpn/macvpn sections)
 	IPVPN   string `json:"ipvpn,omitempty" label:"IP-VPN" tooltip:"Reference to an ipvpn definition (required for evpn-irb / evpn-routed)" ref:"IPVPNSpec"`
 	MACVPN  string `json:"macvpn,omitempty" label:"MAC-VPN" tooltip:"Reference to a macvpn definition (required for evpn-irb / evpn-bridged)" ref:"MACVPNSpec"`
-	VRFType string `json:"vrf_type,omitempty" label:"VRF Type" tooltip:"How the per-service VRF is instantiated on-device" enum:"interface,shared"`
+	VRFType string `json:"vrf_type,omitempty" label:"VRF Type" tooltip:"How the per-service VRF is instantiated on-device. Immutable — it also caps the service-name length (interface ≤5, shared ≤11) so the derived VRF name fits the 15-char Linux limit; delete and recreate to change it." enum:"interface,shared" immutable:"true"`
 
 	// Routing protocol specification
 	Routing *RoutingSpec `json:"routing,omitempty" label:"Routing" tooltip:"BGP / static-routing protocol parameters"`

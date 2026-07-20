@@ -866,7 +866,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 	allActions := []StepAction{
 		ActionProvision, ActionWait, ActionVerifyProvisioning,
 		ActionHostExec, ActionNewtron, ActionNewtronCLI,
-		ActionRunSuite,
+		ActionRunSuite, ActionSnapshot, ActionVerifySnapshot,
 	}
 	// Verify the constant values match the expected action names
 	if ActionProvision != "topology-reconcile" {

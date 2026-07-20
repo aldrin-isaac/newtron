@@ -16,13 +16,13 @@ requires: [L4-permission-families-alice]
 as: mallory
 
 steps:
-  # vrf.bind — mallory denied. The argument is the IP-VPN spec name
-  # (MALLORY); the on-device VRF name is derived from it as "Vrf_"+name.
+  # vrf.bind — mallory denied. bind-ipvpn enrolls a named VRF (Vrf_MALLORY)
+  # into IP-VPN MALLORY; the permission Resource is the VRF name.
   - name: mallory-bind-ipvpn-denied
     action: newtron
     method: POST
     url: /nodes/switch1/bind-ipvpn?mode=topology
-    params: {ipvpn: MALLORY}
+    params: {vrf_name: Vrf_MALLORY, ipvpn: MALLORY}
     expect_failure: true
 
   # vrf.route — mallory denied
@@ -84,12 +84,12 @@ requires: [L4-vrf-families-alice-setup]
 as: bob
 
 steps:
-  # vrf.bind — forward (IP-VPN spec name BOB → derives VRF Vrf_BOB)
+  # vrf.bind — forward (enroll Vrf_BOB into IP-VPN BOB; Resource = Vrf_BOB)
   - name: bob-bind-ipvpn-allowed
     action: newtron
     method: POST
     url: /nodes/switch1/bind-ipvpn?mode=topology
-    params: {ipvpn: BOB}
+    params: {vrf_name: Vrf_BOB, ipvpn: BOB}
 
   # vrf.route — forward (writes against Vrf_BOB)
   - name: bob-add-static-route-allowed
@@ -141,7 +141,7 @@ steps:
     action: newtron
     method: POST
     url: /nodes/switch1/unbind-ipvpn?mode=topology
-    params: {ipvpn: BOB}
+    params: {vrf_name: Vrf_BOB, ipvpn: BOB}
 
 ---
 name: L4-vrf-families-alice-cleanup
