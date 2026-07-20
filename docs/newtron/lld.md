@@ -83,7 +83,7 @@ pkg/newtron/network/node/             # Node internals — all operations live h
     vlan_config.go                    # VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
     vrf_config.go                     # VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
     bgp_config.go                     # BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_PEER_GROUP, etc.
-    vxlan_config.go                   # VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP
+    evpn_config.go                   # VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP
     acl_config.go                     # ACL_TABLE, ACL_RULE
     qos_config.go                     # PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, SCHEDULER, WRED_PROFILE
     qos_query.go                      # QoS reference counting (isQoSPolicyReferenced)
@@ -195,7 +195,7 @@ Each CONFIG_DB table has exactly one owning file (see [HLD §4](hld.md) for rati
 | `vlan_config.go` | VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL |
 | `vrf_config.go` | VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT |
 | `bgp_config.go` | BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA, BGP_PEER_GROUP, BGP_PEER_GROUP_AF |
-| `vxlan_config.go` | VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP, SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI |
+| `evpn_config.go` | VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP, SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI |
 | `acl_config.go` | ACL_TABLE, ACL_RULE |
 | `qos_config.go` | PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE |
 | `interface_config.go` | INTERFACE |
@@ -1350,11 +1350,11 @@ Note: DEVICE_METADATA uses field-level merge in `applyEntry` — both `SetDevice
 
 | Table | Key Format | Fields | Owner |
 |-------|-----------|--------|-------|
-| `VXLAN_TUNNEL` | `vtep` | src_ip | `vxlan_config.go` |
-| `VXLAN_EVPN_NVO` | `nvo` | source_vtep | `vxlan_config.go` |
-| `VXLAN_TUNNEL_MAP` | `vtep\|map_{VNI}_{resource}` | vni, vlan | `vxlan_config.go` |
-| `SUPPRESS_VLAN_NEIGH` | `Vlan{N}` | suppress | `vxlan_config.go` |
-| `BGP_EVPN_VNI` | `{vrf}\|{l3vni}` | (empty) | `vxlan_config.go` |
+| `VXLAN_TUNNEL` | `vtep` | src_ip | `evpn_config.go` |
+| `VXLAN_EVPN_NVO` | `nvo` | source_vtep | `evpn_config.go` |
+| `VXLAN_TUNNEL_MAP` | `vtep\|map_{VNI}_{resource}` | vni, vlan | `evpn_config.go` |
+| `SUPPRESS_VLAN_NEIGH` | `Vlan{N}` | suppress | `evpn_config.go` |
+| `BGP_EVPN_VNI` | `{vrf}\|{l3vni}` | (empty) | `evpn_config.go` |
 
 ### 5.3 BGP Tables
 
