@@ -196,49 +196,40 @@ func TestInlineStatePersistedToInlineNamespace(t *testing.T) {
 // pre-fix break where Runner.Run started calling LoadSuite
 // unconditionally but the inline writer only emitted the scenario
 // YAML — every inline run died in the goroutine with "reading
-// .../suite.yaml: no such file or directory". The test stages an
-// inline run, locates the synthetic directory, and confirms (a)
+// .../suite.yaml: no such file or directory". It confirms (a)
 // suite.yaml exists, (b) the staged scenario has no leftover
 // suite-level fields, (c) LoadSuite accepts the result and returns
 // exactly one scenario.
+//
+// It exercises writeInlineScenarioDir directly rather than driving a
+// full HTTP run. The staging output is what these assertions are about;
+// the earlier HTTP-driven version inspected the same dir that the run's
+// completion goroutine RemoveAlls, so it raced that cleanup and flaked on
+// slow CI runners (widening the inline wait only shrank the window). Calling
+// the staging function is deterministic — no run, no cleanup goroutine, no
+// race — and t.Cleanup removes the dir the function created.
 func TestInlineStagesAsLoadableSuite(t *testing.T) {
-	srv, cleanup := newTestServer(t)
-	defer cleanup()
-	ts := httptest.NewServer(srv.buildHandler())
-	defer ts.Close()
-
-	// This test inspects the staging dir contents the goroutine writes
-	// during the run; once the run completes, the goroutine RemoveAlls
-	// the dir. The 10ms inlineScenarioWait races with that cleanup on
-	// slow CI runners — by the time os.Stat fires the dir is already
-	// gone. Use a longer-wait scenario inline so the dir persists long
-	// enough for the test to inspect it.
-	const longWaitScenario = `
+	const scenarioYAML = `
 name: inline-test
 description: smoke test
 network: test-topo
 steps:
-  - name: long-pause
+  - name: pause
     action: wait
-    duration: 2s
+    duration: 10ms
 `
-	resp, env := postInline(t, ts, InlineRunRequest{
-		ScenarioYAML:   longWaitScenario,
-		TimeoutSeconds: 10,
-	})
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("status: got %d, want 202; error: %s", resp.StatusCode, env.Error)
-	}
-	runID := env.Data.(map[string]any)["run_id"].(string)
-
-	inlineDir, err := newtrun.InlineStateDir(runID)
+	scenario, err := newtrun.ParseScenarioBytes([]byte(scenarioYAML))
 	if err != nil {
-		t.Fatalf("InlineStateDir: %v", err)
+		t.Fatalf("ParseScenarioBytes: %v", err)
 	}
-	scenariosDir := filepath.Join(inlineDir, "scenarios")
 
-	suitePath := filepath.Join(scenariosDir, "suite.yaml")
-	if _, err := os.Stat(suitePath); err != nil {
+	scenariosDir, err := writeInlineScenarioDir(newRunID(), scenario)
+	if err != nil {
+		t.Fatalf("writeInlineScenarioDir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(scenariosDir)) })
+
+	if _, err := os.Stat(filepath.Join(scenariosDir, "suite.yaml")); err != nil {
 		t.Fatalf("suite.yaml missing in inline staging dir: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(scenariosDir, "inline.yaml")); err != nil {

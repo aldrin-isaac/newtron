@@ -1,4 +1,4 @@
-.PHONY: test test-all coverage clean build cross install lint tools
+.PHONY: test test-all coverage clean build cross install lint tools check-doc-links
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -69,6 +69,11 @@ tools:
 	@echo "Or add to your shell profile:"
 	@echo '  export PERL5LIB=$$HOME/perl5/lib/perl5'
 	@echo '  export PATH=$$HOME/perl5/bin:$$PATH'
+
+# Check internal markdown links across docs/ + the root docs. Same command the
+# doc-links CI workflow runs; deterministic, pure-Python stdlib, no Go toolchain.
+check-doc-links:
+	python3 scripts/check-doc-links.py docs README.md CLAUDE.md
 
 # Lint
 lint:
