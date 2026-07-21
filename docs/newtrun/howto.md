@@ -553,7 +553,7 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 | `after` | no | Soft ordering — run after these, regardless of their status. Used for cleanup scenarios that always run last. |
 | `requires_features` | no | Platform feature flags. Scenario is SKIPPED if the platform doesn't declare them (e.g., `evpn-vxlan` on a platform without overlay support). |
 | `repeat` | no | Run the step list N times in sequence. Used for soak/stability tests. |
-| `steps` | yes | Ordered list of [Step](#step-fields) records. |
+| `steps` | yes | Ordered list of [Step](#102-step-fields) records. |
 | `cleanup` | no | Steps that run once, after all iterations and repeats, **regardless of pass/fail**. Put fabric-state teardown here, not at the tail of `steps:` — tail steps never run when an earlier step fails, and the stranded state cascades into downstream scenarios. Best-effort (every cleanup step runs even if one fails); results recorded under a `cleanup/` name prefix; a cleanup failure fails an otherwise-passing scenario. No `{{target.X}}` references (cleanup is not iterated per binding). |
 
 `network` and `platform` are **suite-level** — declared in `suite.yaml`, not in individual scenarios. `LoadSuite` rejects any scenario that sets them.

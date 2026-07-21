@@ -30,3 +30,4 @@ networks/*/audit/
 # (spec.ArchiveDirName). The archive store is out-of-band recovery only —
 # never committed, never served by the API.
 networks/archives/
+__pycache__/
