@@ -17,7 +17,7 @@ This document specifies newtrun's type definitions, package structure, and code 
 5. [State Persistence](#5-state-persistence-statego)
 6. [Runner Internals](#6-runner-internals-runnergo)
 7. [Progress Reporting](#7-progress-reporting-progressgo)
-8. [HTTP Server Package](#8-http-server-package-pkgnewtrunapi)
+8. [HTTP Server Package](#8-http-server-package-pkgnewtrunnewtrunv1)
 9. [HTTP Client Package](#9-http-client-package-pkgnewtrunclient)
 10. [Step Executors](#10-step-executors)
 11. [newtlab Integration](#11-newtlab-integration-deploygo)
@@ -115,7 +115,7 @@ A Suite is loaded from a directory containing `suite.yaml` and zero or more scen
 | `description` | no | Human-readable description shown on `GET /newtrun/v1/suites/{name}/scenarios` and in `newtrun list`. |
 | `network` | yes | Network name; the Runner aborts at startup if the server's loaded network doesn't match. |
 | `platform` | no | Default platform for capability checks; overridden by CLI `--platform`. |
-| `targets` | no | Map of plural dimension key → list of values. Recognized dimensions: `devices`, `interfaces` (see [§2.4 singularize](#24-singularize)). Values must satisfy the target-value whitelist (`^[A-Za-z0-9_-]+$`). |
+| `targets` | no | Map of plural dimension key → list of values. Recognized dimensions: `devices`, `interfaces` (see [§2.4 singularize](#24-singularize-suitego)). Values must satisfy the target-value whitelist (`^[A-Za-z0-9_-]+$`). |
 | `parameters` | no | Map of name → `ParameterSpec`. Catalog of typed values parameterized scenarios may reference via `{{param.X}}`. |
 | `Scenarios` | n/a | Populated by `LoadSuite` from the dependency-ordered scenario list; not part of the wire format. |
 
@@ -752,7 +752,7 @@ type Server struct {
 |-------|---------|
 | `NetworksBase` | `networks` |
 | `NewtronServer` | `http://127.0.0.1:18080` |
-| `NetworkID` | `default` (final fallback only — file-backed runs default to `suite.Topology` first; see `resolveNetworkID` in [§8 handleStartRun](#8-http-server-package-pkgnewtrunapi)) |
+| `NetworkID` | `default` (final fallback only — file-backed runs default to `suite.Topology` first; see `resolveNetworkID` in [§8 handleStartRun](#8-http-server-package-pkgnewtrunnewtrunv1)) |
 | `InlineURLPrefix` | empty (no URL restriction enforced by default; see [§8.7](#87-inlinesafetypolicy)) |
 | `Logger` | `log.Default()` |
 
@@ -1087,8 +1087,8 @@ Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERV
 | `status [-s <pattern>]` | GET /newtrun/v1/runs + /newtrun/v1/runs/{suite} | Lists all suites; `-s/--suite <pattern>` filters by substring match. `--monitor` auto-refreshes. |
 | `list [suite]` | GET /newtrun/v1/suites + /newtrun/v1/suites/{suite}/scenarios | Lists suites; with a suite name lists its scenarios. |
 | `suites` | GET /newtrun/v1/suites | Hidden alias of `list`. |
-| `suite create/delete <name>` | POST/DELETE /newtrun/v1/suites | Per [§8](#8-http-server-package-pkgnewtrunapi). |
-| `scenario list/get/put/delete` | /newtrun/v1/suites/{suite}/scenarios* | Per [§8](#8-http-server-package-pkgnewtrunapi). |
+| `suite create/delete <name>` | POST/DELETE /newtrun/v1/suites | Per [§8](#8-http-server-package-pkgnewtrunnewtrunv1). |
+| `scenario list/get/put/delete` | /newtrun/v1/suites/{suite}/scenarios* | Per [§8](#8-http-server-package-pkgnewtrunnewtrunv1). |
 | `networks` | GET /newtron/v1/networks | List newtron-registered networks (delegated). |
 | `network create <name>` | POST /newtron/v1/networks | Create (or pick up) the named network with newtron in one call. |
 | `actions` | static | Help text describing the action vocabulary. |

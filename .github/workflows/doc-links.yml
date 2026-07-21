@@ -1,0 +1,30 @@
+name: doc-links
+
+# Fail a PR (or a push to main) when any internal markdown link in docs/ is
+# broken — a missing file or an anchor that no heading produces. Docs-only, so
+# it path-filters on docs/ and the checker itself, runs in seconds, and needs no
+# Go toolchain (the checker is pure-Python stdlib). Complements test.yml.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/check-doc-links.py"
+      - ".github/workflows/doc-links.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "scripts/check-doc-links.py"
+      - ".github/workflows/doc-links.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check internal doc links
+        run: python3 scripts/check-doc-links.py

@@ -325,7 +325,7 @@ Subscribes to the phase event stream for `{name}`. Standard `text/event-stream` 
 
 | `event` field | When emitted | `data` payload |
 |---|---|---|
-| `phase` | `Lab.OnProgress(phase, detail)` fires during deploy or destroy | `PhasePayload` (see [§7](#7-types-reference)) |
+| `phase` | `Lab.OnProgress(phase, detail)` fires during deploy or destroy | `PhasePayload` (see [§7](#8-types-reference)) |
 | `complete` | deploy goroutine returns successfully | empty |
 | `error` | deploy goroutine returns an error | `ErrorPayload` |
 

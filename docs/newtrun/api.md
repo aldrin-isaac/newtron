@@ -631,7 +631,7 @@ The wire shape carries the abstract run identity only — no on-disk paths (wher
 
 `target` (string) is omitted when the run executed all scenarios; it carries the `--target <scenario>` filter when one was supplied.
 
-`status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /newtrun/v1/runs/{suite}`](#get-apirunssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
+`status` values: `running`, `pausing`, `paused`, `complete`, `aborted`, `failed`. The reconcile rule in [`§4 GET /newtrun/v1/runs/{suite}`](#get-newtrunv1runssuite--read-one-run) may rewrite `running` / `pausing` to `aborted` on the wire when the registry has no live entry.
 
 ### `RunInfo`
 

@@ -1337,7 +1337,7 @@ Writes a value into the network's **secret store** — the value a spec field
 references via `${secret:KEY}` (auth-design.md §L0). This is the API/UI half of
 the secret-store design: an operator populates a credential (e.g. a node's
 `ssh_pass`) through the API instead of hand-editing `secrets.json`. Schema
-metadata marks such fields with `"secret": true` (see [§ schema metadata](#3-schema-metadata))
+metadata marks such fields with `"secret": true` (see [§ schema metadata](#schema-metadata-endpoints))
 so a UI renders a masked input and submits the value here, then references it
 from the spec field as `${secret:<key>}`.
 

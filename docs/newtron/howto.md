@@ -2408,7 +2408,7 @@ This is the same reconcile mechanism described in [§16.1.3](#1613-reconcile), b
 ssh admin@<mgmt_ip> 'sudo config save -y'
 ```
 
-See [§16.4 Config Persistence](#164-config-persistence) for details.
+See [§16.4 Config Persistence](#165-config-persistence) for details.
 
 ### 18.3 Precondition Failures
 
