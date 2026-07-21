@@ -140,9 +140,14 @@ inventory, captured at platform-onboarding time:
 In both cases the stored table is a snapshot of an upstream authority, refreshed
 by regeneration — not a source of truth that competes with the device.
 
-## 5. Proposed Schema
+## 5. Schema (as designed — now shipped)
 
-A new `Ports []PortSpec` on `PlatformSpec`:
+Sections 5–8 are the original design, preserved as the rationale record; they
+read in the proposing tense but describe **shipped** behavior. `PlatformSpec.Ports`
+and `PortSpec` are in `pkg/newtron/spec/types.go` today; §10's open questions are
+struck through as each was resolved.
+
+A `Ports []PortSpec` on `PlatformSpec`:
 
 ```go
 // PortSpec is one front-panel port in a platform's pre-boot port model.
