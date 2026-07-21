@@ -241,8 +241,8 @@ If your test requires unsupported features:
 
 ## Related Documentation
 
-- [RCA-001: swss restart breaks VPP](../rca/001-sonic-vpp-swss-restart-fatal.md)
-- [RCA-019: BGP restart after provision](../rca/019-sonic-vpp-bgp-asn-change-requires-restart.md)
+- [RCA-001: swss restart breaks VPP](../rca/001-config-reload-breaks-vpp-syncd.md)
+- [RCA-019: BGP restart after provision](../rca/019-bgp-asn-mismatch-after-provision.md)
 - [RCA-020: Port count matches NIC count](../rca/020-sonic-vpp-port-count-matches-nic-count.md)
 - [Platform Capabilities](platform-capabilities.md)
 - [Device LLD](../newtron/device-lld.md)

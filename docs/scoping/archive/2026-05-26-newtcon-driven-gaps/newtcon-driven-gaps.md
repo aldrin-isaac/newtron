@@ -7,7 +7,7 @@ assistance.
 
 **Scope date:** 2026-05-26 (original batch of 5; extended same day
 with 4 more). This document is the **parent** for a cluster-split
-scoping structure; see [`README.md`](README.md) for the directory
+scoping structure; see [`README.md`](../../README.md) for the directory
 layout. Update each cluster doc as its issues land; archive the
 whole `docs/scoping/` tree once every issue closes.
 
@@ -34,7 +34,7 @@ The ten gaps are not independent design decisions. Each is an
 instance of the same principle: **newtron's HTTP API should expose
 its canonical in-memory substrate types directly, not derivatives,
 summaries, or opaque handles.** This is codified as
-[`DESIGN_PRINCIPLES_NEWTRON.md` §46](../../../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
+[`DESIGN_PRINCIPLES_NEWTRON.md` §46](../../../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-canonical-types)
 ("HTTP API Boundary — Wire Shape Mirrors Canonical Types").
 
 Re-reading the ten issues through the §46 lens, grouped by the
@@ -236,7 +236,7 @@ as to this parent.
 ## Cross-references
 
 - newtron principles: [`../DESIGN_PRINCIPLES_NEWTRON.md`](../../../DESIGN_PRINCIPLES_NEWTRON.md), especially
-  [§46](../../../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
+  [§46](../../../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-canonical-types)
   (HTTP API Boundary — Wire Shape Mirrors Canonical Types; the unifying
   principle for this batch),
   [§11](../../../DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract)

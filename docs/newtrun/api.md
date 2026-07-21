@@ -465,7 +465,7 @@ newtron directly:
 | Operation | Endpoint |
 |-----------|----------|
 | List registered networks | `GET /newtron/v1/networks` |
-| Create (or pick up existing) a network by id | `POST /newtron/v1/networks` (see [newtron API](../newtron/api.md#post-newtronv1network)) |
+| Create (or pick up existing) a network by id | `POST /newtron/v1/networks` (see [newtron API](../newtron/api.md#post-newtronv1networks)) |
 
 The `newtrun networks` and `newtrun network create` CLI subcommands
 delegate to these newtron endpoints.
@@ -656,7 +656,7 @@ Fields: `name`, `description`, `network`, `platform`, `step_count`, `requires`.
 
 ### `HealthResponse`, `SuitesResponse`
 
-Single-field wrappers around the relevant array or scalar. See examples in [§3](#3-server-management) and [§7](#7-suite-management). Network listing is owned by newtron — see the [newtron API](../newtron/api.md#get-newtronv1network).
+Single-field wrappers around the relevant array or scalar. See examples in [§3](#3-server-management) and [§7](#7-suite-management). Network listing is owned by newtron — see the [newtron API](../newtron/api.md#get-newtronv1networks).
 
 ### Event payloads
 
