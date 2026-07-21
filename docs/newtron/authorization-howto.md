@@ -209,11 +209,13 @@ permission check writes one JSON-line event:
 }
 ```
 
-(The `id` field is currently empty for every audit event — the audit
-log implementation has not yet wired ID generation. The other
-zero-valued fields — `device`, `changes`, `execute_mode`, `dry_run`,
-`duration` — are shared shape with request-level audit events;
-decision events leave them at their zero values.)
+(The `id` field is empty unless the hash-chain integrity feature is
+enabled: with `--audit-integrity`, `FileLogger.Log` populates `id`
+(and `prev_hash`) so a verifier can walk the chain (audit-design.md
+§L6); without it, `id` stays empty. The other zero-valued fields —
+`device`, `changes`, `execute_mode`, `dry_run`, `duration` — are
+shared shape with request-level audit events; decision events leave
+them at their zero values.)
 
 To filter for just decisions (audit is per-network — read the
 network's log, or use `bin/newtron -N <network> audit list --json`):
