@@ -16,6 +16,9 @@ blocks (``` or ~~~) are skipped — they are examples, not navigation.
 Exit status: 0 if every internal link resolves, 1 otherwise (with a report).
 
 Usage: scripts/check-doc-links.py [root ...]   # roots default to ["docs"]
+
+A root may be a directory (walked for *.md) or a single .md file, so root-level
+docs are covered too, e.g.:  scripts/check-doc-links.py docs README.md CLAUDE.md
 """
 
 import os
@@ -80,6 +83,10 @@ def main(argv: list[str]) -> int:
     roots = argv[1:] or ["docs"]
     md_files = []
     for root in roots:
+        if os.path.isfile(root):  # a root may be a single .md file (README.md, CLAUDE.md)
+            if root.endswith(".md"):
+                md_files.append(root)
+            continue
         for dirpath, _, files in os.walk(root):
             md_files.extend(os.path.join(dirpath, f) for f in files if f.endswith(".md"))
 
