@@ -4,11 +4,25 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
+
+// ErrLabNotFound reports that a lab has no runtime state on this host — the
+// network may exist but was never deployed here (no state.json). It is the
+// distinguishable "absent resource" case: API handlers map it to 404, while
+// every other LoadState failure (unreadable or unparsable state) is a genuine
+// server-side error (500). Wrapped, not returned bare, so the message keeps
+// naming the lab.
+var ErrLabNotFound = errors.New("not found (no state.json)")
+
+// ErrNodeNotFound reports that a node name does not exist in a lab's state or
+// specs — the same absent-resource class as ErrLabNotFound, mapped to 404 by
+// API handlers.
+var ErrNodeNotFound = errors.New("not found")
 
 // NewTelemetryToken mints a 256-bit random token for LabState.TelemetryToken —
 // the per-lab credential newtlink presents when pushing BridgeStats. Drawn from
@@ -112,12 +126,17 @@ func SaveState(state *LabState) error {
 	return nil
 }
 
-// LoadState reads lab state from state.json. Returns error if not found.
+// LoadState reads lab state from state.json. A missing state.json wraps
+// ErrLabNotFound (the lab was never deployed here — an absent resource, not a
+// failure); any other read error is surfaced as the real error it is.
 func LoadState(networkID string) (*LabState, error) {
 	path := filepath.Join(LabDir(networkID), "state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("newtlab: lab %s not found (no state.json)", networkID)
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("newtlab: lab %s %w", networkID, ErrLabNotFound)
+		}
+		return nil, fmt.Errorf("newtlab: read lab %s state: %w", networkID, err)
 	}
 
 	var state LabState
