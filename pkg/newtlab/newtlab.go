@@ -1209,7 +1209,7 @@ func (l *Lab) Stop(ctx context.Context, nodeName string) error {
 
 	node, ok := state.Nodes[nodeName]
 	if !ok {
-		return fmt.Errorf("newtlab: node %q not found", nodeName)
+		return fmt.Errorf("newtlab: node %q %w", nodeName, ErrNodeNotFound)
 	}
 
 	if err := StopNode(node.PID, node.HostIP); err != nil {
@@ -1230,7 +1230,7 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 
 	nodeState, ok := state.Nodes[nodeName]
 	if !ok {
-		return fmt.Errorf("newtlab: node %q not found", nodeName)
+		return fmt.Errorf("newtlab: node %q %w", nodeName, ErrNodeNotFound)
 	}
 
 	// Re-load lab config to rebuild the node. The original Lab's
@@ -1247,7 +1247,7 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 
 	node, ok := lab.Nodes[nodeName]
 	if !ok {
-		return fmt.Errorf("newtlab: node %q not found in specs", nodeName)
+		return fmt.Errorf("newtlab: node %q %w in specs", nodeName, ErrNodeNotFound)
 	}
 
 	// Restore allocated ports from state

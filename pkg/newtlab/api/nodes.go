@@ -22,7 +22,7 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := lab.Start(r.Context(), node); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("start %s/%s: %w", name, node, err))
+		httputil.WriteError(w, statusFromErr(err), fmt.Errorf("start %s/%s: %w", name, node, err))
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{
@@ -47,7 +47,7 @@ func (s *Server) handleStopNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := lab.Stop(r.Context(), node); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("stop %s/%s: %w", name, node, err))
+		httputil.WriteError(w, statusFromErr(err), fmt.Errorf("stop %s/%s: %w", name, node, err))
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{

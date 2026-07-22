@@ -12,6 +12,19 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
+// statusFromErr maps engine errors to HTTP statuses: an absent resource — a
+// lab with no deployment state on this host, or an unknown node — is a 404
+// (the condition is the caller's to address, and newtlab/api.md documents
+// these routes as 200/404); everything else is a genuine server-side failure,
+// 500. Before this mapping, a registered-but-never-deployed lab surfaced as
+// 500 on status/destroy/resync/node-start/stop, contradicting the docs.
+func statusFromErr(err error) int {
+	if errors.Is(err, newtlab.ErrLabNotFound) || errors.Is(err, newtlab.ErrNodeNotFound) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
 // handleListLabs returns every lab newtlab knows about — anything with
 // a state directory under ~/.newtlab/labs/. Running and stopped labs
 // are both included; clients call GET /{name}/status for per-node state.
@@ -43,7 +56,7 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := lab.Status()
 	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("status %s: %w", name, err))
+		httputil.WriteError(w, statusFromErr(err), fmt.Errorf("status %s: %w", name, err))
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, StatusResponse{LabState: state})
@@ -178,7 +191,7 @@ func (s *Server) handleDestroy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := lab.Destroy(r.Context()); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("destroy %s: %w", name, err))
+		httputil.WriteError(w, statusFromErr(err), fmt.Errorf("destroy %s: %w", name, err))
 		return
 	}
 	// Evict any leftover bridge-stats snapshots so a redeployed lab
@@ -199,7 +212,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := newtlab.ResyncBridges(name); err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, fmt.Errorf("resync %s: %w", name, err))
+		httputil.WriteError(w, statusFromErr(err), fmt.Errorf("resync %s: %w", name, err))
 		return
 	}
 	// Drop stale snapshots from the previous newtlink so the first read after
