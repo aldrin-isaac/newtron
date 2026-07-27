@@ -1975,11 +1975,14 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) e
 // exist in the topology AND that the interface is declared on each device's
 // Ports map.
 func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
+	// Typed *util.ValidationError so the API maps these to 400 — a malformed
+	// or dangling endpoint is the caller's input to fix, not a server fault
+	// (#401). Only the already-wired case below is a 409.
 	if link == nil {
-		return fmt.Errorf("link entry required")
+		return &util.ValidationError{Errors: []string{"link entry required"}}
 	}
 	if link.A == "" || link.Z == "" {
-		return fmt.Errorf("link endpoints required (a, z)")
+		return &util.ValidationError{Errors: []string{"link endpoints required (a, z)"}}
 	}
 
 	mu := n.locks.lock(keyTopology)
@@ -1991,20 +1994,28 @@ func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
 		topo = &spec.TopologySpecFile{Version: "1.0", Nodes: map[string]*spec.TopologyNode{}}
 	}
 
-	// Endpoint format: "device:interface". Validate both ends.
-	for _, ep := range []string{link.A, link.Z} {
+	// Endpoint format: "device:interface". Validate both ends; Field names
+	// which request field ("a" or "z") carried the offending endpoint.
+	for i, ep := range []string{link.A, link.Z} {
+		field := "a"
+		if i == 1 {
+			field = "z"
+		}
 		dev, iface, ok := splitTopologyEndpoint(ep)
 		if !ok {
-			return fmt.Errorf("invalid endpoint '%s' (expected 'device:interface')", ep)
+			return &util.ValidationError{Field: field, Errors: []string{
+				fmt.Sprintf("invalid endpoint '%s' (expected 'device:interface')", ep)}}
 		}
 		d, exists := topo.Nodes[dev]
 		if !exists {
-			return fmt.Errorf("endpoint %s: device '%s' not in topology", ep, dev)
+			return &util.ValidationError{Field: field, Errors: []string{
+				fmt.Sprintf("endpoint %s: device '%s' not in topology", ep, dev)}}
 		}
 		if d.Ports != nil {
 			if _, declared := d.Ports[iface]; !declared {
-				return fmt.Errorf("endpoint %s: interface '%s' not declared on device '%s'",
-					ep, iface, dev)
+				return &util.ValidationError{Field: field, Errors: []string{
+					fmt.Sprintf("endpoint %s: interface '%s' not declared on device '%s'",
+						ep, iface, dev)}}
 			}
 		}
 	}
@@ -2034,7 +2045,7 @@ func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
 // Returns NotFoundError when no link contains the endpoint.
 func (n *Network) DeleteTopologyLink(endpoint string) error {
 	if endpoint == "" {
-		return fmt.Errorf("link endpoint required (device:interface)")
+		return &util.ValidationError{Errors: []string{"link endpoint required (device:interface)"}}
 	}
 
 	mu := n.locks.lock(keyTopology)

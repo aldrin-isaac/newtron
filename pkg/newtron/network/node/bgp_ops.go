@@ -531,7 +531,7 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, ipAddress string,
 			peerAS = optsPeerAS
 		}
 		if peerAS == 0 {
-			return nil, fmt.Errorf("service requires peer_as parameter")
+			return nil, &util.ValidationError{Field: "peer_as", Errors: []string{"service requires peer_as parameter"}}
 		}
 	} else if routing.PeerAS != "" {
 		fmt.Sscanf(routing.PeerAS, "%d", &peerAS)
@@ -542,7 +542,7 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, ipAddress string,
 
 	// All-eBGP design: UnderlayASN is required
 	if underlayASN == 0 {
-		return nil, fmt.Errorf("device has no AS number configured (underlay_asn required)")
+		return nil, fmt.Errorf("device has no AS number configured (underlay_asn required): %w", util.ErrPreconditionFailed)
 	}
 
 	localIP, _ := util.SplitIPMask(ipAddress)
