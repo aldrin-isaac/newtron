@@ -138,7 +138,7 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName, vrfName string) (*Chang
 		return nil, fmt.Errorf("bind-ipvpn: %w", err)
 	}
 	if vrfName == "" {
-		return nil, fmt.Errorf("bind-ipvpn: vrfName is required — the VRF that joins the VPN must be named by the caller (the service composite, or the vrf-name argument of `vrf bind-ipvpn`)")
+		return nil, &util.ValidationError{Field: "vrf_name", Errors: []string{"bind-ipvpn: vrfName is required — the VRF that joins the VPN must be named by the caller (the service composite, or the vrf-name argument of `vrf bind-ipvpn`)"}}
 	}
 	resolved := n.Resolved()
 	cs, err := n.op(sonic.OpBindIPVPN, ipvpnName, ChangeModify,

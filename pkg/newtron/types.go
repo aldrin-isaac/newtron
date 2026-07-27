@@ -105,8 +105,8 @@ func (e *NotFoundError) Error() string {
 
 // ValidationError indicates invalid input.
 type ValidationError struct {
-	Field   string
-	Message string
+	Field   string `json:"field,omitempty"`
+	Message string `json:"message"`
 }
 
 func (e *ValidationError) Error() string {

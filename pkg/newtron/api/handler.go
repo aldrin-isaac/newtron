@@ -11,6 +11,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/httputil"
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // buildMux creates the HTTP mux with all routes registered.
@@ -329,6 +330,17 @@ func writeError(w http.ResponseWriter, err error) {
 	var wcErr *newtron.WriteControlError
 	if errors.As(err, &wcErr) {
 		envelope.Data = wcErr
+	}
+	// §46: a validation rejection carries its typed shape ({field, errors} or
+	// {field, message}) in Data so a client attributes the failure to the
+	// offending request field without parsing the message (#464, #401).
+	var utilValidation *util.ValidationError
+	if errors.As(err, &utilValidation) {
+		envelope.Data = utilValidation
+	}
+	var validation *newtron.ValidationError
+	if errors.As(err, &validation) {
+		envelope.Data = validation
 	}
 	json.NewEncoder(w).Encode(envelope)
 }

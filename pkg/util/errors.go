@@ -90,9 +90,14 @@ func NewPreconditionError(operation, resource, precondition, details string) *Pr
 	}
 }
 
-// ValidationError represents one or more validation failures
+// ValidationError represents one or more validation failures. Field, when set,
+// names the request field the failure is attributable to (wire name, e.g.
+// "peer_as") — the API layer serializes the error into the response envelope's
+// data so clients can attribute the rejection without parsing the message
+// (DESIGN_PRINCIPLES_NEWTRON §46).
 type ValidationError struct {
-	Errors []string
+	Field  string   `json:"field,omitempty"`
+	Errors []string `json:"errors"`
 }
 
 func (e *ValidationError) Error() string {

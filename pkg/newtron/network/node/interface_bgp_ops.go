@@ -39,7 +39,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
-		return nil, fmt.Errorf("remote AS number is required")
+		return nil, &util.ValidationError{Field: "remote_as", Errors: []string{"remote AS number is required"}}
 	}
 
 	// Interface must have an IP address
@@ -131,7 +131,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) 
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
-		return nil, fmt.Errorf("remote AS number is required")
+		return nil, &util.ValidationError{Field: "remote_as", Errors: []string{"remote AS number is required"}}
 	}
 
 	intentKey := "interface|" + i.name + "|bgp-peer"
