@@ -56,6 +56,39 @@ account  required pam_unix.so
 local user can authenticate. Suitable for single-host deployments
 where the team already has shell accounts on the engine host.
 
+**Privilege requirement — an unprivileged server can only authenticate
+itself.** `/etc/shadow` is readable only by root and the `shadow` group.
+When newt-server runs as an ordinary user, `pam_unix` cannot read the
+hash directly and falls back to the `unix_chkpwd` helper — whose hard
+policy is that a non-root caller may verify **only its own** password.
+The symptom is every login for any *other* user failing with a correct
+password, while `/var/log/auth.log` shows:
+
+```
+unix_chkpwd[…]: check pass; user unknown
+unix_chkpwd[…]: password check failed for user (ron)
+```
+
+Fix: put the user that runs newt-server in the `shadow` group so
+in-process `pam_unix` reads the hash directly:
+
+```sh
+sudo usermod -aG shadow <newt-server-user>
+# group membership applies at next login; to start the server
+# immediately without re-login:
+sg shadow -c 'bin/newt-server … &'
+```
+
+Tradeoff: every process of that user can then read the password hashes
+on the host. For a stricter posture, run newt-server under a dedicated
+service account that is the `shadow` group's only member.
+
+Two follow-on gotchas once verification is real (both invisible under a
+permit-all test service): an account created with `useradd` but no
+`chpasswd` is **locked** (`!` in shadow) and can never authenticate; and
+any script that logs in multiple identities must send each account's
+actual password — a shared default only works when nothing verifies it.
+
 ### 2b. With SSSD (LDAP / Active Directory)
 
 ```sh
