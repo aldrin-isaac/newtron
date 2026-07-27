@@ -71,11 +71,15 @@ echo 'ron:ronthenewt' | sudo chpasswd
 # Ungranted negative-test identity.
 sudo useradd --shell /usr/sbin/nologin mallory
 echo 'mallory:test123' | sudo chpasswd
+# Hosts with a password-quality policy may refuse short passwords
+# ("shorter than 8 characters") — pick a compliant one and pass it to
+# login-users.sh via NEWTRON_MALLORY_PASSWORD.
 ```
 
 Under the dev `pam_permit` service the passwords above are ignored; under a
-real PAM module they must match what `login-users.sh` sends (set
-`NEWTRON_TEST_PASSWORD`, or give both accounts the same password). `ron`'s
+real PAM module they must match what `login-users.sh` sends per identity
+(defaults ron:ronthenewt, mallory:test123; override with
+`NEWTRON_RON_PASSWORD` / `NEWTRON_MALLORY_PASSWORD`). `ron`'s
 super-user power comes from `--super-users ron` on newt-server, **not** from
 the OS account — the account only carries the PAM credential.
 
