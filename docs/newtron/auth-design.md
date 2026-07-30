@@ -171,20 +171,28 @@ Deployments adopt layers at their own pace. Specifically:
 - **L5 fine-grained grants:** dictated by spec format. Old
   shorthand keeps working (it's syntactic sugar for the richer
   form); operators opt into per-resource grants by writing them.
-- **L6 revocation + log integrity:** `--spec-watch=true` enables
-  the file watcher; `--audit-integrity=true` enables the hash
-  chain. Default `false`.
+- **L6 revocation + log integrity:** the spec-file watcher is **on by
+  default** (`--spec-watch=false` disables it) — an edited grant table
+  takes effect within the debounce window with no `/reload` call, which
+  is the revocation latency this layer exists to provide. Turn it off
+  only where the filesystem cannot deliver change notifications (some
+  network mounts) or inotify watches are exhausted; `POST /reload`
+  remains the manual path. `--audit-integrity=true` enables the hash
+  chain (default `false`).
 
-Two properties this contract guarantees:
+  The watcher costs nothing when newtron is the one writing: a reload
+  whose specs are identical to the loaded set returns without touching
+  the running network, so the spec writes the server performs for its
+  own operations never drain live device actors. Only a real change —
+  an operator's edit — reloads.
 
-1. **A fresh deployment behaves identically to today.** No flag, no
-   change. This protects existing operators (and the project's
-   integration tests) from being broken by the layered rollout.
-2. **Layers can be adopted independently.** An operator who only
-   needs the audit log (L1) can ship it without identity
-   verification (L2) or enforcement (L3). An operator on a small
-   trusted team can pick the audit log + Unix socket and skip the
-   rest indefinitely.
+One property this contract guarantees:
+
+- **Layers can be adopted independently.** An operator who only
+  needs the audit log (L1) can ship it without identity
+  verification (L2) or enforcement (L3). An operator on a small
+  trusted team can pick the audit log + Unix socket and skip the
+  rest indefinitely.
 
 The flags are reviewed during each layer's PR for shape and naming
 consistency.

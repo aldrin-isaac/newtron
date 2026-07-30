@@ -1056,3 +1056,72 @@ func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
 		t.Fatalf("Load() should pass: zone service refs zone ipvpn, got: %v", err)
 	}
 }
+
+// TestSyncedDigest_TracksLoadsWritesAndEdits pins the contract the reload path
+// depends on (api.Server.ReloadNetwork): after a load or a loader write, the
+// synced marker equals the on-disk digest — so a reload triggered by newtron's
+// own write is a no-op — while any edit made behind the loader's back moves the
+// disk digest away from it, so a real operator edit still reloads.
+func TestSyncedDigest_TracksLoadsWritesAndEdits(t *testing.T) {
+	dir := t.TempDir()
+	writeFile := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	writeFile("network.json", `{"user_groups":{"ops":["alice","bob"]}}`)
+	writeFile("zones/amer.json", `{}`)
+	writeFile("nodes/sw1.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.1","zone":"amer","underlay_asn":65001}`)
+
+	l := NewLoader(dir, nil)
+	if err := l.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	onDisk := func() string {
+		t.Helper()
+		d, err := DiskDigest(dir)
+		if err != nil {
+			t.Fatalf("DiskDigest: %v", err)
+		}
+		return d
+	}
+
+	// After Load, memory and disk agree — a reload here must be a no-op.
+	if l.SyncedDigest() != onDisk() {
+		t.Fatal("synced digest != disk digest right after Load")
+	}
+
+	// A write THROUGH the loader keeps them in agreement: this is the case that
+	// must not drain live device actors.
+	spec := l.GetNetwork()
+	spec.UserGroups["ops"] = []string{"alice"}
+	if err := l.SaveNetwork(spec); err != nil {
+		t.Fatalf("SaveNetwork: %v", err)
+	}
+	if l.SyncedDigest() != onDisk() {
+		t.Error("synced digest != disk digest after a loader write — a self-write would force a needless reload")
+	}
+
+	// An edit behind the loader's back (an operator with an editor) must move
+	// the disk digest away from the marker, or revocation would never reload.
+	writeFile("network.json", `{"user_groups":{"ops":[]}}`)
+	if l.SyncedDigest() == onDisk() {
+		t.Error("disk digest unchanged after an external edit to network.json — the reload would be skipped")
+	}
+
+	// Per-file specs count too — the watcher watches nodes/ and zones/, and
+	// node specs load lazily, so this is the case an in-memory digest missed.
+	l2 := NewLoader(dir, nil)
+	if err := l2.Load(); err != nil {
+		t.Fatalf("re-Load: %v", err)
+	}
+	writeFile("nodes/sw1.json", `{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.9","zone":"amer","underlay_asn":65001}`)
+	if l2.SyncedDigest() == onDisk() {
+		t.Error("disk digest unchanged after an external edit to a per-file node spec")
+	}
+}

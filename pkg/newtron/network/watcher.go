@@ -240,7 +240,11 @@ func (w *SpecWatcher) scheduleReload(path, networkID string) {
 		if err := w.reload(networkID); err != nil {
 			w.logger.Printf("spec-watcher: reload network '%s' after change at %s: %v", networkID, path, err)
 		} else {
-			w.logger.Printf("spec-watcher: reloaded network '%s' after change at %s", networkID, path)
+			// "settled", not "reloaded": the callback decides whether anything
+			// actually changed. A reload that finds the specs already current
+			// (newtron's own write) returns without swapping the network, and
+			// only the swap logs "reloaded network ...".
+			w.logger.Printf("spec-watcher: spec change settled for network '%s' at %s", networkID, path)
 		}
 	})
 }

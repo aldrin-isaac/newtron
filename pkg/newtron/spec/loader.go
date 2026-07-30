@@ -1,10 +1,13 @@
 package spec
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -30,6 +33,8 @@ type Loader struct {
 	platforms map[string]*PlatformSpec
 
 	mu        sync.RWMutex
+	// syncedDigest is the DiskDigest as of the last load-or-write; see SyncedDigest.
+	syncedDigest string
 	network   *NetworkSpecFile
 	topology  *TopologySpecFile // nil if topology.json doesn't exist
 	nodeSpecs map[string]*NodeSpec
@@ -107,6 +112,8 @@ func (l *Loader) Load() error {
 		}
 	}
 
+	// Memory now agrees with disk — record the agreement point.
+	l.markSynced()
 	return nil
 }
 
@@ -281,6 +288,91 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 	return l.topology
 }
 
+// DiskDigest is a content hash of every spec file in a network directory —
+// network.json, topology.json, and the per-file node and zone specs. The
+// network's own audit/ subtree is runtime output, not spec, and is excluded.
+//
+// It answers "has anything on disk changed since we last read it?", which is
+// what the reload path needs (see api.Server.ReloadNetwork). Digesting the
+// bytes on disk rather than the parsed structs is deliberate: node specs are
+// cached lazily, so an in-memory digest would silently miss an operator's edit
+// to a node file that nothing had loaded yet — a skipped reload, which is a
+// far worse failure than a redundant one.
+func DiskDigest(specDir string) (string, error) {
+	h := sha256.New()
+	add := func(rel string) error {
+		data, err := os.ReadFile(filepath.Join(specDir, rel))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil // an absent optional spec file contributes nothing
+			}
+			return err
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", rel, len(data))
+		h.Write(data)
+		return nil
+	}
+	for _, f := range []string{"network.json", "topology.json"} {
+		if err := add(f); err != nil {
+			return "", fmt.Errorf("digesting %s in %s: %w", f, specDir, err)
+		}
+	}
+	// Per-file specs, name-sorted so the digest is order-independent.
+	for _, sub := range []string{"nodes", "zones"} {
+		entries, err := os.ReadDir(filepath.Join(specDir, sub))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // subdir is optional
+			}
+			return "", fmt.Errorf("digesting %s/ in %s: %w", sub, specDir, err)
+		}
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			if err := add(filepath.Join(sub, n)); err != nil {
+				return "", fmt.Errorf("digesting %s/%s in %s: %w", sub, n, specDir, err)
+			}
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// SyncedDigest is the DiskDigest as of the last time this loader and disk were
+// in agreement — the initial Load, or the most recent spec write the loader
+// performed. Comparing it against a fresh DiskDigest tells a caller whether
+// anything changed underneath it.
+//
+// The failure polarity is deliberate. A spec mutation that somehow bypasses the
+// loader leaves this value stale, which makes a reload look necessary when it
+// isn't — redundant work, nothing worse. The reverse (reporting "unchanged"
+// when disk moved) would silently drop an operator's edit, so nothing marks
+// the loader synced except an actual read or write of the files.
+func (l *Loader) SyncedDigest() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.syncedDigest
+}
+
+// markSynced records the on-disk digest as the loader's current agreement
+// point. Called after a load and after every mutation the loader persists.
+// A digest failure clears the marker rather than keeping a stale one, so the
+// next comparison falls back to reloading.
+func (l *Loader) markSynced() {
+	digest, err := DiskDigest(l.specDir)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err != nil {
+		l.syncedDigest = ""
+		return
+	}
+	l.syncedDigest = digest
+}
+
 // ListNodeSpecs returns the names of all nodeSpec files in the nodes directory.
 func (l *Loader) ListNodeSpecs() []string {
 	nodesDir := filepath.Join(l.specDir, "nodes")
@@ -400,7 +492,11 @@ func (l *Loader) zoneSpecPath(name string) string {
 // writeNodeSpecFile marshals nodeSpec to nodes/<name>.json atomically. It
 // touches neither the lock nor the cache — callers handle cache coherence.
 func (l *Loader) writeNodeSpecFile(name string, nodeSpec *NodeSpec) error {
-	return writeJSONAtomic(l.nodeSpecPath(name), nodeSpec)
+	if err := writeJSONAtomic(l.nodeSpecPath(name), nodeSpec); err != nil {
+		return err
+	}
+	l.markSynced()
+	return nil
 }
 
 // MutateNodeSpec atomically applies fn to a nodeSpec and persists it, serialized
@@ -479,6 +575,7 @@ func (l *Loader) DeleteNodeSpec(name string) error {
 	l.mu.Lock()
 	delete(l.nodeSpecs, name)
 	l.mu.Unlock()
+	l.markSynced()
 	return nil
 }
 
@@ -562,7 +659,11 @@ func (l *Loader) Zones() map[string]*ZoneSpec {
 // writeZoneSpecFile marshals zone to zones/<name>.json atomically. It touches
 // neither the lock nor the cache — callers handle coherence.
 func (l *Loader) writeZoneSpecFile(name string, zone *ZoneSpec) error {
-	return writeJSONAtomic(l.zoneSpecPath(name), zone)
+	if err := writeJSONAtomic(l.zoneSpecPath(name), zone); err != nil {
+		return err
+	}
+	l.markSynced()
+	return nil
 }
 
 // CreateZoneSpec atomically creates a new zone file, rejecting a name already
@@ -640,6 +741,7 @@ func (l *Loader) DeleteZoneSpec(name string) error {
 	l.mu.Lock()
 	delete(l.zoneSpecs, name)
 	l.mu.Unlock()
+	l.markSynced()
 	return nil
 }
 
@@ -653,6 +755,7 @@ func (l *Loader) SaveNetwork(spec *NetworkSpecFile) error {
 	l.mu.Lock()
 	l.network = spec
 	l.mu.Unlock()
+	l.markSynced()
 	return nil
 }
 
@@ -666,6 +769,7 @@ func (l *Loader) SaveTopology(spec *TopologySpecFile) error {
 	l.mu.Lock()
 	l.topology = spec
 	l.mu.Unlock()
+	l.markSynced()
 	return nil
 }
 

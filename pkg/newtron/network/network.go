@@ -1513,6 +1513,17 @@ func (n *Network) Spec() *spec.NetworkSpecFile {
 }
 
 // GetTopology returns the topology spec, or nil if no topology.json was loaded.
+// SyncedDigest is the on-disk spec digest as of this network's last load or
+// spec write — see spec.Loader.SyncedDigest. Comparing it with a fresh
+// spec.DiskDigest tells a caller whether the files changed underneath.
+// Empty when the network has no loader (nothing to compare against).
+func (n *Network) SyncedDigest() string {
+	if n.loader == nil {
+		return ""
+	}
+	return n.loader.SyncedDigest()
+}
+
 func (n *Network) GetTopology() *spec.TopologySpecFile {
 	return n.topology
 }
