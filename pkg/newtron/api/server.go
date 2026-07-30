@@ -557,9 +557,21 @@ func (s *Server) DeleteNetwork(ctx context.Context, id string, force bool, times
 	return archived, nil
 }
 
-// ReloadNetwork stops the existing networkEntity, reloads specs from disk,
-// and creates a fresh networkEntity. SSH connections reconnect lazily on
-// next request.
+// ReloadNetwork re-reads a network's specs from disk and swaps in a fresh
+// networkEntity. SSH connections reconnect lazily on next request.
+//
+// Compare, then load, then drain. Two properties fall out of that order:
+//
+//   - A reload for specs that have not changed since this network last read or
+//     wrote them returns without touching the entity. This is the common case
+//     under the spec watcher: newtron persists a spec (create-service,
+//     create-node, …) and the watcher sees its own write. Memory and disk
+//     already agree, and draining every live device actor to "apply" a change
+//     that isn't one would drop in-flight requests and SSH sessions for
+//     nothing. An operator's edit moves the digest and reloads for real.
+//   - A load that fails leaves the running network untouched, instead of
+//     draining its actors and then erroring out with the old specs still
+//     installed.
 func (s *Server) ReloadNetwork(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -569,17 +581,29 @@ func (s *Server) ReloadNetwork(id string) error {
 		return &notRegisteredError{id}
 	}
 
+	// Nothing changed on disk since this network last loaded or wrote its
+	// specs? Then there is nothing to apply — keep the live entity, actors and
+	// connections included. A digest error, or an empty synced marker, is not
+	// fatal: fall through to the full reload, which is correct in every case
+	// and merely more expensive.
+	if synced := entity.net.SyncedDigest(); synced != "" {
+		if current, digestErr := spec.DiskDigest(entity.specDir); digestErr == nil && current == synced {
+			return nil
+		}
+	}
+
+	// Reload specs from disk before touching the running entity.
+	net, err := newtron.LoadNetwork(entity.specDir, networkName(entity.specDir), s.portResolver, s.secretStore, s.platforms)
+	if err != nil {
+		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
+	}
+
 	// Drain the old entity's node actors, but KEEP its audit logger open —
 	// reload changes specs, not the audit ledger. The logger is carried to the
 	// new entity so the network's hash chain is continuous and no in-flight
 	// mutation loses its event to a close/reopen race.
 	entity.stopNodes()
 
-	// Reload specs from disk
-	net, err := newtron.LoadNetwork(entity.specDir, networkName(entity.specDir), s.portResolver, s.secretStore, s.platforms)
-	if err != nil {
-		return fmt.Errorf("reloading specs from %s: %w", entity.specDir, err)
-	}
 	if s.enforceAuthorization {
 		net.EnableAuthorization(id, s.globalSuperUsers...)
 	}

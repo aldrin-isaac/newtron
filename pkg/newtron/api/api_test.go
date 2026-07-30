@@ -283,6 +283,7 @@ func TestAPICompleteness(t *testing.T) {
 			"SaveDeviceIntents":      "intent save — invoked by handleSave via nodeActor.execute",
 			"CheckAuthReadGate":      "auth gate helper invoked by handleGetAuthorization for the engage-when-configured PermAuthRead check (#187); not a request-handled action",
 			"CheckAuditReadGate":     "auth gate helper invoked by handleAuditEvents and handleAuditIntegrity for the engage-when-configured PermAuditRead check (#196); not a request-handled action",
+			"SyncedDigest":           "server-internal reload coherence — api.Server.ReloadNetwork compares it against a fresh spec.DiskDigest to tell an operator's edit from a spec newtron itself just wrote (auth-design.md L6 watcher); an implementation detail of reload, not operator-facing state",
 		},
 		"Node": {
 			"BindsService":        "internal helper for /service/{name}/projection — pre-check before ServiceProjection",

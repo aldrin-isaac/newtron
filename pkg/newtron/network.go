@@ -203,6 +203,14 @@ func (net *Network) HasTopology() bool {
 // GetTopology returns the full topology spec, or nil when no topology.json was
 // loaded for this network. §46: canonical `spec.TopologySpecFile` substrate
 // exposed directly, alongside the names-only summary in TopologyNodeNames.
+// SyncedDigest is the on-disk spec digest as of this network's last load or
+// spec write. The reload path compares it against a fresh spec.DiskDigest to
+// tell an operator's edit (reload for real) from a write newtron itself just
+// performed (nothing to do) — see api.Server.ReloadNetwork.
+func (net *Network) SyncedDigest() string {
+	return net.internal.SyncedDigest()
+}
+
 func (net *Network) GetTopology() *spec.TopologySpecFile {
 	return net.internal.GetTopology()
 }
