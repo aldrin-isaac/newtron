@@ -32,9 +32,16 @@ type Loader struct {
 	// (every platform is treated as non-host).
 	platforms map[string]*PlatformSpec
 
-	mu        sync.RWMutex
-	// syncedDigest is the DiskDigest as of the last load-or-write; see SyncedDigest.
+	// syncedDigest is the DiskDigest as of the last load-or-write (see
+	// SyncedDigest). It has its own mutex rather than sharing mu: markSynced is
+	// called from write paths that already hold mu (CreateZoneSpec holds it for
+	// the whole body) and from paths that don't, so sharing the loader lock
+	// deadlocks. Nothing else reads or writes it, so a private mutex costs
+	// nothing and makes lock order irrelevant.
+	digestMu     sync.Mutex
 	syncedDigest string
+
+	mu        sync.RWMutex
 	network   *NetworkSpecFile
 	topology  *TopologySpecFile // nil if topology.json doesn't exist
 	nodeSpecs map[string]*NodeSpec
@@ -353,8 +360,8 @@ func DiskDigest(specDir string) (string, error) {
 // when disk moved) would silently drop an operator's edit, so nothing marks
 // the loader synced except an actual read or write of the files.
 func (l *Loader) SyncedDigest() string {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.digestMu.Lock()
+	defer l.digestMu.Unlock()
 	return l.syncedDigest
 }
 
@@ -364,8 +371,8 @@ func (l *Loader) SyncedDigest() string {
 // next comparison falls back to reloading.
 func (l *Loader) markSynced() {
 	digest, err := DiskDigest(l.specDir)
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.digestMu.Lock()
+	defer l.digestMu.Unlock()
 	if err != nil {
 		l.syncedDigest = ""
 		return
