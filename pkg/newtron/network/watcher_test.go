@@ -66,8 +66,9 @@ func TestSpecWatcher_FileChangeTriggersReload(t *testing.T) {
 // TestSpecWatcher_ZoneFileChangeTriggersReload pins that a write under the
 // per-file zones/ subdirectory triggers a reload — the watch target added when
 // zones moved to zones/<name>.json. inotify is non-recursive, so the parent
-// watch alone would miss it; Add must register zones/ explicitly. The subdir
-// must exist before Add (an absent subdir is skipped, logged, and not watched).
+// watch alone would miss it; Add must register zones/ explicitly. (A subdir
+// absent at Add is adopted when it appears — see
+// TestSpecWatcher_AdoptsSubdirCreatedAfterAdd.)
 func TestSpecWatcher_ZoneFileChangeTriggersReload(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(`{"version":"1.0"}`), 0o644); err != nil {
@@ -237,3 +238,69 @@ func TestSpecWatcher_Remove(t *testing.T) {
 	}
 }
 
+
+// TestSpecWatcher_AdoptsSubdirCreatedAfterAdd pins #469: a nodes/ or zones/
+// subdirectory that does not exist at Add is picked up when it appears, so
+// edits to per-file specs inside it still reload.
+//
+// Creating the subdir itself fires on the parent watch, so that step reloads
+// either way. Everything AFTER it is the real assertion: inotify is
+// non-recursive, so without the subdir watch nothing inside it is delivered —
+// not the first file, not a later edit — and an operator's node-spec or zone
+// change silently never took effect. (Verified: with the adoption call removed,
+// this test fails at the first write inside nodes/.)
+func TestSpecWatcher_AdoptsSubdirCreatedAfterAdd(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "network.json"), []byte(`{"version":"1.0"}`), 0o644); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	got := make(chan string, 8)
+	w, err := NewSpecWatcher(quietLogger(), 50*time.Millisecond, func(id string) error {
+		got <- id
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("NewSpecWatcher: %v", err)
+	}
+	defer w.Stop()
+	// Registered with no nodes/ present — the case that used to leave it unwatched.
+	if err := w.Add(dir, "default"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	w.Start(context.Background())
+
+	drain := func(what string) {
+		t.Helper()
+		select {
+		case <-got:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("no reload within 2s after %s", what)
+		}
+	}
+
+	nodesDir := filepath.Join(dir, "nodes")
+	if err := os.Mkdir(nodesDir, 0o755); err != nil {
+		t.Fatalf("mkdir nodes: %v", err)
+	}
+	drain("creating nodes/")
+
+	nodeFile := filepath.Join(nodesDir, "leaf1.json")
+	if err := os.WriteFile(nodeFile, []byte(`{"mgmt_ip":"127.0.0.1"}`), 0o644); err != nil {
+		t.Fatalf("write node spec: %v", err)
+	}
+	drain("creating nodes/leaf1.json")
+
+	// The real test: an edit wholly inside the late-created subdir.
+	if err := os.WriteFile(nodeFile, []byte(`{"mgmt_ip":"127.0.0.2"}`), 0o644); err != nil {
+		t.Fatalf("edit node spec: %v", err)
+	}
+	select {
+	case id := <-got:
+		if id != "default" {
+			t.Errorf("reload fired for id=%q, want default", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("editing a file inside a nodes/ created after Add did not reload — the subdir is not being watched (#469)")
+	}
+}

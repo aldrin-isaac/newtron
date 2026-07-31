@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,6 +20,12 @@ import (
 // short enough to keep revocation latency low and long enough to
 // absorb editor noise.
 const DefaultWatchDebounce = time.Second
+
+// specSubdirs are the per-file spec subdirectories a network directory may
+// carry (nodes/<name>.json, zones/<name>.json). inotify is non-recursive, so
+// each is watched in its own right — at Add when it already exists, and on its
+// create event when it shows up later (adoptNewSubdir).
+var specSubdirs = []string{"nodes", "zones"}
 
 // ReloadFunc is the callback the watcher invokes for a watched
 // path's networkID after the debounce window settles. The watcher
@@ -79,9 +87,11 @@ func NewSpecWatcher(logger *log.Logger, debounce time.Duration, reload ReloadFun
 
 // Add begins watching specDir for the given networkID. The watcher
 // monitors the directory itself plus the per-file spec subdirectories
-// (nodes/ and zones/) if present — where the per-node and per-zone JSON
-// files live. Edits there (a rotated node spec, a zone override) mean
-// "re-read the network dir" the same way a grant edit to network.json does.
+// (nodes/ and zones/) — where the per-node and per-zone JSON files live.
+// Edits there (a rotated node spec, a zone override) mean "re-read the network
+// dir" the same way a grant edit to network.json does. A subdir that does not
+// exist yet is picked up when it appears (adoptNewSubdir), so a scaffolded
+// network does not need one at registration time.
 //
 // Returns an error if the watcher fails to register the path with
 // the kernel (typically because the directory doesn't exist or the
@@ -103,7 +113,7 @@ func (w *SpecWatcher) Add(specDir, networkID string) error {
 	// triggers a reload — inotify is non-recursive, so the parent watch alone
 	// wouldn't see them. Each is optional: a network dir may not have created
 	// the subdir yet; log and continue.
-	for _, sub := range []string{"nodes", "zones"} {
+	for _, sub := range specSubdirs {
 		dir := filepath.Join(abs, sub)
 		if err := w.fsw.Add(dir); err != nil {
 			w.logger.Printf("spec-watcher: skip %s subdir %s: %v", sub, dir, err)
@@ -125,8 +135,9 @@ func (w *SpecWatcher) Remove(specDir string) error {
 		return nil
 	}
 	_ = w.fsw.Remove(abs)
-	_ = w.fsw.Remove(filepath.Join(abs, "nodes"))
-	_ = w.fsw.Remove(filepath.Join(abs, "zones"))
+	for _, sub := range specSubdirs {
+		_ = w.fsw.Remove(filepath.Join(abs, sub))
+	}
 	delete(w.paths, abs)
 	if timer, ok := w.pending[abs]; ok {
 		timer.Stop()
@@ -219,10 +230,40 @@ func (w *SpecWatcher) handle(event fsnotify.Event) {
 		// Event fires on the watched dir itself OR a subdirectory
 		// of it (nodes/, zones/). Match by prefix to cover both.
 		if dir == path || filepath.Dir(dir) == path {
+			w.adoptNewSubdir(path, event)
 			w.scheduleReload(path, networkID)
 			return
 		}
 	}
+}
+
+// adoptNewSubdir starts watching a per-file spec subdirectory that appears
+// after Add. inotify is non-recursive and Add can only register the subdirs
+// that exist at registration time, so a network scaffolded without nodes/ or
+// zones/ — or one whose zones arrive later — would never deliver edits to the
+// files inside them, and an operator's change would silently not take effect
+// (#469).
+//
+// The create event that brings the subdir into existence also schedules a
+// reload, and that reload re-reads the whole directory, so any file written
+// into the new subdir before this watch lands is still picked up by that pass;
+// every edit afterwards is delivered normally. Caller holds w.mu.
+func (w *SpecWatcher) adoptNewSubdir(watched string, event fsnotify.Event) {
+	if !event.Has(fsnotify.Create) || filepath.Dir(event.Name) != watched {
+		return
+	}
+	if !slices.Contains(specSubdirs, filepath.Base(event.Name)) {
+		return
+	}
+	if info, err := os.Stat(event.Name); err != nil || !info.IsDir() {
+		return
+	}
+	if err := w.fsw.Add(event.Name); err != nil {
+		w.logger.Printf("spec-watcher: cannot watch new %s subdir %s: %v",
+			filepath.Base(event.Name), event.Name, err)
+		return
+	}
+	w.logger.Printf("spec-watcher: now watching %s (created after registration)", event.Name)
 }
 
 // scheduleReload arms (or resets) the debounce timer for path. When
