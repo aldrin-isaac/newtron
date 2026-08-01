@@ -19,7 +19,7 @@ serves see the corresponding `api.md`.
 | `/newtron/v1/...` | newtron engine ([`docs/newtron/api.md`](newtron/api.md)) |
 | `/newtrun/v1/...` | newtrun engine ([`docs/newtrun/api.md`](newtrun/api.md)) |
 | `/newtlab/v1/...` | newtlab engine ([`docs/newtlab/api.md`](newtlab/api.md)) |
-| `/newt-server/v1/health` | newt-server's own health probe |
+| `/newt-server/v1/health` | newt-server's own health probe — liveness + deployment posture (`auth_surface`, `audit_log`, `audit_integrity`). **No credential required**, even under `--auth-pam-service`: probes and monitors cannot present one (auth-design.md, #476) |
 | `/newt-server/v1/auth/login` | Session-key mint — POST with HTTP Basic, returns an opaque session key (auth-design.md §L2c). Returns 404 when `--auth-pam-service` is not set. |
 | `/newt-server/v1/auth/logout` | Session-key revoke — POST with `Authorization: Bearer <key>`. Idempotent. Returns 404 when `--auth-pam-service` is not set. |
 

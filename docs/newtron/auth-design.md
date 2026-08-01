@@ -60,13 +60,31 @@ server, so newtlink's copy would go stale on the first restart — reintroducing
 the 401 it was meant to fix. Instead newtlab mints a **per-lab telemetry token**
 at deploy, persists it in the lab's `state.json` (newtlab owns lab state, §27),
 and passes it to newtlink in `bridge.json`; newtlink presents it as a Bearer on
-every push. `cmd/newt-server` exempts only
-`POST /newtlab/v1/labs/{lab}/bridges/{host}/stats` from the L2b/L2c chain, and
+every push. `cmd/newt-server` exempts two requests from the L2b/L2c chain —
+`POST /newtlab/v1/labs/{lab}/bridges/{host}/stats` and
+`GET /newt-server/v1/health` (liveness + deployment posture, #476; see below) — and
 the newtlab handler (`handlePushBridgeStats`) validates the Bearer against the
 lab's stored token in constant time. Because the token lives on disk, a server
 restart re-reads it and the running newtlink keeps authenticating without a
 redeploy; because it authorizes only that one lab's stats push, it is
 least-privilege — not a super-user like the in-process service key.
+
+**The health exemption (#476).** `GET /newt-server/v1/health` answers without a
+credential because the callers that need it cannot present one: a load balancer,
+a Kubernetes liveness probe, an uptime monitor. A health endpoint behind
+authentication is not a health endpoint. It returns liveness (`status`,
+`version`) plus deployment posture — `auth_surface`, `audit_log`,
+`audit_integrity` — so a console can tell an operator whether a tamper-evident
+record is being written without first holding an engine credential.
+
+Posture describes how *this process* was started. It names no network, node,
+user, or spec, so it discloses no tenant data. It does tell an unauthenticated
+caller when auditing is off, which is accepted deliberately: that fact is
+already inferable (`POST /auth/login` answers 404 vs 401 depending on whether
+PAM is configured, and consumers read it that way today), and publishing it
+plainly is better than consumers inferring posture from side channels. The
+exemption is scoped to exactly that one method and path — `/auth/login` and
+`/auth/logout` share the prefix and stay authenticated.
 
 | Threat | Surface | Layer that addresses it |
 |---|---|---|

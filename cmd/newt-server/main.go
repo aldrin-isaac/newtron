@@ -303,10 +303,31 @@ func main() {
 	mux.Handle("/newtron/v1/", newtronSrv.Handler())
 	mux.Handle("/newtrun/v1/", newtrunSrv.Handler())
 	mux.Handle("/newtlab/v1/", newtlabSrv.Handler())
+	// Liveness + deployment posture, reachable WITHOUT a credential (#476).
+	// A load balancer, k8s probe, or uptime monitor cannot present a bearer, so
+	// a health endpoint behind auth is not a health endpoint. The posture fields
+	// report how this process was started — not tenant data — so a console can
+	// tell an operator whether a tamper-evident record is being written without
+	// first holding an engine credential.
+	//
+	// Trade-off, accepted deliberately: this also tells an unauthenticated
+	// caller when auditing is OFF. That is already inferable (POST /auth/login
+	// answers 404 vs 401 depending on whether PAM is configured, and consumers
+	// read it that way today), and publishing the fact plainly beats consumers
+	// guessing from side channels. Nothing here names a network, node, or user.
+	posture := func(on bool) string {
+		if on {
+			return "enabled"
+		}
+		return "disabled"
+	}
 	mux.HandleFunc("GET /newt-server/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSON(w, http.StatusOK, map[string]string{
-			"status":  "ok",
-			"version": version.Version,
+			"status":          "ok",
+			"version":         version.Version,
+			"auth_surface":    posture(*authPAMService != ""),
+			"audit_log":       posture(*auditEnable),
+			"audit_integrity": posture(*auditIntegrity),
 		})
 	})
 	mux.HandleFunc("POST /newt-server/v1/auth/login", sessionkey.LoginHandler(sessionKeys))
@@ -329,7 +350,7 @@ func main() {
 	// credentials, so route just that one path straight to the engine mux —
 	// bypassing sessionkey/PAM but still hitting the newtlab engine's own
 	// middleware. Every other request goes through the user-facing auth chain.
-	handler := exemptBridgeStatsPush(mux, authed)
+	handler := exemptUnauthenticated(mux, authed)
 
 	srv := httputil.NewServer(handler, logger,
 		httputil.ServerLabel("newt-server"),
@@ -386,18 +407,36 @@ func parseCommaList(s string) []string {
 	return out
 }
 
-// exemptBridgeStatsPush routes newtlink's telemetry push straight to the engine
-// mux, bypassing the user-facing sessionkey/PAM chain; that path authenticates
-// with the per-lab telemetry token inside the newtlab handler. Every other
-// request flows through authed (sessionkey → PAM → mux).
-func exemptBridgeStatsPush(mux, authed http.Handler) http.Handler {
+// exemptUnauthenticated routes the two requests that must work without a
+// user credential straight to the engine mux, bypassing the sessionkey/PAM
+// chain. Everything else flows through authed (sessionkey → PAM → mux).
+//
+// This function is the whole exemption list — auth-design.md documents it, so
+// keep the two in step. Adding a case here widens the unauthenticated surface
+// of every deployment, so each one states why no credential is possible:
+//
+//   - newtlink's BridgeStats push holds neither a session key nor PAM
+//     credentials; it authenticates with the per-lab telemetry token, which
+//     the newtlab handler validates itself (handlePushBridgeStats).
+//   - The health probe answers liveness and deployment posture to callers that
+//     cannot present a bearer at all — load balancers, k8s probes, monitors
+//     (#476). It exposes no tenant data.
+func exemptUnauthenticated(mux, authed http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isBridgeStatsPush(r) {
+		if isBridgeStatsPush(r) || isHealthProbe(r) {
 			mux.ServeHTTP(w, r)
 			return
 		}
 		authed.ServeHTTP(w, r)
 	})
+}
+
+// isHealthProbe matches exactly GET /newt-server/v1/health — the liveness and
+// posture surface. Scoped to that one path and method so no other
+// /newt-server/v1/ route (auth/login, auth/logout) is caught by it.
+func isHealthProbe(r *http.Request) bool {
+	return r.Method == http.MethodGet &&
+		strings.Trim(r.URL.Path, "/") == "newt-server/v1/health"
 }
 
 // isBridgeStatsPush matches exactly POST /newtlab/v1/labs/{lab}/bridges/{host}/stats
