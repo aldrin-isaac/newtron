@@ -1059,17 +1059,38 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 	return err
 }
 
+// sweepScope is the directory the /proc sweep matches a lab's processes against
+// (see belongsToLab). It is derived rather than read straight off the field
+// because a Lab is routinely built as a bare literal — &Lab{NetworkID: name} —
+// by the CLI verbs and the ByName helpers, which never set StateDir. Reading
+// l.StateDir directly then scoped the sweep to "", and an empty scope matched
+// nothing: destroy killed no processes, the survivor gate passed vacuously, the
+// ledger was erased, and the lab's VMs were orphaned with no record of their
+// PIDs — the exact outcome the gate exists to prevent.
+//
+// An empty NetworkID is refused rather than derived: LabDir("") is the labs
+// ROOT, which would scope one lab's teardown to every lab on the host.
+func (l *Lab) sweepScope() (string, error) {
+	if l.StateDir != "" {
+		return l.StateDir, nil
+	}
+	if l.NetworkID == "" {
+		return "", fmt.Errorf("newtlab: cannot determine which lab to operate on: both StateDir and NetworkID are empty")
+	}
+	return LabDir(l.NetworkID), nil
+}
+
 // StopByName stops a node in a lab identified by its network-id and node name,
 // loading all necessary state from disk.
 func StopByName(ctx context.Context, networkID, nodeName string) error {
-	lab := &Lab{NetworkID: networkID}
+	lab := &Lab{NetworkID: networkID, StateDir: LabDir(networkID)}
 	return lab.Stop(ctx, nodeName)
 }
 
 // StartByName starts a node in a lab identified by its network-id and node name,
 // loading all necessary state from disk.
 func StartByName(ctx context.Context, networkID, nodeName string) error {
-	lab := &Lab{NetworkID: networkID}
+	lab := &Lab{NetworkID: networkID, StateDir: LabDir(networkID)}
 	return lab.Start(ctx, nodeName)
 }
 
@@ -1123,11 +1144,17 @@ func (l *Lab) teardown(state *LabState, progress bool) error {
 	}
 
 	// Local processes: sweep + identity-checked reap (tracked or orphaned).
+	// A scope we cannot determine aborts the teardown BEFORE the ledger is
+	// touched: sweeping the wrong scope silently orphans this lab's VMs.
+	scope, err := l.sweepScope()
+	if err != nil {
+		return err
+	}
 	if progress {
 		l.progress("bridges", "reaping local VMs + bridge workers")
 	}
-	for _, pid := range findLabProcesses(l.StateDir) {
-		if !killLabProcess(pid, l.StateDir) {
+	for _, pid := range findLabProcesses(scope) {
+		if !killLabProcess(pid, scope) {
 			errs = append(errs, fmt.Errorf("local pid %d survived SIGKILL", pid))
 		}
 	}
@@ -1137,7 +1164,7 @@ func (l *Lab) teardown(state *LabState, progress bool) error {
 	// Gate ledger removal on a clean local host. Remote/cleanup errors do not
 	// gate it — a stuck remote host is unreachable whether or not state survives,
 	// and retaining it would only strand the lab.
-	if survivors := findLabProcesses(l.StateDir); len(survivors) > 0 {
+	if survivors := findLabProcesses(scope); len(survivors) > 0 {
 		return fmt.Errorf("newtlab: teardown incomplete — %d local process(es) still alive %v; state retained, re-run destroy: %v",
 			len(survivors), survivors, errs)
 	}

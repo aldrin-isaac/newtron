@@ -27,7 +27,7 @@ If only one lab is deployed, the network name can be omitted.
 			}
 
 			fmt.Printf("Destroying lab %s...\n", labName)
-			lab := &newtlab.Lab{NetworkID: labName}
+			lab := &newtlab.Lab{NetworkID: labName, StateDir: newtlab.LabDir(labName)}
 			lab.OnProgress = func(phase, detail string) {
 				fmt.Printf("  [%s] %s\n", phase, detail)
 			}
