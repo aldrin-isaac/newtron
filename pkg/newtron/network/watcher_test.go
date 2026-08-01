@@ -178,8 +178,19 @@ func TestSpecWatcher_DebouncesRapidWrites(t *testing.T) {
 		t.Fatalf("write seed: %v", err)
 	}
 
+	// The debounce is deliberately long relative to the burst. The property
+	// under test is that writes arriving inside one window coalesce into a
+	// single reload; with a 200ms window and 10ms between writes, a CI runner
+	// stalling for 200ms mid-burst split the burst and produced two reloads —
+	// a failure of the runner's scheduling, not of the coalescing. A window an
+	// order of magnitude wider than the inter-write gap keeps the assertion
+	// exact ("want 1") instead of weakening it to "fewer than 10".
+	//
+	// This is headroom, not proof: a stall longer than the window would still
+	// split the burst. Making it airtight needs an injectable clock in place of
+	// time.AfterFunc, which is a larger change than this test warrants.
 	var calls atomic.Int32
-	w, err := NewSpecWatcher(quietLogger(), 200*time.Millisecond, func(id string) error {
+	w, err := NewSpecWatcher(quietLogger(), 2*time.Second, func(id string) error {
 		calls.Add(1)
 		return nil
 	})
@@ -200,8 +211,8 @@ func TestSpecWatcher_DebouncesRapidWrites(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Wait long enough for the debounce + one reload.
-	time.Sleep(500 * time.Millisecond)
+	// Wait long enough for the debounce to settle plus one reload.
+	time.Sleep(3 * time.Second)
 	if n := calls.Load(); n != 1 {
 		t.Errorf("got %d reload calls for a burst, want 1 (debounce coalesced)", n)
 	}
