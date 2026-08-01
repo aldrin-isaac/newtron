@@ -100,7 +100,7 @@ func showAllLabs() error {
 }
 
 func showLabDetail(labName string) error {
-	lab := &newtlab.Lab{NetworkID: labName}
+	lab := &newtlab.Lab{NetworkID: labName, StateDir: newtlab.LabDir(labName)}
 	state, err := lab.Status()
 	if err != nil {
 		return err
@@ -348,7 +348,7 @@ func monitorAllLabs() error {
 // all nodes are running with no phase, or all have reached a terminal state
 // (stopped/error).
 func labDeployFinished(labName string) bool {
-	lab := &newtlab.Lab{NetworkID: labName}
+	lab := &newtlab.Lab{NetworkID: labName, StateDir: newtlab.LabDir(labName)}
 	state, err := lab.Status()
 	if err != nil || len(state.Nodes) == 0 {
 		return false
