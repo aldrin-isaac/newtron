@@ -165,6 +165,22 @@ func main() {
 		logger.Println("WARNING: --audit-integrity has no effect without --audit")
 	}
 
+	// Posture, stated at startup as well as on /health (#476). The operator
+	// watching a server come up is the person who can fix one started in the
+	// wrong mode, and they will not think to query an endpoint to find out —
+	// so a server running with no authentication says so, in the log, every
+	// time. Development and demo runs are exactly when a no-auth server gets
+	// left running longer than intended; the people who benefit from noticing
+	// are the ones who would never go looking.
+	if *authPAMService == "" {
+		logger.Println("WARNING: no authentication configured (--auth-pam-service unset) — every request is served unverified")
+	}
+	if !*auditEnable {
+		logger.Println("WARNING: no audit log (--audit unset) — mutations leave no record")
+	}
+	logger.Printf("posture: auth=%s audit=%s audit-integrity=%s",
+		posture(*authPAMService != ""), posture(*auditEnable), posture(*auditIntegrity))
+
 	// auth-design.md L0: open the secret store when --secret-store
 	// is set. Nil store is the L0 disabled state.
 	var store secret.Store
@@ -315,12 +331,6 @@ func main() {
 	// answers 404 vs 401 depending on whether PAM is configured, and consumers
 	// read it that way today), and publishing the fact plainly beats consumers
 	// guessing from side channels. Nothing here names a network, node, or user.
-	posture := func(on bool) string {
-		if on {
-			return "enabled"
-		}
-		return "disabled"
-	}
 	mux.HandleFunc("GET /newt-server/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSON(w, http.StatusOK, map[string]string{
 			"status":          "ok",
@@ -429,6 +439,16 @@ func exemptUnauthenticated(mux, authed http.Handler) http.Handler {
 		}
 		authed.ServeHTTP(w, r)
 	})
+}
+
+// posture renders a deployment-posture flag for the /health payload and the
+// startup log. One spelling for both so an operator greps the log and reads the
+// endpoint expecting the same words.
+func posture(on bool) string {
+	if on {
+		return "enabled"
+	}
+	return "disabled"
 }
 
 // isHealthProbe matches exactly GET /newt-server/v1/health — the liveness and

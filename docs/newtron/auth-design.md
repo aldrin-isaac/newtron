@@ -78,12 +78,24 @@ authentication is not a health endpoint. It returns liveness (`status`,
 record is being written without first holding an engine credential.
 
 Posture describes how *this process* was started. It names no network, node,
-user, or spec, so it discloses no tenant data. It does tell an unauthenticated
-caller when auditing is off, which is accepted deliberately: that fact is
-already inferable (`POST /auth/login` answers 404 vs 401 depending on whether
-PAM is configured, and consumers read it that way today), and publishing it
-plainly is better than consumers inferring posture from side channels. The
-exemption is scoped to exactly that one method and path — `/auth/login` and
+user, or spec, so it discloses no tenant data.
+
+It does tell an unauthenticated caller that a server is running with no
+authentication or no audit log, and **that is the point, not a concession**. A
+server in that state is almost always a development or demo run that outlived
+its intent, and the asymmetry favours the defender: an attacker who can reach
+the endpoint can already discover the same fact by simply making a request,
+whereas the operator who would fix it is the one who never thinks to look.
+Publishing posture plainly means a misconfigured server is caught by the people
+who care, early, rather than by whoever finds it later.
+
+For the same reason posture is stated in the **startup log**, not only on the
+endpoint — an operator watching a server come up should not have to query it to
+learn it is unauthenticated. Running without `--auth-pam-service` or without
+`--audit` each logs a `WARNING`, and every start logs a `posture:` line in both
+directions so the two surfaces use the same words.
+
+The exemption is scoped to exactly one method and path — `/auth/login` and
 `/auth/logout` share the prefix and stay authenticated.
 
 | Threat | Surface | Layer that addresses it |
