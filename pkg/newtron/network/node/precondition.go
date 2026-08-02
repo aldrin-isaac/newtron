@@ -188,6 +188,19 @@ func (p *PreconditionChecker) RequireACLTableNotExists(name string) *Preconditio
 	return p
 }
 
+// RequireBGPPeerNotExists checks that no BGP neighbor with this IP is already
+// configured. "Already peered" is a conflict with existing state, not a bad
+// request — routing it through the checker maps it to 409 rather than the 500 a
+// hand-rolled fmt.Errorf produced.
+func (p *PreconditionChecker) RequireBGPPeerNotExists(neighborIP string) *PreconditionChecker {
+	if p.node.BGPNeighborExists(neighborIP) {
+		p.errors = append(p.errors, util.NewPreconditionError(
+			p.operation, p.resource, "BGP peer must not exist",
+			fmt.Sprintf("BGP peer %s already exists", neighborIP)))
+	}
+	return p
+}
+
 // Check runs a custom check
 func (p *PreconditionChecker) Check(condition bool, precondition, details string) *PreconditionChecker {
 	if !condition {

@@ -145,15 +145,16 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 // For DIRECT BGP peers that use a link IP as the update-source (typical
 // eBGP on point-to-point links), use Interface.AddBGPPeer() instead.
 func (n *Node) AddBGPEVPNPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	if err := n.precondition(sonic.OpAddBGPEVPNPeer, neighborIP).Result(); err != nil {
-		return nil, err
-	}
-
+	// Caller input first (400), then state preconditions (409). An unparseable
+	// address is the caller's to fix; an address already peered is a conflict
+	// with what the device holds.
 	if !util.IsValidIPv4(neighborIP) {
-		return nil, fmt.Errorf("invalid neighbor IP: %s", neighborIP)
+		return nil, &util.ValidationError{Field: "neighbor_ip", Errors: []string{
+			fmt.Sprintf("invalid neighbor IP: %s", neighborIP)}}
 	}
-	if n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP peer %s already exists", neighborIP)
+	if err := n.precondition(sonic.OpAddBGPEVPNPeer, neighborIP).
+		RequireBGPPeerNotExists(neighborIP).Result(); err != nil {
+		return nil, err
 	}
 
 	// EVPN peer group required (created by ConfigureBGPOverlay, called by SetupDevice with source_ip).

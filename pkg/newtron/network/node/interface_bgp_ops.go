@@ -61,14 +61,15 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 		neighborIP = derivedIP
 	}
 
-	// Validate neighbor IP
+	// Caller input first (400), then state preconditions (409) — same split as
+	// AddBGPEVPNPeer.
 	if !util.IsValidIPv4(neighborIP) {
-		return nil, fmt.Errorf("invalid neighbor IP: %s", neighborIP)
+		return nil, &util.ValidationError{Field: "neighbor_ip", Errors: []string{
+			fmt.Sprintf("invalid neighbor IP: %s", neighborIP)}}
 	}
-
-	// Check if BGP peer already exists
-	if n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP peer %s already exists", neighborIP)
+	if err := n.precondition(sonic.OpAddBGPPeer, i.name).
+		RequireBGPPeerNotExists(neighborIP).Result(); err != nil {
+		return nil, err
 	}
 
 	// Extract local IP without mask for update-source
