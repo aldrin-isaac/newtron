@@ -10,20 +10,26 @@ breaks silently. Ansible playbooks return success without verifying that
 writes landed. Terraform state files diverge from reality after a crash
 and require manual surgery to recover.
 
-The tools are different. The failure mode is the same: two
-representations of a device — one for what should exist, another for
-what does exist — maintained by separate code, synchronized by hope,
-diverging by default. This is not a bug in any particular tool. It is
-the structural consequence of separating intent from reality into
-distinct types or stores. The separation is itself the source of the
-drift it tries to detect. Terraform has this problem. Kubernetes has
-this problem. Every system built on that separation has this problem.
+The tools are different. The failure mode is the same. Look at where
+each one keeps what it knows: Terraform in a state file, the
+reconciler in its own database, the scraper in whatever it parsed
+last time. All of it is notes kept in the middle — between the
+operator's intent and the device — maintained by separate code,
+synchronized by hope, describing both ends and belonging to neither.
+The device changes and the notes don't hear about it. The notes
+survive a crash wrong and nobody notices. And the writes go out
+open-loop: push, report success, never read back. Nothing in these
+systems is ever forced to look at the actual device — not before
+acting, not after. So error doesn't announce itself. It accumulates
+quietly in the gap between the notes and the machine, and you meet it
+during an outage.
 
 These are principles for building something different: the software
 behind a software-driven network. Not scripts that push configs to
 switches, but software that embodies how the network should be built,
 ensures each device is programmed correctly, tracks what has been done,
-and can prove — at any time — that reality matches intent.
+and can show, entry by entry and at any time, where the device
+agrees with intent and where it does not.
 
 The platform is SONiC — the open-source network operating system that
 runs on white-box switches from dozens of vendors. SONiC is unusual:
@@ -42,18 +48,53 @@ own data alongside SONiC's tables — intent records, operational
 metadata, anything that benefits from living on the device itself
 rather than in an external store.
 
-The central insight is that intent and reality need not be two things.
-They are the same object viewed from different starting points. The
-Node is that object. An offline Node initialized from specs and
-profiles IS the expected state — intent before actualization. A
-actuated Node whose projection is rebuilt from intent records stored
-on the device IS the expected state verified against reality. Same type, same
-methods, same preconditions, same validation. From this single design
-decision — one object, three states — delivery guarantees, offline
-provisioning, drift
-detection, and crash recovery all follow as structural consequences
-rather than independent features that must be built and maintained
-independently.
+The solution has two parts, and both are about memory.
+
+First: the system keeps no notes. Nothing between the spec and the
+device is ever stored. What a device should look like is computed
+fresh before every operation and thrown away after — one piece of
+code doing the computing either way. Built from spec files, it is the
+expected state of a device that doesn't exist yet; built from the
+records on a live device, it is the expected state of one that does.
+The Node is that one piece of code — same type, same methods, same
+preconditions, same validation, whichever end it starts from. A
+system that remembers nothing can't remember wrong. And from this one
+decision — one object, one code path, three initializations —
+delivery guarantees, offline provisioning, drift detection, and crash
+recovery follow as structural consequences rather than independent
+features.
+
+Second: the one record that has to be durable — what was actually
+applied, and why — lives on the device itself. Every operation writes
+its intent record and the configuration it produces in one
+transaction, to one database, on the device it configured. The record
+can't miss a change, because it's part of the change. It can't be
+lost separately from the config, or survive a crash the config
+didn't. There is no state file about the device; there is the device,
+carrying its own receipt.
+
+That leaves two durable things in the world: the spec — what you
+want — and the device — what is, plus the receipt for what was done.
+Everything in between is recomputed on demand, and the loop between
+the two ends runs on every operation, not on a schedule: rebuild the
+expected state, read the device, compare. A spec edit shows up as a
+difference to deliver — that's the job. Everything else that shows up
+— a daemon that took the write and did nothing, a by-hand fix at 3am,
+a crash between write and confirm, a bug in this system's own code —
+is a difference the system refuses to write over. It stops. What's on
+the device stays put, the mismatch is listed entry by entry, and a
+person decides what happens next — because sometimes the 3am fix was
+right, and software that silently overwrites it is making the night
+worse. If intent and reality are supposed to agree, you don't keep
+writing when they don't.
+
+The claim goes as far down as CONFIG_DB and no further. Below that,
+SONiC's daemons turn database entries into kernel and ASIC state, and
+they can fail with the database in perfect shape — a race between two
+daemons, a fifteen-character kernel limit that quietly killed a
+dataplane while every check said green. Both are in this document
+because both happened. Below CONFIG_DB the system watches and tests;
+it doesn't prove.
 
 This document is in two parts. **Part 1 — The Architecture** presents
 the principles that define the system: the Node thesis, the domain
@@ -99,12 +140,14 @@ Everything else in this document follows from them.
 
 ## 1. The Node — Intent and Reality in One Object
 
-Drift is not a bug in the reconciliation logic. It is the structural
-consequence of maintaining parallel representations — one for intent,
-one for reality — with separate code paths that must stay synchronized
-forever. The Node — a software object that represents a device, not the
-device itself — eliminates the duality at the root. It does not bridge
-intent and reality — it *is* both, depending on how it is initialized.
+Erosion begins wherever a tool keeps notes about a device — a stored
+model, maintained by its own code path, that must stay synchronized
+with the machine forever. The Node — a software object that
+represents a device, not the device itself — is how this system keeps
+no notes. It is the single representation of expected state, computed
+fresh each time it is needed, by one code path that runs from either
+end: from spec files for a device that does not exist yet, or from
+the intent records a live device carries.
 
 The Node operates in three states — same code path, different
 initialization:
@@ -2944,14 +2987,18 @@ multiple current SONiC schemas to produce.
 
 ### Thesis vs delivery framing
 
-§1 says the Node — unifying intent and reality in one object — is the
-central concept. §10 says delivery is what the system treats as "the
-problem." The resolution: delivery is the *externally visible*
-promise; the Node is the *architectural mechanism* that keeps it. The
-thesis explains why the promise is keepable — one code path means
-delivery guarantees are structural, not aspirational. The promise
-explains why the thesis matters to operators — they care that their
-writes land safely, not that the internal architecture is elegant.
+§1 makes the Node — one memoryless representation of expected state —
+the central concept. §10 says delivery is what the system treats as
+"the problem." And a reader can fairly ask why, if intent and the
+device are meant to agree, so much of this document is machinery for
+their disagreement — guards, reconciliation, settling checks. The
+resolution: delivery is the *externally visible* promise; the Node is
+the *architectural mechanism* that keeps it; and the disagreement
+machinery is what keeping it costs on hardware and software that
+never promised to cooperate. A system that stated the agreement and
+shipped no guard would be synchronizing by hope. One code path makes
+delivery guarantees structural rather than aspirational; the guard
+makes the agreement honest rather than assumed.
 
 ---
 
@@ -2961,7 +3008,7 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 
 | # | Principle | One-Line Rule | |
 |---|-----------|---------------|-|
-| 1 | The Node — intent and reality in one object | Intent and reality are the same type viewed from different starting points; the Node is that type | C |
+| 1 | The Node — intent and reality in one object | Expected state has one representation and one code path, recomputed fresh from specs or from the device's own records; the Node is that type | C |
 | 2 | Three properties of one code path | Delivery, offline provisioning, and drift detection are structural consequences, not independent features | C |
 | 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | C |
 | 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C |
