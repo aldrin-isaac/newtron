@@ -213,7 +213,7 @@ Never assert what code does based on assumptions, naming conventions, or mental
 models. Before making any claim about what a function reads, writes, or depends
 on — **read the actual code**.
 
-- "This function calls X" — did you grep for the call site?
+- "This function calls X" — did you trace it in the code graph, or only match the name? (§26)
 - "This table is used by Y" — did you read the function that writes/reads it?
 - "This depends on Z" — did you trace the dependency in source?
 
@@ -582,3 +582,61 @@ single-owner violation. Converge it in the same change, not a follow-up.
 Cross-references: §3 (don't create what already exists), §7 (second instance =
 stop), §13 (unify the name, then merge the paths), §24 (the sibling mechanical
 check, for §15).
+
+---
+
+## 26. Verify Structure With the Code Graph, Not a Substring Match — IMPL+REVIEW+EXPLAIN
+
+The mechanical companion to §11 ("Do Not Speculate"). §11 says verify a claim in
+source before asserting it; this directive says **which claims `grep` cannot
+answer, and what does.**
+
+Relational claims about code — "A calls B", "B is reachable from A", "this is B's
+only caller", "nothing else writes this table", "this type implements that
+interface" — are questions about the call-and-reference graph, not about text.
+`grep`/`sed` answer exactly one question: does this string appear in these files.
+That is not the same question, and treating a match as the answer is how a false
+claim ships. Seeing `TxPipeline` in `pipeline.go` and concluding that a method in
+that package delivers atomically is a substring over-read — the graph, not the
+file, decides which path calls it.
+
+**Use the code graph.** For Go this repo runs `gopls` behind the LSP integration;
+it is compiler-backed, so its answers are authoritative, not heuristic:
+
+- **"Does A call / reach B?" / "who are B's callers?"** → `findReferences` on B.
+  The returned sites are the complete set; if A's file is not among them, A does
+  not call B. (This one query refutes the error below.)
+- **"What does A call / depend on?"** → read A's body, or `outgoingCalls` on A.
+- **"Who implements / overrides this?"** → `goToImplementation`.
+- **"Where is this defined? What symbols does this file hold?"** →
+  `goToDefinition`, `documentSymbol`.
+
+Where the LSP integration is absent, or a call-hierarchy request fails — on a
+large module `incomingCalls`/`outgoingCalls` can exceed the bridge's budget and
+drop the connection — fall back to **reading the named function's body in
+source**, never to grep-and-generalize. `findReferences` and reading the body are
+the two reliable moves; the call-hierarchy ops are a convenience on top, not the
+floor.
+
+`grep`/`sed` keep their proper jobs: locating text, counting occurrences, reading
+a passage, finding candidate sites to *then* verify in the graph. They are not the
+authority on reachability, call structure, or ownership.
+
+**The trigger:** before the word "verified" attaches to any claim about what calls
+what, what is reachable, or who writes a table — in a doc, a PR, or a review — the
+code graph, or a direct read of the named function, backs it. A substring match
+alone never does.
+
+This section is earned. A re-scoped `DESIGN_PRINCIPLES.md` thesis claimed, and
+merged to `main`, that "every operation writes its intent record and the
+configuration it produces in one transaction … every entry lands or none does."
+It does not: `ChangeSet.Apply` is a sequential loop of per-entry
+`SetWithReply`/`DeleteWithReply` that aborts on the first error; `TxPipeline` is
+only the composite/reconcile path. The claim came from grepping `pipeline.go`,
+seeing `TxPipeline`, and never tracing which path `Apply` actually calls.
+`findReferences` on `TxPipeline` returns its call sites across four files —
+`changeset.go` not among them — refuting the claim in one call. The tool was
+available; the query was skipped. Cross-references: §11 (the parent — verify,
+don't speculate), §25 (`findReferences` is how you enumerate a table's writers or
+an operation's callers), §20 (docs lag code — verify the doc against the graph,
+not the graph against the doc).
