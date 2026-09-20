@@ -36,9 +36,11 @@ device's NEWTRON_INTENT records on an actuated one, through the same
 replay path either way. Same type, same methods, same preconditions,
 same validation. The one durable record — what was applied, and why —
 is written by `writeIntent` into the same ChangeSet as the CONFIG_DB
-entries it explains and lands on the device in the same MULTI/EXEC
-transaction: the receipt cannot miss a change, because it is part of
-the change. That leaves the spec directory and the device as the only
+entries it explains, ahead of them, so configuration never reaches the
+device without the receipt that explains it. A composite delivery
+commits that set in one MULTI/EXEC (`TxPipeline`); an incremental
+`Apply` writes its entries one at a time and stops on the first error —
+either way the receipt leads, which is what makes a crash recoverable. That leaves the spec directory and the device as the only
 two durable stores, and `execute()` runs the loop between them on
 every operation — rebuild, compare, and refuse to write when device
 CONFIG_DB has diverged from the projection. From this single design
@@ -381,9 +383,14 @@ newtron IS that owner. It writes NEWTRON_INTENT records to CONFIG_DB
 alongside the entries those intents describe. The intent DB is the
 primary state — the projection (expected CONFIG_DB) is derived from it.
 External CONFIG_DB edits are drift, detected by the drift guard and
-refused until the operator reconciles. newtron does not support
-brownfield — two opinionated architectures cannot converge on the
-same device.
+refused until the operator reconciles. Detection is scoped to the tables
+newtron writes (`DiffConfigDB` compares only `ownedTables`, skips `PORT`
+and `DEVICE_METADATA`, and treats an unexpected extra field on an owned
+row as the device's business, not a conflict). newtron does not support
+brownfield — two opinionated architectures cannot converge on the same
+device; the scoping shares one CONFIG_DB with the platform's
+boot-established tables, it is not licence to co-manage the ones newtron
+owns.
 
 The paired framing that follows from this governs every operation:
 
@@ -923,13 +930,16 @@ addresses each one directly:
    is caught at the point of write, not when a daemon silently ignores
    the entry thirty seconds later.
 
-2. **Applied atomically.** Every mutating operation produces a ChangeSet
-   — a complete, ordered description of what will change — computed fully
-   before any Redis write occurs. Dry-run is the default; execution is
-   opt-in. The write itself is a single Redis MULTI/EXEC transaction
-   (`TxPipeline`): every entry lands or none does. What the transaction
-   cannot promise is that the daemons consuming those entries acted on
-   them — that is verification's job, not application's.
+2. **Applied as one ordered set.** Every mutating operation produces a
+   ChangeSet — a complete, ordered description of what will change —
+   computed fully before any Redis write occurs. Dry-run is the default;
+   execution is opt-in. The intent record leads the set. A composite
+   delivery commits the whole set in one Redis MULTI/EXEC (`TxPipeline`);
+   an incremental `ChangeSet.Apply` writes its entries in order via
+   per-entry `SetWithReply`/`DeleteWithReply`, stops at the first
+   failure, and records in `DeviceOps` exactly what landed. Neither
+   promises the daemons consuming those entries acted on them — that is
+   verification's job, not application's.
 
 3. **Verified by re-reading.** After execution, newtron re-reads every
    entry it wrote and diffs against the ChangeSet. If anything is missing
@@ -1261,7 +1271,6 @@ The current operation pairs:
 | Create | Remove |
 |--------|--------|
 | `CreateVLAN` | `DeleteVLAN` |
-| `AddVLANMember` | `RemoveVLANMember` |
 | `CreateVRF` | `DeleteVRF` |
 | `ConfigureInterface` (interface) | `UnconfigureInterface` (interface) |
 | `BindIPVPN` | `UnbindIPVPN` |
@@ -1272,12 +1281,17 @@ The current operation pairs:
 | `AddBGPPeer` (interface) | `RemoveBGPPeer` (interface) |
 | `BindMACVPN` (node) | `UnbindMACVPN` (node) |
 | `AddBGPEVPNPeer` | `RemoveBGPEVPNPeer` |
-| `ConfigureIRB` | `RemoveIRB` |
+| `ConfigureIRB` | `UnconfigureIRB` |
 | `CreateACL` | `DeleteACL` |
 | `AddStaticRoute` | `RemoveStaticRoute` |
+| `SetProperty` (interface) | `ClearProperty` (interface) |
 
 Baseline operations (no individual reverse — remediation is reconcile):
-`SetupDevice`, `SetProperty`
+`SetupDevice`. `set-property` is not one of these — it has a real
+`clear-property` reverse (`OpSetProperty.Inverse` in the registry) and
+belongs in the table above. VLAN membership is not a standalone pair
+either — it is a forwarding-mode decision covered by
+`ConfigureInterface`/`UnconfigureInterface` (§6).
 
 RefreshService is not a pair — it combines removal and reapplication
 as a single operation. When a service's spec changes after it was
@@ -1384,7 +1398,7 @@ that exists proves it was written. A process that responds proves it's
 alive. Structural proofs are binary — they are either true or false.
 Heuristics have thresholds, and thresholds have edge cases. One timer
 survives, named as what it is: a crashed lock-holder can prove nothing,
-so the device lock (SETNX in STATE_DB) carries a one-hour expiry as its
+so the device lock in STATE_DB carries a one-hour expiry as its
 liveness backstop. The lock guards concurrency, nothing more —
 detecting what a crash left behind is the projection comparison above,
 which needs no clock.
@@ -1531,9 +1545,19 @@ intfmgrd had moved on. The interface remained unbound forever — in the
 kernel, not in CONFIG_DB. The database said the device was configured.
 The device was not.
 
-Sequential operations — writing the VRF first, waiting for the kernel
-device, then writing the interface — never hit this race. The fix was
-ordering, not timing.
+Writing the VRF and the interface as two separate operations — the
+second only after the kernel VRF device exists — never hits this race:
+by the time intfmgrd sees the interface, vrfmgrd has materialized the
+device (RCA-037's "why Vrf_dp_test works"). Note what this is and isn't.
+Ordering entries *within a single delivery* does not help — a composite
+commits them together and the daemons still race, which is exactly how
+this bug reproduces at cold provision. What separates them is time.
+Where that settling can't be arranged ahead, the binding is verified
+afterward and re-driven if the kernel dropped it, because intfmgrd does
+not retry (RCA-037). So the rule has two halves: order entries within a
+delivery so a daemon consuming them in sequence sees parents first, and
+for a dependency that crosses daemons into the kernel, gate on the
+downstream state settling — a `pollUntil`, not a sleep.
 
 ### The dependency chain
 
@@ -1644,13 +1668,16 @@ reality for teardown and reconstruction.
 
 There is no separate "declared but not yet applied" state — the
 NEWTRON_INTENT schema's `state` field admits exactly one value,
-`actuated`. `writeIntent` puts the record in the same transaction as
-its CONFIG_DB entries, so a crash before commit leaves neither, a
-crash after leaves both, nothing in between. Recovery needs no zombie
-detection: on the next connect the projection is replayed from
-whatever records the device carries, the drift guard compares it
-against actual CONFIG_DB, and anything a crash left inconsistent
-surfaces as ordinary divergence for `Reconcile()` to re-deliver.
+`actuated`. `writeIntent` prepends the record to the ChangeSet that
+carries its CONFIG_DB entries, so the receipt lands before the config
+and configuration never exists without a record explaining it. The
+incremental `Apply` writes entries one at a time, so a crash can leave a
+receipt whose entries were only partly written — and that is fine: on
+the next connect the projection is replayed from whatever records the
+device carries, the drift guard compares it against actual CONFIG_DB,
+and whatever a crash left half-written surfaces as ordinary divergence
+for `Reconcile()` to re-deliver. No zombie detection, because the
+receipt is always there to replay from.
 
 There is no type discriminator field that says "this is a service intent"
 or "this is a VRF intent." The Operation field (e.g., `apply-service`,
@@ -1746,10 +1773,13 @@ Two rules follow:
 - **Reconstruction tolerates it.** A replay step that fails *solely* because its
   spec no longer resolves (`spec.NotFoundError`) is skipped, not fatal — a
   device must stay readable; one orphaned intent must not 503 every read of it.
-  The skip is scoped to spec-resolution failures only; a malformed intent or any
-  other replay error still aborts, so reconstruction never silently swallows a
-  real fault. Spec-resolution sites on the replay path must therefore preserve
-  the typed error through wrapping (`%w`). (`node.replaySteps`.)
+  The skip covers two classes — a spec that no longer resolves
+  (`spec.NotFoundError`) and an intent whose preconditions no longer hold on the
+  current device (`util.ErrPreconditionFailed`, e.g. a bind-qos recorded against
+  an IRB the capability gate now refuses); both are left in place to show as
+  drift. Any other replay error still aborts, so reconstruction never silently
+  swallows a real fault. Both skip sites must preserve the typed error through
+  wrapping (`%w`). (`node.replaySteps`.)
 - **The orphan surfaces as drift, and is deletable.** Skipping leaves the
   orphan's config out of the projection, so it shows as drift against the
   device's actual CONFIG_DB. Removing it needs no spec — the reverse operation
@@ -1851,7 +1881,7 @@ Each intent record stores two kinds of parameters:
 
 The record is the union. The two purposes read different fields:
 
-**Snapshot** (§21) extracts user params only. When `Snapshot()` exports
+**Snapshot** (§21) extracts user params only. When `IntentsToSteps` exports
 an intent as a topology step, it emits `service: transit` and
 `ip_address: 10.1.1.1/30` — not `l3vni: 1001` or `route_map_in:
 RM_IN_A1B2C3D4`. Replay re-derives resolved values from current specs.
@@ -1897,9 +1927,12 @@ growth degrades device operations for data that no SONiC daemon will
 ever consume.
 
 The intent record is O(resources) per device — one per managed resource
-(interface, VRF, overlay). The rollback history is O(1) per device —
-capped at a configurable limit (default 10 entries), oldest evicted. Neither grows with the number of
-operations performed over the device's lifetime.
+(interface, VRF, overlay), captured as current state rather than a
+journal — re-applying a resource updates its one record in place. A
+bounded rollback history would follow the same rule, but is not written
+today; `NEWTRON_HISTORY` exists as a reserved, drift-excluded table
+awaiting it. Neither the intent DB nor that reserved table grows with the
+number of operations performed over the device's lifetime.
 
 This principle killed the append-only journal design: after seven years
 of operations, CONFIG_DB would be dominated by thousands of history
@@ -2167,7 +2200,7 @@ evpn_ops.go        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
 acl_ops.go         → ACL_TABLE, ACL_RULE
 qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
                       SCHEDULER, WRED_PROFILE
-interface_ops.go   → INTERFACE
+interface_ops.go   → INTERFACE, PORTCHANNEL_INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
 intent_ops.go      → NEWTRON_INTENT
@@ -2493,7 +2526,7 @@ checks are advisory safety nets, not guarantees.
 
 # Part VIII: Working Conventions
 
-Seven conventions that prevent the slow erosion of Parts I–VII.
+The working conventions that prevent the slow erosion of Parts I–VII.
 
 ## 36. Normalize at the Boundary
 
@@ -3046,10 +3079,12 @@ sharing context. Conflating them would be unsafe.
 §5 says newtron owns the device's CONFIG_DB. It also says baseline
 prerequisites are non-negotiable. The resolution: the baseline is a
 precondition, not an ongoing constraint. `newtron init` establishes it
-once. After that, other writers can modify CONFIG_DB freely within the
-established baseline. newtron accommodates their writes. It does not
-accommodate a writer that disables unified mode or changes the baseline
-itself.
+once. After that, the drift guard watches only the tables newtron owns
+(§5), so a co-resident writer touching tables it never authors is
+outside the guard's view — tolerated because it is invisible, not
+accommodated as a feature. A writer that edits an owned table is drift
+and blocks the next write; one that disables unified mode or changes the
+baseline itself breaks the precondition newtron requires.
 
 ### Reconstruction and device state
 
@@ -3077,12 +3112,14 @@ The data exists; the three-way comparison is not yet built.
 
 ### Bounded footprint and rollback history
 
-§23 says CONFIG_DB cost must not grow with time. But the rollback
-history stores up to a configurable number of completed commits (default 10, set via `DefaultMaxHistory`).
-The resolution: 10 is a fixed constant, not a function of time. A
-device that has run 50,000 operations has the same 10 history entries
-as one that has run 11. The bound is structural — enforced by eviction,
-not by policy or operator discipline.
+§23 says CONFIG_DB cost must not grow with time. The intent DB honors
+this directly: one record per resource, updated in place, so a device
+that has run 50,000 operations carries the same footprint as one that
+has run 11. A rollback history would have to honor the same rule — a
+fixed cap, not a count that climbs with operations — which is why
+`NEWTRON_HISTORY` is reserved as a bounded, drift-excluded table rather
+than an open-ended log. That history is not written today; the bound is
+a constraint on the design, not yet an enforced mechanism.
 
 ### Greenfield and multi-version
 
@@ -3131,7 +3168,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C | construction | §12 |
 | 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C | machine: schema.go | §13 |
 | 14 | Verify writes, observe the rest | Assert what you know (your own writes); observe what you don't (the network); return data, not judgments | C | construction | §14 |
-| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (lock + intent) over heuristic detection (staleness timers) | C | machine: TestOpRegistrySanity, TestOpInverseWireRoute | §15 |
+| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (the projection either matches the device or it doesn't) over heuristic detection (staleness timers) | C | machine: TestOpRegistrySanity, TestOpInverseWireRoute | §15 |
 | 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C | prose | §16 |
 | 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C | prose | §17 |
 | 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C | construction | §18 |
@@ -3141,8 +3178,8 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C | machine: TestOpRoundTrip, TestRecordedParamsClaimed | §22 |
 | 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C | prose | §23 |
 | 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C | prose | §24 |
-| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C | construction | §25 |
-| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C | construction | §26 |
+| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | P | construction | §25 |
+| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | P | construction | §26 |
 | 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P | prose | §27 |
 | 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S | prose | §28 |
 | 29 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P | prose | §29 |
@@ -3154,15 +3191,15 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 35 | Import direction, interface state, projection rebuild | Three principles that each prevent a specific class of silent bug | P | construction | §34 |
 | 36 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P | construction | §35 |
 | 37 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C | prose | §36 |
-| 38 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C | prose | §37 |
+| 38 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | P | prose | §37 |
 | 39 | DRY across programs | Every capability exists in exactly one place, even across program boundaries | P | prose | §34 |
 | 40 | Greenfield | Write code for the system as it is today, not as it was yesterday | C | prose | §38 |
 | 41 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C | prose | §39 |
-| 42 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C | prose | §40 |
+| 42 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | P | prose | §40 |
 | 43 | Intent DAG — structural dependencies replace scanning | Declare parents at creation; the DAG enforces ordering, prevents premature deletion, and sorts reconstruction — without scanning | C | construction | — |
 | 44 | Kind-prefixed intent keys | Every intent key starts with its kind (`vlan\|100`, `interface\|Ethernet0`); no heuristics, no special cases | C | construction | — |
 | 45 | Multi-parent rendering | A child with multiple parents renders as a leaf under each parent; query the child directly to see its full subtree | C | construction | — |
 | 46 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C | prose | §41 |
-| 47 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C | machine: device_ops_test.go | §42 |
+| 47 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | P | machine: device_ops_test.go | §42 |
 | 48 | In-place update is delivered in place | To a daemon that re-reads on each notification, an edit and a remove+add differ; `update-X` uses a field diff (never DEL the key), teardown keeps DEL+ADD; the caller declares which | C | machine: device_ops_test.go | §43 |
 | 49 | An invariant declares its enforcement | The Enforcement column is the ledger; machine rows name their checker and pkg/conformance verifies it exists; prose is tracked debt | C | machine: TestPrinciplesCrosswalk, TestEnforcementLedger | §44 |

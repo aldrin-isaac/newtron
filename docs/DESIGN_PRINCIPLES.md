@@ -58,32 +58,35 @@ expected state of a device that doesn't exist yet; built from the
 records on a live device, it is the expected state of one that does.
 The Node is that one piece of code — same type, same methods, same
 preconditions, same validation, whichever end it starts from. A
-system that remembers nothing can't remember wrong. And from this one
+projection that is never stored can't go stale. And from this one
 decision — one object, one code path, three initializations —
 delivery guarantees, offline provisioning, drift detection, and crash
 recovery follow as structural consequences rather than independent
 features.
 
 Second: the one record that has to be durable — what was actually
-applied, and why — lives on the device itself. Every operation writes
-its intent record and the configuration it produces in one
-transaction, to one database, on the device it configured. The record
-can't miss a change, because it's part of the change. It can't be
-lost separately from the config, or survive a crash the config
-didn't. There is no state file about the device; there is the device,
-carrying its own receipt.
+applied, and why — lives on the device itself. Every operation puts
+its intent record and the configuration it produces in a single change
+set, delivered to one database on the device it configured, and the
+record is written first — so configuration never lands without the
+receipt that explains it. There is no store in the middle for the
+record to drift away into: no state file about the device, just the
+device, carrying its own receipt.
 
 That leaves two durable things in the world: the spec — what you
 want — and the device — what is, plus the receipt for what was done.
 Everything in between is recomputed on demand, and the loop between
 the two ends runs on every operation, not on a schedule: rebuild the
-expected state, read the device, compare. A spec edit shows up as a
-difference to deliver — that's the job. Everything else that shows up
-— a daemon that took the write and did nothing, a by-hand fix at 3am,
-a crash between write and confirm, a bug in this system's own code —
-is a difference the system refuses to write over. It stops. What's on
-the device stays put, the mismatch is listed entry by entry, and a
-person decides what happens next — because sometimes the 3am fix was
+expected state from the receipts, read the device, compare. Editing a
+spec doesn't touch the device; an operator delivers that change through
+an operation — that is how intent is meant to move. What the loop
+guards against is the device moving on its own: a daemon that took a
+write and did nothing, a by-hand fix at 3am, a crash between write and
+confirm, a bug in this system's own code. Any of those leaves the
+device diverged from what the receipts say it should be, and the guard
+stops — it will not write onto a device that no longer matches its own
+record of it. What's on the device stays put, the mismatch is listed
+entry by entry, and a person decides what happens next — because sometimes the 3am fix was
 right, and software that silently overwrites it is making the night
 worse. If intent and reality are supposed to agree, you don't keep
 writing when they don't.
@@ -416,9 +419,14 @@ The system IS that owner. It writes intent records to CONFIG_DB
 alongside the entries those intents describe. The intent DB is the
 primary state — the projection (expected CONFIG_DB) is derived from it.
 External CONFIG_DB edits are drift, detected by the drift guard and
-refused until the operator reconciles. The system does not support
-brownfield — two opinionated architectures cannot converge on the
-same device.
+refused until the operator reconciles. Detection is scoped to the
+tables the system writes: it compares its projection against those,
+does not police tables it never authors, and reads an unexpected extra
+field on one of its own rows as the device's business, not a conflict.
+The system does not support brownfield — two opinionated architectures
+cannot converge on the same device; the scoping is how it shares one
+CONFIG_DB with the platform's boot-established tables, not licence to
+co-manage the ones it owns.
 
 The paired framing that follows from this governs every operation:
 
@@ -852,27 +860,30 @@ tool provides this: QEMU VMs wired into topologies that the
 system configures. The virtual twin is separate
 infrastructure — it validates the automation, it is not the automation.
 
-### Integration through the spec directory
+### Integration through owned data, reached by API
 
-The natural instinct when integrating tools is to connect them with
-APIs — RPC calls, shared libraries, service registries. The integration
-model avoids all of these. Tools communicate through the spec
-directory — a set of JSON files describing the network, its devices,
-and its services:
+The natural instinct when integrating tools is to wire them into each
+other — shared libraries, service registries, one reaching into
+another's files. The integration model avoids that. Each kind of data
+has exactly one owning tool (§27): the spec directory — the JSON files
+describing the network, its devices, and its services — belongs to one
+tool; lab runtime state belongs to another. A tool that needs data it
+does not own asks the owner through the owner's API. It does not open
+the owner's files or spawn its binary.
 
-- Infrastructure tools write connectivity details (`ssh_port`,
-  `console_port`, `mgmt_ip`) into node spec files.
-- The system reads those profiles and uses them to
-  connect.
-- Orchestrators invoke the system's API, passing spec references by
+- The spec directory is owned by the tool that authors it; other tools
+  read specs through that tool's API, by name.
+- Runtime connectivity needed to reach a device — an SSH port, a
+  management address — is resolved from the owning tool at the moment of
+  connection, not copied into spec files that would then have to be kept
+  in sync.
+- Orchestrators invoke the owning tool's API, passing spec references by
   name.
 
-This means no shared libraries (a change to internal types
-does not require rebuilding anything else), no runtime coordination
-(tools don't need to be alive at the same time), and no service
-discovery (read a file, not an endpoint). The spec directory is the
-integration surface. Each tool is a separate binary with a separate
-failure domain.
+This means no shared libraries (a change to internal types does not
+require rebuilding anything else), no coupling to another tool's on-disk
+layout (only to its API), and one writer per kind of data (§27). Each
+tool is a separate binary with a separate failure domain.
 
 ---
 
@@ -960,13 +971,17 @@ addresses each one directly:
    is caught at the point of write, not when a daemon silently ignores
    the entry thirty seconds later.
 
-2. **Applied atomically.** Every mutating operation produces a ChangeSet
-   — a complete, ordered description of what will change — computed fully
-   before any Redis write occurs. Dry-run is the default; execution is
-   opt-in. The write itself is a single Redis transaction: every entry
-   lands or none does. What the transaction cannot promise is that the
-   daemons consuming those entries acted on them — that is
-   verification's job, not application's.
+2. **Applied as one ordered set.** Every mutating operation produces a
+   ChangeSet — a complete, ordered description of what will change —
+   computed fully before any Redis write occurs. Dry-run is the default;
+   execution is opt-in. The intent record leads the set, so
+   configuration never reaches the device without the receipt that
+   explains it. A composite delivery commits the whole set in one Redis
+   transaction; an incremental operation writes its entries in order and
+   stops at the first failure. Either way the ChangeSet records exactly
+   what landed — and a crash leaves the receipt to recover from — but
+   neither promises the daemons consuming those entries acted on them.
+   That is verification's job, not application's.
 
 3. **Verified by re-reading.** After execution, the system re-reads every
    entry it wrote and diffs against the ChangeSet. If anything is missing
@@ -1229,6 +1244,19 @@ visibility into the network-wide state that would make a route
 "correct" or "incorrect." Only an orchestrator that sees multiple
 devices can make that judgment.
 
+There is a floor beneath even the assertion. Re-reading CONFIG_DB
+proves the write reached the database; it cannot prove the daemons
+below CONFIG_DB turned it into kernel and ASIC state. Usually they do.
+When they don't, the database is a perfect record of a device that
+isn't configured. A VRF name one character past the fifteen the Linux
+kernel allows was accepted by CONFIG_DB, by the drift guard, and by the
+intent snapshot — every assertion the system can make read green —
+while the kernel `ip link add` failed silently and the dataplane was
+dead (RCA-052). Below CONFIG_DB the system can only observe: a poll of
+downstream state, a health read, a ping from a test. It asserts to the
+database and observes past it, and does not mistake the observation for
+a proof.
+
 This creates a clean four-tier verification hierarchy:
 
 | Tier | Question | Who Answers |
@@ -1311,9 +1339,13 @@ The current operation pairs:
 | `ConfigureIRB` | `UnconfigureIRB` |
 | `CreateACL` | `DeleteACL` |
 | `AddStaticRoute` | `RemoveStaticRoute` |
+| `SetProperty` | `ClearProperty` |
 
 Baseline operations (no individual reverse — remediation is reconcile):
-`SetupDevice`, `SetProperty`
+`SetupDevice`. A `set-*` verb is not automatically reverseless:
+`set-property` has a real `clear-property` reverse and belongs in the
+table above; only the `setup-*` device baseline is replaced as a unit
+rather than undone piecewise.
 
 VLAN membership is not a standalone operation — it is a forwarding
 mode decision (§6). Joining a VLAN bridge domain and joining a VRF
@@ -1489,8 +1521,9 @@ device-wide object referenced by per-interface bindings — the same shared-obje
 as ACLs and IP-VPNs (§24).
 
 Two rules follow:
-- `setup-*` and `set-*` = no individual reverse. Remediation is
-  reconcile.
+- `setup-*` = no individual reverse; its collective reverse is
+  reconcile. (`set-*` is not in this class — `set-property` reverses
+  with `clear-property`.)
 - Every other verb has a specific reverse verb. A developer adding a
   `create-*` operation must also implement `delete-*` in the same
   commit (§15).
@@ -1615,9 +1648,20 @@ intfmgrd had moved on. The interface remained unbound forever — in the
 kernel, not in CONFIG_DB. The database said the device was configured.
 The device was not.
 
-Sequential operations — writing the VRF first, waiting for the kernel
-device, then writing the interface — never hit this race. The fix was
-ordering, not timing.
+Writing the VRF and the interface as two separate operations — the
+second only after the kernel VRF device exists — never hits this race:
+by the time intfmgrd sees the interface, vrfmgrd has materialized the
+device. Note what this is and isn't. Ordering entries *within a single
+delivery* does not help here — a composite commits them together and
+the two daemons still race, which is exactly how this bug reproduces.
+What separates them is time: the VRF settles before the interface is
+written. Where that settling can't be arranged ahead — a cold provision
+writes both at once — the binding is verified afterward and re-driven if
+the kernel dropped it, because intfmgrd does not retry (RCA-037). So the
+honest rule has two halves: order entries within a delivery so a daemon
+consuming them in sequence sees parents first, and for a dependency that
+crosses daemons into the kernel, gate on the downstream state settling.
+That gate is a wait, and pretending it away is what this race punishes.
 
 ### The dependency chain
 
@@ -1738,15 +1782,18 @@ record captures the resource's current state — what should exist
 now — not a journal of operations. This keeps intent O(resources)
 per device (§23), not O(operations over time).
 
-There is no separate "declared but not yet applied" state. The
-transaction that writes an intent record writes its CONFIG_DB entries
-with it, so every record the device carries is *actuated* — a crash
-before commit leaves neither, a crash after leaves both, nothing in
-between. Recovery therefore needs no zombie detection: on the next
-connect the projection is replayed from whatever records the device
-carries, the drift guard compares it against actual CONFIG_DB, and
-anything a crash left inconsistent surfaces as ordinary divergence for
-`Reconcile()` to re-deliver.
+There is no separate "declared but not yet applied" state: every
+record the device carries is *actuated*, written in the same change set
+as the configuration it describes and ahead of it. Writing the receipt
+first means configuration never lands without a record that explains
+it — the direction that matters for recovery. The reverse can happen: a
+crash can leave a receipt whose entries were only partly written,
+because the entries go in one at a time. That needs no special
+detection — on the next connect the projection is replayed from
+whatever records the device carries, the drift guard compares it
+against actual CONFIG_DB, and whatever a crash left half-written
+surfaces as ordinary divergence for reconcile to re-deliver. No zombie
+detection, because the receipt is always there to replay from.
 
 There is no type discriminator field that says "this is a service intent"
 or "this is a VRF intent." The Operation field (e.g., `apply-service`,
@@ -1848,8 +1895,11 @@ definition — reconcilable drift, not a fatal inconsistency. Two rules follow.
 **Reconstruction tolerates it** — a replay step that fails *solely* because its
 definition no longer resolves is skipped, not fatal, so the managed object
 stays readable; one orphaned record must not break every read of it. The skip
-is scoped to definition-resolution failures only — any other replay error still
-aborts, so reconstruction never silently swallows a real fault. **The orphan
+covers two cases — an intent whose definition no longer resolves, and one whose
+preconditions no longer hold on the current device (a policy recorded against a
+resource that can no longer accept it) — both left in place to show as drift. Any
+other replay error still aborts, so reconstruction never silently swallows a real
+fault. **The orphan
 surfaces as drift, and is deletable** — skipping leaves its state out of the
 reconstructed expectation, so it shows as drift against actual state; removing
 it needs no definition, because the reverse operation is self-sufficient from
@@ -1986,9 +2036,13 @@ growth degrades device operations for data that no SONiC daemon will
 ever consume.
 
 The intent record is O(resources) per device — one per managed resource
-(interface, VRF, overlay). The rollback history is O(1) per device —
-capped at 10 entries, oldest evicted. Neither grows with the number of
-operations performed over the device's lifetime.
+(interface, VRF, overlay), and it captures current state, not a journal:
+re-applying a resource updates its one record in place rather than
+appending, so the footprint tracks the infrastructure, never the
+operation count. A bounded rollback history would follow the same rule —
+a fixed cap, not a number that climbs with operations — but is not
+written today; NEWTRON_HISTORY exists as a reserved, drift-excluded
+table awaiting it.
 
 This principle killed the append-only journal design: after seven years
 of operations, CONFIG_DB would be dominated by thousands of history
@@ -2944,10 +2998,13 @@ sharing context. Conflating them would be unsafe.
 §5 says the system owns the device's CONFIG_DB. It also says baseline
 prerequisites are non-negotiable. The resolution: the baseline is a
 precondition, not an ongoing constraint. The initialization command
-establishes it once. After that, other writers can modify CONFIG_DB
-freely within the established baseline. The system accommodates their
-writes. It does not accommodate a writer that disables unified mode or
-changes the baseline itself.
+establishes it once. After that, the drift guard watches only the
+tables the system owns (§5), so a co-resident writer touching tables it
+never authors is outside the guard's view — tolerated because it is
+invisible, not accommodated as a feature. A writer that edits an owned
+table is drift and blocks the next write; one that disables unified
+mode or changes the baseline itself breaks the precondition the system
+requires.
 
 ### Reconstruction and device state
 
@@ -2975,12 +3032,14 @@ The data exists; the three-way comparison is not yet built.
 
 ### Bounded footprint and rollback history
 
-§23 says CONFIG_DB cost must not grow with time. But the rollback
-history stores up to 10 completed commits.
-The resolution: 10 is a fixed constant, not a function of time. A
-device that has run 50,000 operations has the same 10 history entries
-as one that has run 11. The bound is structural — enforced by eviction,
-not by policy or operator discipline.
+§23 says CONFIG_DB cost must not grow with time. The intent DB honors
+this directly: one record per resource, updated in place, so a device
+that has run 50,000 operations carries the same footprint as one that
+has run 11. A rollback history would have to honor the same rule — a
+fixed cap on entries, not a count that climbs with operations — which is
+why NEWTRON_HISTORY is reserved as a bounded, drift-excluded table
+rather than an open-ended log. That history is not written today; the
+bound is a constraint on the design, not yet an enforced mechanism.
 
 ### Greenfield and multi-version
 
