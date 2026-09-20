@@ -873,10 +873,11 @@ the owner's files or spawn its binary.
 
 - The spec directory is owned by the tool that authors it; other tools
   read specs through that tool's API, by name.
-- Runtime connectivity needed to reach a device — an SSH port, a
-  management address — is resolved from the owning tool at the moment of
-  connection, not copied into spec files that would then have to be kept
-  in sync.
+- A device's runtime SSH port — a lab allocation — is resolved from the
+  owning tool at the moment of connection, not copied into spec files
+  that would then drift. A management address for real hardware, by
+  contrast, is the node spec's own field: owned data read directly, not
+  a copy of another tool's.
 - Orchestrators invoke the owning tool's API, passing spec references by
   name.
 
@@ -1047,7 +1048,8 @@ writes CONFIG_DB entries is automatically previewable, executable,
 and verifiable. Adding a new operation never requires adding a new
 verification method.
 
-A ChangeSet is atomic within a single invocation. If an
+A ChangeSet is the unit of a single invocation — computed whole before
+any write, and the boundary at which reversal is defined. If an
 orchestrator makes multiple invocations and the second fails, deciding
 whether to roll back the first is the orchestrator's responsibility.
 The system provides the mechanism (each ChangeSet can be reversed

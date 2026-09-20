@@ -275,9 +275,11 @@ func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[str
 //     the operator can reconcile away. Removing it is the self-sufficient
 //     reverse path (§15) — teardown reads the intent record, not the spec.
 //
-// Skipping is scoped to spec.NotFoundError ONLY; any other replay failure
-// (malformed intent, render/validation error) is returned. Reconstruction must
-// not silently swallow real errors. ProjectionDiff deliberately does NOT use
+// Skipping is scoped to two recoverable classes — spec.NotFoundError (the
+// definition is gone) and util.ErrPreconditionFailed (the intent no longer fits
+// the current device); any other replay failure (malformed intent,
+// render/validation error) is returned. Reconstruction must not silently
+// swallow real errors. ProjectionDiff deliberately does NOT use
 // this helper — it replays *new, hypothetical* operations, where a missing
 // spec is a genuine error the operator must see.
 func (n *Node) replaySteps(ctx context.Context, steps []spec.TopologyStep) error {

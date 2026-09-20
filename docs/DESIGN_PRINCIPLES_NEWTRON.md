@@ -824,25 +824,30 @@ provides this: QEMU VMs wired into topologies that newtron configures.
 The virtual twin is separate infrastructure — it validates the
 automation, it is not the automation.
 
-### Integration through the spec directory
+### Integration through owned data, reached by API
 
-The natural instinct when integrating tools is to connect them with
-APIs — RPC calls, shared libraries, service registries. newtron's
-integration model avoids all of these. Tools communicate through the
-spec directory — a set of JSON files describing the network, its
-devices, and its services:
+Each kind of data has exactly one owning engine (§27), and an engine
+that needs data it does not own asks the owner over HTTP — it does not
+open the owner's files or spawn its binary. newtron owns the spec
+directory; newtlab owns lab runtime state. newtlab reads specs through
+newtron's HTTP client (the `NewtronClient` interface in
+`pkg/newtlab/newtlab.go`, "never by spawning its binary"), and newtron
+resolves a device's SSH port from newtlab at `Device.Connect` time
+(`network.go`: "SSH port is resolved from newtlab … not from the
+spec") — neither engine reads connectivity out of the other's files.
 
-- Infrastructure tools write connectivity details (`ssh_port`,
-  `console_port`, `mgmt_ip`) into node spec files.
-- newtron reads those profiles and uses them to connect.
+- Spec data (network, nodes, zones, services) is newtron's; other
+  engines read it through `/newtron/v1/...`, by name.
+- A device's runtime SSH port is a lab allocation, resolved from newtlab
+  at connect. Its management address, for real hardware, is the node
+  spec's own `mgmt_ip` — newtron's owned data, not a copy pulled in from
+  elsewhere.
 - Orchestrators invoke newtron's API, passing spec references by name.
 
-This means no shared libraries (a change to newtron's internal types
-does not require rebuilding anything else), no runtime coordination
-(tools don't need to be alive at the same time), and no service
-discovery (read a file, not an endpoint). The spec directory is the
-integration surface. Each tool is a separate binary with a separate
-failure domain.
+This means no shared libraries (a change to internal types rebuilds
+nothing else) and one writer per kind of data (§27). Each engine is a
+separate binary with a separate failure domain; integration is by API,
+so the owning engine must be reachable when its data is needed.
 
 ---
 
@@ -1005,7 +1010,8 @@ writes CONFIG_DB entries is automatically previewable, executable,
 and verifiable. Adding a new operation never requires adding a new
 verification method.
 
-A ChangeSet is atomic within a single newtron invocation. If an
+A ChangeSet is the unit of a single newtron invocation — computed whole
+before any write, and the boundary at which reversal is defined. If an
 orchestrator makes multiple invocations and the second fails, deciding
 whether to roll back the first is the orchestrator's responsibility.
 newtron provides the mechanism (each ChangeSet can be reversed through
