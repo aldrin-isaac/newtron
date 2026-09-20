@@ -18,36 +18,41 @@ applications can also store their own data alongside SONiC's tables —
 intent records, operational metadata, anything that benefits from
 living on the device itself rather than in an external store.
 
-But the hardest problem isn't SONiC-specific. Every system that
-automates device configuration eventually faces the same structural
-problem: it
-maintains two representations of a device. One
-for what the device should look like — the intent, the desired state,
-the template output. Another for what the device does look like — the
-live state, the actual CONFIG_DB, the ground truth read back from
-Redis. Two data structures, two code paths, one for computing what
-should exist and another for reading what does exist, compared by a
-third code path that understands neither as well as the code that
-produced them.
+But the hardest problem isn't SONiC-specific. Every configuration
+automation ends up keeping notes about the device somewhere between
+the operator's intent and the machine — a state file, a cached model,
+yesterday's parse — and notes in the middle erode: nothing forces
+them to face the device before a write or after one
+(`DESIGN_PRINCIPLES.md`, opening and §1). SONiC is the rare platform
+where the notes can be eliminated instead of maintained, because the
+device is already a database: the record of what was done can live
+next to what was done, and the expected state can be recomputed from
+that record on demand.
 
-This is the architecture of drift. Not drift as a bug to be fixed, but
-drift as the structural consequence of maintaining parallel
-representations that must stay synchronized through every code change,
-every edge case, every midnight hotfix. Terraform has this problem.
-Kubernetes has this problem. Every system that separates "desired" from
-"actual" into distinct types or stores has this problem, because the
-separation is itself the source of the divergence it tries to detect.
+So newtron keeps no notes. The projection — what the device should
+look like — is never stored: `RebuildProjection` recomputes it before
+every operation, from specs and profiles on an offline Node, from the
+device's NEWTRON_INTENT records on an actuated one, through the same
+replay path either way. Same type, same methods, same preconditions,
+same validation. The one durable record — what was applied, and why —
+is written by `writeIntent` into the same ChangeSet as the CONFIG_DB
+entries it explains and lands on the device in the same MULTI/EXEC
+transaction: the receipt cannot miss a change, because it is part of
+the change. That leaves the spec directory and the device as the only
+two durable stores, and `execute()` runs the loop between them on
+every operation — rebuild, compare, and refuse to write when device
+CONFIG_DB has diverged from the projection. From this single design
+decision — one object, one code path, three initializations —
+delivery guarantees, offline provisioning, drift detection, and crash
+recovery all follow as structural consequences rather than
+independent features.
 
-newtron's central insight is that intent and reality are the same object
-viewed from different starting points. The Node is that object. An
-offline Node initialized from specs and profiles IS the expected
-state — intent before actualization. An actuated Node whose projection
-is rebuilt from NEWTRON_INTENT records IS the expected state verified
-against reality. Same type, same methods, same preconditions, same
-validation. From this single design decision — one object, three
-states — delivery guarantees,
-offline provisioning, drift detection, and crash recovery all follow
-as structural consequences rather than independent features.
+The guarantee runs to CONFIG_DB and no further. intfmgrd and vrfmgrd
+can race with the database in perfect shape (RCA-037), and a
+sixteen-character VRF name once left CONFIG_DB, drift, and the intent
+snapshot all clean while the kernel device was never created and the
+dataplane was dead (RCA-052). Below CONFIG_DB, newtron observes —
+STATE_DB polls, dataplane assertions in newtrun — and does not prove.
 
 This document explains the principles behind that architecture — not as
 a reference, but as a narrative. Part I states the thesis: the Node,
@@ -104,12 +109,14 @@ else in this document follows from them.
 
 ## 1. The Node — Intent and Reality in One Object
 
-Drift is not a bug in the reconciliation logic. It is the structural
-consequence of maintaining parallel representations — one for intent,
-one for reality — with separate code paths that must stay synchronized
-forever. The Node — a software object that represents a device, not the
-device itself — eliminates the duality at the root. It does not bridge
-intent and reality — it *is* both, depending on how it is initialized.
+A reconciler that stores its model of the device has committed to
+synchronizing that model forever (`DESIGN_PRINCIPLES.md` §1). The
+Node — a software object that represents a device, not the device
+itself — is newtron's refusal of that commitment: it stores nothing.
+It is the expected state of the device, recomputed on demand, by one
+code path that starts from either end — spec files when the device
+doesn't exist yet, the device's own NEWTRON_INTENT records once it
+does.
 
 The Node operates in three states — same code path, different
 initialization:
@@ -3082,14 +3089,19 @@ multiple current SONiC schemas to produce.
 
 ### Thesis vs delivery framing
 
-§1 says the Node — unifying intent and reality in one object — is the
-central concept. §10 says delivery is what newtron treats as "the
-problem." The resolution: delivery is the *externally visible*
-promise; the Node is the *architectural mechanism* that keeps it. The
-thesis explains why the promise is keepable — one code path means
-delivery guarantees are structural, not aspirational. The promise
-explains why the thesis matters to operators — they care that their
-writes land safely, not that the internal architecture is elegant.
+§1 makes the Node — expected state recomputed on demand, never
+stored — the central concept. §10 says delivery is what newtron
+treats as "the problem." A reader can fairly ask why, if projection
+and device CONFIG_DB are meant to agree, so much of this document is
+machinery for their disagreement — the drift guard, reconcile,
+settling checks. The resolution: delivery is the *externally visible*
+promise; the Node is the *architectural mechanism* that keeps it; and
+the disagreement machinery is what keeping it costs on daemons and
+hardware that never promised to cooperate. A newtron that asserted
+the agreement and shipped no guard would be synchronizing by hope.
+One code path makes delivery guarantees structural rather than
+aspirational; the guard makes the agreement honest rather than
+assumed.
 
 ---
 
@@ -3099,7 +3111,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 
 | # | Principle | One-Line Rule | | Enforcement | Universal § |
 |---|-----------|---------------|-|-------------|-------------|
-| 1 | The Node — intent and reality in one object | Intent and reality are the same type viewed from different starting points; the Node is that type | C | construction | §1 |
+| 1 | The Node — intent and reality in one object | Expected state has one representation, recomputed per operation from specs or NEWTRON_INTENT; the Node is that type | C | construction | §1 |
 | 2 | Three properties of one code path | Delivery, offline provisioning, and drift detection are structural consequences, not independent features | C | construction | §2 |
 | 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | C | construction | §3 |
 | 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C | prose | §4 |
