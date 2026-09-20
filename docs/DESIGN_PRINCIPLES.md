@@ -161,7 +161,10 @@ initialization:
 - **Connected**: The Node is connected to a device but not yet
   actuated. The projection is still built from intent replay, not
   loaded from Redis. Operations write intents and render them into
-  the projection. Used to apply operations and deliver them.
+  the projection. Used to apply operations and deliver them. Its
+  intents originate from specs and this session's operations; the
+  device's own intent records are not read — reading them is what
+  actuation means.
 
 - **Actuated**: The Node is connected and actuated — intents loaded
   from the device's own intent records. The projection is
@@ -231,8 +234,8 @@ projection is exported via `ExportEntries()` and delivered via
 only path where the system asserts authority over device state.
 
 **Operations** — Day-2 in industry parlance — are mutations against
-the projection. Before every operation, `RebuildProjection()` re-derives
-the projection from the latest intents — ensuring each operation sees
+the projection. Before every operation, the projection is re-derived
+from the latest intents — ensuring each operation sees
 fresh, authoritative state. Preconditions check the projection, not raw
 device CONFIG_DB. In actuated mode, the drift guard also fires: if
 device CONFIG_DB diverges from the projection, the operation is refused
@@ -465,8 +468,8 @@ that the system accepts. The drift guard detects the divergence and
 refuses writes until the operator reconciles.
 
 There is no background reconciliation loop — but the system is not
-passive either. Every operation begins with `RebuildProjection()`,
-which re-derives expected state from the latest intents. If the
+passive either. Every operation begins by re-deriving expected state
+from the latest intents. If the
 projection and device CONFIG_DB disagree, the drift guard fires. The
 operator must either reconcile (overwrite the device to match intent)
 or clear intents and start fresh.
@@ -960,9 +963,10 @@ addresses each one directly:
 2. **Applied atomically.** Every mutating operation produces a ChangeSet
    — a complete, ordered description of what will change — computed fully
    before any Redis write occurs. Dry-run is the default; execution is
-   opt-in. Because the description is complete before the first write,
-   the outcome is always knowable: either every entry landed, or the
-   ChangeSet tells you exactly which did and which didn't.
+   opt-in. The write itself is a single Redis transaction: every entry
+   lands or none does. What the transaction cannot promise is that the
+   daemons consuming those entries acted on them — that is
+   verification's job, not application's.
 
 3. **Verified by re-reading.** After execution, the system re-reads every
    entry it wrote and diffs against the ChangeSet. If anything is missing
@@ -976,7 +980,7 @@ addresses each one directly:
    belong to me?"
 
 These guarantees are properties of the pipeline, not of any specific
-primitive. When a new primitive is added, it inherits them automatically.
+primitive. Every new primitive inherits them without new code.
 When an existing primitive changes, they remain. The pipeline absorbs
 growth; individual primitives do not need to earn their own reliability.
 
@@ -1054,7 +1058,7 @@ diff, never a `DEL`+`ADD` of the same key (§43).
 ## 12. Dry-Run as First-Class Mode
 
 Every mutating operation supports dry-run as the **default behavior**.
-The `-x` flag is required to execute. Without it, operations preview
+An explicit execute flag is required. Without it, operations preview
 what would change and return.
 
 This is not just a safety feature — it is an architectural constraint
@@ -1421,11 +1425,15 @@ threshold, no edge cases.
 
 This pattern applies beyond intent records. Anywhere a heuristic
 (timeout, polling interval, retry count) is used to detect a condition,
-ask first: is there a structural fact that already proves it? A lock
-that was acquired proves the previous holder released or expired. A
-file that exists proves it was written. A process that responds proves
-it's alive. Structural proofs are binary — they are either true or
-false. Heuristics have thresholds, and thresholds have edge cases.
+ask first: is there a structural fact that already proves it? A file
+that exists proves it was written. A process that responds proves it's
+alive. Structural proofs are binary — they are either true or false.
+Heuristics have thresholds, and thresholds have edge cases. One timer
+survives in this design, and it is named as what it is: a crashed
+lock-holder can prove nothing, so the device lock carries an expiry as
+its liveness backstop. The lock guards concurrency, nothing more —
+detecting what a crash left behind is the projection comparison above,
+which needs no clock.
 
 ### Symmetry is an axis, not a direction
 
@@ -1730,14 +1738,15 @@ record captures the resource's current state — what should exist
 now — not a journal of operations. This keeps intent O(resources)
 per device (§23), not O(operations over time).
 
-Intent records move through two states. *Unrealized* means declared but
-not yet applied — the intent exists as a record of what should happen, but
-no CONFIG_DB entries have been written for it. *Actuated* means the
-operation completed successfully — the CONFIG_DB entries exist and match
-what the intent record describes. If a process crashes mid-apply, the
-drift guard on the next connect detects the mismatch between projection
-and device CONFIG_DB. `Reconcile()` re-delivers the full projection —
-no zombie detection or heuristic recovery needed.
+There is no separate "declared but not yet applied" state. The
+transaction that writes an intent record writes its CONFIG_DB entries
+with it, so every record the device carries is *actuated* — a crash
+before commit leaves neither, a crash after leaves both, nothing in
+between. Recovery therefore needs no zombie detection: on the next
+connect the projection is replayed from whatever records the device
+carries, the drift guard compares it against actual CONFIG_DB, and
+anything a crash left inconsistent surfaces as ordinary divergence for
+`Reconcile()` to re-deliver.
 
 There is no type discriminator field that says "this is a service intent"
 or "this is a VRF intent." The Operation field (e.g., `apply-service`,
@@ -1784,9 +1793,8 @@ and the evolved device (post-provision operations). The topology
 provisioner calls the same methods on an offline Node (`SetupDevice`,
 `ApplyService`, etc.); `ExportEntries()` yields the expected CONFIG_DB
 after provisioning. The intent records give you everything that happened
-since — each one carries enough information to replay the operation via
-`IntentsToSteps` + `ReplayStep` and produce the incremental CONFIG_DB
-entries. Together, they reconstruct the full expected state at any point
+since — each one carries enough information to replay the operation
+through the replay path and produce the incremental CONFIG_DB entries. Together, they reconstruct the full expected state at any point
 in the device's lifetime.
 
 The existing principle "intent records must be self-sufficient for reverse
@@ -1884,8 +1892,8 @@ after each operation — by reconstructing expected state and diffing
 against actual CONFIG_DB.
 
 CONFIG_DB contains intent — what the device should look like — not
-history. The unrealized intent record (§19) is intent: "this should be
-applied." Completed operation history is not intent. It belongs in
+history. The intent record (§19) is intent: "this should exist."
+Completed operation history is not intent. It belongs in
 structured logging or an external store, not in the device's
 configuration database.
 
@@ -2505,8 +2513,7 @@ Node's ConfigDB snapshot. A previous design cached 15 fields — fifteen
 opportunities per operation for stale state.
 
 **Projection rebuild — fresh state per unit of work.** Before every
-operation, `RebuildProjection()` re-derives the projection from the
-latest intents. This ensures each operation sees fresh, authoritative
+operation, the projection is re-derived from the latest intents. This ensures each operation sees fresh, authoritative
 state — not stale cache from a prior operation. In actuated mode, the
 drift guard also fires at this point, comparing the projection against
 actual device CONFIG_DB.
@@ -2524,7 +2531,7 @@ deduplication is the same instinct applied to *how* rather than
 
 # VIII. Working Conventions
 
-Six conventions that prevent the slow erosion of Parts I–VII.
+The working conventions that prevent the slow erosion of Parts I–VII.
 
 ## 35. Normalize at the Boundary
 
@@ -2784,9 +2791,8 @@ The principle is small. Three rules:
    two ACL_RULE rows with the same PRIORITY (different rule_names).
    Priority is a field. The verb shape must accept that.
 
-The schema file is the contract. `pkg/newtron/device/sonic/schema.go`
-declares `KeyPattern` for every table — that pattern is the identity
-model. New verbs read it before claiming what's mutable.
+The schema is the contract: it declares a key pattern for every
+table, and that pattern is the identity model. New verbs read it before claiming what's mutable.
 
 **The CONFIG_DB key is the identity. An update verb that changes it
 isn't updating — it's deleting one row and creating another.**
@@ -3022,7 +3028,7 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C |
 | 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C |
 | 14 | Verify writes, observe the rest | Assert what you know (your own writes); observe what you don't (the network); return data, not judgments | C |
-| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (lock + intent) over heuristic detection (staleness timers) | C |
+| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (the projection either matches the device or it doesn't) over heuristic detection (staleness timers) | C |
 | 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C |
 | 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C |
 | 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C |
@@ -3032,8 +3038,8 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C |
 | 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
 | 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C |
-| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C |
-| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C |
+| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | P |
+| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | P |
 | 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P |
 | 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S |
 | 29 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P |
@@ -3044,11 +3050,11 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 34 | Structural guardrails | Five rules — transparent transport, import direction, on-demand state, projection rebuild, cross-program DRY — each preventing a class of silent bug | P |
 | 35 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
 | 36 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
-| 37 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
+| 37 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | P |
 | 38 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
 | 39 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
-| 40 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
+| 40 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | P |
 | 41 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
-| 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | C |
+| 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | P |
 | 43 | In-place update is delivered in place | To a consumer that re-reads on each notification, an edit and a remove+add differ; updates are field diffs that never remove the object, teardown stays observable; the caller declares which | C |
 | 44 | An invariant declares its enforcement | Enforcement is by construction, machine, or prose; prose is debt, and a checklist appearing twice is a registry not yet built | C |

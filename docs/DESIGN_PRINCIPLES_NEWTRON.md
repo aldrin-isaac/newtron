@@ -926,9 +926,10 @@ addresses each one directly:
 2. **Applied atomically.** Every mutating operation produces a ChangeSet
    — a complete, ordered description of what will change — computed fully
    before any Redis write occurs. Dry-run is the default; execution is
-   opt-in. Because the description is complete before the first write,
-   the outcome is always knowable: either every entry landed, or the
-   ChangeSet tells you exactly which did and which didn't.
+   opt-in. The write itself is a single Redis MULTI/EXEC transaction
+   (`TxPipeline`): every entry lands or none does. What the transaction
+   cannot promise is that the daemons consuming those entries acted on
+   them — that is verification's job, not application's.
 
 3. **Verified by re-reading.** After execution, newtron re-reads every
    entry it wrote and diffs against the ChangeSet. If anything is missing
@@ -942,7 +943,7 @@ addresses each one directly:
    belong to me?"
 
 These guarantees are properties of the pipeline, not of any specific
-primitive. When a new primitive is added, it inherits them automatically.
+primitive. Every new primitive inherits them without new code.
 When an existing primitive changes, they remain. The pipeline absorbs
 growth; individual primitives do not need to earn their own reliability.
 
@@ -1378,11 +1379,15 @@ threshold, no edge cases.
 
 This pattern applies beyond intent records. Anywhere a heuristic
 (timeout, polling interval, retry count) is used to detect a condition,
-ask first: is there a structural fact that already proves it? A lock
-that was acquired proves the previous holder released or expired. A
-file that exists proves it was written. A process that responds proves
-it's alive. Structural proofs are binary — they are either true or
-false. Heuristics have thresholds, and thresholds have edge cases.
+ask first: is there a structural fact that already proves it? A file
+that exists proves it was written. A process that responds proves it's
+alive. Structural proofs are binary — they are either true or false.
+Heuristics have thresholds, and thresholds have edge cases. One timer
+survives, named as what it is: a crashed lock-holder can prove nothing,
+so the device lock (SETNX in STATE_DB) carries a one-hour expiry as its
+liveness backstop. The lock guards concurrency, nothing more —
+detecting what a crash left behind is the projection comparison above,
+which needs no clock.
 
 ### Symmetry is an axis, not a direction
 
@@ -1637,14 +1642,15 @@ composite was applied. Name references the spec that was consumed, if any.
 Params carry the resolved values that were actually written — the ground
 reality for teardown and reconstruction.
 
-Intent records move through two states. *Unrealized* means declared but
-not yet applied — the intent exists as a record of what should happen, but
-no CONFIG_DB entries have been written for it. *Actuated* means the
-operation completed successfully — the CONFIG_DB entries exist and match
-what the intent record describes. If a process crashes mid-apply, the
-drift guard on the next connect detects the mismatch between projection
-and device CONFIG_DB. `Reconcile()` re-delivers the full projection — no
-zombie detection or heuristic recovery needed.
+There is no separate "declared but not yet applied" state — the
+NEWTRON_INTENT schema's `state` field admits exactly one value,
+`actuated`. `writeIntent` puts the record in the same transaction as
+its CONFIG_DB entries, so a crash before commit leaves neither, a
+crash after leaves both, nothing in between. Recovery needs no zombie
+detection: on the next connect the projection is replayed from
+whatever records the device carries, the drift guard compares it
+against actual CONFIG_DB, and anything a crash left inconsistent
+surfaces as ordinary divergence for `Reconcile()` to re-deliver.
 
 There is no type discriminator field that says "this is a service intent"
 or "this is a VRF intent." The Operation field (e.g., `apply-service`,
@@ -1790,8 +1796,8 @@ after each operation — by reconstructing expected state and diffing
 against actual CONFIG_DB.
 
 CONFIG_DB contains intent — what the device should look like — not
-history. The unrealized intent record (§19) is intent: "this should be
-applied." Completed operation history is not intent. It belongs in
+history. The intent record (§19) is intent: "this should exist."
+Completed operation history is not intent. It belongs in
 structured logging or an external store, not in the device's
 configuration database.
 
