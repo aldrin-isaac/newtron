@@ -782,3 +782,27 @@ invent hypothetical failure modes to fill out a list.
   claims about code."
 - If the list of real anti-patterns is short, that's fine — a short list of
   real problems is more valuable than a long list of imagined ones.
+
+## 46. Paired Documents Change Together — DESIGN
+
+A concept document and its applied twin — `DESIGN_PRINCIPLES.md` and
+`DESIGN_PRINCIPLES_NEWTRON.md` — are one work in two registers (§43 governs which
+owns what). A change to one is not complete until the other carries its
+counterpart: a corrected claim, a relabeled principle, a dropped count, an
+updated ownership map. The crosswalk test (`TestPrinciplesCrosswalk`) enforces
+that a *mapping* between the two exists; it does not enforce that the two
+*agree*. So a fix can land in the concept doc, pass the crosswalk, and leave the
+twin a stale secondary source contradicting its own parent.
+
+**Rule:** when you edit one of the paired docs, audit the other in the same
+change for the corresponding edit — content, labels, counts, and cited facts,
+not just the section mapping. Treat "I updated the principles doc" as half-done
+until the twin is checked.
+
+**Test:** for every claim, label, or count you changed in one doc, grep the other
+for its counterpart. If the counterpart exists and still says the old thing, the
+change is incomplete.
+
+This is earned: an editorial pass corrected the concept doc's summary-row
+wording, several principle labels, a section count, and an ownership map — and
+none reached the twin until a separate audit found the divergence.
