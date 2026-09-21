@@ -223,99 +223,45 @@ is only one code path to fix.
 
 ## 2. Three Properties of One Code Path
 
-The one-code-path design produces three structural properties that
-would otherwise need to be built and maintained as independent features
-— with independent bugs, independent test suites, and independent
-drift.
+Universal §2 owns the concept: delivery guarantees, offline
+provisioning, and drift detection are structural consequences of the
+one code path, not independently built features.
 
-**1. Delivery guarantees.** Because preview and execution share the
-same code path, the ChangeSet that previews an operation IS the
-ChangeSet that executes it — same object, not a copy, not a
-re-derivation. Preview and execution cannot diverge because there is
-nothing to diverge. (See §11 for the ChangeSet mechanism.)
+In newtron the three land on concrete mechanisms:
 
-**2. Offline provisioning.** The offline Node computes without writing
-to a device, so a complete device configuration can be built in memory
-and delivered later as a single atomic operation. This is not a second
-system — it is the same system in offline mode. Adding a new feature
-to the incremental path automatically makes it available in the
-topology provisioner, because the provisioner calls the same methods
-on an offline Node. A service type that works interactively works in
-full-device provisioning on the same day, exercising the same code,
-validated by the same preconditions. (See §12.)
-
-**3. Drift detection.** Comparing what a device should look like against
-what it does look like normally requires a separate "expected state"
-representation — a desired-state store, a state file, a journal of
-applied operations. In newtron, the expected state IS an offline Node
-initialized from the device's specs, profile, and intent records.
-Rebuild the projection via intent replay, read the actual device
-CONFIG_DB, compare the two, and the diff is the drift. No journal, no
-state file, no reconciliation engine — the expected state is computed
-from the same code path that would produce it on a real device. If the
-code path is correct for deployment, it is correct for drift detection,
-because it is the same code path. (See §21.)
-
-These three properties reinforce each other. Delivery guarantees mean
-that what was previewed is what was applied — so drift detection can
-trust the expected state. Offline provisioning uses the same code path
-as reconstruction — so drift detection is exactly as precise as
-deployment. And drift detection closes the loop — the consequences of
-any divergence between intent and reality are immediately visible,
-whether that divergence came from a failed apply, an external edit, or
-a daemon that rewrote a table.
-
-A system that maintained these as independent features would need three
-implementations kept in sync. A system where they are consequences of a
-single design decision — one code path, three states — gets them for free
-and cannot lose one without losing the architecture.
+- **Delivery guarantees** — the ChangeSet that previews an operation is
+  the object that executes it (§11), so there is no re-derivation to
+  diverge.
+- **Offline provisioning** — the topology provisioner calls the same
+  operation methods on an offline Node (§12), so a service type that
+  works interactively works in full-device provisioning the same day,
+  validated by the same preconditions.
+- **Drift detection** — the expected state is an offline Node rebuilt
+  from the device's own NEWTRON_INTENT records: replay the intents, read
+  actual CONFIG_DB, and the diff is the drift (§21). No journal, no state
+  file, no separate reconciliation engine.
 
 ---
 
 ## 3. The Enforcement Contract
 
-Every capability a system learns is new surface area for failure. A
-tool that manages VLANs can break in one way. Add BGP, and it can break
-in two. Add ACLs, EVPN, QoS, LAGs, VRFs, static routes — each
-primitive multiplies the surface for partial applies, stale state, and
-orphaned entries. Growth and reliability are naturally opposed.
+Universal §3 owns the concept: per-feature reliability doesn't scale, so
+reliability is made a property of the pipeline, not of each primitive
+that passes through it.
 
-Most systems accept this tradeoff implicitly. Each new feature gets its
-own verification logic, its own cleanup path, its own error handling.
-The first five features maintain discipline. By feature fifteen, the
-verification for feature three has drifted from the rest. By feature
-thirty, nobody remembers what feature eight's rollback was supposed to
-do. Reliability erodes not because anyone chose to let it — but because
-per-feature reliability doesn't scale.
-
-The only way out is to make reliability a property of the *pipeline*,
-not of each feature that passes through it. The Node's operation method
-is where the pipeline lives — preconditions, schema validation,
-ChangeSet production, projection update, intent recording. Every mutating
-operation flows through this pipeline. The one-code-path design (§1) is
-what makes this possible: because all three states share the same pipeline, a guarantee proven
-in one state holds in all. The
-pipeline is not an aspiration documented above the code — it is the
-code.
-
-Concretely, the pipeline enforces four guarantees — schema validation,
-atomic application, post-write verification, and symmetric reversal —
-for every mutating operation, regardless of which primitive produced
-it. §10 explains why each guarantee matters. §11–§18 describe the
-machinery that implements them. The point here is structural: every
-guarantee is a property of the pipeline, not of any specific primitive.
-When a new primitive is added, it inherits them automatically. When an
-existing primitive changes, they remain. The primitives are the
-variable; the delivery contract is the invariant.
-
-The opinions (§9) define what each primitive looks like. The delivery
-pipeline (§10) ensures each primitive arrives safely. Together they
-form the enforcement contract — the reason newtron can accumulate
-capability without accumulating fragility.
-
-newtron is never done — it is always acquiring new primitives, not
-converging on a final set. The enforcement contract is what keeps that
-growth sound.
+In newtron the pipeline is the Node's `op()` method — preconditions,
+schema validation, ChangeSet production, projection update, intent
+recording — and every mutating operation flows through it. Because all
+three Node states share that one pipeline (§1), a guarantee proven in
+one holds in all; the pipeline is not an aspiration above the code, it
+is the code. The four delivery guarantees (schema validation, atomic
+application, post-write verification, symmetric reversal; §10, machinery
+in §11–§18) are properties of the pipeline: a new primitive inherits
+them with no new code, an existing one keeps them when it changes. The
+primitives are the variable; the contract is the invariant — which is
+how newtron accumulates capability without accumulating fragility, and
+why it is never done, always acquiring primitives rather than converging
+on a final set.
 
 ---
 
@@ -562,30 +508,11 @@ at initialization, and accommodate everything else.
 
 ## 6. The Interface Is the Point of Service
 
-Every service delivery system must choose what it binds to. The choice
-is consequential: whatever entity you choose becomes your unit of
-lifecycle, your unit of state, and your unit of failure. Bind services
-to the device, and every service change is a device-wide operation —
-you cannot apply a service to one port without reasoning about all
-ports. Bind to the topology, and every change is network-wide — you
-cannot reason about one device independently. Bind to the interface,
-and each port is independently manageable: one service binding, one
-lifecycle, one blast radius.
-
-This is not a code-organization choice. It is the fundamental
-abstraction of the domain. A network *is*, at its core, services
-applied on interfaces. Routing policy attaches to an interface. VRF
-binding, VLAN membership, ACL application, QoS scheduling, BGP
-peering — all are per-interface. The interface is where abstract intent
-meets physical infrastructure:
-
-- **The point of service delivery** — where specs bind to physical ports
-- **The unit of service lifecycle** — apply, remove, refresh happen
-  per-interface
-- **The unit of state** — each interface has exactly one service binding
-  (or none)
-- **The unit of isolation** — services on Ethernet0 and Ethernet4 are
-  independent
+Universal §6 owns the concept: whatever you bind services to becomes
+your unit of lifecycle, state, and isolation, and binding to the
+interface makes each port independently manageable — one binding, one
+lifecycle, one blast radius. In newtron that unit is `Interface`, and
+the rest of this section is where the abstraction meets SONiC.
 
 Container membership is the one boundary on this isolation (universal
 §6). A PortChannel member cedes its L2/L3 configuration to the LAG —
@@ -900,35 +827,13 @@ same hand. Coherence is not imposed from above; it emerges from below.
 
 ## 10. Delivery Over Generation
 
-Because the Node unifies intent and reality in a single code path —
-specs flow in through SpecProvider, device state flows in through
-ConfigDB, and every mutation flows out through a ChangeSet — the
-delivery guarantees are not bolted on after the fact. They are
-structural properties of the pipeline described in §3.
-
-Without delivery guarantees, configuration degrades. Not immediately,
-and not obviously, but inevitably:
-
-- **Partial applies leave orphaned entries.** A multi-entry operation
-  fails partway through. The entries that landed have no owner. Nothing
-  knows how to find them, nothing knows how to clean them up. They
-  accumulate in CONFIG_DB, silently corrupting device state.
-
-- **Overlapping writes munge shared state.** Two operations write to the
-  same CONFIG_DB table without coordination. Fields from one overwrite
-  fields from the other. Neither operation's intent is fully realized on
-  the device. The problem is invisible until a daemon crashes or traffic
-  blackholes.
-
-- **Blind teardown corrupts what it doesn't understand.** Removal
-  inspects current device state to guess what to delete. But if other
-  operations have added entries since the original apply, teardown cannot
-  distinguish its entries from theirs. It either removes too much
-  (breaking other services) or too little (leaving orphans).
-
-These are not edge cases. They are the steady state of any system that
-treats delivery as someone else's problem. newtron's delivery pipeline
-addresses each one directly:
+Universal §10 owns the concept: generation is the solved part;
+delivery — validate, apply, verify, reverse — is the hard part, and its
+guarantees are structural properties of the pipeline (§3), not
+after-the-fact additions. Without them configuration erodes — partial
+applies orphan entries, overlapping writes munge shared state, blind
+teardown corrupts what it cannot distinguish. In newtron the pipeline
+answers each directly:
 
 1. **Validated against schema.** Every CONFIG_DB entry passes YANG-derived
    constraint checking before reaching the device. A typo in a field name
@@ -1036,33 +941,17 @@ diff, never a `DEL`+`ADD` of the same key (§48).
 
 ## 12. Dry-Run as First-Class Mode
 
-Every mutating operation supports dry-run as the **default behavior**.
-The `-x` flag is required to execute. Without it, operations preview
-what would change and return.
+Universal §12 owns the concept: dry-run is the default and execution is
+opt-in, and the forced separation of computation from execution is the
+same constraint that makes offline provisioning possible.
 
-This is not just a safety feature — it is an architectural constraint
-that shapes how every operation is written. An operation that can
-preview its changes without executing them *must* separate computation
-from execution. The ChangeSet must be fully resolved — every table,
-every key, every field — before any Redis write occurs. You cannot
-write an operation that "figures out what to do as it goes," because
-dry-run mode would have nowhere to stop.
-
-This forced separation produces a second structural consequence:
-offline provisioning. Because newtron can
-compute a full device configuration without connecting to a device —
-it's just spec translation — it can build a complete configuration in
-memory and deliver it later as a single atomic operation. Offline
-provisioning is not a second code path bolted on later; it falls out
-of the same constraint that makes dry-run work. The offline Node
-(§1) exists because of this forced separation — computation that never
-touches Redis can run against the projection just as well as a real
-one. The constraint that makes preview possible is the same constraint
-that makes offline mode possible.
-
-**Preview first. Execute deliberately. The same code does both — and
-the constraint that makes preview possible is what makes offline
-provisioning possible.**
+In newtron the execute flag is `-x` — absent, an operation previews its
+ChangeSet and returns. The separation is structural: an operation
+resolves its whole ChangeSet (every table, key, and field) before any
+Redis write, so preview has a place to stop. Offline provisioning falls
+out of the same constraint — the offline Node (`NewAbstract`, §1) runs
+the same operations against the projection with no transport, and
+`ExportEntries` yields the finished configuration for delivery later.
 
 ---
 
@@ -1966,17 +1855,12 @@ how shared objects coexist with independent lifecycles.
 
 ## 24. Policy vs Infrastructure — Shared Objects Have Independent Lifecycles
 
-Some CONFIG_DB entries exist for a single interface and die with it.
-Others are shared across the network and must outlive any individual
-consumer. These are fundamentally different objects with fundamentally
-different lifecycles, and conflating them — as most config automation
-systems do — forces a choice between two failure modes: premature
-deletion (removing an ACL that another interface still needs) or
-permanent leakage (never removing anything for fear of breaking a
-consumer).
-
-newtron resolves this by recognizing three distinct kinds of CONFIG_DB
-entry, each with its own identity model and lifecycle:
+Universal §24 owns the concept: infrastructure objects are 1:1 with an
+interface and die with it, while policy objects are shared and must
+outlive any single consumer — conflating them forces a choice between
+premature deletion and permanent leakage. newtron resolves it by
+recognizing three kinds of CONFIG_DB entry, each with its own identity
+and lifecycle:
 
 | Category | Identity | Lifecycle | Examples |
 |----------|----------|-----------|----------|
@@ -2036,15 +1920,12 @@ blue-green updates without touching every consumer simultaneously.
 
 ## 25. Content-Hashed Naming — Version Shared Objects by What They Write
 
-Naming is a coordination problem. Two independent code paths — the
-forward path that creates a policy object and the reverse path that
-deletes it hours or days later — must agree on the same name without
-ever calling each other. They share no state. They share no function
-calls. They agree only by naming convention. This is inherently
-fragile — unless the name itself carries proof of its content.
-
-Shared policy objects (ACLs, route maps, prefix sets, community sets)
-include an 8-character content hash in their CONFIG_DB key name:
+Universal §25 owns the concept: a forward create and a reverse delete,
+hours apart and never calling each other, must agree on a name, and the
+only way to make that agreement un-losable is for the name to carry
+proof of its content. In newtron shared policy objects (ACLs, route
+maps, prefix sets, community sets) carry an 8-character content hash in
+their CONFIG_DB key:
 
 ```
 ACL_TABLE|PROTECT_RE_IN_1ED5F2C7
@@ -2132,18 +2013,12 @@ reference new route map names.
 
 ## 26. BGP Peer Groups — The Protocol's Native Sharing Mechanism
 
-When ten interfaces use the same transit service with BGP routing and
-the route map changes, the naive approach writes ten `BGP_NEIGHBOR_AF`
-updates — ten Redis writes, ten keyspace notifications, ten frrcfgd
-processing events. At a hundred interfaces, it's a hundred. The update
-count scales linearly with the number of consumers, and each update is
-a window where some neighbors have the old policy and others have the
-new one.
-
-BGP already solved this problem. Peer groups are the protocol's native
-template inheritance mechanism. newtron creates a `BGP_PEER_GROUP`
-named after the service; neighbors reference it; shared attributes
-(route maps, admin status) live on `BGP_PEER_GROUP_AF`:
+Universal §26 owns the concept: N individual neighbor updates scale
+linearly, but BGP's native peer-group template makes shared-policy
+propagation O(1) — one write instead of N, with no window where half
+the neighbors have diverged. In newtron a `BGP_PEER_GROUP` is named
+after the service, neighbors reference it, and shared attributes (route
+maps, admin status) live on `BGP_PEER_GROUP_AF`:
 
 ```
 BGP_PEER_GROUP|TRANSIT                  → { admin_status: up }
@@ -2271,13 +2146,12 @@ change a table format, change one file.**
 
 ## 29. Pure Config Functions — Separate Generation from Orchestration
 
-The offline Node (§1) works because entry construction has no side
-effects. If a config function opened connections or checked
-preconditions, it couldn't run offline — and the one-code-path thesis
-would break. Purity is not a style preference; it is what makes
-offline mode possible.
+Universal §29 owns the concept: entry construction is side-effect-free,
+which is what lets it run offline (§1) — purity is a requirement, not a
+style choice.
 
-Config functions take identity parameters and CONFIG_DB state, return
+In newtron a config function takes identity parameters and CONFIG_DB
+state, returns
 `[]sonic.Entry`, and do nothing else. Three forms:
 
 - **Package-level functions** for stateless construction:
@@ -2312,12 +2186,10 @@ format once; all paths update — because there is only one path.
 
 ## 30. Respect Abstraction Boundaries
 
-§6 says the Interface is the point of service. This principle says
-callers must use it. A caller that bypasses Interface to pass an
-interface name as a string to a free function has two paths to the
-same outcome — the path through the abstraction, which carries its
-guarantees, and the path around it, which carries none. The second
-path works until the edge case the abstraction was designed to prevent.
+Universal §30 owns the concept: when an abstraction exists, callers
+must use it — a path around it carries none of its guarantees, and
+works only until the edge case the abstraction was built to prevent.
+In newtron:
 
 **Rule 1: If an operation is scoped to an interface, it is a method on
 Interface.** `i.bindVrf(vrfName)` not `interfaceVRFConfig(intfName,

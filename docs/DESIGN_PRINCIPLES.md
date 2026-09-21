@@ -121,7 +121,7 @@ mechanics, named types, code anchors. This document owns the concept
 and its rationale, independent of any one implementation; the newtron
 document owns the application, and deliberately does not restate this
 one. The crosswalk lives in the newtron document's summary table
-(**Universal §** column) and is enforced by `pkg/conformance`: every
+(**Universal §** column) and is enforced by a machine-checked conformance test: every
 concept here must be claimed by at least one applied principle there.
 
 One more thing. These principles were arrived at through years of
@@ -232,8 +232,8 @@ where intent replaces reality entirely. An offline Node builds the
 complete desired state — every VLAN, every VRF,
 every BGP session, every service binding — by running the same methods
 in the same order that an operator would run interactively. The
-projection is exported via `ExportEntries()` and delivered via
-`Reconcile()` — overwriting whatever the device had before. This is the
+projection is exported as CONFIG_DB entries and delivered by reconcile
+— overwriting whatever the device had before. This is the
 only path where the system asserts authority over device state.
 
 **Operations** — Day-2 in industry parlance — are mutations against
@@ -243,7 +243,7 @@ fresh, authoritative state. Preconditions check the projection, not raw
 device CONFIG_DB. In actuated mode, the drift guard also fires: if
 device CONFIG_DB diverges from the projection, the operation is refused
 until the operator reconciles. Drift detection (§21) answers the
-divergence question when asked; `Reconcile()` delivers the projection
+divergence question when asked; reconcile delivers the projection
 to fix it.
 
 The same methods run in both cases. The same preconditions fire. The
@@ -486,7 +486,7 @@ Different operation types interact with this model differently:
 
 - **Provisioning** is the initial act of establishing device state from
   intent. An offline Node builds the complete projection, then
-  `Reconcile()` delivers it to CONFIG_DB — removing stale keys while
+  reconcile delivers it to CONFIG_DB — removing stale keys while
   preserving factory defaults (MAC, platform metadata, port config).
 
 - **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
@@ -529,7 +529,7 @@ state to diff the device against.
 The system does not run a reconciliation loop — but it has every
 capability a reconciler has. Reconstruction (§21) produces expected
 state from specs and intent records. Drift detection (§2) diffs
-expected against actual. `Reconcile()` (§21) delivers the fix through
+expected against actual. Reconcile (§21) delivers the fix through
 the same pipeline that created the state. This is Terraform's
 `plan` + `apply` cycle, using the same code path that provisions
 and operates the device.
@@ -546,7 +546,7 @@ What the system adds beyond a reconciler:
   after a crash — `terraform import` and manual state surgery are the
   recovery paths. The system's intent records live on the device. The
   drift guard detects incomplete operations (projection ≠ device
-  CONFIG_DB). `Reconcile()` is the recovery path — no external state
+  CONFIG_DB). Reconcile is the recovery path — no external state
   surgery needed.
 
 - **On-device state.** Terraform stores state in a file or remote
@@ -562,7 +562,7 @@ For incremental operations, the desired state is the projection —
 derived from intent replay and updated by each operation. The system
 does not run a continuous reconciliation loop, but it has full
 reconciliation capabilities. It uses them on demand (drift detection,
-`Reconcile()`), not continuously.
+reconcile), not continuously.
 
 Two opinionated architectures cannot converge on the same device.
 Device-reality checks minimize harm — they don't accommodate
@@ -637,8 +637,8 @@ happens to carry it.
 Because the interface is the unit of service in the domain, it is the
 unit of service in the code. `ApplyService` lives on Interface — not
 on Node, not on Network — because the interface is the entity being
-configured, the point where a service becomes real. `VerifyChangeSet`
-lives on Node because the node holds the Redis connection.
+configured, the point where a service becomes real. Verification
+lives on Node because the node holds the device connection.
 `GetService` lives on Network because services are network-wide
 definitions independent of any device.
 
@@ -848,8 +848,8 @@ of client. Multi-device coordination — deciding what to apply, where,
 in what order — belongs to orchestrators that consume the same API.
 An E2E test orchestrator is one such consumer: it provisions
 devices through the system, then asserts correctness
-across the fabric. Observation primitives (`GetRoute`,
-`HealthCheck`) return structured data, not judgments (§14), so any
+across the fabric. Observation primitives — a route lookup, a health
+check — return structured data, not judgments (§14), so any
 orchestrator can make its own decisions.
 
 Good automation development requires a virtual twin — the ability to
@@ -938,8 +938,8 @@ same hand. Coherence is not imposed from above; it emerges from below.
 ## 10. Delivery Over Generation
 
 Because the Node unifies intent and reality in a single code path —
-specs flow in through SpecProvider, device state flows in through
-ConfigDB, and every mutation flows out through a ChangeSet — the
+specs flow in through the spec source, device state flows in through
+the config database, and every mutation flows out through a ChangeSet — the
 delivery guarantees are not bolted on after the fact. They are
 structural properties of the pipeline described in §3.
 
@@ -1033,7 +1033,7 @@ with table, key, operation type, old value, and new value:
    written. The ChangeSet *is* the preview.
 2. **Execution receipt** — the same ChangeSet drives the Redis writes.
    What was previewed is what gets written.
-3. **Verification contract** — `VerifyChangeSet` re-reads CONFIG_DB and
+3. **Verification contract** — the verification primitive re-reads CONFIG_DB and
    diffs against the same ChangeSet. What was written is what gets
    verified.
 
@@ -1180,7 +1180,7 @@ later.
 Pre-operation checks refuse work for two fundamentally different
 reasons. The first: "the resource you're targeting doesn't exist." The
 VLAN isn't in CONFIG_DB. The interface isn't on the device. The VRF was
-never created. This is a `PreconditionError` — the operation's subject
+never created. This is a precondition failure — the operation's subject
 is absent.
 
 The second: "the resource exists but can't be safely modified." The
@@ -1197,9 +1197,9 @@ operation never created the resource — skip it, nothing to undo. "Has
 active consumers" means something the recovery path didn't expect —
 stop and let the operator investigate.
 
-Every "resource not found" check — whether in the precondition checker
-(`RequireVLANExists`), a lookup method (`GetInterface`), or an inline
-existence check — must return `PreconditionError`. This is not a style
+Every "resource not found" check — whether in the precondition checker,
+a lookup method, or an inline existence check — must return the
+precondition-failure kind, distinct from a conflict. This is not a style
 choice. Any code path that needs to distinguish "missing" from
 "conflicting" depends on the error type to make that distinction. A
 lookup that returns a generic error "not found" is indistinguishable
@@ -1224,17 +1224,18 @@ didn't anticipate.
 The line is drawn at what the system can *know* versus what it can only
 *see*.
 
-**Assertions** check the system's own work. `VerifyChangeSet` re-reads
-every CONFIG_DB entry just written and diffs against the ChangeSet. If
+**Assertions** check the system's own work. The one verification
+primitive re-reads every CONFIG_DB entry just written and diffs against
+the ChangeSet. If
 anything is missing or different, it's a bug in the system or a device
 anomaly. There is exactly one assertion primitive — because there is
 exactly one write mechanism (the ChangeSet). This assertion is
 absolute: the system knows what it wrote, so it can verify with
 certainty.
 
-**Observations** return device state as structured data. `GetRoute`
-returns a route entry (or nil). `GetRouteASIC` returns a resolved SAI
-chain. `HealthCheck` returns a health report. These methods don't
+**Observations** return device state as structured data: a route
+lookup returns a route entry (or nil), a SAI-chain read returns the
+resolved chain, a health check returns a health report. These don't
 know what the "correct" answer is — they report what they see and let
 the caller decide what it means.
 
@@ -1270,8 +1271,8 @@ This creates a clean four-tier verification hierarchy:
 
 Orchestrators compose the system's primitives across devices — they
 never re-implement them. When an orchestrator needs to check CONFIG_DB,
-it calls `VerifyChangeSet`. When it needs to read a route, it calls
-`GetRoute`.
+it calls the same verification primitive. When it needs to read a
+route, it uses the same observation.
 
 **Return data, not judgments.** A method that returns a `RouteEntry` is
 useful to any caller. A method that returns `true`/`false` for "is this
@@ -1300,7 +1301,7 @@ CONFIG_DB state created by the system should require a human with
 (`setup-device`) writes loopback, BGP globals, VTEP, device metadata,
 and optionally route-reflector configuration. These have no individual
 reverse — you never tear down BGP from a fabric switch without
-rebuilding the device. Their collective reverse is `Reconcile()`, which re-derives the
+rebuilding the device. Their collective reverse is reconcile, which re-derives the
 projection from current intents and delivers it to the device. The
 `setup-*` verb signals this lifecycle: no individual reverse exists;
 remediation is reconcile.
@@ -1454,7 +1455,7 @@ The structural proof is simpler: **the projection derived from intent
 replay either matches the device or it doesn't.** If a process crashes
 mid-apply, the drift guard on the next connect detects that the
 projection (from intent records on the device) diverges from actual
-CONFIG_DB. `Reconcile()` re-delivers the projection. No timer, no
+CONFIG_DB. Reconcile re-delivers the projection. No timer, no
 threshold, no edge cases.
 
 This pattern applies beyond intent records. Anywhere a heuristic
@@ -1721,9 +1722,9 @@ depending on the hardware platform, the ASIC, and the SONiC release.
 
 These latencies matter in two contexts:
 
-1. **Post-provisioning convergence.** After `Reconcile()` delivers
+1. **Post-provisioning convergence.** After reconcile delivers
    the full config, daemons need time to process everything. Test suites
-   handle this with polling-based health checks (`pollUntil` with
+   handle this with polling-based health checks (a settling poll with
    configurable timeout and interval), not hardcoded sleeps.
 
 2. **Inter-daemon races.** When two daemons process related entries from
@@ -1840,7 +1841,7 @@ journal replay, no off-device state needed.
 This closes the gap between provisioning (topology-defined baseline)
 and the evolved device (post-provision operations). The topology
 provisioner calls the same methods on an offline Node (`SetupDevice`,
-`ApplyService`, etc.); `ExportEntries()` yields the expected CONFIG_DB
+`ApplyService`, etc.); exporting the projection yields the expected CONFIG_DB
 after provisioning. The intent records give you everything that happened
 since — each one carries enough information to replay the operation
 through the replay path and produce the incremental CONFIG_DB entries. Together, they reconstruct the full expected state at any point
@@ -1959,29 +1960,26 @@ modified fields. The natural question is: why not apply a surgical fix?
 Add the missing entry. Delete the extra one. Correct the modified field.
 
 The answer depends on where the surgical fix lives. A surgical remediator
-outside `Reconcile()` is a second write path. It would construct CONFIG_DB
+outside reconcile is a second write path. It would construct CONFIG_DB
 entries outside the Node's operation pipeline — without ChangeSet tracking,
 without schema validation, without precondition checks, without intent
 recording. It would bypass the one-code-path thesis to fix a problem that
 the one-code-path thesis detected. The cure would undermine the diagnostic.
 
 Drift remediation is reconcile: rebuild the projection from intent
-replay (§1), deliver it via `Reconcile()` (§10), verify it landed
-(§14). The same code path that detected the drift produces the fix. No
+replay (§1), deliver it (§10), verify it landed (§14). The same code path that detected the drift produces the fix. No
 second system.
 
-`Reconcile()` supports two modes. Full mode performs `config reload` +
-`ReplaceAll()` — a complete overwrite of the device's CONFIG_DB from the
-projection. Every subscribing daemon tears down and rebuilds internal state
-for every entry it watches, whether drifted or not. Delta mode performs
-`DiffConfigDB` + `ApplyDrift()` — it patches only the drifted entries
-identified by drift detection, without a config reload. Delta mode is the
-surgical fix: it applies targeted writes, but through the same
-`Reconcile()` method. The entries it writes were already validated when
-originally rendered into the projection. Both modes live inside the same
-`Node.Reconcile()` call;
-the mode is a parameter, not a code path. The anti-pattern is a remediator
-that bypasses `Reconcile()` entirely — not one that writes fewer entries.
+Reconcile supports two modes. Full mode overwrites the device's CONFIG_DB
+from the projection wholesale (a config reload followed by a complete
+rewrite); every subscribing daemon tears down and rebuilds internal state
+for every entry it watches, whether drifted or not. Delta mode patches only
+the entries drift detection flagged, without a config reload. Delta mode is
+the surgical fix — targeted writes, but through the same operation, and the
+entries it writes were already validated when originally rendered into the
+projection. Both modes are one operation with a mode parameter, not two code
+paths. The anti-pattern is a remediator that bypasses reconcile entirely —
+not one that writes fewer entries.
 
 ---
 
@@ -2558,7 +2556,7 @@ refreshed every request. Every layer with logic can drift; the
 transport has none.
 
 **Import direction — dependencies flow one way.** The network package
-imports the node package, never the reverse. `SpecProvider` (§7) breaks
+imports the node package, never the reverse. The spec-source seam (§7) breaks
 what would otherwise be a circular dependency. Change a Node method →
 blast radius is the node package plus callers. Change a Network method →
 Node code is provably untouched.
@@ -2602,7 +2600,7 @@ hyphens → underscores, `[A-Z0-9_]` only. After loading, every map key
 (`Services["TRANSIT"]`), every cross-reference
 (`ServiceSpec.IngressFilter = "PROTECT_RE"`), and every name that flows
 into CONFIG_DB key construction is already canonical. Operations code
-never calls `NormalizeName()`.
+never re-normalizes names.
 
 ---
 
@@ -2958,12 +2956,11 @@ boundary with another will misapply it. These tensions are worth naming.
 ### Intent vs reality and provisioning
 
 §5 establishes that the intent DB is the authority after application.
-`Reconcile()` is the operation where the full projection replaces device
-CONFIG_DB wholesale. The resolution: `Reconcile()` is first-class — not
-an exception, but the system's native recovery mechanism. Provisioning
-is the initial reconcile. Post-provision reconcile fixes drift. Both
-use the same code path: rebuild projection from intents, deliver via
-`ReplaceAll()`.
+Reconcile is the operation where the full projection replaces device
+CONFIG_DB wholesale. The resolution: reconcile is first-class — not an
+exception, but the system's native recovery mechanism. Provisioning is
+the initial reconcile. Post-provision reconcile fixes drift. Both use
+the same code path: rebuild projection from intents, deliver, verify.
 
 ### Fail-closed schema and extensibility
 
