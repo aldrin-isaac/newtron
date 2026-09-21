@@ -222,6 +222,18 @@ citing a document as justification — "CLAUDE.md says X", "the architecture doc
 requires Y" — verify the claim against the current code. A document that described
 the system accurately last month may be stale today.
 
+The discipline covers claims of *completeness*, not only correctness. "Fixed in
+both docs", "every caller updated", "removed everywhere", "the twin got the
+corresponding change" — each is an assertion to verify site by site, not a
+feeling that the job is done. Mirrored structures are where it fails: a
+concept/applied doc pair, a forward/reverse operation pair, the same fix across
+every engine — "done" silently means "done in the one place you were looking".
+Before writing "done everywhere", enumerate the sites (grep, read, or the code
+graph per §26) and confirm each; where the structure is mirrored, an independent
+audit that re-checks every site earns its cost. Earned here: a "fixed in both
+principles docs" claim landed in one, and the twin's stale copy was caught only
+by a separate audit — twice.
+
 The discipline extends past code and documents to every claim about the running
 system. Three classes recur, each one earned here:
 
