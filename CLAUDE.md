@@ -500,6 +500,35 @@ Before making any change to `service_ops.go`, `*_ops.go`, or any shared code pat
 
 Tracking what was working (update this as test suites are validated):
 
+**Design-principles audit arc 2026-09-21 (PRs #480–#485, issue #486; docs/process only, no suite run)**:
+a two-round external review of `DESIGN_PRINCIPLES.md` + `DESIGN_PRINCIPLES_NEWTRON.md`,
+every finding verified against code (not the reverse), corrected the docs and
+hardened the process. Findings were sorted by kind, and that sort is the reusable
+lesson (memory `feedback_false_vs_taste_reviews`): **false → fixed** — the thesis
+overclaimed ("separation is the disease"); "one transaction" was false
+(`ChangeSet.Apply` is a sequential per-entry loop, only the composite/reconcile
+path is MULTI/EXEC via `TxPipeline`); §18 "ordering not timing" was wrong (the
+single pipeline *causes* the intfmgrd/vrfmgrd race, RCA-037; intfmgrd does not
+retry); `SetProperty` is not reverseless (has `clear-property`); the
+rollback-history / `DefaultMaxHistory` store is unbuilt (`NEWTRON_HISTORY` has no
+writer); §8 spec-directory integration was a pre-#27 fossil (engines reach specs
+via HTTP, ssh_port resolved from newtlab at connect); drift scope now stated
+(owned tables, skips PORT/DEVICE_METADATA). **Author's own contracts → enforced**
+(editing-guidelines §43/§4, Highest tier) — implementation-symbol names out of
+the concept doc, worst verbatim-copy twin sections de-duplicated (verbatim
+paragraphs 45%→38%, doc −131 lines). **Taste/architecture → surfaced, not
+imposed** — declined the reviewer's "cut to ~15 convictions"; filed the three-way
+intent-diff (separate spec-evolution from device-drift) as #486 for an
+accept/defer decision, no principles edit. Discipline added from failures this
+arc exposed in the work itself: **ai-instructions §26** (verify call-path/structure
+with the code graph / gopls `findReferences`, not a substring match — a
+grep-and-generalize shipped the false atomicity claim; gopls call-hierarchy is
+flaky here, `findReferences`+body-reads are the reliable moves), **§11** extended
+to *completeness* claims, **editing-guidelines §46** (paired concept/applied docs
+change together — the crosswalk proves a mapping exists, not that the two agree;
+twin lag was caught only by a separate audit both times). `go build` /
+`go test ./pkg/conformance` (TestPrinciplesCrosswalk) / doc-links green throughout.
+
 **VRF-as-member cold sweep 2026-07-19 (branch fix/vrf-interface-mode-ipvpn-membership)**:
 a VRF is now a **member** of an IP-VPN, not the VPN itself — interface-mode
 `vrf_type=interface + ipvpn` is valid (reverted the wrong #449). VRFs are named
