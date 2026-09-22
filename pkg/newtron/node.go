@@ -3,6 +3,7 @@ package newtron
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
@@ -209,6 +210,36 @@ func (n *Node) Drift(ctx context.Context) ([]DriftEntry, error) {
 			Actual:   d.Actual,
 		})
 	}
+	return result, nil
+}
+
+// SpecDivergence reports how the device's applied intent differs from what the
+// current specs would apply — the "is this device behind its specs?" read of the
+// three-way intent comparison (#486 rung 0a). It is single-device observation
+// (§14): it returns data (which resources evolved, which params moved, which are
+// orphaned), not a verdict, and mutates nothing on the device. Complements Drift
+// (device-vs-projection); a caller combines the two to tell "behind" from
+// "drifted". Entries are sorted by resource, changes by field.
+func (n *Node) SpecDivergence(ctx context.Context) ([]SpecDivergenceEntry, error) {
+	div, err := n.internal.SpecDivergence(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SpecDivergenceEntry, 0, len(div))
+	for res, rd := range div {
+		e := SpecDivergenceEntry{Resource: res}
+		if rd.Orphaned {
+			e.Kind = "orphaned"
+		} else {
+			e.Kind = "spec-evolved"
+			for f, c := range rd.Changes {
+				e.Changes = append(e.Changes, SpecFieldChange{Field: f, Applied: c.Applied, Current: c.Current})
+			}
+			sort.Slice(e.Changes, func(i, j int) bool { return e.Changes[i].Field < e.Changes[j].Field })
+		}
+		result = append(result, e)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Resource < result[j].Resource })
 	return result, nil
 }
 

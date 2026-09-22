@@ -235,6 +235,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/intent/snapshot", s.handleIntentSnapshot)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/status", s.handleNodeStatus)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/intent/drift", s.handleDrift)
+	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/intent/spec-diff", s.handleSpecDivergence)
 	mux.HandleFunc("GET /newtron/v1/networks/{netID}/nodes/{node}/intent/topology-drift", s.handleTopologyDrift)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/intent/reconcile", s.handleReconcile)
 	mux.HandleFunc("POST /newtron/v1/networks/{netID}/nodes/{node}/intent/save", s.handleSave)

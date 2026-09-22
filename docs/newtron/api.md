@@ -156,6 +156,7 @@ Spec-to-device delivery is via `POST /newtron/v1/networks/{n}/nodes/{d}/intent/r
 | `POST /intent/projection-diff` | Pre-commit diff for a hypothetical operation set (before/after/diff) |
 | GET | `/intent/tree` | Intent DAG tree view |
 | GET | `/intent/drift` | Drift between projection (expected) and CONFIG_DB (actual) |
+| GET | `/intent/spec-diff` | Spec-evolution: how the device's applied intent differs from what current specs would apply (#486 rung 0a) |
 | GET | `/intent/topology-drift` | Drift between fresh topology.json projection and CONFIG_DB ([details](#topology-drift)) |
 | GET | `/status` | Cheap per-device badge: online + intent drift + has_unsaved_intents ([details](#device-status)) |
 | POST | `/intent/reconcile` | Deliver projection to device, eliminating drift |

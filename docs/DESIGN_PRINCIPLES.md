@@ -85,8 +85,10 @@ by-hand fix at 3am, a crash between write and confirm, a bug in this
 system's own code. Or the intent moved: an operator edited a spec, so
 the rebuilt expectation no longer matches a device still faithfully at
 its last-applied state — and the guard freezes writes to every device
-using that spec until each is reconciled. Both surface as drift; telling
-them apart is not yet built (§21). Either way the guard will not write
+using that spec until each is reconciled. Both surface as drift, and the
+guard blocks on both; a read now tells them apart (§21), though acting on
+the distinction — not freezing on a spec edit — is not. Either way the
+guard will not write
 onto a device that no longer matches the current expectation. What's on the device stays put, the mismatch is listed
 entry by entry, and a person decides what happens next — because sometimes the 3am fix was
 right, and software that silently overwrites it is making the night
@@ -3040,7 +3042,10 @@ what *would* be applied now; the device captures what's actually there.
 A three-way comparison — intent record vs device (true drift) and
 intent record vs reconstruction (spec evolution) — would separate
 "someone edited CONFIG_DB" from "the spec changed since last apply."
-The data exists; the three-way comparison is not yet built.
+The read now exists — the spec-evolution axis (intent record vs
+reconstruction) is reported as a diagnostic (#486 rung 0a). What is not
+yet built is the guard acting on it: treating a spec edit as a pending
+refresh rather than freezing writes (rung 1).
 
 ### Bounded footprint and rollback history
 
