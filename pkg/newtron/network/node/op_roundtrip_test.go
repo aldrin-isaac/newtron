@@ -272,15 +272,6 @@ var roundTripSequence = []opInvocation{
 // re-registers children in topo-sort order, which may legitimately differ
 // from original creation order. Set membership is the contract, not order.
 
-// normalizedIntentDB returns the node's intent table with DAG links normalized.
-func normalizedIntentDB(n *Node) map[string]map[string]string {
-	out := make(map[string]map[string]string, len(n.configDB.NewtronIntent))
-	for res, fields := range n.configDB.NewtronIntent {
-		out[res] = NormalizeIntentFields(fields)
-	}
-	return out
-}
-
 // diffStringMaps reports per-key differences between two map[string]string.
 func diffStringMaps(t *testing.T, label string, a, b map[string]string) {
 	t.Helper()

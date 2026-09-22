@@ -128,6 +128,72 @@ Examples:
 }
 
 // ============================================================================
+// intent spec-diff — is this device behind its specs? (#486 rung 0a)
+// ============================================================================
+
+var intentSpecDiffCmd = &cobra.Command{
+	Use:   "spec-diff",
+	Short: "Show how the device's applied intent differs from current specs",
+	Long: `Compare the intent this device has applied (its NEWTRON_INTENT records)
+against what the current specs would apply. A non-empty result means a spec
+changed since the device was last provisioned or reconciled — the device is
+"behind" its specs.
+
+This isolates the spec-moved axis of drift: 'intent drift' reports device vs
+current-spec projection (device edited OR spec edited, undistinguished); this
+reports only what moved because a spec changed. Read-only.
+
+Requires -D (device) flag and a connected device.
+
+Examples:
+  newtron leaf1 intent spec-diff
+  newtron leaf1 intent spec-diff --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		entries, err := app.client.SpecDivergence(app.deviceName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(entries)
+		}
+
+		if len(entries) == 0 {
+			fmt.Printf("\nSpec-diff for %s: %s\n", bold(app.deviceName), green("UP TO DATE"))
+			fmt.Println("The device's applied intent matches what the current specs would apply.")
+			return nil
+		}
+
+		fmt.Printf("\nSpec-diff for %s: %s\n", bold(app.deviceName), red("BEHIND"))
+		for _, e := range entries {
+			if e.Kind == "orphaned" {
+				fmt.Printf("  %s: %s (its defining spec no longer resolves — behind by a teardown)\n",
+					bold(e.Resource), red("orphaned"))
+				continue
+			}
+			fmt.Printf("  %s: %s\n", bold(e.Resource), yellow("spec-evolved"))
+			for _, c := range e.Changes {
+				fmt.Printf("      %s: %s → %s\n", c.Field, red(qEmpty(c.Applied)), green(qEmpty(c.Current)))
+			}
+		}
+		return nil
+	},
+}
+
+// qEmpty renders an empty value as "(none)" so an added/dropped field reads
+// clearly in the spec-diff output.
+func qEmpty(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	return v
+}
+
+// ============================================================================
 // intent reconcile — deliver projection to device to eliminate drift
 // ============================================================================
 
@@ -612,6 +678,7 @@ func init() {
 	intentCmd.AddCommand(intentSnapshotCmd)
 	intentCmd.AddCommand(intentSnapshotDiffCmd)
 	intentCmd.AddCommand(intentDriftCmd)
+	intentCmd.AddCommand(intentSpecDiffCmd)
 	intentCmd.AddCommand(intentReconcileCmd)
 	intentCmd.AddCommand(intentSaveCmd)
 	intentCmd.AddCommand(intentReloadCmd)
