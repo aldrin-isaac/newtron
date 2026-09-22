@@ -77,15 +77,17 @@ That leaves two durable things in the world: the spec — what you
 want — and the device — what is, plus the receipt for what was done.
 Everything in between is recomputed on demand, and the loop between
 the two ends runs on every operation, not on a schedule: rebuild the
-expected state from the receipts, read the device, compare. Editing a
-spec doesn't touch the device; an operator delivers that change through
-an operation — that is how intent is meant to move. What the loop
-guards against is the device moving on its own: a daemon that took a
-write and did nothing, a by-hand fix at 3am, a crash between write and
-confirm, a bug in this system's own code. Any of those leaves the
-device diverged from what the receipts say it should be, and the guard
-stops — it will not write onto a device that no longer matches its own
-record of it. What's on the device stays put, the mismatch is listed
+expected state by replaying the receipts through the current specs,
+read the device, compare. The guard stops on any divergence between the
+two — and today it cannot tell you which of two kinds you have. The
+device may have moved on its own: a daemon that ignored a write, a
+by-hand fix at 3am, a crash between write and confirm, a bug in this
+system's own code. Or the intent moved: an operator edited a spec, so
+the rebuilt expectation no longer matches a device still faithfully at
+its last-applied state — and the guard freezes writes to every device
+using that spec until each is reconciled. Both surface as drift; telling
+them apart is not yet built (§21). Either way the guard will not write
+onto a device that no longer matches the current expectation. What's on the device stays put, the mismatch is listed
 entry by entry, and a person decides what happens next — because sometimes the 3am fix was
 right, and software that silently overwrites it is making the night
 worse. If intent and reality are supposed to agree, you don't keep
@@ -272,7 +274,7 @@ nothing to diverge. (See §11 for the ChangeSet mechanism.)
 
 **2. Offline provisioning.** The offline Node computes without writing
 to a device, so a complete device configuration can be built in memory
-and delivered later as a single atomic operation. This is not a second
+and delivered later in one transaction. This is not a second
 system — it is the same system in offline mode. Adding a new feature
 to the incremental path automatically makes it available in the
 topology provisioner, because the provisioner calls the same methods
@@ -335,7 +337,7 @@ pipeline is not an aspiration documented above the code — it is the
 code.
 
 Concretely, the pipeline enforces four guarantees — schema validation,
-atomic application, post-write verification, and symmetric reversal —
+ordered application, post-write verification, and symmetric reversal —
 for every mutating operation, regardless of which primitive produced
 it. §10 explains why each guarantee matters. §11–§18 describe the
 machinery that implements them. The point here is structural: every
@@ -421,8 +423,11 @@ primary state — the projection (expected CONFIG_DB) is derived from it.
 External CONFIG_DB edits are drift, detected by the drift guard and
 refused until the operator reconciles. Detection is scoped to the
 tables the system writes: it compares its projection against those,
-does not police tables it never authors, and reads an unexpected extra
-field on one of its own rows as the device's business, not a conflict.
+does not police tables it never authors, and — because the field check
+is a subset — does not today catch an unexpected extra field added to
+one of its own rows, even though such a ghost field can mislead a daemon
+(§11). That is a known limit of the subset check, not a claim that extra
+fields are benign.
 The system does not support brownfield — two opinionated architectures
 cannot converge on the same device; the scoping is how it shares one
 CONFIG_DB with the platform's boot-established tables, not licence to
@@ -575,8 +580,9 @@ operating mode.**
 
 ### Baseline prerequisites are non-negotiable
 
-The system accommodates other writers — but it requires a device
-baseline. SONiC supports two modes for BGP configuration: unified mode,
+The system tolerates writers it cannot see — those touching tables it
+doesn't own (§5 scoping) — but it requires a device baseline it will not
+share. SONiC supports two modes for BGP configuration: unified mode,
 where CONFIG_DB entries flow through SONiC daemons to FRR, and split
 mode, where vtysh configures FRR directly. A Redis-first system (§4)
 writes BGP configuration to CONFIG_DB and depends on daemons to relay
@@ -586,13 +592,15 @@ entirely.
 Unified mode is non-negotiable. This is the one place where coexistence
 of two configuration approaches is refused. The initialization command
 establishes the baseline: unified mode enabled, factory artifacts
-cleaned, platform-specific patches applied. After initialization, the
-system accommodates other writers within the established baseline. It
-will not accommodate a writer that changes the baseline itself.
+cleaned, platform-specific patches applied. After initialization, a
+writer touching tables the system doesn't own is outside the drift
+guard's view — tolerated because invisible, not accommodated as a
+feature (§5); an edit to an owned table is drift. It refuses a writer
+that changes the baseline itself.
 
 Other baseline requirements may emerge as new primitives require them.
 The principle is the same: state the prerequisites, establish them once
-at initialization, and accommodate everything else.
+at initialization, and leave untouched only what it does not own.
 
 ---
 
@@ -1090,7 +1098,7 @@ This forced separation produces a second structural consequence:
 offline provisioning. Because the system can
 compute a full device configuration without connecting to a device —
 it's just spec translation — it can build a complete configuration in
-memory and deliver it later as a single atomic operation. Offline
+memory and deliver it later in one transaction. Offline
 provisioning is not a second code path bolted on later; it falls out
 of the same constraint that makes dry-run work. The offline Node
 (§1) exists because of this forced separation — computation that never
@@ -1368,8 +1376,9 @@ definition in its place.
 
 When adding a new operation that creates CONFIG_DB state, the
 corresponding removal operation is not optional — it is part of the
-feature. Ship both or ship neither. Baseline operations (`setup-*`,
-`set-*`) are the sole exception — their reverse is reconcile.
+feature. Ship both or ship neither. Baseline operations (`setup-*`)
+are the sole exception — their reverse is reconcile. (`set-*` is not
+baseline: `set-property` reverses with `clear-property`.)
 
 The symmetry extends down to the config generator layer — the pure
 functions that construct CONFIG_DB entries (see §29):
@@ -1512,7 +1521,7 @@ the verb knows whether a teardown command exists and what it's called.
 | Verb | Lifecycle | Reverse |
 |------|-----------|---------|
 | `setup-*` | Device-lifetime. Done once at provisioning. | reconcile |
-| `set-*` | Field assignment. Per-resource. | reconcile |
+| `set-*` | Field assignment. Per-resource. | `clear-*` |
 | `create-*` | Named resource with independent lifecycle. | `delete-*` |
 | `add-*` | Instance in a collection. | `remove-*` |
 | `bind-*` | Relationship between resources. | `unbind-*` |
@@ -1700,7 +1709,11 @@ between writes:
 There are no sleep calls in the write path. If a developer feels
 the need to add a sleep between CONFIG_DB writes, it means the ordering
 is wrong or the daemon has a bug — both of which deserve investigation,
-not a timing band-aid.
+not a timing band-aid. "No sleeps" is not "no waits": a sleep is a timer,
+a guess at a duration, while the settling gate a cross-daemon kernel
+dependency needs (the race above) polls for a structural fact — the
+kernel device exists — and proceeds the instant it does. That is a wait
+on a fact, not on a clock (§15).
 
 ### Daemon settling time
 
@@ -2041,8 +2054,7 @@ re-applying a resource updates its one record in place rather than
 appending, so the footprint tracks the infrastructure, never the
 operation count. A bounded rollback history would follow the same rule —
 a fixed cap, not a number that climbs with operations — but is not
-written today; NEWTRON_HISTORY exists as a reserved, drift-excluded
-table awaiting it.
+written today; a reserved, drift-excluded table awaits it.
 
 This principle killed the append-only journal design: after seven years
 of operations, CONFIG_DB would be dominated by thousands of history
@@ -2469,7 +2481,7 @@ Domain-intent naming makes the symmetry legible:
 Noun-only names are reserved for types and constructors.
 
 **Not every verb has a paired reverse — a class of them guarantees a state rather
-than creating a thing.** `setup` and `set` are already in this class (their
+than creating a thing.** `setup` is already in this class (its
 remediation is reconcile, §16); `ensure` is another member of it, naming an
 idempotent guarantee of a mode or state that is not a discrete created record — its
 reverse, if any, is reconcile or another state-`ensure`, never a `de-ensure`. The two
@@ -2915,7 +2927,8 @@ Enforcement comes in three classes, and they fail differently:
 
 - **By construction** — the violation is inexpressible. Once names are
   normalized at the boundary, downstream code cannot mis-normalize; once
-  ordering is structural, there is no sleep to forget. This class cannot rot.
+  ordering is structural, there is no sleep to forget — the one cross-daemon wait that remains is
+a poll on a fact, not a timer. This class cannot rot.
 - **By machine** — a gate rejects the violation: a schema that fails closed,
   a completeness test that walks a registry. This class fails loudly, at the
   gate, on the change that introduced the violation.
@@ -3036,8 +3049,8 @@ this directly: one record per resource, updated in place, so a device
 that has run 50,000 operations carries the same footprint as one that
 has run 11. A rollback history would have to honor the same rule — a
 fixed cap on entries, not a count that climbs with operations — which is
-why NEWTRON_HISTORY is reserved as a bounded, drift-excluded table
-rather than an open-ended log. That history is not written today; the
+why that history has a reserved, drift-excluded table rather than an
+open-ended log. That history is not written today; the
 bound is a constraint on the design, not yet an enforced mechanism.
 
 ### Greenfield and multi-version
@@ -3081,7 +3094,7 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C |
 | 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C |
 | 9 | The opinion is in the pattern | Constrain the building blocks, not the building | C |
-| 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C |
+| 10 | Delivery over generation | Generation is solved; delivery — validate, apply in order, verify, reverse — is not | C |
 | 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C |
 | 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C |
 | 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C |

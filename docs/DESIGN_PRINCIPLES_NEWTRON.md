@@ -63,7 +63,7 @@ sound as it grows. Part II establishes the domain model — how newtron
 sees SONiC, how it treats device state, and where services live.
 Part III describes the opinions: one pattern per primitive, consistently
 enforced. Part IV defines the delivery contract — schema validation,
-atomic application, post-write verification, symmetric reversal.
+ordered application, post-write verification, symmetric reversal.
 Part V explains what the Node records and why intent must be
 self-sufficient. Part VI covers shared objects and policy lifecycles.
 Part VII shows how the code reflects the model. Part VIII covers
@@ -254,7 +254,7 @@ schema validation, ChangeSet production, projection update, intent
 recording — and every mutating operation flows through it. Because all
 three Node states share that one pipeline (§1), a guarantee proven in
 one holds in all; the pipeline is not an aspiration above the code, it
-is the code. The four delivery guarantees (schema validation, atomic
+is the code. The four delivery guarantees (schema validation, ordered
 application, post-write verification, symmetric reversal; §10, machinery
 in §11–§18) are properties of the pipeline: a new primitive inherits
 them with no new code, an existing one keeps them when it changes. The
@@ -331,8 +331,9 @@ primary state — the projection (expected CONFIG_DB) is derived from it.
 External CONFIG_DB edits are drift, detected by the drift guard and
 refused until the operator reconciles. Detection is scoped to the tables
 newtron writes (`DiffConfigDB` compares only `ownedTables`, skips `PORT`
-and `DEVICE_METADATA`, and treats an unexpected extra field on an owned
-row as the device's business, not a conflict). newtron does not support
+and `DEVICE_METADATA`, and — because the field check is a subset — does not today catch an
+unexpected extra field added to an owned row, a known limit given such a
+ghost field can mislead a daemon, §11). newtron does not support
 brownfield — two opinionated architectures cannot converge on the same
 device; the scoping shares one CONFIG_DB with the platform's
 boot-established tables, it is not licence to co-manage the ones newtron
@@ -485,7 +486,9 @@ operating mode.**
 
 ### Baseline prerequisites are non-negotiable
 
-newtron accommodates other writers — but it requires a device baseline.
+newtron tolerates writers it cannot see — those touching tables it
+doesn't own (§5 scoping) — but it requires a device baseline it will not
+share.
 SONiC supports two modes for BGP configuration: unified mode, where
 CONFIG_DB entries flow through SONiC daemons to FRR, and split mode,
 where vtysh configures FRR directly. newtron is Redis-first (§4). It
@@ -496,13 +499,15 @@ entirely.
 Unified mode is non-negotiable. This is the one place where coexistence
 of two configuration approaches is refused. `newtron init` establishes
 the baseline: unified mode enabled, factory artifacts cleaned,
-platform-specific patches applied. After init, newtron accommodates
-other writers within the established baseline. It will not accommodate
-a writer that changes the baseline itself.
+platform-specific patches applied. After init, a writer touching
+tables newtron doesn't own is outside the drift guard's view — tolerated
+because invisible, not accommodated as a feature (§5); an edit to an
+owned table is drift. It refuses a writer that changes the baseline
+itself.
 
 Other baseline requirements may emerge as new primitives require them.
 The principle is the same: state the prerequisites, establish them once
-at initialization, and accommodate everything else.
+at initialization, and leave untouched only what it does not own.
 
 ---
 
@@ -1196,8 +1201,9 @@ definition in its place.
 
 When adding a new operation that creates CONFIG_DB state, the
 corresponding removal operation is not optional — it is part of the
-feature. Ship both or ship neither. Baseline operations (`setup-*`,
-`set-*`) are the sole exception — their reverse is reconcile.
+feature. Ship both or ship neither. Baseline operations (`setup-*`)
+are the sole exception — their reverse is reconcile. (`set-*` is not
+baseline: `set-property` reverses with `clear-property`.)
 
 The symmetry extends down to the config generator layer — the pure
 functions that construct CONFIG_DB entries (see §29):
@@ -1337,7 +1343,7 @@ what happens if one doesn't exist — without consulting documentation.
 | Verb | Lifecycle | Reverse | Examples |
 |------|-----------|---------|----------|
 | `setup-*` | Device-lifetime. Done once at provisioning. | reconcile | `setup-device` |
-| `set-*` | Field assignment. Per-resource. | reconcile | `set-property` |
+| `set-*` | Field assignment. Per-resource. | `clear-*` | `set-property`/`clear-property` |
 | `create-*` | Named resource with independent lifecycle. | `delete-*` | `create-vrf`, `create-vlan` |
 | `add-*` | Instance in a collection. | `remove-*` | `add-bgp-peer`, `add-static-route` |
 | `bind-*` | Relationship between resources. | `unbind-*` | `bind-ipvpn`, `bind-acl`, `bind-qos` |
@@ -1488,7 +1494,11 @@ between writes:
 There are no `time.Sleep` calls in the write path. If a developer feels
 the need to add a sleep between CONFIG_DB writes, it means the ordering
 is wrong or the daemon has a bug — both of which deserve investigation,
-not a timing band-aid.
+not a timing band-aid. "No sleeps" is not "no waits": a sleep is a timer,
+while the settling gate a cross-daemon kernel dependency needs (the race
+above) is a `pollUntil` on a structural fact — the kernel device
+exists — proceeding the instant it does. A wait on a fact, not a clock
+(§15).
 
 ### Daemon settling time
 
@@ -3041,7 +3051,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C | machine: loader.go | §7 |
 | 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C | prose | §8 |
 | 9 | The opinion is in the pattern | newtron constrains the building blocks, not the building | C | prose | §9 |
-| 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C | construction | §10 |
+| 10 | Delivery over generation | Generation is solved; delivery — validate, apply in order, verify, reverse — is not | C | construction | §10 |
 | 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C | construction | §11 |
 | 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C | construction | §12 |
 | 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C | machine: schema.go | §13 |
