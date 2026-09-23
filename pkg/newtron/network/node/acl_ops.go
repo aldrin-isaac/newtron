@@ -154,6 +154,10 @@ type ACLConfig struct {
 	Stage       string
 	Ports       string
 	Description string
+	// Filter is the source filter spec name for a service-derived ACL (§24/§25
+	// provenance). Recorded on the intent so it survives round-trip and the
+	// replay can rebuild the ACL's rules from it. Empty for standalone ACLs.
+	Filter string
 }
 
 // CreateACL creates a new ACL table.
@@ -186,6 +190,9 @@ func (n *Node) CreateACL(ctx context.Context, name string, opts ACLConfig) (*Cha
 	}
 	if opts.Description != "" {
 		intentParams[sonic.FieldDescription] = opts.Description
+	}
+	if opts.Filter != "" {
+		intentParams[sonic.FieldFilter] = opts.Filter
 	}
 	if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+name, intentParams, []string{"device"}); err != nil {
 		return nil, err

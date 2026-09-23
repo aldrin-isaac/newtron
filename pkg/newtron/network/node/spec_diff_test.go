@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // TestSpecDiff proves rung 0a's thesis (#486): when a spec changes after a
@@ -95,5 +96,37 @@ func TestSpecDiff(t *testing.T) {
 	}
 	if !orphaned {
 		t.Errorf("expected an orphaned resource after deleting the macvpn spec; got %v", div)
+	}
+}
+
+// TestSpecDiff_ServiceACLFilterRoundTrips guards the reconstruction asymmetry
+// on-device validation surfaced (#489): a service-derived ACL records its source
+// filter (§24/§25), but the create-acl replay dropped it, so spec-diff reported
+// a spurious applied=FILTER→current="" on every provisioned device with a
+// service filter. TestOpRoundTrip missed it — its fixture uses standalone ACLs
+// with no filter. With filter recorded on the intent and reproduced by replay,
+// spec-diff is clean.
+func TestSpecDiff_ServiceACLFilterRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	n := roundTripNode()
+	sp := n.SpecProvider.(*testSpecProvider)
+	sp.filterSpecs["FILTER_X"] = &spec.FilterSpec{
+		Type:  "ipv4",
+		Rules: []*spec.FilterRule{{Sequence: 10, Action: "permit"}},
+	}
+
+	// A service-derived ACL carries its source filter as recorded provenance.
+	if _, err := n.CreateACL(ctx, "FILTER_X_IN_ABCD1234", ACLConfig{
+		Type: "L3", Stage: "ingress", Ports: "Ethernet0", Filter: "FILTER_X",
+	}); err != nil {
+		t.Fatalf("CreateACL: %v", err)
+	}
+
+	div, err := n.SpecDiff(ctx)
+	if err != nil {
+		t.Fatalf("SpecDiff: %v", err)
+	}
+	if rd, ok := div["acl|FILTER_X_IN_ABCD1234"]; ok {
+		t.Errorf("service ACL shows spurious spec-divergence — the recorded filter did not round-trip: %+v", rd)
 	}
 }

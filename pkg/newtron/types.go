@@ -246,6 +246,7 @@ type ACLConfig struct {
 	Stage       string
 	Ports       string
 	Description string
+	Filter      string // source filter spec for a service-derived ACL (§24/§25 provenance)
 }
 
 // ACLRuleConfig holds parameters for adding an ACL rule. Identity (table +

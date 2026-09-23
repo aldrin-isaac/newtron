@@ -279,6 +279,7 @@ func buildOpRegistry() map[string]*OpSpec {
 					Stage:       paramString(p, "stage"),
 					Ports:       paramString(p, "ports"),
 					Description: paramString(p, "description"),
+					Filter:      paramString(p, "filter"),
 				}); err != nil {
 					return err
 				}
