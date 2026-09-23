@@ -579,11 +579,11 @@ func (c *Client) IntentDrift(device, mode string) ([]newtron.DriftEntry, error) 
 	return result, nil
 }
 
-// SpecDivergence reports how the device's applied intent differs from what the
+// SpecDiff reports how the device's applied intent differs from what the
 // current specs would apply — the "is this device behind its specs?" read of the
 // three-way intent comparison (#486 rung 0a). Complements IntentDrift.
-func (c *Client) SpecDivergence(device string) ([]newtron.SpecDivergenceEntry, error) {
-	var result []newtron.SpecDivergenceEntry
+func (c *Client) SpecDiff(device string) ([]newtron.SpecDiffEntry, error) {
+	var result []newtron.SpecDiffEntry
 	if err := c.doGet(c.nodePath(device)+"/intent/spec-diff", &result); err != nil {
 		return nil, err
 	}

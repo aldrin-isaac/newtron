@@ -2996,7 +2996,7 @@ what *would* be applied now; the device captures what's actually there.
 A three-way comparison — intent record vs device (true drift) and
 intent record vs reconstruction (spec evolution) — would separate
 "someone edited CONFIG_DB" from "the spec changed since last apply."
-The read now exists — `intent spec-diff` (`Node.SpecDivergence`, #486
+The read now exists — `intent spec-diff` (`Node.SpecDiff`, #486
 rung 0a) reports the spec-evolution axis. What is not yet built is the
 guard acting on it: treating a spec edit as a pending refresh rather
 than freezing writes (rung 1).

@@ -1298,13 +1298,13 @@ type SpecFieldChange struct {
 	Current string `json:"current"`           // resolved value the current spec would produce
 }
 
-// SpecDivergenceEntry reports, for one intent resource, how the device's applied
+// SpecDiffEntry reports, for one intent resource, how the device's applied
 // intent differs from what the current specs would apply. Kind is "spec-evolved"
 // (the named params moved because a spec changed since apply) or "orphaned" (the
 // resource's defining spec no longer resolves, so the device is behind by a
 // teardown). It answers a single-device observation (§14) — data, not a verdict:
 // the device is behind its specs, distinct from device drift (see DriftEntry).
-type SpecDivergenceEntry struct {
+type SpecDiffEntry struct {
 	Resource string            `json:"resource"`
 	Kind     string            `json:"kind"` // "spec-evolved" | "orphaned"
 	Changes  []SpecFieldChange `json:"changes,omitempty"`
