@@ -222,6 +222,19 @@ func (cs *ChangeSet) IsEmpty() bool {
 	return len(cs.Changes) == 0
 }
 
+// hasModify reports whether any change is an in-place field update (ChangeModify).
+// render() uses this to decide, during reconstruction, whether it must snapshot
+// the current rows to merge a partial modify against — a changeset of pure adds
+// needs no such snapshot, so the common replay path pays nothing for it.
+func (cs *ChangeSet) hasModify() bool {
+	for i := range cs.Changes {
+		if cs.Changes[i].Type == sonic.ChangeTypeModify {
+			return true
+		}
+	}
+	return false
+}
+
 // buildChangeSet wraps config function output into a ChangeSet.
 // Bridges pure config functions (return []sonic.Entry) with the ChangeSet
 // world used by primitives and composites.
