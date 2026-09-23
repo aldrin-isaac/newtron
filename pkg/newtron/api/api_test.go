@@ -248,7 +248,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ProjectionDiff": true, // #4: POST /networks/{netID}/nodes/{device}/intent/projection-diff
 			"Tree":           true,
 			"Drift":          true,
-			"SpecDivergence": true, // GET /networks/{netID}/nodes/{node}/intent/spec-diff (#486 rung 0a)
+			"SpecDiff": true, // GET /networks/{netID}/nodes/{node}/intent/spec-diff (#486 rung 0a)
 			"Reconcile":      true,
 		},
 		"Interface": {
@@ -505,7 +505,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ProjectionDiff":          "intent dry-run preview (no device writes)",
 			"Tree":                    "intent read",
 			"Drift":                   "intent + device read",
-			"SpecDivergence":          "intent + spec read (spec-evolution axis)",
+			"SpecDiff":          "intent + spec read (spec-evolution axis)",
 			"Execute":                 "orchestration wrapper — gates fire on each mutation inside fn",
 		},
 		"Interface": {

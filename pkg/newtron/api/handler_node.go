@@ -1260,7 +1260,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-// handleSpecDivergence answers "is this device behind its specs, and how?" —
+// handleSpecDiff answers "is this device behind its specs, and how?" —
 // the read half of the three-way intent comparison (#486 rung 0a). It reports,
 // per intent resource, the params whose resolved value has moved because a spec
 // changed since apply (spec-evolved) or the resources whose defining spec no
@@ -1268,13 +1268,13 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 // current-spec projection (device moved OR spec moved, undistinguished); this
 // isolates the spec-moved axis. Single-device observation (§14) — data, not a
 // verdict.
-func (s *Server) handleSpecDivergence(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSpecDiff(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
 	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return n.SpecDivergence(r.Context())
+		return n.SpecDiff(r.Context())
 	})
 	if err != nil {
 		writeError(w, err)

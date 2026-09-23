@@ -153,7 +153,7 @@ Examples:
 			return err
 		}
 
-		entries, err := app.client.SpecDivergence(app.deviceName)
+		entries, err := app.client.SpecDiff(app.deviceName)
 		if err != nil {
 			return err
 		}

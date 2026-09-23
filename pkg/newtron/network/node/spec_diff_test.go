@@ -7,8 +7,8 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
 
-// TestSpecDivergence proves rung 0a's thesis (#486): when a spec changes after a
-// resource is applied, SpecDivergence reports exactly the resolved param that
+// TestSpecDiff proves rung 0a's thesis (#486): when a spec changes after a
+// resource is applied, SpecDiff reports exactly the resolved param that
 // moved — and reports nothing when the spec is unchanged. The "nothing when
 // unchanged" half rests on the same invariant TestOpRoundTrip proves (replay is
 // deterministic and lossless); this test drives the CHANGED-spec and
@@ -18,7 +18,7 @@ import (
 // bind-macvpn is the vehicle: it re-resolves `vni` from the macvpn spec by name
 // on replay (BindMACVPN → GetMACVPN(...).VNI), so a spec edit makes the applied
 // intent (frozen at apply time) disagree with what current specs would apply.
-func TestSpecDivergence(t *testing.T) {
+func TestSpecDiff(t *testing.T) {
 	ctx := context.Background()
 	n := roundTripNode()
 	sp := n.SpecProvider.(*testSpecProvider)
@@ -42,9 +42,9 @@ func TestSpecDivergence(t *testing.T) {
 	}
 
 	// Unchanged spec → up to date.
-	div, err := n.SpecDivergence(ctx)
+	div, err := n.SpecDiff(ctx)
 	if err != nil {
-		t.Fatalf("SpecDivergence (baseline): %v", err)
+		t.Fatalf("SpecDiff (baseline): %v", err)
 	}
 	if len(div) != 0 {
 		t.Fatalf("baseline divergence should be empty, got %v", div)
@@ -54,9 +54,9 @@ func TestSpecDivergence(t *testing.T) {
 	// current spec would now apply 10999.
 	sp.macvpn["SERVERS"].VNI = 10999
 
-	div, err = n.SpecDivergence(ctx)
+	div, err = n.SpecDiff(ctx)
 	if err != nil {
-		t.Fatalf("SpecDivergence (after spec change): %v", err)
+		t.Fatalf("SpecDiff (after spec change): %v", err)
 	}
 	found := false
 	for res, rd := range div {
@@ -83,9 +83,9 @@ func TestSpecDivergence(t *testing.T) {
 	// Delete the macvpn spec → the bind-macvpn resource can no longer resolve,
 	// so replay skips it (§20) and it reports as orphaned.
 	delete(sp.macvpn, "SERVERS")
-	div, err = n.SpecDivergence(ctx)
+	div, err = n.SpecDiff(ctx)
 	if err != nil {
-		t.Fatalf("SpecDivergence (after spec delete): %v", err)
+		t.Fatalf("SpecDiff (after spec delete): %v", err)
 	}
 	orphaned := false
 	for _, rd := range div {
