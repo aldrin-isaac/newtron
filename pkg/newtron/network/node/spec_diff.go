@@ -54,11 +54,7 @@ type ResourceDiff struct {
 // this so link-ordering differences never register as spurious change — the same
 // equality semantics TestOpRoundTrip and util.DiffIntentRecords require.
 func normalizedIntentDB(n *Node) map[string]map[string]string {
-	out := make(map[string]map[string]string, len(n.configDB.NewtronIntent))
-	for res, fields := range n.configDB.NewtronIntent {
-		out[res] = NormalizeIntentFields(fields)
-	}
-	return out
+	return normalizeIntentRecords(n.configDB.NewtronIntent)
 }
 
 // diffIntents classifies each intent resource by comparing applied (#1 — what
