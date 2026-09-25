@@ -2996,10 +2996,10 @@ what *would* be applied now; the device captures what's actually there.
 A three-way comparison — intent record vs device (true drift) and
 intent record vs reconstruction (spec evolution) — would separate
 "someone edited CONFIG_DB" from "the spec changed since last apply."
-The read now exists — `intent spec-diff` (`Node.SpecDiff`, #486
-rung 0a) reports the spec-evolution axis. What is not yet built is the
-guard acting on it: treating a spec edit as a pending refresh rather
-than freezing writes (rung 1).
+Neither the comparison nor the guard it would feed is built: newtron
+today reports drift without separating the two causes, and treats a
+spec edit the same as a CONFIG_DB edit — it freezes writes rather than
+treating the spec change as a pending refresh.
 
 ### Bounded footprint and rollback history
 
