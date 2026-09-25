@@ -635,7 +635,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	if err := n.precondition(sonic.OpBindACL, i.name).Result(); err != nil {
 		return nil, err
 	}
-	if n.GetIntent("acl|"+aclName) == nil {
+	if n.GetIntent(aclKey(aclName)) == nil {
 		return nil, fmt.Errorf("ACL table '%s' does not exist", aclName)
 	}
 	if direction != "ingress" && direction != "egress" {
@@ -648,7 +648,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	}
 	if err := i.node.writeIntent(cs, sonic.OpBindACL, "interface|"+i.name+"|acl|"+direction,
 		map[string]string{sonic.FieldACLName: aclName, sonic.FieldDirection: direction},
-		[]string{"interface|" + i.name, "acl|" + aclName}); err != nil {
+		[]string{"interface|" + i.name, aclKey(aclName)}); err != nil {
 		return nil, err
 	}
 	cs.ReverseOp = "interface.unbind-acl"

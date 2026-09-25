@@ -810,7 +810,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 	if !skipACL && ingressACLName != "" {
-		aclIntent := n.GetIntent("acl|" + ingressACLName)
+		aclIntent := n.GetIntent(aclKey(ingressACLName))
 		if aclIntent != nil {
 			// ACL already exists — update port list from intents (this interface's
 			// service intent was written above, so aclPortsFromIntents includes it)
@@ -833,22 +833,20 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				// derivation (§21): the rules are regenerated from the filter at
 				// replay and read from the projected ACL_RULE table at teardown —
 				// the rule names are never consulted, so they are not recorded.
-				aclParams := map[string]string{
-					sonic.FieldName:        ingressACLName,
-					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
-					sonic.FieldStage:       "ingress",
-					sonic.FieldPorts:       ports,
-					sonic.FieldDescription: desc,
-					sonic.FieldFilter:      svc.IngressFilter,
-				}
-				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+ingressACLName, aclParams, []string{"device"}); err != nil {
+				if err := n.createACLIntent(cs, ingressACLName, ACLConfig{
+					Type:        mapFilterType(filterSpec.Type),
+					Stage:       "ingress",
+					Ports:       ports,
+					Description: desc,
+					Filter:      svc.IngressFilter,
+				}); err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
 	if !skipACL && egressACLName != "" {
-		aclIntent := n.GetIntent("acl|" + egressACLName)
+		aclIntent := n.GetIntent(aclKey(egressACLName))
 		if aclIntent != nil {
 			// ACL already exists — update port list from intents
 			currentPorts := n.aclPortsFromIntents(egressACLName, "egress")
@@ -861,15 +859,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				ports := n.aclPortsFromIntents(egressACLName, "egress")
 				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", ports, desc))
 				n.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec)
-				aclParams := map[string]string{
-					sonic.FieldName:        egressACLName,
-					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
-					sonic.FieldStage:       "egress",
-					sonic.FieldPorts:       ports,
-					sonic.FieldDescription: desc,
-					sonic.FieldFilter:      svc.EgressFilter,
-				}
-				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+egressACLName, aclParams, []string{"device"}); err != nil {
+				if err := n.createACLIntent(cs, egressACLName, ACLConfig{
+					Type:        mapFilterType(filterSpec.Type),
+					Stage:       "egress",
+					Ports:       ports,
+					Description: desc,
+					Filter:      svc.EgressFilter,
+				}); err != nil {
 					return nil, err
 				}
 			}
@@ -894,9 +890,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			// per-member when apply-service replays; there is no IRB-level bind.
 			n.bindMemberQoS(cs, vlanID)
 		} else {
-			if err := n.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
-				map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
-				[]string{"interface|" + i.name}); err != nil {
+			if err := i.createQoSBindingIntent(cs, qosPolicyName); err != nil {
 				return nil, err
 			}
 			cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
@@ -1177,7 +1171,7 @@ func (n *Node) expandPrefixList(prefixListName, directIP string) []string {
 // Uses DAG children of the acl|NAME intent to determine remaining users
 // instead of scanning CONFIG_DB ports.
 func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
-	aclIntentKey := "acl|" + aclName
+	aclIntentKey := aclKey(aclName)
 	aclIntent := i.node.GetIntent(aclIntentKey)
 
 	// Determine if this is the last user via DAG children.
@@ -1244,7 +1238,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 			}
 		}
 		cs.Deletes(deleteAclTableConfig(aclName))
-		if err := i.node.deleteIntent(cs, aclIntentKey); err != nil {
+		if err := i.node.deleteACLIntent(cs, aclName); err != nil {
 			return err
 		}
 	} else {
@@ -1385,7 +1379,7 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 		}
 	}
 	// Delete QoS sub-intent (child of interface intent — must precede parent deletion per I5)
-	if err := n.deleteIntent(cs, "interface|"+i.name+"|qos"); err != nil {
+	if err := i.deleteQoSBindingIntent(cs); err != nil {
 		return nil, err
 	}
 

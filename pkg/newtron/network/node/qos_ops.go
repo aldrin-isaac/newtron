@@ -15,6 +15,36 @@ import (
 // QoS Operations (Per-Interface)
 // ============================================================================
 
+// qosBindingKey returns the intent resource key for an interface's QoS binding —
+// a sub-resource of the interface's identity record (interface|<name>), and the
+// single owner of this key so writer, readers, and teardown cannot diverge (§25).
+func qosBindingKey(intfName string) string {
+	return "interface|" + intfName + "|qos"
+}
+
+// createQoSBindingIntent writes the interface|<name>|qos intent record. It is the
+// single owner of that record's contents (§25/§27), shared by the standalone
+// BindQoS and the service-derived bind ApplyService performs — the QoS twin of
+// createACLIntent, converged for the same reason (#492/#494).
+//
+// It is deliberately NOT called on the irb path: an irb service's QoS is
+// delivered per VLAN member and must not be recorded, because a bind-qos intent
+// on an IRB is unreplayable (the capability gate refuses it) and would abort the
+// next projection rebuild. That is a caller's decision, expressed by not calling
+// this — never by a flag here.
+func (i *Interface) createQoSBindingIntent(cs *ChangeSet, policyName string) error {
+	return i.node.writeIntent(cs, sonic.OpBindQoS, qosBindingKey(i.name),
+		map[string]string{sonic.FieldQoSPolicy: policyName},
+		[]string{"interface|" + i.name})
+}
+
+// deleteQoSBindingIntent removes the interface|<name>|qos intent record — the
+// reverse of createQoSBindingIntent, named with it and shipped with it (§15).
+// Shared by the standalone UnbindQoS and RemoveService's teardown.
+func (i *Interface) deleteQoSBindingIntent(cs *ChangeSet) error {
+	return i.node.deleteIntent(cs, qosBindingKey(i.name))
+}
+
 // BindQoS binds a QoS policy to this interface — creates device-wide
 // maps (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE) on
 // first reference and per-interface entries (PORT_QOS_MAP, QUEUE) every
@@ -38,9 +68,7 @@ func (i *Interface) BindQoS(ctx context.Context, policyName string) (*ChangeSet,
 	if err := i.createInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
-	if err := i.node.writeIntent(cs, sonic.OpBindQoS, "interface|"+i.name+"|qos",
-		map[string]string{sonic.FieldQoSPolicy: policyName},
-		[]string{"interface|" + i.name}); err != nil {
+	if err := i.createQoSBindingIntent(cs, policyName); err != nil {
 		return nil, err
 	}
 	cs.ReverseOp = "interface." + sonic.OpUnbindQoS
@@ -71,7 +99,7 @@ func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 	}
 
 	// Read policy name from intent — not from CONFIG_DB
-	intentKey := "interface|" + i.name + "|qos"
+	intentKey := qosBindingKey(i.name)
 	intent := n.GetIntent(intentKey)
 	if intent == nil {
 		return nil, fmt.Errorf("no QoS intent for %s", i.name)
@@ -95,7 +123,7 @@ func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 		cs.Deletes(deleteDeviceQoSConfig(policyName, policy))
 	}
 
-	if err := i.node.deleteIntent(cs, "interface|"+i.name+"|qos"); err != nil {
+	if err := i.deleteQoSBindingIntent(cs); err != nil {
 		return nil, err
 	}
 	if err := n.render(cs); err != nil {

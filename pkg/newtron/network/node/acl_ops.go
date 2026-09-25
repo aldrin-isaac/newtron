@@ -92,7 +92,7 @@ func (n *Node) rebindMemberACLs(cs *ChangeSet, vlanID int) {
 				continue
 			}
 			rendered[dir+"|"+aclName] = true
-			if n.GetIntent("acl|"+aclName) == nil {
+			if n.GetIntent(aclKey(aclName)) == nil {
 				continue // table not created (the service carries no filter this direction)
 			}
 			merged := updateAclPorts(aclName, n.aclPortsFromIntents(aclName, dir))
@@ -160,10 +160,58 @@ type ACLConfig struct {
 	Filter string
 }
 
+// aclKey returns the intent resource key for an ACL table record — the single
+// owner of this key so writer, readers, and teardown cannot diverge (§25).
+func aclKey(name string) string {
+	return "acl|" + name
+}
+
+// aclRuleKey returns the intent resource key for one rule within an ACL table —
+// a sub-resource of the table's record (§25, as aclKey).
+func aclRuleKey(tableName, ruleName string) string {
+	return "acl|" + tableName + "|" + ruleName
+}
+
+// createACLIntent writes the acl|<name> intent record. It is the single owner of
+// that record's contents (§25/§27): both the standalone CreateACL operation and
+// the service-derived ACL that ApplyService assembles go through it, so the two
+// paths cannot record different params for one record — a divergence on `filter`
+// was exactly the bug in #492, and the projection-level twin of it was #494.
+//
+// The caller owns its ChangeSet lifecycle and its idempotency decision: op()
+// directs composites like ApplyService to manage their own set, and the two
+// callers legitimately differ on what to do when the record already exists
+// (CreateACL returns an empty set; ApplyService merges the new port in). Those
+// are decisions, not copies — only the record's contents are owned here.
+func (n *Node) createACLIntent(cs *ChangeSet, name string, opts ACLConfig) error {
+	params := map[string]string{
+		sonic.FieldName:    name,
+		sonic.FieldACLType: opts.Type,
+		sonic.FieldStage:   opts.Stage,
+	}
+	if opts.Ports != "" {
+		params[sonic.FieldPorts] = opts.Ports
+	}
+	if opts.Description != "" {
+		params[sonic.FieldDescription] = opts.Description
+	}
+	if opts.Filter != "" {
+		params[sonic.FieldFilter] = opts.Filter
+	}
+	return n.writeIntent(cs, sonic.OpCreateACL, aclKey(name), params, []string{"device"})
+}
+
+// deleteACLIntent removes the acl|<name> intent record — the reverse of
+// createACLIntent, named with it and shipped with it (§15). Shared by the
+// standalone DeleteACL and RemoveService's last-consumer reap.
+func (n *Node) deleteACLIntent(cs *ChangeSet, name string) error {
+	return n.deleteIntent(cs, aclKey(name))
+}
+
 // CreateACL creates a new ACL table.
 func (n *Node) CreateACL(ctx context.Context, name string, opts ACLConfig) (*ChangeSet, error) {
 	// Intent-idempotent: if the ACL intent already exists, returns empty ChangeSet.
-	if n.GetIntent("acl|"+name) != nil {
+	if n.GetIntent(aclKey(name)) != nil {
 		return NewChangeSet(n.name, "device."+sonic.OpCreateACL), nil
 	}
 
@@ -180,21 +228,7 @@ func (n *Node) CreateACL(ctx context.Context, name string, opts ACLConfig) (*Cha
 	if err != nil {
 		return nil, err
 	}
-	intentParams := map[string]string{
-		sonic.FieldName:    name,
-		sonic.FieldACLType: opts.Type,
-		sonic.FieldStage:   opts.Stage,
-	}
-	if opts.Ports != "" {
-		intentParams[sonic.FieldPorts] = opts.Ports
-	}
-	if opts.Description != "" {
-		intentParams[sonic.FieldDescription] = opts.Description
-	}
-	if opts.Filter != "" {
-		intentParams[sonic.FieldFilter] = opts.Filter
-	}
-	if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+name, intentParams, []string{"device"}); err != nil {
+	if err := n.createACLIntent(cs, name, opts); err != nil {
 		return nil, err
 	}
 	cs.OperationParams = map[string]string{"name": name}
@@ -238,9 +272,9 @@ func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts 
 	if opts.DstPort != "" {
 		intentParams["dst_port"] = opts.DstPort
 	}
-	if err := n.writeIntent(cs, sonic.OpAddACLRule, "acl|"+tableName+"|"+ruleName,
+	if err := n.writeIntent(cs, sonic.OpAddACLRule, aclRuleKey(tableName, ruleName),
 		intentParams,
-		[]string{"acl|" + tableName}); err != nil {
+		[]string{aclKey(tableName)}); err != nil {
 		return nil, err
 	}
 
@@ -262,7 +296,7 @@ func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts 
 // (acl_table, rule_name) is immutable. Renaming a rule is remove + add,
 // not update. Issue #227.
 func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
-	resource := "acl|" + tableName + "|" + ruleName
+	resource := aclRuleKey(tableName, ruleName)
 	existing := n.GetIntent(resource)
 	if existing == nil {
 		return nil, fmt.Errorf("rule %s not found in ACL table %s", ruleName, tableName)
@@ -309,7 +343,7 @@ func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, op
 	}
 	if err := n.writeIntent(cs, sonic.OpAddACLRule, resource,
 		intentParams,
-		[]string{"acl|" + tableName}); err != nil {
+		[]string{aclKey(tableName)}); err != nil {
 		return nil, err
 	}
 
@@ -321,7 +355,7 @@ func (n *Node) UpdateACLRule(ctx context.Context, tableName, ruleName string, op
 // DeleteACLRule removes a single rule from an ACL table.
 func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*ChangeSet, error) {
 	// Verify rule exists via intent DB
-	if n.GetIntent("acl|"+tableName+"|"+ruleName) == nil {
+	if n.GetIntent(aclRuleKey(tableName, ruleName)) == nil {
 		return nil, fmt.Errorf("rule %s not found in ACL table %s", ruleName, tableName)
 	}
 
@@ -333,7 +367,7 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 	}
 	cs.OperationParams = map[string]string{"table_name": tableName, "rule_name": ruleName}
 
-	if err := n.deleteIntent(cs, "acl|"+tableName+"|"+ruleName); err != nil {
+	if err := n.deleteIntent(cs, aclRuleKey(tableName, ruleName)); err != nil {
 		return nil, err
 	}
 
@@ -350,7 +384,7 @@ func (n *Node) DeleteACL(ctx context.Context, name string) (*ChangeSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := n.deleteIntent(cs, "acl|"+name); err != nil {
+	if err := n.deleteACLIntent(cs, name); err != nil {
 		return nil, err
 	}
 	util.WithDevice(n.name).Infof("Deleted ACL table %s", name)
