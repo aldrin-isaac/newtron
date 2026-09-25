@@ -579,18 +579,6 @@ func (c *Client) IntentDrift(device, mode string) ([]newtron.DriftEntry, error) 
 	return result, nil
 }
 
-// SpecDiff reports how the device's applied intent differs from what the
-// current specs would apply — the "is this device behind its specs?" read of the
-// three-way intent comparison (#486 rung 0a). Complements IntentDrift.
-func (c *Client) SpecDiff(device string) ([]newtron.SpecDiffEntry, error) {
-	var result []newtron.SpecDiffEntry
-	if err := c.doGet(c.nodePath(device)+"/intent/spec-diff", &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// IntentSave persists the device's current intent DB back to topology.json.
 func (c *Client) IntentSave(device, mode string) (*newtron.TopologySnapshot, error) {
 	path := c.nodePath(device) + "/intent/save"
 	if mode == "topology" {

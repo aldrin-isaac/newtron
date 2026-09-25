@@ -416,8 +416,10 @@ func TestOpRoundTrip(t *testing.T) {
 	}
 
 	// (a) Intent DB equality — params round-trip exactly, per resource.
-	intentA := normalizedIntentDB(nA)
-	intentB := normalizedIntentDB(nB)
+	// Both sides canonicalize through the one owner (normalizeIntentRecords) so
+	// DAG-link ordering never reads as a real difference.
+	intentA := normalizeIntentRecords(nA.configDB.NewtronIntent)
+	intentB := normalizeIntentRecords(nB.configDB.NewtronIntent)
 	for res, fa := range intentA {
 		fb, ok := intentB[res]
 		if !ok {
