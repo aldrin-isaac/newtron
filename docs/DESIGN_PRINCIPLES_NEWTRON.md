@@ -3071,6 +3071,11 @@ established practice newtron subscribes to — if the pattern has a name outside
 it is P, however specific its application here · **S** = style preference — could go the
 other way with no functional consequence.
 
+The Universal § column is a mapping, not a bijection: one universal principle may be
+the concept behind several newtron ones (its §34, Structural Guardrails, bundles the
+five rules newtron states as §34, §35 and §39). Where a universal principle and its
+newtron counterparts are the same claim, their labels agree.
+
 | # | Principle | One-Line Rule | | Enforcement | Universal § |
 |---|-----------|---------------|-|-------------|-------------|
 | 1 | The Node — intent and reality in one object | Expected state has one representation, recomputed per operation from specs or NEWTRON_INTENT; the Node is that type | C | construction | §1 |
@@ -3106,7 +3111,7 @@ other way with no functional consequence.
 | 31 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | P | construction | §31 |
 | 32 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S | prose | §32 |
 | 33 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P | machine: TestAPICompleteness | §33 |
-| 34 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S | prose | §34 |
+| 34 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | P | prose | §34 |
 | 35 | Import direction, interface state, projection rebuild | Three principles that each prevent a specific class of silent bug | P | construction | §34 |
 | 36 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P | construction | §35 |
 | 37 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C | prose | §36 |
