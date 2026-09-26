@@ -341,7 +341,7 @@ func (i *Interface) DirectBGPPeerIP() string {
 // policy name before the auth gate runs, so `where: {resource: "..."}`
 // clauses scope the reverse op symmetrically with BindQoS (#163).
 func (i *Interface) QoSPolicyName() string {
-	intent := i.node.GetIntent("interface|" + i.name + "|qos")
+	intent := i.node.GetIntent(qosBindingKey(i.name))
 	if intent == nil {
 		return ""
 	}

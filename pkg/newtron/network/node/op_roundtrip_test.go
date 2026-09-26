@@ -51,7 +51,7 @@ func iface(n *Node, name string) (*Interface, error) {
 // Called once per side so A and B are structurally identical.
 func roundTripNode() *Node {
 	n := testDevice()
-	for _, p := range []string{"Ethernet8", "Ethernet12", "Ethernet16", "Ethernet20"} {
+	for _, p := range []string{"Ethernet8", "Ethernet12", "Ethernet16", "Ethernet20", "Ethernet24"} {
 		n.configDB.Port[p] = sonic.PortEntry{}
 		n.interfaces[p] = &Interface{node: n, name: p}
 	}
@@ -77,6 +77,25 @@ func roundTripNode() *Node {
 		Routing:     &spec.RoutingSpec{Protocol: "bgp", PeerAS: "request"},
 	}
 	sp.qosPolicies["GOLD"] = &spec.QoSPolicy{}
+	// EDGE carries ingress + egress filters and a QoS policy. Applying it drives
+	// apply-service's *hand-written* create-acl (ingress/egress) and bind-qos
+	// intents — the two-writer paths where apply-service and the replay method
+	// (CreateACL / BindQoS) must agree field-for-field. Without a filter/QoS
+	// service in the sequence the round trip never exercised these paths, which
+	// is how a dropped service-ACL `filter` field (recorded by apply-service,
+	// not by CreateACL) shipped undetected. The EDGE step below closes that gap.
+	sp.filterSpecs["EDGE_FILTER"] = &spec.FilterSpec{
+		Type:  "ipv4",
+		Rules: []*spec.FilterRule{{Sequence: 10, Action: "permit", SrcIP: "10.0.0.0/8"}},
+	}
+	sp.services["EDGE"] = &spec.ServiceSpec{
+		Description:   "filtered edge",
+		ServiceType:   "routed",
+		Routing:       &spec.RoutingSpec{Protocol: "bgp", PeerAS: "request"},
+		IngressFilter: "EDGE_FILTER",
+		EgressFilter:  "EDGE_FILTER",
+		QoSPolicy:     "GOLD",
+	}
 	return n
 }
 
@@ -263,6 +282,23 @@ var roundTripSequence = []opInvocation{
 				"route_reflector_client": "true",
 				"next_hop_self":          "true",
 			},
+		})
+		return err
+	}},
+	{"apply-service (filtered + qos)", func(ctx context.Context, n *Node) error {
+		// Drives apply-service's hand-written service-ACL (ingress+egress) and
+		// bind-qos intents. On replay these export to independent create-acl /
+		// bind-qos steps reconstructed by CreateACL / BindQoS, so every field
+		// apply-service records here must round-trip through those methods — the
+		// two-writer contract (§25). A field apply-service writes that the op's
+		// registry Params omit is dropped on export and fails as a field diff.
+		i, err := iface(n, "Ethernet24")
+		if err != nil {
+			return err
+		}
+		_, err = i.ApplyService(ctx, "EDGE", ApplyServiceOpts{
+			IPAddress: "10.3.0.0/31",
+			PeerAS:    65003,
 		})
 		return err
 	}},

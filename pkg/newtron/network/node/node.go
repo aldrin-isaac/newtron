@@ -877,29 +877,37 @@ func (n *Node) render(cs *ChangeSet) error {
 	if err := cs.validate(); err != nil {
 		return err
 	}
-	// Capture the prior field values each change overwrites or deletes — the
-	// `from` state recorded on the change for audit/undo (#236). Only for live
-	// operator mutations: during reconstruction (replaySteps) before/after has
-	// no meaning and the per-render snapshot would tax the hot rebuild path.
-	// One snapshot up front, maintained incrementally so a delete-then-re-add
-	// of the same key within one ChangeSet (e.g. RefreshService) records each
-	// step's true prior state rather than the original twice.
+	// prior holds each row's fields as they stand before the change, taken once
+	// up front and maintained incrementally so a later same-key change in one
+	// ChangeSet (e.g. RefreshService) sees the state its predecessors left. It
+	// serves two ends:
+	//   - the `from` state recorded on the change for audit/undo (#236), and
+	//   - the merge source for a partial modify: the device applies a modify as
+	//     an HSET merge (§48), so a partial update keeps the row's other fields;
+	//     the projection must mirror that, but a typed hydrator full-replaces
+	//     the row from the entry alone (configdb_parsers.go), dropping every
+	//     field the modify omits. Merging c.Fields over the existing row here
+	//     keeps the projection faithful to what the device will hold.
+	// Live mutations always snapshot (they also need `from`). Reconstruction
+	// snapshots only when a modify is present — replay's usual all-adds
+	// changesets pay nothing, preserving the rebuild budget (adds carry a
+	// complete row, so they need no merge).
 	var prior sonic.RawConfigDB
-	if !n.reconstructing {
+	if !n.reconstructing || cs.hasModify() {
 		prior = n.configDB.ExportRaw()
 	}
+	recordFrom := !n.reconstructing
 	for i := range cs.Changes {
 		c := &cs.Changes[i]
-		capture := prior != nil && fromUndoable(c.Table)
-		if capture {
-			if from := prior[c.Table][c.Key]; len(from) > 0 {
-				c.From = maps.Clone(from)
-			}
+		track := prior != nil && fromUndoable(c.Table)
+		priorFields := prior[c.Table][c.Key] // nil-safe: nil map read yields nil
+		if recordFrom && track && len(priorFields) > 0 {
+			c.From = maps.Clone(priorFields)
 		}
 		switch c.Type {
 		case sonic.ChangeTypeDelete:
 			n.configDB.DeleteEntry(c.Table, c.Key)
-			if capture && prior[c.Table] != nil {
+			if track && prior[c.Table] != nil {
 				delete(prior[c.Table], c.Key)
 			}
 		case sonic.ChangeTypeReplace:
@@ -909,20 +917,33 @@ func (n *Node) render(cs *ChangeSet) error {
 			// then apply yields the exact row.
 			n.configDB.DeleteEntry(c.Table, c.Key)
 			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
-			if capture {
+			if track {
 				if prior[c.Table] == nil {
 					prior[c.Table] = map[string]map[string]string{}
 				}
 				prior[c.Table][c.Key] = maps.Clone(c.Fields)
 			}
-		default: // add / modify — HSET merge
-			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
-			if capture {
+		default: // add / modify — HSET merge on the device (§48); mirror it here
+			fields := c.Fields
+			if c.Type == sonic.ChangeTypeModify && len(priorFields) > 0 {
+				// A partial modify must not drop the row's other fields: merge
+				// over the existing row, matching the device HSET. (An add carries
+				// a complete row by contract, so it is applied as-is.) c.Fields
+				// itself is left untouched — cs.Apply still HSETs only the changed
+				// fields to the device.
+				merged := maps.Clone(priorFields)
+				for k, v := range c.Fields {
+					merged[k] = v
+				}
+				fields = merged
+			}
+			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: fields}})
+			if track {
 				if prior[c.Table] == nil {
 					prior[c.Table] = map[string]map[string]string{}
 				}
-				// Mirror HSET merge semantics so a later same-key change in this
-				// set sees the merged state as its `from`.
+				// Mirror the HSET merge so a later same-key change in this set
+				// sees the merged state.
 				merged := maps.Clone(prior[c.Table][c.Key])
 				if merged == nil {
 					merged = map[string]string{}
