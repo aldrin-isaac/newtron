@@ -340,9 +340,11 @@ modify does not, and `render` merges it against the current row first — see §
 and the RCA-037 narrative.*
 
 Config functions return entries in dependency order (parents before children). Reverse
-operations delete in opposite order. Never use `time.Sleep` between writes — ordering
-is structural. Daemon settling is verified by `pollUntil` polling, not sleeps. Daemon
-races are documented as RCAs.
+operations delete in opposite order. Never use `time.Sleep` between writes — within one
+delivery ordering is structural. Across a daemon boundary it is not orderable at all:
+that dependency needs a `pollUntil` on the fact it waits for (RCA-037). Either way the
+wait is on a fact, never a clock — suites verify settling the same way. Daemon races are
+documented as RCAs.
 
 ## Unified Naming Convention for CONFIG_DB Keys
 

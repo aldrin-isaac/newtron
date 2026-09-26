@@ -1269,6 +1269,10 @@ follow; they're left with `redis-cli` and guesswork.
 
 The rule: **if the safety net cannot be established, do not create a
 situation that needs one.** A failed intent write aborts the operation.
+One mechanism, not two: the record leads the ChangeSet it describes, so an
+incremental delivery must write it before the entries it covers, while a
+composite gets this for free — the record commits inside the same
+MULTI/EXEC as the entries, or nothing commits.
 This is not excessive caution — it is the minimum condition for
 recoverability. Proceeding without the intent is proceeding with the
 assumption that nothing will go wrong, which is exactly the assumption
@@ -1478,7 +1482,7 @@ SCHEDULER       -→  QUEUE (via bracket-ref)
 DSCP_TO_TC_MAP  -→  PORT_QOS_MAP (via bracket-ref)
 ```
 
-### Structural ordering, not timing hacks
+### Ordering within a delivery, a fact-gate across daemons
 
 Write ordering is enforced structurally — by the order entries appear in
 the slice returned by config functions — not by inserting `time.Sleep`
@@ -1530,9 +1534,11 @@ These latencies matter in two contexts:
    prerequisite. These are documented as RCAs with root causes and
    workarounds.
 
-**Write ordering is a compile-time property: config functions encode it
-in the slice they return. Daemon settling is a runtime property: test
-suites verify it with polling, not sleeps.**
+**Within one delivery, write ordering is a compile-time property: config
+functions encode it in the slice they return. Across daemons it is not
+orderable — a dependency crossing a daemon boundary needs a `pollUntil`
+on the fact it waits for. Either way the wait is on a fact, never a clock:
+no `time.Sleep` in the write path, and suites verify settling by polling.**
 
 **When adding a new CONFIG_DB table:**
 
@@ -3014,7 +3020,10 @@ intent record vs reconstruction (spec evolution) — would separate
 Neither the comparison nor the guard it would feed is built: newtron
 today reports drift without separating the two causes, and treats a
 spec edit the same as a CONFIG_DB edit — it freezes writes rather than
-treating the spec change as a pending refresh.
+treating the spec change as a pending refresh. `newtron/spec-diff-design.md`
+carries the justification, why a per-field reconstruction of the applied
+state is unavailable under §20 and §23, the digest-based design that works
+without one, and the trigger agreed for building it.
 
 ### Bounded footprint and rollback history
 

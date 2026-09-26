@@ -86,10 +86,10 @@ system's own code. Or the intent moved: an operator edited a spec, so
 the rebuilt expectation no longer matches a device still faithfully at
 its last-applied state — and the guard freezes writes to every device
 using that spec until each is reconciled. Both surface as drift, and the
-guard blocks on both; a read now tells them apart (§21), though acting on
-the distinction — not freezing on a spec edit — is not. Either way the
-guard will not write
-onto a device that no longer matches the current expectation. What's on the device stays put, the mismatch is listed
+guard blocks on both — it cannot tell them apart, so editing a spec
+freezes writes as though someone had edited the device (§21). Either way
+the guard will not write onto a device that no longer matches the current
+expectation. What's on the device stays put, the mismatch is listed
 entry by entry, and a person decides what happens next — because sometimes the 3am fix was
 right, and software that silently overwrites it is making the night
 worse. If intent and reality are supposed to agree, you don't keep
@@ -1005,10 +1005,10 @@ addresses each one directly:
    have changed since. No guessing, no scanning, no "does this entry
    belong to me?"
 
-These guarantees are properties of the pipeline, not of any specific
-primitive. Every new primitive inherits them without new code.
-When an existing primitive changes, they remain. The pipeline absorbs
-growth; individual primitives do not need to earn their own reliability.
+These four are the enforcement contract of §3 — properties of the
+pipeline, not of any primitive. What follows from that is the point here:
+the pipeline absorbs growth, so individual primitives never have to earn
+their own reliability.
 
 ---
 
@@ -1446,6 +1446,11 @@ follow; they're left with `redis-cli` and guesswork.
 
 The rule: **if the safety net cannot be established, do not create a
 situation that needs one.** A failed intent write aborts the operation.
+There is one mechanism here, not two: the record leads the change set it
+describes, so for a sequential delivery this is an ordering requirement —
+the receipt is written before the writes it covers — and for an atomic one
+it is already guaranteed, since the record commits with the entries or not
+at all.
 This is not excessive caution — it is the minimum condition for
 recoverability. Proceeding without the intent is proceeding with the
 assumption that nothing will go wrong, which is exactly the assumption
@@ -1695,7 +1700,7 @@ SCHEDULER       -→  QUEUE (via bracket-ref)
 DSCP_TO_TC_MAP  -→  PORT_QOS_MAP (via bracket-ref)
 ```
 
-### Structural ordering, not timing hacks
+### Ordering within a delivery, a fact-gate across daemons
 
 Write ordering is enforced structurally — by the order entries appear in
 the slice returned by config functions — not by inserting sleeps
@@ -1747,9 +1752,12 @@ These latencies matter in two contexts:
    prerequisite. These are documented as RCAs with root causes and
    workarounds.
 
-**Write ordering is a compile-time property: config functions encode it
-in the slice they return. Daemon settling is a runtime property: test
-suites verify it with polling, not sleeps.**
+**Within one delivery, write ordering is a compile-time property: config
+functions encode it in the slice they return. Across daemons it is not
+orderable at all — a dependency that crosses a daemon boundary needs a
+runtime gate that polls for the fact it is waiting on. Either way the wait
+is on a fact, never on a clock: no sleeps in the write path, and test
+suites verify settling by polling.**
 
 **When adding a new CONFIG_DB table:**
 
@@ -2929,8 +2937,9 @@ Enforcement comes in three classes, and they fail differently:
 
 - **By construction** — the violation is inexpressible. Once names are
   normalized at the boundary, downstream code cannot mis-normalize; once
-  ordering is structural, there is no sleep to forget — the one cross-daemon wait that remains is
-a poll on a fact, not a timer. This class cannot rot.
+  ordering is structural, there is no sleep to forget (the one wait that
+  remains, across a daemon boundary, polls a fact rather than a clock —
+  §18). This class cannot rot.
 - **By machine** — a gate rejects the violation: a schema that fails closed,
   a completeness test that walks a registry. This class fails loudly, at the
   gate, on the change that introduced the violation.
@@ -3042,10 +3051,10 @@ what *would* be applied now; the device captures what's actually there.
 A three-way comparison — intent record vs device (true drift) and
 intent record vs reconstruction (spec evolution) — would separate
 "someone edited CONFIG_DB" from "the spec changed since last apply."
-The read now exists — the spec-evolution axis (intent record vs
-reconstruction) is reported as a diagnostic (#486 rung 0a). What is not
-yet built is the guard acting on it: treating a spec edit as a pending
-refresh rather than freezing writes (rung 1).
+Neither the comparison nor the guard it would feed is built. Drift is
+reported without separating its two causes, and a spec edit is treated
+exactly like a device edit — writes freeze, rather than the spec change
+being carried as a refresh the device is simply behind on.
 
 ### Bounded footprint and rollback history
 
