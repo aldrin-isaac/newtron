@@ -59,25 +59,6 @@ steps:
     expect:
       jq: '.exists == true'
 
-  # #486 rung 0a: with svc-evpn-irb freshly applied from the specs, the device's
-  # applied intent must match what the current specs would apply — spec-diff
-  # reports nothing. On-device proof of the spec-diff read AND round-trip
-  # cleanliness on REAL specs: a lossy op would surface here as spurious
-  # spec-evolution the fixture round-trip (TestOpRoundTrip) cannot catch.
-  - name: spec-diff-up-to-date-sw1
-    action: newtron
-    devices: [switch1]
-    url: /nodes/{{device}}/intent/spec-diff
-    expect:
-      jq: 'length == 0'
-
-  - name: spec-diff-up-to-date-sw2
-    action: newtron
-    devices: [switch2]
-    url: /nodes/{{device}}/intent/spec-diff
-    expect:
-      jq: 'length == 0'
-
   # Per-member policy (§38 real-device witness): svc-evpn-irb carries
   # ingress_filter FILTER_IRB. The service binds on the IRB, but its ACL is
   # bound to the VLAN's member ports (§4, §7) — the device must accept an

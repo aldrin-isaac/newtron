@@ -1260,29 +1260,6 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, val)
 }
 
-// handleSpecDiff answers "is this device behind its specs, and how?" —
-// the read half of the three-way intent comparison (#486 rung 0a). It reports,
-// per intent resource, the params whose resolved value has moved because a spec
-// changed since apply (spec-evolved) or the resources whose defining spec no
-// longer resolves (orphaned). Distinct from handleDrift: drift is device vs
-// current-spec projection (device moved OR spec moved, undistinguished); this
-// isolates the spec-moved axis. Single-device observation (§14) — data, not a
-// verdict.
-func (s *Server) handleSpecDiff(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return n.SpecDiff(r.Context())
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, val)
-}
-
 // handleTopologyDrift answers "does the device CONFIG_DB diverge from
 // topology.json?" with a freshly-built TopologyNode projection. Distinct
 // from handleDrift (issue #75B): that one drifts against the operator's

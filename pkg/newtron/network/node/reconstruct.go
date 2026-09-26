@@ -54,9 +54,9 @@ func (n *Node) IntentSnapshot(ctx context.Context) (map[string]map[string]string
 }
 
 // normalizeIntentRecords returns a copy of an intent map with every record in
-// canonical form (NormalizeIntentFields). One owner for map-level normalization,
-// shared by IntentSnapshot (device/in-memory read) and normalizedIntentDB
-// (spec-diff's #3) so the two never drift in how they canonicalize.
+// canonical form (NormalizeIntentFields). One owner for map-level normalization
+// so every reader canonicalizes identically — link-ordering differences must
+// never read as a real difference.
 func normalizeIntentRecords(src map[string]map[string]string) map[string]map[string]string {
 	out := make(map[string]map[string]string, len(src))
 	for resource, fields := range src {
