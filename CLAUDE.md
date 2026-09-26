@@ -623,6 +623,32 @@ missed: a local irb's vni=0 macvpn made the composite write a `VXLAN_TUNNEL_MAP`
 with VNI 0 (bind an L2VNI only when `VNI > 0`; regression test added). RCA-051
 documents the ACL/QoS-can't-bind-to-IRB limitation this arc is built around.
 
+**Sweep bring-up recipe (learned the hard way 2026-09-26 — read before any sweep):**
+
+1. **`--super-users` is not optional.** Bring the server up as
+   `bin/newt-server --audit --auth-pam-service newtron-test --enforce-authorization
+   --audit-integrity --spec-watch --super-users aldrin,ron --dev-superuser=false`
+   with `PATH="$PWD/bin:$PATH"` (the `newtron-cli` steps exec `newtron` from the
+   server's PATH). Omitting `--super-users` does not fail loudly — the suites run and
+   report scenario failures like `403: ron lacks vlan.create on VLAN110`, which reads
+   exactly like an authorization regression. `1node-vs-config` came back 2/10/16
+   before the flag and 28/28 after it.
+2. **Re-mint sessions after every server restart** — they are in-memory and a restart
+   silently drops them (compounds with the 8h-TTL trap below).
+3. **A loopback suite poisons the actuated suites on the same network.**
+   `1node-vs-config` runs `--no-deploy` in topology mode and leaves *unsaved
+   topology-mode intents* on that network's in-memory node actor. Every actuated
+   suite on `1node-vs` afterwards dies at `boot-ssh` with
+   `500: topology node has unsaved intents` — which presents as a 2-minute SSH
+   timeout, not as a state problem. Fix: `bin/newtron -D switch1 -N 1node-vs intent
+   reload` to discard (note the syntax — `-D` before the subcommand, and
+   `--topology` is implicit, not a flag), or order the deployed suites for a network
+   before its loopback suite.
+4. **Do not fire a retry while a run is in flight.** newtrun correctly answers
+   `409: run "<suite>" is already in flight`. Scenarios in `1node-vs-basic` take 2m+
+   each, so a slow run looks like a finished one — check for the `scenarios —`
+   summary line before relaunching.
+
 **Full-sweep 2026-07-10 (interface-kind Checkpoint 1)**: all 13 suites
 sequentially on feat/interface-kind-scenarios @ post-#432 + the two
 suite-found fixes (TableKeys entry-key contract; binding-gated QoS
