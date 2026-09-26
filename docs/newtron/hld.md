@@ -164,7 +164,7 @@ Intent → Replay → Render → [Deliver]
 
 1. **Intent source**: Intents come from topology.json steps (topology mode) or device NEWTRON_INTENT records (actuated mode).
 2. **Replay**: `IntentsToSteps` → `ReplayStep` calls config methods. Each config method writes its intent record and generates CONFIG_DB entries.
-3. **Render**: `render(cs)` validates entries against the YANG-derived schema and updates the typed CONFIG_DB tables (the projection).
+3. **Render**: `render(cs)` validates entries against the YANG-derived schema and updates the typed CONFIG_DB tables (the projection). An add applies its row as given; an in-place modify is merged into the existing row so the projection mirrors the `HSET` the device will receive, rather than dropping the fields the modify omits.
 4. **Deliver** (optional): `cs.Apply(n)` for interactive writes, `ReplaceAll()` for Reconcile. Skipped during replay — rendering is the point.
 
 ### 3.1 Three Data Stores

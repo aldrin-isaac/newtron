@@ -295,6 +295,23 @@ The abstract Node uses `ApplyEntries` to keep its projection (in-memory ConfigDB
 func (db *ConfigDB) ApplyEntries(entries []Entry)
 ```
 
+**A hydrator rebuilds its row from the fields it is handed.** For the typed
+parsers (§3.6) that means the entry must carry the complete row, because the
+hydrator assigns a fresh struct — any field the entry omits becomes empty. Adds
+satisfy this by construction: a config generator emits the whole row.
+
+An in-place modify does not. `updateAclPorts` writes `{ports}` alone, and on the
+wire that is correct — Redis `HSET` merges, so the device keeps `type`, `stage`
+and `policy_desc` (DESIGN_PRINCIPLES_NEWTRON §48). `render` therefore merges a
+modify against the row's current fields before handing it to the hydrator, so the
+projection ends up holding what the device will hold. The merge source is the
+`ExportRaw` snapshot `render` already takes for the `from` state; during
+reconstruction it is taken only when a modify is present, so replay's all-adds
+changesets pay nothing for it.
+
+Deletes and `cs.Replace` are unaffected: replace removes the projection row first,
+because that row must become exactly the new fields.
+
 ### 3.4 ConfigDBClient
 
 The Redis client for CONFIG_DB (DB 4). All methods operate on Redis hash keys with format `<TABLE>|<KEY>`.
@@ -368,7 +385,7 @@ CONFIG_DB entries are parsed from Redis hashes into typed Go structs via a regis
 - **1 copy parser**: STATIC_ROUTE (copies into `map[string]map[string]string`)
 - **10 hash-merge parsers**: DEVICE_METADATA, VLAN_INTERFACE, LOOPBACK_INTERFACE, PORTCHANNEL_MEMBER, SUPPRESS_VLAN_NEIGH, SAG, SAG_GLOBAL, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, NEWTRON_INTENT
 
-Hash-merge hydrators (`mergeHydrator`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names.
+Hash-merge hydrators (`mergeHydrator`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names. Because they merge rather than reassign, a partial write to one of these tables was always safe; the typed parsers reassign, which is why `render` merges a modify before hydrating it (§3.3).
 
 **Redis serialization note:** Redis hashes store field names and values as strings. The Go struct `json` tags serve double duty: they define both the Redis hash field name mapping and JSON serialization format (for display/logging). Parsing uses the registry functions, not `json.Unmarshal` — there is no JSON to unmarshal from flat `map[string]string`.
 

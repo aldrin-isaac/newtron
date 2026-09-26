@@ -842,7 +842,12 @@ Three mechanisms bridge these:
 a ConfigDB struct goes through this registry:
 
 - **Render path**: `render` calls it to update configDB after each
-  operation (both modes)
+  operation (both modes). A hydrator *reassigns* its row from the fields
+  it is handed, so an entry must carry the complete row; `render` merges
+  an in-place modify against the current row before hydrating it, so a
+  partial update cannot drop the fields it omits (mechanics in
+  `device-lld.md` §3.3; the rule and its rationale in
+  `DESIGN_PRINCIPLES_NEWTRON.md` §48)
 - **Device read**: `GetAll` calls it when loading `sonic.Device.ConfigDB`
   (the actual-state cache used by `InitFromDeviceIntent` to extract intents)
 

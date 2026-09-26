@@ -296,6 +296,15 @@ state is torn down.
   The intent lives in the caller's verb (`cs.Replace` vs `cs.Deletes`+`cs.Adds`),
   not in an apply-layer heuristic.
 
+- **The projection mirrors the wire.** `render` merges an in-place modify into
+  the projection's existing row, because that is what the device's `HSET` will
+  do. A typed hydrator rebuilds its struct from the fields it is handed, so
+  handing it a partial modify would drop every field the modify omits — the
+  projection would then hold less than the device and the next drift read would
+  report a divergence nobody caused. Hash-merge tables were always immune; the
+  typed ones needed the rule. `cs.Replace` still clears the row first: it must
+  become exactly the new fields.
+
 - **Verification checks final state only.** `verifyConfigChanges` computes the
   last operation per key; a key deleted then re-added is verified as "should
   exist with new fields," not "should be deleted." (A `cs.Replace` field diff
@@ -319,6 +328,11 @@ in three places: `schema.go` (validation), the typed struct in `configdb.go`
 (representation), and the hydrator in `configdb_parsers.go` (wire → struct). A field
 missing from the hydrator is silently dropped during projection rebuild, causing false
 drift on a correctly-configured device. Missing any one is a bug.
+
+**Hydrators reassign; partial writes are merged before they get there.** A typed
+hydrator builds its struct from the fields it is handed, so an entry must carry the
+complete row. Config generators satisfy this (they emit whole rows); an in-place
+modify does not, and `render` merges it against the current row first — see §48.
 
 ## CONFIG_DB Write Ordering and Daemon Settling
 

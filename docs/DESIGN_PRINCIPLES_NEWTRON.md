@@ -2878,9 +2878,24 @@ The two deliveries, by intent:
    observable. The intent lives in the caller's verb, `cs.Replace` versus
    `cs.Deletes`+`cs.Adds`, not in the mechanism.
 
+The projection owes the device the same semantics. `render` applies a
+ChangeSet to the in-memory projection, and a modify there must mirror the
+`HSET` it will become on the wire: **merge the changed fields into the
+existing row, never rebuild the row from the entry alone.** A typed
+hydrator reconstructs its struct from the fields it is handed, so feeding
+it a partial modify drops every field the modify omits — the projection
+then holds less than the device will, and the next drift read reports a
+divergence nobody caused. The hash-merge hydrators were already immune;
+the typed ones were not, which is why the rule has to be stated rather
+than left to the hydrator's shape. Teardown keeps its own semantics here
+too: `cs.Replace` deletes the projection row before applying, because the
+row must become exactly the new fields.
+
 Litmus: if an `update-*` ever emits a `DEL` of the key it is updating, it
 has become a teardown — deliver it with `cs.Replace`, or rename it
-remove + add.
+remove + add. And if a partial modify ever leaves the projection holding
+fewer fields than the device, the projection has stopped being a model of
+the device.
 
 ---
 
