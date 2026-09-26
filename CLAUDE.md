@@ -623,6 +623,68 @@ missed: a local irb's vni=0 macvpn made the composite write a `VXLAN_TUNNEL_MAP`
 with VNI 0 (bind an L2VNI only when `VNI > 0`; regression test added). RCA-051
 documents the ACL/QoS-can't-bind-to-IRB limitation this arc is built around.
 
+**Full-sweep 2026-09-26 (post-#497)**: all 13 suites sequentially on main @ post-#497,
+both platforms, cold deploys for every lab-backed suite, each lab destroyed as its suites
+finished. **197 scenarios — 196 passed, 0 failed, 1 by-design skip (L2c-round-trip), ~2h
+of suite time.** Third consecutive all-green sweep. Per-suite: 1node-vs-config 28/28,
+1node-vs-auth 36/37+1skip, 1node-vs-basic 9/9 (7m44s), 1node-vs-auth-deployed 3/3,
+1node-vs-architecture 32/32 (47m37s), 2node-vs-primitive 25/25 cold (9m39s),
+2node-vs-service 7/7 cold (6m59s), 2node-vs-drift 7/7 (10m15s), 2node-vs-drift-actuated
+8/8 (6m58s), 2node-ngdp-primitive 22/22 cold (9m26s), simple-vrf-host 5/5,
+2node-ngdp-service 6/6 cold (7m48s), 3node-ngdp-dataplane 8/8 cold (8m54s).
+
+Validates on real devices, both platforms, the arc this sweep was run for: the **projection
+partial-modify merge** and the **§25 acl/qos intent-record convergence** (#494), and the
+**removal of spec-diff** (#496/#497). Zero product regressions — every failure the sweep
+surfaced was a *stale suite*, and both had gone stale because something they asserted
+changed after their last run:
+
+1. **`1node-vs-basic/05-configdb-snapshot-actuated`** called `configdb snapshot` with no
+   flag while asserting `.DEVICE_METADATA == null`. The CLI default was flipped at some
+   point to return the entire CONFIG_DB (`--owned-only` became opt-in) and the scenario
+   never caught up — its own description still claimed "the default owned-only filter".
+   DEVICE_METADATA *is* in `excludedFromDrift`, so the assertion was right and the command
+   had lost its flag. Fixed by adding `--owned-only` to the two owned-scope steps.
+2. **`2node-vs-drift/12-teardown`** removed services from `Ethernet16` and `Ethernet4`.
+   The irb-service-redesign flip (7fd5cb7) moved both irb services onto their VLAN
+   interfaces — topology.json applies eirb1/eirb2 on Vlan400/Vlan401 and irb on Vlan100,
+   and the member ports carry no binding. The service suite's own deprovision was updated
+   at the time; this suite's teardown was missed, and its last ledger record (2026-07-07)
+   predates the flip, so nothing had caught it. Fixed the four delivery points; 7/7 in
+   10m15s, matching its pre-flip timing exactly.
+
+**Lesson worth keeping: a suite that has not been run since an architectural change is
+not evidence of anything.** Both stale suites passed every prior sweep and broke on a
+change that never touched them — the 07-07 ledger records were the last time either ran,
+and the IRB flip landed a week later. The per-suite "last validated" dates in this ledger
+are the signal for which suites to distrust after an arc lands.
+
+**Sweep bring-up recipe (learned the hard way 2026-09-26 — read before any sweep):**
+
+1. **`--super-users` is not optional.** Bring the server up as
+   `bin/newt-server --audit --auth-pam-service newtron-test --enforce-authorization
+   --audit-integrity --spec-watch --super-users aldrin,ron --dev-superuser=false`
+   with `PATH="$PWD/bin:$PATH"` (the `newtron-cli` steps exec `newtron` from the
+   server's PATH). Omitting `--super-users` does not fail loudly — the suites run and
+   report scenario failures like `403: ron lacks vlan.create on VLAN110`, which reads
+   exactly like an authorization regression. `1node-vs-config` came back 2/10/16
+   before the flag and 28/28 after it.
+2. **Re-mint sessions after every server restart** — they are in-memory and a restart
+   silently drops them (compounds with the 8h-TTL trap below).
+3. **A loopback suite poisons the actuated suites on the same network.**
+   `1node-vs-config` runs `--no-deploy` in topology mode and leaves *unsaved
+   topology-mode intents* on that network's in-memory node actor. Every actuated
+   suite on `1node-vs` afterwards dies at `boot-ssh` with
+   `500: topology node has unsaved intents` — which presents as a 2-minute SSH
+   timeout, not as a state problem. Fix: `bin/newtron -D switch1 -N 1node-vs intent
+   reload` to discard (note the syntax — `-D` before the subcommand, and
+   `--topology` is implicit, not a flag), or order the deployed suites for a network
+   before its loopback suite.
+4. **Do not fire a retry while a run is in flight.** newtrun correctly answers
+   `409: run "<suite>" is already in flight`. Scenarios in `1node-vs-basic` take 2m+
+   each, so a slow run looks like a finished one — check for the `scenarios —`
+   summary line before relaunching.
+
 **Full-sweep 2026-07-10 (interface-kind Checkpoint 1)**: all 13 suites
 sequentially on feat/interface-kind-scenarios @ post-#432 + the two
 suite-found fixes (TableKeys entry-key contract; binding-gated QoS

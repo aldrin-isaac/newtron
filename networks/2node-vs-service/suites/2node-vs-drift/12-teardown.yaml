@@ -2,6 +2,11 @@ name: teardown
 description: |
   Standard teardown: remove services, then deprovision infrastructure.
   Follows the service topology's reverse dependency order.
+
+  The irb services are removed on their VLAN interfaces, not on the member
+  ports: the IRB is the service delivery point, so topology.json applies
+  eirb1/eirb2 on Vlan400/Vlan401 and irb on Vlan100. Ethernet4 and
+  Ethernet16 are VLAN members and carry no binding to remove.
 requires: [reprovision]
 
 steps:
@@ -10,13 +15,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet16/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan400/remove-service
 
   - name: remove-overlay-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet16/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan401/remove-service
 
   - name: remove-l2-extend-sw1
     action: newtron
@@ -46,13 +51,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet4/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan100/remove-service
 
   - name: remove-local-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet4/remove-service
+    url: /nodes/{{device}}/interfaces/Vlan100/remove-service
 
   - name: remove-transit-sw1
     action: newtron
