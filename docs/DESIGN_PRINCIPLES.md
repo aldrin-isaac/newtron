@@ -3095,13 +3095,18 @@ makes the agreement honest rather than assumed.
 
 # Summary
 
-Legend: **C** = conviction (specific to this architecture) · **P** = established practice · **S** = style preference
+Legend, with the test each label has to pass: **C** = conviction — a choice specific to
+this architecture that a competent engineer could reasonably make differently · **P** =
+established practice — if the pattern has a name outside this system, it is P, however
+specific its application here · **S** = style preference — could go the other way with no
+functional consequence. A label is a claim, not a compliment; the P entries are not lesser
+principles, they are the ones whose justification is already settled elsewhere.
 
 | # | Principle | One-Line Rule | |
 |---|-----------|---------------|-|
 | 1 | The Node — intent and reality in one object | Expected state has one representation and one code path, recomputed fresh from specs or from the device's own records; the Node is that type | C |
 | 2 | Three properties of one code path | Delivery, offline provisioning, and drift detection are structural consequences, not independent features | C |
-| 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | C |
+| 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | P |
 | 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C |
 | 5 | Specs are intent; intent DB is authority | The intent DB is the primary state after application; the projection (from intent replay) is the expected CONFIG_DB; the system requires its baseline | C |
 | 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C |
@@ -3110,26 +3115,26 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 9 | The opinion is in the pattern | Constrain the building blocks, not the building | C |
 | 10 | Delivery over generation | Generation is solved; delivery — validate, apply in order, verify, reverse — is not | C |
 | 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C |
-| 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | C |
-| 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C |
+| 12 | Dry-run as first-class | The constraint that makes preview safe is the same one that makes offline provisioning possible | P |
+| 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | P |
 | 14 | Verify writes, observe the rest | Assert what you know (your own writes); observe what you don't (the network); return data, not judgments | C |
-| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (the projection either matches the device or it doesn't) over heuristic detection (staleness timers) | C |
-| 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C |
+| 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (the projection either matches the device or it doesn't) over heuristic detection (staleness timers) | P |
+| 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | S |
 | 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C |
-| 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C |
+| 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | P |
 | 19 | Unified intent model | One record per managed resource — keyed by resource, evolved by operations, carrying params for teardown and reconstruction; the Node intermediates all intent | C |
 | 20 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C |
 | 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
 | 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C |
-| 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
-| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C |
+| 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | P |
+| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | P |
 | 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | P |
 | 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | P |
 | 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P |
 | 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S |
 | 29 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P |
 | 30 | Respect abstraction boundaries | An abstraction that exists but is not used is worse than no abstraction at all | P |
-| 31 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | C |
+| 31 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | P |
 | 32 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S |
 | 33 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P |
 | 34 | Structural guardrails | Five rules — transparent transport, import direction, on-demand state, projection rebuild, cross-program DRY — each preventing a class of silent bug | P |
@@ -3141,5 +3146,5 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 40 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | P |
 | 41 | HTTP API boundary — wire shape mirrors canonical types | Serialize the canonical type, not a summary; the public type and the wire form are the same JSON | C |
 | 42 | CONFIG_DB composite key is the identity | Whatever makes the row's Redis key distinguishable is identity; `update-X` preserves it, key changes are remove + add | P |
-| 43 | In-place update is delivered in place | To a consumer that re-reads on each notification, an edit and a remove+add differ; updates are field diffs that never remove the object, teardown stays observable; the caller declares which | C |
+| 43 | In-place update is delivered in place | To a consumer that re-reads on each notification, an edit and a remove+add differ; updates are field diffs that never remove the object, teardown stays observable; the caller declares which | P |
 | 44 | An invariant declares its enforcement | Enforcement is by construction, machine, or prose; prose is debt, and a checklist appearing twice is a registry not yet built | C |
