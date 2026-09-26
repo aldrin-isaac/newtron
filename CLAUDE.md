@@ -688,6 +688,40 @@ are the signal for which suites to distrust after an arc lands.
    each, so a slow run looks like a finished one — check for the `scenarios —`
    summary line before relaunching.
 
+5. **Check the principles label crosswalk — nothing else does.** `pkg/conformance`
+   enforces the crosswalk's *mapping* (contiguity, coverage, no duplicates) but not the
+   C/P/S labels, so "a universal principle and its newtron counterparts carry the same
+   label" is prose, kept honest only by running this. It found one silent mismatch that
+   had survived multiple reviews and a deliberate ten-row audit:
+
+   ```sh
+   python3 - <<'EOF'
+   import re
+   def rows(p, x):
+       out = []
+       for ln in open(p):
+           if not ln.startswith('| '): continue
+           c = [s.strip() for s in ln.split('|')]
+           if len(c) < 6 or not c[1].isdigit() or c[4] not in ('C','P','S'): continue
+           out.append((int(c[1]), c[2], c[4], c[6] if x and len(c) > 6 else ''))
+       return out
+   u = {n: l for n, nm, l, _ in rows('docs/DESIGN_PRINCIPLES.md', False)}
+   bad = []
+   for n, nm, l, xw in rows('docs/DESIGN_PRINCIPLES_NEWTRON.md', True):
+       m = re.match(r'§(\d+)$', xw)
+       if m and int(m.group(1)) in u and u[int(m.group(1))] != l:
+           bad.append((n, nm, l, m.group(1), u[int(m.group(1))]))
+   for n, nm, l, um, ul in bad:
+       print('MISMATCH: newtron §%s %s [%s] vs universal §%s [%s]' % (n, nm, l, um, ul))
+   print('label crosswalk:', 'aligned' if not bad else '%d mismatch(es)' % len(bad))
+   EOF
+   ```
+
+   Expected output is the single line `label crosswalk: aligned`. A mismatch is a
+   question, not a failure — the Universal § column is a mapping, not a bijection (one
+   universal principle can be the concept behind several newtron ones), so a reported
+   row may be a legitimate split. Read both principles and decide.
+
 **Full-sweep 2026-07-10 (interface-kind Checkpoint 1)**: all 13 suites
 sequentially on feat/interface-kind-scenarios @ post-#432 + the two
 suite-found fixes (TableKeys entry-key contract; binding-gated QoS
