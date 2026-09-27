@@ -1148,9 +1148,9 @@ You cannot call `ApplyService` and skip the checks — they run as the
 first step of the operation. This is application-level referential
 integrity for a database that has none.
 
-For removal operations, the system scans CONFIG_DB to determine if
-shared resources (VRFs, VLANs, ACLs) are still referenced by other
-service bindings before deleting them. A VRF used by three interfaces
+For removal operations, the system consults the intent records to
+determine whether shared resources (VRFs, VLANs, ACLs) are still
+referenced by other service bindings before deleting them. A VRF used by three interfaces
 isn't removed until the last interface unbinds from it.
 
 ### Schema validation enforces data format
@@ -1438,8 +1438,8 @@ records low-level CONFIG_DB mutations (HSET, DEL) but not the sharing
 context in which they were made. Reversing those mutations would delete
 a VRF that two services share, remove a filter still bound to another
 interface, or tear down a VTEP that other overlays depend on. Every
-removal path scans CONFIG_DB for remaining consumers before deleting
-shared resources — a domain judgment that no mechanical reversal can
+removal path consults the intent records for remaining consumers before
+deleting shared resources — a domain judgment that no mechanical reversal can
 replicate.
 
 Only domain-level reverse operations (`RemoveService`, `UnbindACL`,
@@ -2134,65 +2134,83 @@ deletion (removing an ACL that another interface still needs) or
 permanent leakage (never removing anything for fear of breaking a
 consumer).
 
-The system resolves this by recognizing three distinct kinds of
-CONFIG_DB entry, each with its own identity model and lifecycle:
+**Infrastructure** is how traffic is carried: a routing table, the
+protocol configuration inside it, an interface's address, a neighbour of
+its own. **Policy** is a rule about traffic: which packets are
+permitted, which routes are accepted, how a packet is queued. That
+distinction is what an operator already thinks in, and it holds
+regardless of how any individual object is stored.
 
-| Category | Identity | Lifecycle | Examples |
-|----------|----------|-----------|----------|
-| **Infrastructure** | Per-interface | Created/destroyed with service apply/remove | INTERFACE IP, BGP_NEIGHBOR, VRF binding |
-| **Policy** | User-named + content hash | Shared across services, independent lifecycle | ACL_TABLE, ROUTE_MAP, PREFIX_SET |
-| **Binding** | Per-interface | Created/destroyed with service apply/remove | ACL ports field, peer group route_map_in |
+Apply a transit service to Ethernet0 and two different things come into
+being. The routing table, the ACL and the QoS policy are created because
+the network needs them, and they will outlive Ethernet0. What belongs to
+Ethernet0 is smaller: an address, a binding to that routing table, a
+place in the ACL's port list, a queue map on the port, a neighbour of its
+own. Apply the same service to nine more ports and the first set is not
+created again — only the second. Remove Ethernet0 and only the second
+goes. That last part is not an optimisation: an ACL protecting four
+interfaces must survive the removal of three.
 
-The distinction is not taxonomic. It drives the implementation of
-every create and every delete.
+Now change one of those shared objects. There are two ways to do it, and
+they differ in what anyone watching the network can observe while it
+happens. Build the complete new version and switch members over, and the
+only behaviours that ever exist are the old one and the intended one.
+Change the object where it stands, and every partial state along the way
+is live traffic's problem too.
 
-Infrastructure is 1:1 with an interface's service binding — it exists
-because the interface needs it and dies when the interface is done with
-it. A BGP neighbor for transit peering on Ethernet0 exists because
-Ethernet0 has a transit service. Remove the service, remove the
-neighbor. No ambiguity, no scanning.
+| | Build the new version, switch members to it | Change it where it stands |
+|---|---|---|
+| **Policy** | an ACL, a route map, a prefix set | a QoS policy |
+| **Infrastructure** | — none today | the routing table, its BGP peer group |
 
-Policy objects are N:1 — many interfaces reference the same ACL or
-route map. This changes every lifecycle question. Creation must be
-idempotent: the second interface that needs `PROTECT_RE_IN` must not
-re-create it. Deletion must be reference-aware: the first interface
-removed must not destroy what three others still depend on. The policy
-exists because the *network* needs it, not because any single
-interface does.
+Which way to go depends on what those partial states cost. A filter's
+terms are evaluated as a set, so a partial set is a rule nobody wrote:
+traffic admitted that should be blocked, or blocked that should pass.
+That is expensive enough that filters are always built and switched —
+which needs a name that tells one version from the next, so the name is
+derived from the content. A QoS policy is made of parts too, but its
+partial states misqueue rather than misadmit; nothing is permitted or
+denied that shouldn't be, so it changes where it stands under a stable
+name. Infrastructure's parts stand alone — a second neighbour does not
+invalidate the first — and moving an interface into a freshly built
+routing table would rebuild every adjacency it had, which costs more
+than the edit avoids. §25 weighs this.
 
-Bindings connect the two. An ACL's `ports` field lists the interfaces
-that reference it. A peer group AF's `route_map_in` names the policy
-object. Bindings are per-interface entries that point to shared
-objects — they are created and destroyed with the interface, but what
-they point to has an independent lifecycle.
+**Membership is derived, not stored twice.** Which interfaces reference a
+shared object is computed from the intent records; CONFIG_DB is where
+that answer is delivered, not where it is looked up. It lands in one of
+two shapes — the object lists its members (an ACL's `ports` field), or
+each member names the object (`vrf_name` on an interface,
+`peer_group_name` on a neighbour). Both deliver the same derived fact;
+neither is a third kind of entry.
 
-The lifecycle rules follow from the identity model: infrastructure
-entries are created on `ApplyService` and deleted on `RemoveService`.
-Policy objects are created on first reference and deleted when the
-*last* reference is removed — they persist across individual service
-removals as long as at least one consumer remains. This is not
-reference counting as an optimization; it is the only correct
-behavior. An ACL that protects four interfaces must survive the
-removal of three.
-
-The separation also enables content-hashed naming (§25) — because
-policy objects have identities independent of any interface, their
-names can encode their content, allowing automatic change detection and
-blue-green updates without touching every consumer simultaneously.
+None of this is taxonomy for its own sake. It drives the implementation
+of every create and every delete.
 
 ---
 
 ## 25. Content-Hashed Naming — Version Shared Objects by What They Write
 
-Naming is a coordination problem. Two independent code paths — the
-forward path that creates a policy object and the reverse path that
-deletes it hours or days later — must agree on the same name without
-ever calling each other. They share no state. They share no function
-calls. They agree only by naming convention. This is inherently
-fragile — unless the name itself carries proof of its content.
+A filter with forty terms is protecting a customer edge. Someone widens
+one prefix in the spec. Rewriting that filter in place is not one act:
+each term removed and re-added is a change the dataplane picks up on its
+own, and in between, the rule in force is neither the old one nor the
+new one. Remove a permit before its replacement lands and legitimate
+traffic is dropped. Remove a deny and unwanted traffic is admitted. The
+more terms, the longer that window stays open — and nobody wrote the
+rule that is enforced while it is.
 
-Shared policy objects (ACLs, route maps, prefix sets, community sets)
-include an 8-character content hash in their CONFIG_DB key name:
+So a change of content produces a new object rather than an edit to the
+one in use: the complete replacement is built, members move to it, and
+the original is removed. What the naming makes possible is a transition
+in which no half-written rule is ever in force. Whether a given delivery
+path takes that option is a separate matter — one that removes the
+superseded object before installing its replacement reopens the window
+this exists to close, which is the argument §48 makes for a single row,
+at the scale of a rule.
+
+Two versions cannot share a name, so the name carries a hash of the
+content it was built from:
 
 ```
 ACL_TABLE|PROTECT_RE_IN_1ED5F2C7
@@ -2201,80 +2219,51 @@ PREFIX_SET|RFC1918_5F2A8B3E|10
 ```
 
 The hash is computed from the **generated CONFIG_DB fields** — the
-actual key-value pairs that would be written to Redis — not the spec
-definition. Sorted keys, sorted entries, SHA256, first 4 bytes as
-uppercase hex. This means:
+key-value pairs that would be written to Redis — not from the spec
+definition: sorted keys, sorted entries, SHA256, first four bytes as
+uppercase hex. A future version that adds a field produces a different
+hash, which is correct, because new fields are new content. There is no
+canonical form to maintain alongside the spec and no version number to
+forget to bump. The hash answers one question: what would this object
+write?
 
-- Future versions that add new CONFIG_DB fields automatically
-  produce different hashes (correct — new fields = new content).
-- No separate "canonical form" to maintain, no version field to forget
-  to bump.
-- The hash is literally "what would this policy write to Redis?"
+Three things follow. A change of content surfaces as a change of name,
+visible at the key rather than buried in a field. The forward path that
+creates an object and the reverse path that removes it agree on which
+object they mean without ever coordinating. And the hash is
+deterministic, so an unchanged spec yields an unchanged name — a refresh
+is a no-op for that object — while restoring a spec restores its name, so
+a revert costs nothing and needs no record of what was there before.
 
-When policy objects reference each other, their hashes cascade
-bottom-up. PREFIX_SET hashes are computed first, then ROUTE_MAP
-entries reference those hashed PREFIX_SET names. A prefix list content
-change propagates through the chain automatically — ROUTE_MAP gets a
-new hash because one of its referenced objects changed. The cascade
-stops at the peer group, where it becomes a field update rather than
-a name change.
+When these objects reference each other the hashes cascade bottom-up. A
+prefix set is hashed first; a route map that references it incorporates
+the hashed name, so changing one prefix propagates a new hash up the
+chain. The cascade stops where a shared object is named for what it is
+rather than what it contains: at the peer group it becomes a field
+update, not a new name.
 
-This enables zero-disruption policy updates. Spec unchanged → hash
-unchanged → refreshing the service is a no-op for that object. Spec
-changed → new hash → new object created alongside old → interfaces
-migrate one by one → old object deleted when last consumer migrates.
+Where the hash sits inside the name is a readability choice, not a
+correctness one. Removal never searches for these objects: the forward
+path hands back each name it generated, the operation's intent record
+keeps them, and teardown deletes exactly those names. Any layout works —
+pick the one that sorts usefully for whoever has to read the store.
 
-### Hash placement: always suffix, never prefix
+The superseded object goes with the change that replaced it. Leaving it
+would make footprint grow with the number of edits rather than with the
+network (§23), and a content-derived name is what makes it unambiguously
+the one to remove.
 
-The content hash is always a **suffix** on the object name:
-`{SERVICE}_{DIRECTION}_{HASH}`, not `{HASH}_{SERVICE}_{DIRECTION}`.
-This is a deliberate coupling constraint between two independent code
-paths.
+Refreshing a service after a spec edit leaves the old-hash objects
+behind — nothing points at them, but nothing has deleted them either. The
+refresh compares two lists: the names the service recorded before the
+change, and the names it records after. The difference is what to delete.
+No search is needed, because the record of what was created is the record
+of what to remove.
 
-The forward path (`createRoutePolicy`) generates entries with hashed
-names. The reverse path (`deleteRoutePoliciesConfig`) scans CONFIG_DB
-for entries whose key starts with `{serviceName}_` — a prefix scan.
-These two code paths never call each other; they agree on names only by
-convention.
-
-If the hash is a suffix, the prefix scan works:
-
-```
-ROUTE_MAP|TRANSIT_IMPORT_A1B2C3D4|10     ← starts with "TRANSIT_" ✓
-PREFIX_SET|TRANSIT_IMPORT_PL_10_F3E2|10   ← starts with "TRANSIT_" ✓
-```
-
-If the hash were a prefix, the scan would silently match nothing:
-
-```
-ROUTE_MAP|A1B2C3D4_TRANSIT_IMPORT|10     ← does NOT start with "TRANSIT_" ✗
-```
-
-The failure mode is particularly dangerous: the forward path (create)
-works fine; only the reverse path (delete) breaks — silently leaking
-CONFIG_DB entries that accumulate over time and can never be cleaned up.
-This breakage would only manifest when a service is removed, which might
-not happen in testing for weeks.
-
-**Content hashes are always the last component of a generated name.** The
-service name prefix is the anchor that connects the forward and reverse
-paths.
-
-### Stale hash cleanup during RefreshService
-
-When a spec changes and `RefreshService` runs, old-hash policy objects
-become orphaned. `RemoveService` (called internally) skips shared policy
-deletion if other interfaces still use the service. `ApplyService`
-creates new-hash objects. The old objects would never be cleaned up by
-normal lifecycle.
-
-`RefreshService` solves this with a post-merge scan: after the
-remove+apply cycle, it reads existing route policy objects from CONFIG_DB
-(Redis in connected mode, projection in offline mode), compares against the set
-of objects just created by the apply phase, and deletes the difference.
-This is safe because all interfaces sharing a service use the same spec
-→ the same hashes, and the shared peer group AF was already updated to
-reference new route map names.
+This applies only where the name is ours to choose. A row the platform
+keys for us — device metadata, a global setting, a per-interface instance
+keyed by its interface — has no second version to build, so a change to
+it is always a change in place.
 
 ---
 
@@ -2646,9 +2635,10 @@ The working conventions that prevent the slow erosion of Parts I–VII.
 
 Content-hashed naming (§25) requires that two code paths computing the
 same hash from the same spec get identical results. If one path sees
-`"protect-re"` and another sees `"PROTECT_RE"`, the hashes diverge and
-blue-green migration breaks silently. Boundary normalization is the
-precondition.
+`"protect-re"` and another sees `"PROTECT_RE"`, the hashes diverge and the
+same content yields two different names: the forward path creates one
+object while the reverse path looks for another, so nothing is ever
+cleaned up. Boundary normalization is the precondition.
 
 Names are normalized once, at spec load time: ALL UPPERCASE,
 hyphens → underscores, `[A-Z0-9_]` only. After loading, every map key
@@ -3161,8 +3151,8 @@ principles, they are the ones whose justification is already settled elsewhere.
 | 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
 | 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C |
 | 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | P |
-| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | P |
-| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | P |
+| 24 | Policy vs infrastructure | Shared objects outlive their members; whether a change builds a new version or edits one in place is a separate judgement, not a property of the category | P |
+| 25 | Content-hashed naming | Rewriting a composed rule in place enforces rules nobody wrote; build the replacement and switch members to it, which needs a name derived from content | P |
 | 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | P |
 | 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P |
 | 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S |
