@@ -2044,6 +2044,14 @@ against the set recorded after, and the difference is deleted. No scan is
 needed, because the record of what was created is the record of what to
 remove.
 
+That is also why `route_policy_keys` exists at all, and why nothing like
+it exists for a QoS policy's queues. A content-hashed name cannot be
+guessed back, so the forward hands its generated names to the record and
+teardown deletes exactly those. An identity-named resource needs no such
+record: its keys follow from the name, so its reverse clears the namespace
+directly — `unbindQosConfig` sweeps the port's queue indices without
+consulting anything (§15).
+
 ### Delivery order does not yet take the option
 
 The naming makes it possible to build a complete replacement before

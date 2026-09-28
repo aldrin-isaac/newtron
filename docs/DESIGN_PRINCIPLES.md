@@ -2265,6 +2265,12 @@ keys for us — device metadata, a global setting, a per-interface instance
 keyed by its interface — has no second version to build, so a change to
 it is always a change in place.
 
+The same split decides removal. Where the system chose the name, nothing
+can guess it back, so the forward records what it generated and teardown
+deletes exactly those names; where the platform keys the row, the name is
+derivable and teardown enumerates the space instead of remembering it.
+§15 states the rule that follows.
+
 ---
 
 ## 26. BGP Peer Groups — The Protocol's Native Sharing Mechanism
