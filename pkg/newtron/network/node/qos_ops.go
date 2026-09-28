@@ -15,6 +15,17 @@ import (
 // QoS Operations (Per-Interface)
 // ============================================================================
 
+// qosBindable reports whether an interface kind is a legal QoS bind point. The
+// single owner of that question for the derived per-member paths (§25), where the
+// port is discovered from VLAN membership rather than named by the operator: a
+// PortChannel can be a VLAN member but holds no PORT_QOS_MAP row (LAG QoS is
+// per-member in SONiC — see CapabilityQoSBinding, RCA-051), and the schema refuses
+// the key outright. The operator-named paths need no such check; their forward
+// capability gate already refuses a bind the reverse could then find.
+func qosBindable(intfName string) bool {
+	return interfaceKindOf(intfName).HasCapability(CapabilityQoSBinding)
+}
+
 // qosBindingKey returns the intent resource key for an interface's QoS binding —
 // a sub-resource of the interface's identity record (interface|<name>), and the
 // single owner of this key so writer, readers, and teardown cannot diverge (§25).
@@ -106,21 +117,14 @@ func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 	}
 	policyName := intent.Params[sonic.FieldQoSPolicy]
 
-	// Resolve spec for queue count — needed for deterministic unbind
-	var queueCount int
-	var policy *spec.QoSPolicy
-	if policyName != "" {
-		policy, _ = n.GetQoSPolicy(policyName)
-		if policy != nil {
-			queueCount = len(policy.Queues)
-		}
-	}
-
-	cs := buildChangeSet(n.Name(), "interface."+sonic.OpUnbindQoS, unbindQosConfig(i.name, queueCount), ChangeDelete)
+	// No spec is resolved here: the policy name is the decision this record holds,
+	// and the rows to clear follow from it plus the namespace bound (§20 — a reverse
+	// is self-sufficient from the record; §15 — it clears what it owns).
+	cs := buildChangeSet(n.Name(), "interface."+sonic.OpUnbindQoS, unbindQosConfig(i.name), ChangeDelete)
 
 	// Clean up device-wide entries if no other interface references this policy
 	if policyName != "" && !n.isQoSPolicyReferenced(policyName, i.name) {
-		cs.Deletes(deleteDeviceQoSConfig(policyName, policy))
+		cs.Deletes(deleteDeviceQoSConfig(policyName))
 	}
 
 	if err := i.deleteQoSBindingIntent(cs); err != nil {
@@ -215,30 +219,42 @@ func (n *Node) isMemberServiceQoSBound(member, excludeKey string) bool {
 	return false
 }
 
-// deleteMemberQoSRows deletes a member's PORT_QOS_MAP/QUEUE rows. The queue count is
-// read from the projection (device reality), not re-resolved from a spec.
+// deleteMemberQoSRows clears a member's QoS rows. The single owner of the
+// per-member reverse (§25), shared by the membership-leave path and RemoveService.
+//
+// It reads neither the policy spec nor the projection. The former is not what was
+// applied and the latter is the same re-derivation (see unbindQosConfig); what
+// bounds the delete is the namespace, and what gates it is the member's kind — a
+// PortChannel VLAN member holds no PORT_QOS_MAP row and the schema refuses the
+// key, so emitting one would fail the whole operation. That gate is why this is a
+// function and not an inlined call.
 func (n *Node) deleteMemberQoSRows(cs *ChangeSet, member string) {
-	queueCount := 0
-	for key := range n.configDB.Queue {
-		if strings.HasPrefix(key, member+"|") {
-			queueCount++
-		}
+	if !qosBindable(member) {
+		return
 	}
-	if queueCount > 0 || n.configDB.PortQoSMap[member].DSCPToTCMap != "" {
-		cs.Deletes(unbindQosConfig(member, queueCount))
-	}
+	cs.Deletes(unbindQosConfig(member))
 }
 
-// unbindMemberQoS removes a leaving member's QoS rows when no irb-type service
-// still binds it — the reverse of bindMemberQoS (§15).
-// A member leaving its last serviced VLAN loses its PORT_QOS_MAP/QUEUE; one that
-// still belongs to another serviced VLAN keeps them. Called after the membership
-// intent is deleted, so the left VLAN's binding is already gone.
-func (n *Node) unbindMemberQoS(cs *ChangeSet, member string) {
+// unbindMemberQoS removes a leaving member's QoS rows — the reverse of
+// bindMemberQoS (§15). A member leaving its last serviced VLAN loses its
+// PORT_QOS_MAP/QUEUE; one that still belongs to another serviced VLAN keeps them.
+//
+// leftVLANs are the VLANs the member is leaving. They must be passed in: this runs
+// after the membership intents are deleted, so the left VLANs are no longer
+// derivable from the member, and without them a port leaving a VLAN that never
+// carried QoS would emit a teardown for rows it never had. Both gates read intent
+// records — one asks whether any *remaining* service still binds QoS here, the
+// other whether any *departed* VLAN's service bound it at all.
+func (n *Node) unbindMemberQoS(cs *ChangeSet, member string, leftVLANs map[int]bool) {
 	if n.isMemberServiceQoSBound(member, "") {
 		return
 	}
-	n.deleteMemberQoSRows(cs, member)
+	for vlanID := range leftVLANs {
+		if b := n.GetIntent(bindingKey(VLANName(vlanID))); b != nil && b.Params["qos_policy"] != "" {
+			n.deleteMemberQoSRows(cs, member)
+			return
+		}
+	}
 }
 
 // isQoSPolicyReferenced checks if any QoS intent (excluding the given interface)

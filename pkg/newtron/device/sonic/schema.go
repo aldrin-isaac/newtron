@@ -10,6 +10,13 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// MaxQueuesPerPort bounds the QUEUE index namespace a port can hold, and is the
+// bound every QUEUE write is validated against (see the QUEUE key pattern below).
+// That is what makes the namespace sweepable: no key outside it has ever been
+// delivered, so a teardown that clears 0..MaxQueuesPerPort-1 cannot under-delete
+// whatever a policy held when it was bound. Widening a platform widens both.
+const MaxQueuesPerPort = 8
+
 // FieldType identifies the expected type of a CONFIG_DB field value.
 type FieldType int
 
@@ -480,7 +487,9 @@ var Schema = map[string]TableSchema{
 	},
 
 	"QUEUE": {
-		// Key: "IntfName|QueueID"
+		// Key: "IntfName|QueueID" — the index is bounded by MaxQueuesPerPort.
+		// The literal class and the constant must agree; TestQueueKeyPatternBound
+		// pins them (a Sprintf-built class is silently wrong above 10 queues).
 		KeyPattern: `^(Ethernet|PortChannel)\d+\|[0-7]$`,
 		Fields: map[string]FieldConstraint{
 			"scheduler":    {Type: FieldString},

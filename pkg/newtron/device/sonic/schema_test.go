@@ -1,6 +1,7 @@
 package sonic
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -658,5 +659,30 @@ func TestSchema_PORT_QOS_MAP_KeyPattern(t *testing.T) {
 		if !tt.ok && !hasKeyErr {
 			t.Errorf("key %s should fail key validation", tt.key)
 		}
+	}
+}
+
+// TestQueueKeyPatternBound pins MaxQueuesPerPort to the QUEUE key pattern. The
+// two are one fact expressed twice — the pattern is a literal character class
+// because building it from the constant is silently wrong above ten queues
+// ("[0-15]" means 0-1 and 5) — so a test is what keeps them from diverging. A
+// QoS teardown clears the whole index namespace on the strength of this bound.
+func TestQueueKeyPatternBound(t *testing.T) {
+	schema := Schema["QUEUE"]
+	keyRejected := func(key string) bool {
+		err := schema.ValidateEntry("QUEUE", key, map[string]string{})
+		return err != nil && strings.Contains(err.Error(), "invalid key format")
+	}
+	for i := 0; i < MaxQueuesPerPort; i++ {
+		key := fmt.Sprintf("Ethernet0|%d", i)
+		if keyRejected(key) {
+			t.Errorf("queue index %d is within MaxQueuesPerPort but key %q is rejected — "+
+				"the pattern is narrower than the constant, so a teardown sweep would emit invalid keys", i, key)
+		}
+	}
+	over := fmt.Sprintf("Ethernet0|%d", MaxQueuesPerPort)
+	if !keyRejected(over) {
+		t.Errorf("key %q is accepted but sits outside MaxQueuesPerPort — the pattern is wider "+
+			"than the constant, so a teardown sweep would leave rows behind", over)
 	}
 }

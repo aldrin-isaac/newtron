@@ -1357,25 +1357,20 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 	// refusal on LAGs (PORT_QOS_MAP keys are global|PORT only).
 	qosPolicyName := b["qos_policy"]
 	if qosPolicyName != "" {
-		qosPolicy, _ := n.GetQoSPolicy(qosPolicyName)
-		queueCount := 0
-		if qosPolicy != nil {
-			queueCount = len(qosPolicy.Queues)
-		}
 		if isIRB {
 			// Per-member QoS (§4): i.name is the IRB, which never held a
 			// PORT_QOS_MAP row — the rows are on the VLAN's members. Remove each
 			// unless another irb-service binding (not this one) still binds it.
 			for _, member := range n.vlanMemberPorts(bindingInt(b[sonic.FieldVLANID])) {
 				if !n.isMemberServiceQoSBound(member, excludeKey) {
-					cs.Deletes(unbindQosConfig(member, queueCount))
+					n.deleteMemberQoSRows(cs, member)
 				}
 			}
 		} else {
-			cs.Deletes(unbindQosConfig(i.name, queueCount))
+			cs.Deletes(unbindQosConfig(i.name))
 		}
 		if !n.isQoSPolicyReferenced(qosPolicyName, i.name) {
-			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName, qosPolicy))
+			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName))
 		}
 	}
 	// Delete QoS sub-intent (child of interface intent — must precede parent deletion per I5)
