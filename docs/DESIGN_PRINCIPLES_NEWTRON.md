@@ -1162,9 +1162,39 @@ just as deeply as creation does.
 
 The symmetry extends to composite operations. `ApplyService` creates
 VRFs, VLANs, ACLs, BGP neighbors, and a service binding;
-`RemoveService` reads the binding and removes everything that was
-created, checking whether shared resources are still in use before
-deleting them.
+`RemoveService` reads the binding and clears what the service owns,
+checking whether shared resources are still in use before deleting them.
+
+**A reverse clears the namespace it owns; it does not remove "what was
+created."** `RebuildProjection` replays every intent through *current*
+specs, so the spec, the projection, and the intent record all report what
+a definition says now rather than what it said at apply time — there is no
+"what was created" for a reverse to consult. One built to remove a
+remembered extent under-deletes as soon as a spec shrinks.
+
+The three mechanisms a reverse actually uses, all of them ownership-based:
+
+- **Enumerate from the identity.** `DeleteBGPNeighborConfig` clears
+  `ipv4_unicast`, `ipv6_unicast` and `l2vpn_evpn` whether or not a peer was
+  configured with them; `unbindQosConfig` clears `QUEUE|<port>|0` through
+  `MaxQueuesPerPort-1`, the bound every QUEUE write is validated against.
+  Deletes for members never populated are no-op `DEL`s that verify as absent.
+- **Read names the forward recorded.** Content-hashed objects cannot be
+  guessed, so `ApplyService` records the set it generated as
+  `route_policy_keys` and `deleteRoutePoliciesConfig` deletes exactly those
+  (§25). This is the mechanism for a space that is not enumerable — not a
+  way to remember an extent that is.
+- **Walk the intent DAG.** `UnconfigureInterface` dispatches each child's
+  own reverse, and `DeleteACL` and `DeleteVLAN` are refused while children
+  exist, so the space is empty before the parent goes.
+
+Ownership is also the limit: `DeleteVRF` refuses while interfaces are bound
+rather than unbinding them, because those records belong to their
+interfaces.
+
+So the baseline exception above is not a different mechanism. `setup-*` has
+no individual reverse because the space it owns is the whole device, and
+`Reconcile()` is what clears a whole device.
 
 The current operation pairs:
 
