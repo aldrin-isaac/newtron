@@ -2,7 +2,15 @@ name: qos-lifecycle
 description: |
   Self-contained QoS lifecycle on sw1:Ethernet11 (config-only, no host wired).
   Tests bind-qos and unbind-qos primitives with CONFIG_DB verification for
-  per-interface (PORT_QOS_MAP) and device-wide (DSCP_TO_TC_MAP) entries.
+  per-interface (PORT_QOS_MAP, QUEUE) and device-wide (DSCP_TO_TC_MAP,
+  TC_TO_QUEUE_MAP, SCHEDULER) entries.
+
+  The QUEUE and SCHEDULER checks assert the whole table rather than single keys,
+  so they fail on residue as well as on absence — a teardown that leaves queues
+  behind is exactly the defect these were added for, and an exists-check on one
+  key cannot see it. TEST_4Q declares no ECN queue, so WRED_PROFILE must stay
+  absent: that asserts the generator's conditional instead of a row that should
+  never be written.
 requires: [setup-device]
 
 steps:
@@ -34,6 +42,37 @@ steps:
     expect:
       jq: '.exists == true'
 
+  - name: verify-tc-queue-map
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/TC_TO_QUEUE_MAP/TEST_4Q/exists
+    expect:
+      jq: '.exists == true'
+
+  # TEST_4Q declares 4 queues, so the bind owns exactly PORT|0..3. Asserting the
+  # table (not 4 separate exists-checks) makes a 5th row a failure too.
+  - name: verify-queue-rows-bound
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/QUEUE
+    expect:
+      jq: '[.[] | select(startswith("Ethernet11|"))] | sort == ["Ethernet11|0","Ethernet11|1","Ethernet11|2","Ethernet11|3"]'
+
+  - name: verify-scheduler-rows-bound
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/SCHEDULER
+    expect:
+      jq: '[.[] | select(startswith("TEST_4Q_Q"))] | sort == ["TEST_4Q_Q0","TEST_4Q_Q1","TEST_4Q_Q2","TEST_4Q_Q3"]'
+
+  # No queue in TEST_4Q sets ecn, so the profile must not have been created.
+  - name: verify-no-wred-profile
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/WRED_PROFILE/TEST_4Q_ECN/exists
+    expect:
+      jq: '.exists == false'
+
   - name: unbind-qos-ethernet11
     action: newtron
     devices: [switch1]
@@ -44,6 +83,38 @@ steps:
     action: newtron
     devices: [switch1]
     url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet11/exists
+    expect:
+      jq: '.exists == false'
+
+  # The whole queue namespace for this port goes, not just the count the policy
+  # happens to declare now. This is the assertion the earlier teardown could not
+  # have satisfied after a policy shrink.
+  - name: verify-queue-rows-cleared
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/QUEUE
+    expect:
+      jq: '[.[] | select(startswith("Ethernet11|"))] | length == 0'
+
+  # Last consumer, so the policy's device-wide rows are reaped with it (§24).
+  - name: verify-scheduler-rows-cleared
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/SCHEDULER
+    expect:
+      jq: '[.[] | select(startswith("TEST_4Q_Q"))] | length == 0'
+
+  - name: verify-dscp-tc-map-reaped
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/DSCP_TO_TC_MAP/TEST_4Q/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-tc-queue-map-reaped
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/TC_TO_QUEUE_MAP/TEST_4Q/exists
     expect:
       jq: '.exists == false'
 
