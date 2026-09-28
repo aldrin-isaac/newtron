@@ -219,8 +219,9 @@ func (n *Node) isMemberServiceQoSBound(member, excludeKey string) bool {
 	return false
 }
 
-// deleteMemberQoSRows clears a member's QoS rows. The single owner of the
-// per-member reverse (§25), shared by the membership-leave path and RemoveService.
+// clearMemberQoS clears a member port's QoS binding — its PORT_QOS_MAP row and
+// its whole queue namespace. The single owner of the per-member reverse (§25),
+// shared by the membership-leave path and RemoveService.
 //
 // It reads neither the policy spec nor the projection. The former is not what was
 // applied and the latter is the same re-derivation (see unbindQosConfig); what
@@ -228,7 +229,7 @@ func (n *Node) isMemberServiceQoSBound(member, excludeKey string) bool {
 // PortChannel VLAN member holds no PORT_QOS_MAP row and the schema refuses the
 // key, so emitting one would fail the whole operation. That gate is why this is a
 // function and not an inlined call.
-func (n *Node) deleteMemberQoSRows(cs *ChangeSet, member string) {
+func (n *Node) clearMemberQoS(cs *ChangeSet, member string) {
 	if !qosBindable(member) {
 		return
 	}
@@ -251,7 +252,7 @@ func (n *Node) unbindMemberQoS(cs *ChangeSet, member string, leftVLANs map[int]b
 	}
 	for vlanID := range leftVLANs {
 		if b := n.GetIntent(bindingKey(VLANName(vlanID))); b != nil && b.Params["qos_policy"] != "" {
-			n.deleteMemberQoSRows(cs, member)
+			n.clearMemberQoS(cs, member)
 			return
 		}
 	}

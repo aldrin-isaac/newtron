@@ -2054,12 +2054,17 @@ consulting anything (§15).
 
 ### Delivery order does not yet take the option
 
-The naming makes it possible to build a complete replacement before
-anything moves to it. `ConfigDBClient.ApplyDrift` does not take that
-option: it orders deletes before upserts, so a reconcile carrying a filter
-change removes the superseded `ACL_TABLE` — and with it the bindings in
-its `ports` field — before writing the replacement. The window this
-principle exists to close is reopened at delivery. Universal §48 makes
+Content-derived naming exists so a replacement can be built while the
+original is still in force: new content means a new name, so both exist at
+once and members move from one complete rule set to the other, never
+through a partial one.
+
+`ConfigDBClient.ApplyDrift` does not take that option. It applies every
+delete before any write, so a reconcile carrying a filter change removes the
+superseded `ACL_TABLE` first — and with it the `ports` field that bound it to
+interfaces. For that interval those ports carry no filter at all: traffic
+that should be dropped is forwarded. That is the state the naming was
+designed to make impossible, reintroduced at delivery. Universal §48 makes
 the same argument for a single row.
 
 ## 26. BGP Peer Groups — The Protocol's Native Sharing Mechanism

@@ -1400,7 +1400,7 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 			// unless another irb-service binding (not this one) still binds it.
 			for _, member := range n.vlanMemberPorts(bindingInt(b[sonic.FieldVLANID])) {
 				if !n.isMemberServiceQoSBound(member, excludeKey) {
-					n.deleteMemberQoSRows(cs, member)
+					n.clearMemberQoS(cs, member)
 				}
 			}
 		} else {
