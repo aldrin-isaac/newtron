@@ -1801,15 +1801,25 @@ sources, not from a frozen copy.
 
 **Teardown** (§20) reads resolved params. When `RemoveService` tears
 down a service, it reads `l3vni`, `vrf_name`, and `route_map_in` from
-the intent record — it never re-resolves specs. The spec may have
-changed between apply and remove. The intent record captures what was
-actually applied; that is what must be torn down.
+the intent record rather than re-resolving specs.
+
+State the guarantee exactly, because it is narrower than the phrasing
+invites. Teardown calls no resolver, so it survives a spec being
+**deleted** — the case that would otherwise fail precisely when teardown
+is the remedy. It does not read what was applied. `RebuildProjection`
+replays each intent through *current* specs and `writeIntent` replaces
+the record wholesale, so a resolved param holds what the specs said at
+the last rebuild. Whether any single one survives that rebuild is
+decided per operation by its replay step — `bind-ipvpn` threads
+`vrf_name` back in, while `l3_vni` and `route_targets` beside it are
+resolved afresh — so the record is a mixture, with nothing marking which
+half is which.
 
 If you snapshot resolved params, you bake in stale spec values —
 reconstruction produces outdated expected state and §21 breaks. If
-teardown re-resolves specs, the spec might have changed and teardown
-removes the wrong things — §20 breaks. The union satisfies both
-because the two consumers read orthogonal fields.
+teardown re-resolves specs, it fails outright once a spec is gone —
+§20 breaks. The union satisfies both because the two consumers read
+orthogonal fields.
 
 When adding a new operation, ask two questions:
 1. "Which params does the operator specify?" → those are user params,
@@ -1818,7 +1828,10 @@ When adding a new operation, ask two questions:
    those are resolved params, teardown reads them.
 
 If a resolved value is needed for teardown but missing from the intent
-record, teardown silently breaks when specs change. If a user param is
+record, teardown silently breaks when specs change — and recording it is
+not the remedy, because a rebuild rewrites it. The remedy is for the
+reverse not to need it: clear the namespace the resource owns rather
+than recomputing its extent (§15). If a user param is
 missing, Snapshot produces an incomplete step that fails on replay. Both
 are silent failures caught only when someone eventually exercises the
 round-trip.
@@ -3011,19 +3024,21 @@ range, a different route policy, an updated QoS profile —
 reconstruction produces the *new* expected state while the device still
 has the *old* applied state. A two-way comparison (expected vs actual)
 would flag this as drift, but the device hasn't drifted — the specs
-evolved. The data model already supports distinguishing these cases:
-the intent record captures what was applied; current specs capture
-what *would* be applied now; the device captures what's actually there.
-A three-way comparison — intent record vs device (true drift) and
-intent record vs reconstruction (spec evolution) — would separate
-"someone edited CONFIG_DB" from "the spec changed since last apply."
-Neither the comparison nor the guard it would feed is built: newtron
-today reports drift without separating the two causes, and treats a
-spec edit the same as a CONFIG_DB edit — it freezes writes rather than
-treating the spec change as a pending refresh. `newtron/spec-diff-design.md`
-carries the justification, why a per-field reconstruction of the applied
-state is unavailable under §20 and §23, the digest-based design that works
-without one, and the trigger agreed for building it.
+evolved. Separating the two causes needs three states, and the device
+carries two. `RebuildProjection` replays each intent through *current*
+specs and `writeIntent` replaces the record wholesale, so a record's
+spec-derived params hold what the specs said at the last rebuild, not
+what was delivered — the record tracks the specs, not the device. So the
+gap is data, not a missing comparison: a three-way diff written against
+today's records would report whichever derived values happen to be
+recomputed. newtron today reports drift without separating the two
+causes, and treats a spec edit the same as a CONFIG_DB edit — it freezes
+writes rather than treating the spec change as a pending refresh.
+`newtron/spec-diff-design.md` carries the justification, why replay
+cannot produce the applied state, the two candidate designs — a
+spec-directory digest that answers at device granularity and applied
+values stamped at delivery that answer per field — and the trigger agreed
+for building one.
 
 ### Bounded footprint and rollback history
 

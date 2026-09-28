@@ -2023,14 +2023,19 @@ The record is the union. The two purposes read different fields:
 values from current specs. This is what §21 demands: derive expected
 state from authoritative sources, not from a frozen copy.
 
-**Teardown** (§20) reads resolved params. It never re-resolves specs —
-the spec may have changed between apply and remove. The intent record
-captures what was actually applied; that is what must be torn down.
+**Teardown** (§20) reads resolved params rather than re-resolving specs.
+The guarantee that buys is narrower than it appears, and the difference
+matters: teardown needs no resolver, so it survives a definition being
+**deleted**. It does not see what was applied. Reconstruction rewrites a
+record's resolved params from the definitions as they read at that
+moment, so a definition that **changed** is reflected in the record, and
+the device's older state surfaces as drift for remediation rather than
+being handled by teardown.
 
-If you snapshot resolved params, you bake in stale spec values — §21
-breaks. If teardown re-resolves specs, the spec might have changed —
-§20 breaks. The union satisfies both because the two consumers read
-orthogonal fields.
+If you snapshot resolved params, you bake in stale values — §21 breaks.
+If teardown re-resolves definitions, it fails outright the moment one is
+gone, exactly when teardown is what the operator needs — §20 breaks. The
+union satisfies both because the two consumers read orthogonal fields.
 
 When adding a new operation, ask two questions:
 1. "Which params does the operator specify?" → user params, Snapshot
@@ -3045,16 +3050,17 @@ range, a different route policy, an updated QoS profile —
 reconstruction produces the *new* expected state while the device still
 has the *old* applied state. A two-way comparison (expected vs actual)
 would flag this as drift, but the device hasn't drifted — the specs
-evolved. The data model already supports distinguishing these cases:
-the intent record captures what was applied; current specs capture
-what *would* be applied now; the device captures what's actually there.
-A three-way comparison — intent record vs device (true drift) and
-intent record vs reconstruction (spec evolution) — would separate
-"someone edited CONFIG_DB" from "the spec changed since last apply."
-Neither the comparison nor the guard it would feed is built. Drift is
-reported without separating its two causes, and a spec edit is treated
-exactly like a device edit — writes freeze, rather than the spec change
-being carried as a refresh the device is simply behind on.
+evolved. Separating the two causes needs three states, and only two of
+them exist. Current specs give what *would* be applied now; the device
+gives what is actually there. What *was* applied is not recorded —
+reconstruction rewrites every spec-derived value in a record from the
+specs as they read at that moment, so the record tracks the specs, not
+the device. The missing piece is data, not a comparison: a diff written
+against today's records reports whichever derived values happen to be
+recomputed, which is a proxy for the quantity rather than the quantity.
+So drift is reported without separating its two causes, and a spec edit
+is treated exactly like a device edit — writes freeze, rather than the
+spec change being carried as a refresh the device is simply behind on.
 
 ### Bounded footprint and rollback history
 
