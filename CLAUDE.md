@@ -152,18 +152,11 @@ intent_ops.go      → NEWTRON_INTENT
 service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
-**The six QoS tables have a second claimant.** `config qos reload` is not
-additive: its `_clear_qos()` deletes `PORT_QOS_MAP`, `QUEUE`, `SCHEDULER`,
-`DSCP_TO_TC_MAP`, `TC_TO_QUEUE_MAP` and `WRED_PROFILE` and re-renders them from
-the platform's `qos_config.j2`. newtron and that command are mutually destructive
-on these tables. No brownfield already decides the winner — the community
-command's rows read as drift, the guard refuses the next write, and reconcile
-removes them — so this is a diagnosis hazard, not a correctness one: the operator
-sees unexplained drift and reconcile silently reverts the platform default.
-`_clear_qos()` also clears `CABLE_LENGTH` and `BUFFER_*`, which newtron does not
-validate and therefore cannot see cleared. **Never give a newtron-managed device
-QoS configuration through `config qos reload`.** Full statement in
-`DESIGN_PRINCIPLES_NEWTRON.md` §27.
+**The six QoS tables have a second claimant.** `config qos reload` deletes and
+re-renders them rather than merging, so it and newtron are mutually destructive
+there — and it also clears `BUFFER_*` / `CABLE_LENGTH`, which newtron cannot see
+cleared. **Never give a newtron-managed device QoS through `config qos reload`.**
+Mechanism and consequences: `DESIGN_PRINCIPLES_NEWTRON.md` §27.
 
 **Cross-engine data objects:**
 
