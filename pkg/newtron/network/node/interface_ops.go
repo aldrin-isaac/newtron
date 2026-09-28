@@ -304,7 +304,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		// policy cannot be delivered correctly to a multi-VLAN member. Symmetric
 		// with the apply-service gate. Skipped during replay (enforced at author).
 		if !n.reconstructing {
-			if err := n.refuseTrunkOnPolicyVLAN(i.name, cfg.VLAN); err != nil {
+			if err := n.refuseUndeliverablePolicy(i.name, cfg.VLAN); err != nil {
 				return nil, err
 			}
 		}

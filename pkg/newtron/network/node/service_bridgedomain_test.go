@@ -793,3 +793,90 @@ func TestApplyService_BridgedReconstructs(t *testing.T) {
 		t.Fatal("binding missing after reconstruction")
 	}
 }
+
+// TestMemberPolicy_QoSBindPointGate pins the QoS half of the §7 delivery gate,
+// which the trunk half above does not cover: a PortChannel is a legal VLAN member
+// and a legal ACL target, but SONiC binds QoS maps to physical ports only, so a
+// QoS-bearing irb service cannot reach a LAG member. Refuse rather than deliver to
+// some members and not others.
+//
+// The negative case is the point of the test as much as the positives: a
+// filter-only service on the same VLAN must still succeed, because the ACL does
+// reach a LAG. A gate written on "policy" rather than on QoS would break it.
+func TestMemberPolicy_QoSBindPointGate(t *testing.T) {
+	ctx := context.Background()
+	// lagVLAN builds VLAN 100 with PortChannel100 as its only member plus an
+	// authored IRB, and returns the node and the IRB interface.
+	lagVLAN := func(t *testing.T, svc *spec.ServiceSpec) (*Node, *Interface) {
+		n, _ := testInterface()
+		n.SpecProvider.(*testSpecProvider).services["SVC"] = svc
+		n.SpecProvider.(*testSpecProvider).qosPolicies["QOS1"] = &spec.QoSPolicy{
+			Queues: []*spec.QoSQueue{{Type: "strict"}},
+		}
+		n.SpecProvider.(*testSpecProvider).filterSpecs["F1"] = &spec.FilterSpec{
+			Type: "ipv4", Rules: []*spec.FilterRule{{Sequence: 10, Action: "permit"}},
+		}
+		if _, err := n.CreatePortChannel(ctx, "PortChannel100", PortChannelConfig{}); err != nil {
+			t.Fatalf("CreatePortChannel: %v", err)
+		}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatalf("CreateVLAN: %v", err)
+		}
+		lag, err := n.GetInterface("PortChannel100")
+		if err != nil {
+			t.Fatalf("GetInterface(PortChannel100): %v", err)
+		}
+		if _, err := lag.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100}); err != nil {
+			t.Fatalf("LAG join VLAN 100: %v", err)
+		}
+		if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+			t.Fatalf("ConfigureIRB: %v", err)
+		}
+		irb, err := n.GetInterface("Vlan100")
+		if err != nil {
+			t.Fatalf("GetInterface(Vlan100): %v", err)
+		}
+		return n, irb
+	}
+
+	t.Run("apply refuses a QoS service on a VLAN with a LAG member", func(t *testing.T) {
+		_, irb := lagVLAN(t, &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, QoSPolicy: "QOS1"})
+		_, err := irb.ApplyService(ctx, "SVC", ApplyServiceOpts{VLAN: 100})
+		if err == nil {
+			t.Fatal("expected refusal: a LAG member is no QoS bind point")
+		}
+		if !strings.Contains(err.Error(), "QoS bind point") {
+			t.Errorf("refusal should name the reason, got: %v", err)
+		}
+	})
+
+	t.Run("filter-only service on the same VLAN still applies", func(t *testing.T) {
+		_, irb := lagVLAN(t, &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, IngressFilter: "F1"})
+		if _, err := irb.ApplyService(ctx, "SVC", ApplyServiceOpts{VLAN: 100}); err != nil {
+			t.Fatalf("an ACL does reach a LAG member — this must not be refused: %v", err)
+		}
+	})
+
+	t.Run("join refuses a LAG into a QoS-bearing VLAN", func(t *testing.T) {
+		n, irb := lagVLAN(t, &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, QoSPolicy: "QOS1"})
+		// Re-seed without the LAG membership so the service can apply, then join.
+		delete(n.configDB.NewtronIntent, "interface|PortChannel100")
+		delete(n.configDB.VLANMember, "Vlan100|PortChannel100")
+		if _, err := irb.ApplyService(ctx, "SVC", ApplyServiceOpts{VLAN: 100}); err != nil {
+			t.Fatalf("apply with no LAG member should succeed: %v", err)
+		}
+		lag, err := n.GetInterface("PortChannel100")
+		if err != nil {
+			t.Fatalf("GetInterface: %v", err)
+		}
+		_, err = lag.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100})
+		if err == nil {
+			t.Fatal("expected refusal: joining a QoS-bearing VLAN as a LAG")
+		}
+		// Assert the reason, not just the failure — this subtest hand-clears
+		// membership state, so a refusal for some other cause would pass vacuously.
+		if !strings.Contains(err.Error(), "QoS bind point") {
+			t.Errorf("refused for the wrong reason: %v", err)
+		}
+	})
+}

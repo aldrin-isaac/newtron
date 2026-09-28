@@ -131,14 +131,43 @@ func (n *Node) vlanPolicyServiceName(vlanID int) string {
 	return ""
 }
 
-// refuseTrunkOnPolicyVLAN enforces the §7 single-VLAN-member invariant from the
-// membership side: a port may not become multi-VLAN (a trunk) while it belongs to
-// any VLAN whose irb service carries a filter/QoS. That policy is delivered per
-// member port and cannot be scoped to one VLAN on a trunk — an unqualified ACL /
-// per-port QoS would bleed to the trunk's other VLANs, and an untagged member
-// cannot be VLAN-matched. Called from every membership-add path with the VLAN
-// being joined; a no-op unless the join makes the port multi-VLAN.
-func (n *Node) refuseTrunkOnPolicyVLAN(member string, joiningVLAN int) error {
+// vlanQoSServiceName returns the name of the irb service bound on this VLAN that
+// carries a QoS policy, or "". The QoS-only counterpart of vlanPolicyServiceName:
+// a filter reaches a LAG member (ACL_TABLE ports accepts one) where QoS cannot, so
+// the two questions have different answers and need different readers.
+func (n *Node) vlanQoSServiceName(vlanID int) string {
+	b := n.GetIntent(bindingKey(VLANName(vlanID)))
+	if b == nil || b.Params["qos_policy"] == "" {
+		return ""
+	}
+	return b.Params[sonic.FieldServiceName]
+}
+
+// refuseUndeliverablePolicy refuses a membership that would leave an irb service's
+// per-member policy undeliverable to this member (§7, fail closed). Called from
+// every membership-add path with the VLAN being joined. Two reasons, one question —
+// "can this VLAN's policy reach this member?":
+//
+//   - The join makes the port multi-VLAN. Policy is delivered per member port and
+//     cannot be scoped to one VLAN on a trunk: an unqualified ACL / per-port QoS
+//     would bleed to the trunk's other VLANs, and an untagged member cannot be
+//     VLAN-matched.
+//   - The member's kind cannot hold the policy at all. A PortChannel is a legal
+//     VLAN member and a legal ACL target, but not a QoS bind point (LAG QoS is
+//     per-member in SONiC), so a QoS-bearing service cannot reach it. Checked
+//     against QoS specifically — refusing on a filter-only service would reject
+//     LAG memberships that work.
+//
+// Both refuse rather than deliver to some members and not others; a silent skip
+// would give the operator less policy than they authored, with nothing said.
+func (n *Node) refuseUndeliverablePolicy(member string, joiningVLAN int) error {
+	if !qosBindable(member) {
+		if svc := n.vlanQoSServiceName(joiningVLAN); svc != "" {
+			return util.NewPreconditionError(sonic.OpConfigureInterface, member,
+				fmt.Sprintf("cannot add %s to VLAN %d", member, joiningVLAN),
+				fmt.Sprintf("that VLAN has irb service %q carrying a QoS policy, which is delivered per member port — and %s is no QoS bind point (SONiC binds QoS maps to physical ports only; LAG QoS is per-member) — remove the QoS from the service, or make physical ports the members", svc, member))
+		}
+	}
 	var others []int
 	for _, v := range n.vlanMembershipsOf(member) {
 		if v != joiningVLAN {
@@ -434,13 +463,21 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// VLANs, and an untagged member cannot be VLAN-matched. Fail closed rather than
 	// deliver the policy partially: refuse a policy-bearing irb service on a VLAN
 	// with any trunk member. (Membership churn is gated symmetrically in
-	// ConfigureInterface via refuseTrunkOnPolicyVLAN.)
+	// ConfigureInterface via refuseUndeliverablePolicy.)
 	if isIRB && !n.reconstructing && (svc.IngressFilter != "" || svc.EgressFilter != "" || svc.QoSPolicy != "") {
 		for _, member := range n.vlanMemberPorts(vlanID) {
 			if memberVLANs := n.vlanMembershipsOf(member); len(memberVLANs) > 1 {
 				return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
 					fmt.Sprintf("service %q carries a filter/QoS but VLAN %d member %s is a trunk", serviceName, vlanID, member),
 					fmt.Sprintf("%s is also in VLANs %v — SONiC cannot bind a filter/QoS to the IRB, and a per-port policy on a trunk member would bleed to its other VLANs or miss untagged traffic; remove the filter/QoS from the service, or keep %s single-VLAN", member, memberVLANs, member))
+			}
+			// The QoS half needs the member's kind too: a PortChannel member can
+			// take the ACL but holds no PORT_QOS_MAP row, so a QoS-bearing service
+			// would reach only some members. Refuse rather than deliver partially.
+			if svc.QoSPolicy != "" && !qosBindable(member) {
+				return nil, util.NewPreconditionError(sonic.OpApplyService, i.name,
+					fmt.Sprintf("service %q carries a QoS policy but VLAN %d member %s is no QoS bind point", serviceName, vlanID, member),
+					fmt.Sprintf("an irb service's QoS is delivered per member port, and SONiC binds QoS maps to physical ports only (LAG QoS is per-member) — remove the QoS from the service, or make physical ports the members of VLAN %d", vlanID))
 			}
 		}
 	}
@@ -649,7 +686,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// eligibility check, like configure-interface (§7).
 	if canBridge && !isIRB && vlanID > 0 && !n.isVLANMember(i.name, vlanID) {
 		if !n.reconstructing {
-			if err := n.refuseTrunkOnPolicyVLAN(i.name, vlanID); err != nil {
+			if err := n.refuseUndeliverablePolicy(i.name, vlanID); err != nil {
 				return nil, err
 			}
 		}

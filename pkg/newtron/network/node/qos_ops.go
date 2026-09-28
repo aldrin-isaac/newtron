@@ -173,7 +173,7 @@ func (n *Node) vlanMembershipsOf(member string) []int {
 // VLAN membership, never recorded (§21). QoS is per-port (PORT_QOS_MAP + QUEUE),
 // so unlike the ACL ports-list it is one row per member. Every member is
 // single-VLAN — a QoS-bearing irb service is refused on a VLAN with any trunk
-// member at apply/join time (refuseTrunkOnPolicyVLAN, §7), because a per-port
+// member at apply/join time (refuseUndeliverablePolicy, §7), because a per-port
 // PORT_QOS_MAP on a trunk member would bleed to the trunk's other VLANs. So here
 // the per-port map is exactly the per-VLAN policy; there is no conflict to check.
 // Idempotent — safe to call whenever membership changes.
