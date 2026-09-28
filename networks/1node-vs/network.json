@@ -15,6 +15,48 @@
       ]
     }
   },
+  "qos_policies": {
+    "NS_TEST": {
+      "description": "4-queue fixture for the qos-namespace scenario (48); a fixture rather than runtime-authored so the bind cannot race spec propagation",
+      "queues": [
+        {
+          "name": "bulk",
+          "type": "dwrr",
+          "weight": 40,
+          "dscp": [
+            0,
+            8
+          ]
+        },
+        {
+          "name": "standard",
+          "type": "dwrr",
+          "weight": 30,
+          "dscp": [
+            16,
+            24
+          ]
+        },
+        {
+          "name": "priority",
+          "type": "dwrr",
+          "weight": 20,
+          "dscp": [
+            32,
+            40
+          ]
+        },
+        {
+          "name": "control",
+          "type": "strict",
+          "dscp": [
+            46,
+            48
+          ]
+        }
+      ]
+    }
+  },
   "services": {
     "SVC_GATE": {
       "description": "Local IRB carrying a filter — exercises the §7 trunk-eligibility gate",

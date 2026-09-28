@@ -1330,9 +1330,37 @@ just as deeply as creation does.
 
 The symmetry extends to composite operations. `ApplyService` creates
 VRFs, VLANs, ACLs, BGP neighbors, and a service binding;
-`RemoveService` reads the binding and removes everything that was
-created, checking whether shared resources are still in use before
-deleting them.
+`RemoveService` reads the binding and clears what the service owns,
+checking whether shared resources are still in use before deleting them.
+
+**A reverse clears the namespace it owns; it does not remove "what was
+created."** The distinction sounds pedantic and is not. Nothing records
+what was created — expected state is re-derived from current definitions,
+so a value that moved since the apply reads as its new value everywhere a
+teardown could look. A reverse built to remove a remembered extent is
+therefore built on something that does not exist, and it under-deletes
+the moment a definition shrinks.
+
+What a reverse can know is which space belongs to it, and that follows
+from ownership: single-owner tables (§27) plus one binding or none per
+consumer means a resource's own rows are its alone to clear. Where the
+space is enumerable from the resource's identity — a fixed set of address
+families, an index range the schema validates every write against — the
+reverse sweeps it, and deletes for members that were never populated are
+no-ops. Where it is not enumerable, because the names are derived from
+content and cannot be guessed, the forward records the names it generated
+so that the space becomes enumerable (§25). Where each member is itself a
+recorded decision, the dependency graph enumerates it and children are
+cleared before parents.
+
+Ownership is also the limit. A reverse clears its own space and refuses
+when another owner still holds something inside it: deleting a routing
+table refuses while interfaces are bound to it rather than unbinding them,
+because those records belong to their interfaces.
+
+Seen this way the baseline exception above is not a different mechanism.
+`setup-*` has no individual reverse because the space it owns is the whole
+device, and the operation that clears the whole device is reconcile.
 
 The current operation pairs:
 

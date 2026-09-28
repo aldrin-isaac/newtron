@@ -1,0 +1,145 @@
+name: qos-namespace
+description: |
+  Last-consumer reaping for a QoS policy bound on more than one interface — the
+  property no other scenario reaches, because every other bind-qos site binds one
+  policy on one port.
+
+  A policy's device-wide rows (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER) outlive
+  any single binding and are reaped only with the last one (§24). Unbinding the
+  first of two consumers must leave them standing and must clear only that port's
+  queue namespace.
+
+  The queue checks read whole tables, because a teardown that leaves rows behind is
+  invisible to an exists-check on a single key — which is how the extent defect this
+  scenario was written alongside stayed hidden.
+
+  NS_TEST is a fixture in network.json rather than authored here. Authoring a policy
+  and binding it in the same run exercises spec propagation as much as QoS: the
+  node's resolved-spec snapshot can lag a spec write made through the server, so the
+  bind saw a partial policy and the scenario failed on a count it had just set.
+
+  Not covered here, by design: the shrink case (a bound policy losing queues, then
+  being unbound). Loopback cannot show it — the projection is the only reality, so
+  the rebuild before the teardown replays the bind through the shrunken policy and a
+  teardown deleting the shrunken count looks correct. It needs the emitted delete
+  set, which TestUnbindQoS_ClearsShrunkPolicyExtent asserts directly.
+requires: [setup-device]
+
+steps:
+  # bind-qos creates the interface identity intent itself, so neither port needs
+  # configuring first (same as 22-qos-lifecycle).
+  - name: bind-first
+    action: newtron-cli
+    devices: [switch1]
+    command: "qos bind Ethernet20 NS_TEST --loopback"
+
+  - name: bind-second
+    action: newtron-cli
+    devices: [switch1]
+    command: "qos bind Ethernet24 NS_TEST --loopback"
+
+  - name: verify-first-port-queues
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys QUEUE --loopback"
+    expect:
+      jq: '[.[] | select(startswith("Ethernet20|"))] | sort == ["Ethernet20|0","Ethernet20|1","Ethernet20|2","Ethernet20|3"]'
+
+  - name: verify-second-port-queues
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys QUEUE --loopback"
+    expect:
+      jq: '[.[] | select(startswith("Ethernet24|"))] | sort == ["Ethernet24|0","Ethernet24|1","Ethernet24|2","Ethernet24|3"]'
+
+  - name: verify-schedulers-created
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys SCHEDULER --loopback"
+    expect:
+      jq: '[.[] | select(startswith("NS_TEST_Q"))] | sort == ["NS_TEST_Q0","NS_TEST_Q1","NS_TEST_Q2","NS_TEST_Q3"]'
+
+  # No queue in NS_TEST sets ecn, so the profile must never have been created.
+  - name: verify-no-wred-profile
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists WRED_PROFILE NS_TEST_ECN --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # ====================================================================
+  # First of two consumers goes: its port clears, the shared rows do not
+  # ====================================================================
+  - name: unbind-first
+    action: newtron-cli
+    devices: [switch1]
+    command: "qos unbind Ethernet20 --loopback"
+
+  - name: verify-first-port-cleared
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys QUEUE --loopback"
+    expect:
+      jq: '[.[] | select(startswith("Ethernet20|"))] | length == 0'
+
+  - name: verify-second-port-untouched
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys QUEUE --loopback"
+    expect:
+      jq: '[.[] | select(startswith("Ethernet24|"))] | length == 4'
+
+  - name: verify-shared-schedulers-survive
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys SCHEDULER --loopback"
+    expect:
+      jq: '[.[] | select(startswith("NS_TEST_Q"))] | length == 4'
+
+  - name: verify-dscp-map-survives
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists DSCP_TO_TC_MAP NS_TEST --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # ====================================================================
+  # Last consumer goes: the policy's own rows are reaped with it
+  # ====================================================================
+  - name: unbind-second
+    action: newtron-cli
+    devices: [switch1]
+    command: "qos unbind Ethernet24 --loopback"
+
+  - name: verify-all-queues-cleared
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys QUEUE --loopback"
+    expect:
+      jq: 'length == 0'
+
+  - name: verify-schedulers-reaped
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb keys SCHEDULER --loopback"
+    expect:
+      jq: 'length == 0'
+
+  - name: verify-dscp-map-reaped
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists DSCP_TO_TC_MAP NS_TEST --loopback"
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-tc-queue-map-reaped
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists TC_TO_QUEUE_MAP NS_TEST --loopback"
+    expect:
+      jq: '.exists == false'
+
+# No cleanup: block. The unbinds are main steps carrying assertions, so re-running
+# them here would fail on a happy path; the policy is a fixture, so nothing
+# persistent is mutated. A mid-run failure leaves loopback projection state, which
+# this suite already tolerates (22-qos-lifecycle leaves its interface intents too).

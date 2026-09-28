@@ -304,7 +304,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		// policy cannot be delivered correctly to a multi-VLAN member. Symmetric
 		// with the apply-service gate. Skipped during replay (enforced at author).
 		if !n.reconstructing {
-			if err := n.refuseTrunkOnPolicyVLAN(i.name, cfg.VLAN); err != nil {
+			if err := n.refuseUndeliverablePolicy(i.name, cfg.VLAN); err != nil {
 				return nil, err
 			}
 		}
@@ -471,7 +471,7 @@ func (i *Interface) RemoveTrunkVLAN(ctx context.Context, vlanID int) (*ChangeSet
 	// is already deleted, so aclPortsFromIntents no longer includes it), and
 	// remove its QoS rows unless another serviced VLAN still binds it.
 	n.rebindMemberACLs(cs, vlanID)
-	n.unbindMemberQoS(cs, i.name)
+	n.unbindMemberQoS(cs, i.name, map[int]bool{vlanID: true})
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
@@ -619,7 +619,7 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 	for v := range leftVLANs {
 		n.rebindMemberACLs(cs, v)
 	}
-	n.unbindMemberQoS(cs, i.name)
+	n.unbindMemberQoS(cs, i.name, leftVLANs)
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}

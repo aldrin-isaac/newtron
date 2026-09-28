@@ -405,3 +405,20 @@ steps:
     url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet44/exists
     expect:
       jq: '.exists == false'
+
+  # QUEUE and SCHEDULER, whole-table. A QoS teardown that left queue rows behind
+  # used to pass verify-clean, because only PORT_QOS_MAP was checked — the residue
+  # sat in tables nothing asserted.
+  - name: verify-no-queue-rows
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/QUEUE
+    expect:
+      jq: 'length == 0'
+
+  - name: verify-no-scheduler-rows
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/SCHEDULER
+    expect:
+      jq: 'length == 0'

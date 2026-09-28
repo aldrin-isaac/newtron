@@ -1162,9 +1162,39 @@ just as deeply as creation does.
 
 The symmetry extends to composite operations. `ApplyService` creates
 VRFs, VLANs, ACLs, BGP neighbors, and a service binding;
-`RemoveService` reads the binding and removes everything that was
-created, checking whether shared resources are still in use before
-deleting them.
+`RemoveService` reads the binding and clears what the service owns,
+checking whether shared resources are still in use before deleting them.
+
+**A reverse clears the namespace it owns; it does not remove "what was
+created."** `RebuildProjection` replays every intent through *current*
+specs, so the spec, the projection, and the intent record all report what
+a definition says now rather than what it said at apply time — there is no
+"what was created" for a reverse to consult. One built to remove a
+remembered extent under-deletes as soon as a spec shrinks.
+
+The three mechanisms a reverse actually uses, all of them ownership-based:
+
+- **Enumerate from the identity.** `DeleteBGPNeighborConfig` clears
+  `ipv4_unicast`, `ipv6_unicast` and `l2vpn_evpn` whether or not a peer was
+  configured with them; `unbindQosConfig` clears `QUEUE|<port>|0` through
+  `MaxQueuesPerPort-1`, the bound every QUEUE write is validated against.
+  Deletes for members never populated are no-op `DEL`s that verify as absent.
+- **Read names the forward recorded.** Content-hashed objects cannot be
+  guessed, so `ApplyService` records the set it generated as
+  `route_policy_keys` and `deleteRoutePoliciesConfig` deletes exactly those
+  (§25). This is the mechanism for a space that is not enumerable — not a
+  way to remember an extent that is.
+- **Walk the intent DAG.** `UnconfigureInterface` dispatches each child's
+  own reverse, and `DeleteACL` and `DeleteVLAN` are refused while children
+  exist, so the space is empty before the parent goes.
+
+Ownership is also the limit: `DeleteVRF` refuses while interfaces are bound
+rather than unbinding them, because those records belong to their
+interfaces.
+
+So the baseline exception above is not a different mechanism. `setup-*` has
+no individual reverse because the space it owns is the whole device, and
+`Reconcile()` is what clears a whole device.
 
 The current operation pairs:
 
@@ -2138,6 +2168,22 @@ Other engines and operators reach the data through `/newtrun/v1/runs/...`.
 own runtime state (§5). newtron reads through its SSH-tunneled Redis
 connection; reaching into the device's Redis from any other tool is
 the violation.
+
+**The six QoS tables have a second claimant.** `config qos reload` is not
+additive: its `_clear_qos()` deletes `PORT_QOS_MAP`, `QUEUE`, `SCHEDULER`,
+`DSCP_TO_TC_MAP`, `TC_TO_QUEUE_MAP` and `WRED_PROFILE`, then re-renders them
+from the platform template. It and newtron are mutually destructive on these
+tables. No brownfield (§5) already decides the winner — the command's rows read
+as drift and reconcile removes them — so what remains is a diagnosis problem:
+unexplained drift on a device nobody edited by hand, and a platform default
+silently reverted. Excluding the tables from drift would remove the symptom and
+the protection together.
+
+The wider half is silent. The same command clears `CABLE_LENGTH` and the
+`BUFFER_*` family, which newtron neither writes nor validates; they are absent
+from its schema and so from drift detection, and their loss surfaces as a
+dataplane symptom with no configuration change to point at. A device newtron
+manages should not be given QoS through the platform command.
 
 Locality does not grant ownership. The fact that `pkg/newtlab/` can
 `fopen("topology.json")` and parse it does not make newtlab a co-owner
