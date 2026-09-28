@@ -144,13 +144,26 @@ evpn_ops.go        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
                       SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
 acl_ops.go         → ACL_TABLE, ACL_RULE
 qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
-                      SCHEDULER, WRED_PROFILE
+                      SCHEDULER, WRED_PROFILE  (contested — see below)
 interface_ops.go   → INTERFACE, PORTCHANNEL_INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
 intent_ops.go      → NEWTRON_INTENT
 service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
+
+**The six QoS tables have a second claimant.** `config qos reload` is not
+additive: its `_clear_qos()` deletes `PORT_QOS_MAP`, `QUEUE`, `SCHEDULER`,
+`DSCP_TO_TC_MAP`, `TC_TO_QUEUE_MAP` and `WRED_PROFILE` and re-renders them from
+the platform's `qos_config.j2`. newtron and that command are mutually destructive
+on these tables. No brownfield already decides the winner — the community
+command's rows read as drift, the guard refuses the next write, and reconcile
+removes them — so this is a diagnosis hazard, not a correctness one: the operator
+sees unexplained drift and reconcile silently reverts the platform default.
+`_clear_qos()` also clears `CABLE_LENGTH` and `BUFFER_*`, which newtron does not
+validate and therefore cannot see cleared. **Never give a newtron-managed device
+QoS configuration through `config qos reload`.** Full statement in
+`DESIGN_PRINCIPLES_NEWTRON.md` §27.
 
 **Cross-engine data objects:**
 

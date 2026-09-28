@@ -2156,6 +2156,40 @@ own runtime state (§5). newtron reads through its SSH-tunneled Redis
 connection; reaching into the device's Redis from any other tool is
 the violation.
 
+### The QoS tables are contested, and the contest is already decided
+
+Ownership is usually settled by deciding which file writes a table. Six
+tables have a second claimant that is not a file in this repository:
+`config qos reload`, a SONiC command whose `_clear_qos()` deletes
+`PORT_QOS_MAP`, `QUEUE`, `SCHEDULER`, `DSCP_TO_TC_MAP`, `TC_TO_QUEUE_MAP`
+and `WRED_PROFILE` outright, then re-renders them from the platform's
+`qos_config.j2`. It does not reconcile against what is already there — it
+empties the tables and starts over. The two regimes are mutually
+destructive, in both directions: newtron's `config save` + `config reload`
+makes newtron's version authoritative, and the community command makes the
+platform's version authoritative.
+
+No brownfield (§5) already decides which wins. If the community command
+runs on a managed device, its rows appear in tables newtron owns, the drift
+guard refuses the next write, and reconcile removes them as extra. newtron
+wins, by the mechanism that exists for exactly this — an editor other than
+newtron touched an owned table.
+
+What that leaves is a diagnosis problem rather than a correctness one. The
+operator sees drift on a device nobody edited by hand, with no indication
+that a QoS command caused it, and reconcile silently reverts a
+platform-default configuration they may have intended to apply. Excluding
+the tables from drift detection would remove the symptom and the protection
+together, so it is not the fix; naming the interaction is.
+
+The blast radius is wider than the six tables, and the rest of it is
+silent. `_clear_qos()` also deletes `CABLE_LENGTH` and the `BUFFER_*`
+family. newtron neither writes nor validates those, so they are absent from
+its schema and therefore from drift detection: if they are cleared, nothing
+in newtron notices, and the loss shows up as a dataplane symptom with no
+configuration change to point at. A device newtron manages should not be
+given QoS configuration through the platform command.
+
 Locality does not grant ownership. The fact that `pkg/newtlab/` can
 `fopen("topology.json")` and parse it does not make newtlab a co-owner
 — it makes newtlab a second master of an implicit schema, which is
