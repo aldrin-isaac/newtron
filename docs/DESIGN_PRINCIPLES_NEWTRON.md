@@ -2064,8 +2064,15 @@ delete before any write, so a reconcile carrying a filter change removes the
 superseded `ACL_TABLE` first — and with it the `ports` field that bound it to
 interfaces. For that interval those ports carry no filter at all: traffic
 that should be dropped is forwarded. That is the state the naming was
-designed to make impossible, reintroduced at delivery. Universal §48 makes
-the same argument for a single row.
+designed to make impossible, reintroduced at delivery.
+
+The pipeline being a Redis transaction does not close it. No reader observes
+a torn state, but each command still raises its own keyspace notification, so
+the daemon processes a removal and then a creation — the same reason a
+`DEL`+`HSET` pair tears state down where a field diff does not (§48). Nor is
+a guard missing: after a filter changes, the superseded row is genuinely
+absent from the projection, so deleting it is correct. Only the order is
+wrong, and writing the replacement first would cost nothing.
 
 ## 26. BGP Peer Groups — The Protocol's Native Sharing Mechanism
 
