@@ -1172,7 +1172,7 @@ a definition says now rather than what it said at apply time — there is no
 "what was created" for a reverse to consult. One built to remove a
 remembered extent under-deletes as soon as a spec shrinks.
 
-The three mechanisms a reverse actually uses, all of them ownership-based:
+The mechanisms a reverse actually uses, all of them ownership-based:
 
 - **Enumerate from the identity.** `DeleteBGPNeighborConfig` clears
   `ipv4_unicast`, `ipv6_unicast` and `l2vpn_evpn` whether or not a peer was
