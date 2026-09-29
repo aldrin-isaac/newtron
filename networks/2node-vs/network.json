@@ -136,7 +136,8 @@
       "ipvpn": "IRB",
       "macvpn": "SVC_VLAN400",
       "vrf_type": "shared",
-      "ingress_filter": "FILTER_IRB"
+      "ingress_filter": "FILTER_IRB",
+      "qos_policy": "TEST_4Q"
     },
     "RTD": {
       "description": "Transit peering interface",

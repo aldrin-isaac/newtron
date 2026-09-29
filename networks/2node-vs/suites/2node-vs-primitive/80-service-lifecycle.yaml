@@ -80,6 +80,42 @@ steps:
       jq: '.ports | contains("Ethernet12") and (contains("Vlan400") | not)'
 
   # The rule is unqualified — no VLAN_ID (single-VLAN member, §7).
+  # QoS is the twin of the ACL above and lands the same way: on the member, never
+  # on the IRB. SONiC binds QoS maps to physical ports only (RCA-051), so an irb
+  # service's queues reach its VLAN's members or nowhere — this is the only path
+  # by which this service type gets QoS at all.
+  - name: verify-qos-binds-member-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet12/exists
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-qos-binds-member-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet12/exists
+    expect:
+      jq: '.exists == true'
+
+  # Never the IRB — the negative half, so the assertion above cannot be satisfied
+  # by a binding in the wrong place.
+  - name: verify-qos-not-on-irb-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Vlan400/exists
+    expect:
+      jq: '.exists == false'
+
+  # TEST_4Q declares four queues, and EIRB is the only QoS-bearing service in this
+  # network, so the whole table is exactly this member's four rows.
+  - name: verify-member-queues-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/QUEUE
+    expect:
+      jq: 'sort == ["Ethernet12|0","Ethernet12|1","Ethernet12|2","Ethernet12|3"]'
+
   - name: verify-acl-rule-unqualified-sw1
     action: newtron
     devices: [switch1]
@@ -243,6 +279,16 @@ steps:
 
   # The composed SVI survives the refresh — refresh is deliveryOnly, so it does
   # not reap+recreate the gateway (no flap, §48, #624).
+  # Refresh is remove + re-apply, so the per-member rows must come back. They are
+  # derived from the binding and the membership, never recorded (§21), which is
+  # exactly why a refresh is where they could quietly go missing.
+  - name: verify-member-queues-survive-refresh-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/QUEUE
+    expect:
+      jq: 'sort == ["Ethernet12|0","Ethernet12|1","Ethernet12|2","Ethernet12|3"]'
+
   - name: verify-svi-survives-refresh-sw1
     action: newtron
     devices: [switch1]
@@ -290,6 +336,29 @@ steps:
   # The SVI is reaped by remove-service — the composite created it, so it owns
   # the teardown on the last consumer (reap-on-last-consumer, §15). The VRF and
   # L3VNI go the same way; the VLAN, its L2VNI, and membership survive (§3).
+  # The member's QoS goes with the binding, the same way its ACL does. Whole-table,
+  # because residue in QUEUE is the failure mode a single exists-check cannot see.
+  - name: verify-member-qos-removed-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet12/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-member-qos-removed-sw2
+    action: newtron
+    devices: [switch2]
+    url: /nodes/{{device}}/configdb/PORT_QOS_MAP/Ethernet12/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-member-queues-cleared-sw1
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/QUEUE
+    expect:
+      jq: 'length == 0'
+
   - name: verify-svi-reaped-on-remove-sw1
     action: newtron
     devices: [switch1]
