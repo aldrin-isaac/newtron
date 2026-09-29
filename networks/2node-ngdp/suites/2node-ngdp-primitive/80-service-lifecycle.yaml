@@ -113,7 +113,7 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/configdb/QUEUE
     expect:
-      jq: 'sort == ["Ethernet3|0","Ethernet3|1","Ethernet3|2","Ethernet3|3"]'
+      jq: 'sort == ["Ethernet3|0","Ethernet3|1","Ethernet3|2","Ethernet3|3","Ethernet3|4","Ethernet3|5","Ethernet3|6","Ethernet3|7"]'
 
   - name: verify-acl-rule-unqualified-sw1
     action: newtron
@@ -279,7 +279,7 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/configdb/QUEUE
     expect:
-      jq: 'sort == ["Ethernet3|0","Ethernet3|1","Ethernet3|2","Ethernet3|3"]'
+      jq: 'sort == ["Ethernet3|0","Ethernet3|1","Ethernet3|2","Ethernet3|3","Ethernet3|4","Ethernet3|5","Ethernet3|6","Ethernet3|7"]'
 
   - name: verify-svi-survives-refresh-sw1
     action: newtron

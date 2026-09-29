@@ -126,6 +126,9 @@ func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 	if policyName != "" && !n.isQoSPolicyReferenced(policyName, i.name) {
 		cs.Deletes(deleteDeviceQoSConfig(policyName))
 	}
+	// The shared default scheduler outlives any one policy — reaped only once no
+	// binding remains anywhere on the device.
+	n.reapDefaultScheduler(cs, i.name)
 
 	if err := i.deleteQoSBindingIntent(cs); err != nil {
 		return nil, err
@@ -261,22 +264,59 @@ func (n *Node) unbindMemberQoS(cs *ChangeSet, member string, leftVLANs map[int]b
 // isQoSPolicyReferenced checks if any QoS intent (excluding the given interface)
 // references the policy. Scans both standalone QoS intents (interface|X|qos) and
 // service intents (interface|X with qos_policy param).
-func (n *Node) isQoSPolicyReferenced(policyName, excludeInterface string) bool {
+// qosBindingsExcept returns interface name → bound policy for every interface
+// still binding QoS, excluding excludeInterface ("" excludes none). Both
+// reference questions teardown asks read this one scan (§25): whether a
+// particular policy still has a consumer, and whether any QoS remains bound at
+// all — the second decides the device-wide default scheduler's fate, and answering
+// it from a second copy of this loop is how the two would drift apart.
+//
+// Two sources, because a QoS binding has two shapes: the standalone
+// interface|<name>|qos record, and a service binding carrying a qos_policy.
+func (n *Node) qosBindingsExcept(excludeInterface string) map[string]string {
+	bound := map[string]string{}
 	for resource, intent := range n.IntentsByPrefix("interface|") {
-		// Standalone QoS intents: "interface|Ethernet0|qos"
-		if strings.HasSuffix(resource, "|qos") && intent.Params[sonic.FieldQoSPolicy] == policyName {
-			if name := resourceInterfaceName(resource); name != "" && name != excludeInterface {
-				return true
-			}
+		name := resourceInterfaceName(resource)
+		if name == "" || name == excludeInterface {
+			continue
 		}
-		// Service binding with QoS: "interface|Ethernet0|service" (OpApplyService with qos_policy)
-		if intent.Operation == sonic.OpApplyService && intent.Params["qos_policy"] == policyName {
-			if name := resourceInterfaceName(resource); name != "" && name != excludeInterface {
-				return true
+		switch {
+		case strings.HasSuffix(resource, "|qos"):
+			if p := intent.Params[sonic.FieldQoSPolicy]; p != "" {
+				bound[name] = p
+			}
+		case intent.Operation == sonic.OpApplyService:
+			if p := intent.Params["qos_policy"]; p != "" {
+				bound[name] = p
 			}
 		}
 	}
+	return bound
+}
+
+// isQoSPolicyReferenced reports whether any interface other than excludeInterface
+// still binds this policy — the §24 last-consumer test for the policy's own
+// device-wide rows.
+func (n *Node) isQoSPolicyReferenced(policyName, excludeInterface string) bool {
+	for _, p := range n.qosBindingsExcept(excludeInterface) {
+		if p == policyName {
+			return true
+		}
+	}
 	return false
+}
+
+// reapDefaultScheduler deletes the shared default scheduler once no QoS binding
+// remains anywhere on the device.
+//
+// Its consumer set is wider than any one policy's: every bound port's idle queues
+// reference it, whichever policy they carry. So it outlives a policy's last
+// consumer and is reaped only when the last *binding* goes — which is why this is
+// a separate test from isQoSPolicyReferenced rather than a clause inside it.
+func (n *Node) reapDefaultScheduler(cs *ChangeSet, excludeInterface string) {
+	if len(n.qosBindingsExcept(excludeInterface)) == 0 {
+		cs.Deletes([]sonic.Entry{{Table: "SCHEDULER", Key: defaultSchedulerName}})
+	}
 }
 
 // GetServiceQoSPolicy returns the QoS policy name and definition for a service.

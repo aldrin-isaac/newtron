@@ -43,14 +43,14 @@ steps:
     devices: [switch1]
     command: "configdb keys QUEUE --loopback"
     expect:
-      jq: '[.[] | select(startswith("Ethernet20|"))] | sort == ["Ethernet20|0","Ethernet20|1","Ethernet20|2","Ethernet20|3"]'
+      jq: '[.[] | select(startswith("Ethernet20|"))] | sort == ["Ethernet20|0","Ethernet20|1","Ethernet20|2","Ethernet20|3","Ethernet20|4","Ethernet20|5","Ethernet20|6","Ethernet20|7"]'
 
   - name: verify-second-port-queues
     action: newtron-cli
     devices: [switch1]
     command: "configdb keys QUEUE --loopback"
     expect:
-      jq: '[.[] | select(startswith("Ethernet24|"))] | sort == ["Ethernet24|0","Ethernet24|1","Ethernet24|2","Ethernet24|3"]'
+      jq: '[.[] | select(startswith("Ethernet24|"))] | sort == ["Ethernet24|0","Ethernet24|1","Ethernet24|2","Ethernet24|3","Ethernet24|4","Ethernet24|5","Ethernet24|6","Ethernet24|7"]'
 
   - name: verify-schedulers-created
     action: newtron-cli
@@ -87,7 +87,7 @@ steps:
     devices: [switch1]
     command: "configdb keys QUEUE --loopback"
     expect:
-      jq: '[.[] | select(startswith("Ethernet24|"))] | length == 4'
+      jq: '[.[] | select(startswith("Ethernet24|"))] | length == 8'
 
   - name: verify-shared-schedulers-survive
     action: newtron-cli

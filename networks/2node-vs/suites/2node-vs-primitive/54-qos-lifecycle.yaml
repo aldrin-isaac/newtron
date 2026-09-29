@@ -56,7 +56,7 @@ steps:
     devices: [switch1]
     url: /nodes/{{device}}/configdb/QUEUE
     expect:
-      jq: '[.[] | select(startswith("Ethernet44|"))] | sort == ["Ethernet44|0","Ethernet44|1","Ethernet44|2","Ethernet44|3"]'
+      jq: '[.[] | select(startswith("Ethernet44|"))] | sort == ["Ethernet44|0","Ethernet44|1","Ethernet44|2","Ethernet44|3","Ethernet44|4","Ethernet44|5","Ethernet44|6","Ethernet44|7"]'
 
   - name: verify-scheduler-rows-bound
     action: newtron
