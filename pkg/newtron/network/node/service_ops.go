@@ -1409,6 +1409,9 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 		if !n.isQoSPolicyReferenced(qosPolicyName, i.name) {
 			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName))
 		}
+		// Shared across policies, so it goes with the last binding rather than the
+		// last consumer of this one.
+		n.reapDefaultScheduler(cs, i.name)
 	}
 	// Delete QoS sub-intent (child of interface intent — must precede parent deletion per I5)
 	if err := i.deleteQoSBindingIntent(cs); err != nil {

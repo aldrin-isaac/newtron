@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -17,9 +18,9 @@ func TestGenerateDeviceQoSConfig_TwoQueue(t *testing.T) {
 
 	entries := GenerateDeviceQoSConfig("TEST_2Q", policy)
 
-	// Expect: 1 DSCP_TO_TC_MAP + 1 TC_TO_QUEUE_MAP + 2 SCHEDULER = 4 entries
-	if len(entries) != 4 {
-		t.Fatalf("expected 4 entries, got %d", len(entries))
+	// 1 DSCP_TO_TC_MAP + 1 TC_TO_QUEUE_MAP + 2 policy SCHEDULER + 1 shared default
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries, got %d", len(entries))
 	}
 
 	// DSCP_TO_TC_MAP
@@ -46,11 +47,16 @@ func TestGenerateDeviceQoSConfig_TwoQueue(t *testing.T) {
 	if tcMap.Table != "TC_TO_QUEUE_MAP" || tcMap.Key != "TEST_2Q" {
 		t.Errorf("entry[1]: got %s|%s, want TC_TO_QUEUE_MAP|TEST_2Q", tcMap.Table, tcMap.Key)
 	}
-	if len(tcMap.Fields) != 2 {
-		t.Errorf("TC map should have 2 entries, got %d", len(tcMap.Fields))
+	// Total over the platform's classes, not the policy's two — a class with no
+	// entry has no defined queue, and the map is a function.
+	if len(tcMap.Fields) != sonic.MaxQueuesPerPort {
+		t.Errorf("TC map should cover all %d classes, got %d", sonic.MaxQueuesPerPort, len(tcMap.Fields))
 	}
-	if tcMap.Fields["0"] != "0" || tcMap.Fields["1"] != "1" {
-		t.Errorf("TC map should be identity: got %v", tcMap.Fields)
+	for i := 0; i < sonic.MaxQueuesPerPort; i++ {
+		k := fmt.Sprintf("%d", i)
+		if tcMap.Fields[k] != k {
+			t.Errorf("TC map should be identity at %s: got %q", k, tcMap.Fields[k])
+		}
 	}
 
 	// SCHEDULER entries
@@ -90,13 +96,13 @@ func TestGenerateDeviceQoSConfig_EightQueueWithECN(t *testing.T) {
 
 	entries := GenerateDeviceQoSConfig("8Q_DC", policy)
 
-	// 1 DSCP + 1 TC + 8 SCHEDULER + 1 WRED = 11
-	if len(entries) != 11 {
-		t.Fatalf("expected 11 entries, got %d", len(entries))
+	// 1 DSCP + 1 TC + 8 policy SCHEDULER + 1 shared default + 1 WRED = 12
+	if len(entries) != 12 {
+		t.Fatalf("expected 12 entries, got %d", len(entries))
 	}
 
 	// Last entry should be WRED_PROFILE
-	wred := entries[10]
+	wred := entries[11]
 	if wred.Table != "WRED_PROFILE" || wred.Key != "8Q_DC_ECN" {
 		t.Errorf("last entry: got %s|%s, want WRED_PROFILE|8Q_DC_ECN", wred.Table, wred.Key)
 	}
@@ -115,9 +121,9 @@ func TestGenerateDeviceQoSConfig_NoECN(t *testing.T) {
 
 	entries := GenerateDeviceQoSConfig("NO_ECN", policy)
 
-	// 1 DSCP + 1 TC + 2 SCHEDULER = 4 (no WRED)
-	if len(entries) != 4 {
-		t.Fatalf("expected 4 entries (no WRED), got %d", len(entries))
+	// 1 DSCP + 1 TC + 2 policy SCHEDULER + 1 shared default = 5 (no WRED)
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries (no WRED), got %d", len(entries))
 	}
 	for _, e := range entries {
 		if e.Table == "WRED_PROFILE" {
@@ -137,9 +143,11 @@ func TestQoSBinding(t *testing.T) {
 
 	entries := bindQosConfig("Ethernet0", "TEST_3Q", policy)
 
-	// 1 PORT_QOS_MAP + 3 QUEUE = 4
-	if len(entries) != 4 {
-		t.Fatalf("expected 4 entries, got %d", len(entries))
+	// 1 PORT_QOS_MAP + one QUEUE row per *platform* queue — the policy's three
+	// carry its schedulers, the rest carry the shared default, so the forward
+	// writes the same range unbindQosConfig clears.
+	if len(entries) != 1+sonic.MaxQueuesPerPort {
+		t.Fatalf("expected %d entries, got %d", 1+sonic.MaxQueuesPerPort, len(entries))
 	}
 
 	// PORT_QOS_MAP
@@ -207,5 +215,65 @@ func TestDSCPDefaultMapping(t *testing.T) {
 		if dscpMap.Fields[key] != "0" {
 			t.Errorf("unmapped DSCP %d: got %q, want 0", i, dscpMap.Fields[key])
 		}
+	}
+}
+
+// TestQoSBinding_TotalOverPlatformQueues pins the property increment 3 exists for:
+// every queue the platform has carries a treatment, and the ones the policy does
+// not describe carry the shared default. Before this, a port's queue rows were
+// sized by the policy, which is what let the forward and the reverse disagree
+// about how many rows a binding owns.
+func TestQoSBinding_TotalOverPlatformQueues(t *testing.T) {
+	policy := &spec.QoSPolicy{Queues: []*spec.QoSQueue{
+		{Name: "be", Type: "dwrr", Weight: 60, DSCP: []int{0}},
+		{Name: "voice", Type: "strict", DSCP: []int{46}},
+	}}
+
+	byKey := map[string]sonic.Entry{}
+	for _, e := range bindQosConfig("Ethernet0", "TEST_2Q", policy) {
+		if e.Table == "QUEUE" {
+			byKey[e.Key] = e
+		}
+	}
+	if len(byKey) != sonic.MaxQueuesPerPort {
+		t.Fatalf("queue rows: got %d, want %d (one per platform queue)", len(byKey), sonic.MaxQueuesPerPort)
+	}
+
+	for idx := 0; idx < sonic.MaxQueuesPerPort; idx++ {
+		e, ok := byKey[fmt.Sprintf("Ethernet0|%d", idx)]
+		if !ok {
+			t.Fatalf("queue %d has no row — the mapping is not total", idx)
+		}
+		want := fmt.Sprintf("[SCHEDULER|%s]", defaultSchedulerName)
+		if idx < len(policy.Queues) {
+			want = fmt.Sprintf("[SCHEDULER|TEST_2Q_Q%d]", idx)
+		}
+		if got := e.Fields["scheduler"]; got != want {
+			t.Errorf("queue %d scheduler: got %q, want %q", idx, got, want)
+		}
+	}
+}
+
+// TestGenerateDeviceQoSConfig_DefaultScheduler pins the object those idle queues
+// reference. It is emitted with every policy and identical each time — the §24
+// create-on-first-reference shape — so whichever bind runs first brings it into
+// being and a second bind is a no-op rather than a conflict.
+func TestGenerateDeviceQoSConfig_DefaultScheduler(t *testing.T) {
+	policy := &spec.QoSPolicy{Queues: []*spec.QoSQueue{{Name: "be", Type: "dwrr", Weight: 100, DSCP: []int{0}}}}
+
+	var found *sonic.Entry
+	for _, e := range GenerateDeviceQoSConfig("TEST_1Q", policy) {
+		if e.Table == "SCHEDULER" && e.Key == defaultSchedulerName {
+			found = &e
+		}
+	}
+	if found == nil {
+		t.Fatalf("no shared default scheduler emitted; idle queues would reference a key that does not exist")
+	}
+	// DWRR with a minimum share: nothing classifies into these queues, but if
+	// anything ever did, a minimum-share queue degrades where strict would starve.
+	if found.Fields["type"] != "DWRR" || found.Fields["weight"] != "1" {
+		t.Errorf("default scheduler: got type=%q weight=%q, want DWRR/1",
+			found.Fields["type"], found.Fields["weight"])
 	}
 }

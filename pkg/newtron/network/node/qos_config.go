@@ -13,6 +13,31 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
+// defaultSchedulerName is the shared scheduler every queue the policy does not
+// describe points at, so that queue → treatment is total over the platform's
+// queues rather than over the policy's.
+//
+// Named by newtron's own convention (§36) rather than adopting SONiC's
+// "scheduler.0". That was the first intent, on the §37 reading that a community
+// object should be used rather than a parallel one built beside it — but reading
+// the platform template on a device shows there is no single "scheduler.0" to
+// adopt: three branches of qos_config.j2 define it with weights 1, 40 and 14
+// depending on platform and role. The name is stable, its content is not, so
+// claiming it would mean asserting one of several community meanings. §37 is
+// satisfied anyway: this uses the community's table, fields and role, exactly as
+// the per-policy <POLICY>_Q<n> schedulers already do. It introduces no new
+// mechanism, only one more object in an existing one.
+//
+// DWRR weight 1 is deliberate. Nothing classifies into these queues, so the
+// treatment is inert — but if traffic ever did arrive, a minimum-share DWRR queue
+// degrades gracefully where a strict-priority one would starve everything else.
+// It matches the most conservative of the template's own definitions.
+const (
+	defaultSchedulerName   = "DEFAULT"
+	defaultSchedulerType   = "DWRR"
+	defaultSchedulerWeight = "1"
+)
+
 // Default WRED thresholds for ECN profiles.
 const (
 	defaultWREDMinThreshold  = "1048576" // 1 MB
@@ -45,9 +70,14 @@ func GenerateDeviceQoSConfig(policyName string, policy *spec.QoSPolicy) []sonic.
 		Fields: dscpFields,
 	})
 
-	// TC_TO_QUEUE_MAP: identity mapping (TC N → Queue N).
-	tcFields := make(map[string]string, len(policy.Queues))
-	for i := range policy.Queues {
+	// TC_TO_QUEUE_MAP: identity over every class the platform has, not just the
+	// ones this policy gives meaning to. Sizing it to the policy leaves classes
+	// with no entry, and a class with no entry has no defined queue — the map is
+	// a function and a function should be total over its domain. SONiC's own
+	// template writes the full identity map regardless of policy for the same
+	// reason.
+	tcFields := make(map[string]string, sonic.MaxQueuesPerPort)
+	for i := 0; i < sonic.MaxQueuesPerPort; i++ {
 		tcFields[fmt.Sprintf("%d", i)] = fmt.Sprintf("%d", i)
 	}
 	entries = append(entries, sonic.Entry{
@@ -72,6 +102,18 @@ func GenerateDeviceQoSConfig(policyName string, policy *spec.QoSPolicy) []sonic.
 			Fields: schedFields,
 		})
 	}
+
+	// The shared default scheduler, so the queues below carry a reference. Emitted
+	// with every policy and identical each time, which is the §24 create-on-first-
+	// reference shape: whichever bind runs first brings it into being.
+	entries = append(entries, sonic.Entry{
+		Table: "SCHEDULER",
+		Key:   defaultSchedulerName,
+		Fields: map[string]string{
+			"type":   defaultSchedulerType,
+			"weight": defaultSchedulerWeight,
+		},
+	})
 
 	// WRED_PROFILE: created if any queue has ECN enabled.
 	hasECN := false
@@ -113,19 +155,26 @@ func bindQosConfig(intfName string, policyName string, policy *spec.QoSPolicy) [
 		},
 	})
 
-	// QUEUE: one per queue, binding scheduler (and optionally WRED).
+	// QUEUE: a row for every queue the platform has, not just the ones the policy
+	// describes. The policy's queues carry its schedulers; the rest carry the
+	// shared default, so queue → treatment is total and the forward writes the
+	// same range the reverse clears (unbindQosConfig). Sizing this to the policy
+	// is what made the two disagree, and what made a policy's queue count a value
+	// teardown had to recover.
 	wredKey := policyName + "_ECN"
-	for idx, q := range policy.Queues {
-		queueKey := fmt.Sprintf("%s|%d", intfName, idx)
+	for idx := 0; idx < sonic.MaxQueuesPerPort; idx++ {
 		queueFields := map[string]string{
-			"scheduler": fmt.Sprintf("[SCHEDULER|%s_Q%d]", policyName, idx),
+			"scheduler": fmt.Sprintf("[SCHEDULER|%s]", defaultSchedulerName),
 		}
-		if q.ECN {
-			queueFields["wred_profile"] = fmt.Sprintf("[WRED_PROFILE|%s]", wredKey)
+		if idx < len(policy.Queues) {
+			queueFields["scheduler"] = fmt.Sprintf("[SCHEDULER|%s_Q%d]", policyName, idx)
+			if policy.Queues[idx].ECN {
+				queueFields["wred_profile"] = fmt.Sprintf("[WRED_PROFILE|%s]", wredKey)
+			}
 		}
 		entries = append(entries, sonic.Entry{
 			Table:  "QUEUE",
-			Key:    queueKey,
+			Key:    fmt.Sprintf("%s|%d", intfName, idx),
 			Fields: queueFields,
 		})
 	}
