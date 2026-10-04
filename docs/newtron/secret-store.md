@@ -4,7 +4,8 @@ The secret store (auth-design.md L0) holds plaintext secret values
 referenced from spec files. Spec values may contain
 `${secret:KEY}` references; when newtron-server is started with
 `--secret-store=PATH`, each reference is resolved against the JSON
-map at PATH at network load time. The plaintext stays in the
+map at PATH when it is used — SSH logins at every operation, platform
+credentials once at server startup (§1, §5). The plaintext stays in the
 operator's secret file (mode 0600), not in the version-controlled
 spec directory.
 
@@ -14,14 +15,15 @@ when references are missing or the store is unreadable.
 
 ## 1. What gets resolved
 
-Two spec fields currently carry `${secret:KEY}` references:
+The SSH login and the platform default credentials carry `${secret:KEY}`
+references:
 
-| Spec | Field | File location |
-|---|---|---|
-| `NodeSpec.SSHPass` | `ssh_pass` | `nodes/<device>.json` |
-| `NodeSpec.SSHUser` | `ssh_user` | `nodes/<device>.json` |
-| `Credentials.Pass` | `credentials.pass` | `platforms.json` (per platform) |
-| `Credentials.User` | `credentials.user` | `platforms.json` (per platform) |
+| Spec | Fields | File location | Resolved |
+|---|---|---|---|
+| SSH login, network scope | `ssh_user`, `ssh_pass` | `network.json` | at every operation |
+| SSH login, zone scope | `ssh_user`, `ssh_pass` | `zones/<zone>.json` | at every operation |
+| SSH login, node scope | `ssh_user`, `ssh_pass` | `nodes/<device>.json` | at every operation |
+| Platform default credentials | `credentials.user`, `credentials.pass` | the platforms directory (`--platforms-base`) | once, at server startup |
 
 Other spec fields pass through unchanged. A future Store implementation
 may add encryption-at-rest of the secret file itself — the resolver
@@ -115,23 +117,24 @@ Plaintext values keep working — operators migrate incrementally. A
 mixed profile (some plaintext, some references) is fine; the loader
 resolves each value independently.
 
-## 5. Rotation and reload
+## 5. Rotation
 
-The server reads the store file once when it loads each network.
-Editing the store file does NOT auto-trigger a reload — the server
-is intentionally not watching the file (avoids the complexity of
-detecting partial writes, surprise rotation, etc.).
+The store file is read on every lookup, so what a rotation takes depends
+on when the reference is resolved (§1):
 
-After changing a stored value:
+- **SSH logins** (network, zone, node) are resolved at the start of every
+  operation on a device. A rotated value is used by the next operation;
+  nothing needs reloading. An SSH session already open keeps the login it
+  was opened with until it is reconnected.
+- **Platform default credentials** are resolved once, when the server
+  starts, and the result is shared by every network. A rotated value
+  takes effect only after a server restart; a network reload does not
+  re-resolve them.
 
 ```sh
 bin/newtron secrets --store ~/.newtron/secrets.json put switch1-ssh NEWPASSWORD
-curl -X POST http://127.0.0.1:19080/newtron/v1/networks/default/reload
+# the next operation on switch1 uses the new password
 ```
-
-The reload re-resolves references against the new store content.
-Networks not touched by the reload keep their previously-resolved
-values until they're individually reloaded (or the server restarts).
 
 ## 6. Threat model — what the secret store addresses, what it doesn't
 

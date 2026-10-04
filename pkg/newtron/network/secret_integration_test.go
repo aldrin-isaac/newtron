@@ -385,9 +385,9 @@ func TestResolveNodeSpec_SSHNetworkSecretRef(t *testing.T) {
 }
 
 // TestNewNetwork_SecretRefWithoutStoreErrors pins the disabled-state
-// behavior: a nodeSpec with a reference but no store configured fails
-// at network load (not at first SSH attempt) — the operator sees the
-// problem immediately on server startup, not under load.
+// behavior: a nodeSpec with a reference but no store configured loads,
+// and resolving the node fails with an error naming --secret-store, so
+// the operator knows the fix.
 func TestNewNetwork_SecretRefWithoutStoreErrors(t *testing.T) {
 	dir := newL0FixtureSpecDir(t)
 	writeNodeSpec(t, dir, "switch1", `{

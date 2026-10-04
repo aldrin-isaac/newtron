@@ -19,9 +19,10 @@ import (
 // at a file path the operator chooses; this command edits it.
 //
 // All subcommands require --store=PATH. The path is the same file
-// the server is configured against — the server doesn't watch for
-// changes, so a server restart (or ReloadNetwork on each affected
-// network) is required for additions to take effect.
+// the server is configured against. The server reads it on every
+// lookup: SSH-login references pick up a change at the next operation,
+// platform-credential references only after a server restart (they are
+// resolved once at startup). See docs/newtron/secret-store.md §5.
 var secretsCmd = &cobra.Command{
 	Use:   "secrets",
 	Short: "Manage the operator-configured secret store (auth-design.md L0)",
@@ -29,7 +30,7 @@ var secretsCmd = &cobra.Command{
 
 The store is a JSON file at --store=PATH with mode 0600. Server
 processes (newtron-server, newt-server) open the same file with
---secret-store=PATH and resolve references at network load.
+--secret-store=PATH.
 
 Examples:
   newtron secrets --store ~/.newtron/secrets.json put switch1-ssh YourPaSsWoRd
@@ -42,8 +43,9 @@ use the - sentinel to read from stdin instead:
 
   echo -n "$SECRET" | newtron secrets --store ~/.newtron/secrets.json put switch1-ssh -
 
-The server doesn't auto-reload the store. After editing, either
-restart the server or call ReloadNetwork on each affected network.`,
+A changed SSH-login secret (ssh_user/ssh_pass at network, zone or node
+scope) is used by the next operation on the device. A changed platform
+credential (credentials.user/pass) takes effect after a server restart.`,
 }
 
 // storePath is the --store flag value, populated by cobra. Each

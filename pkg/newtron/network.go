@@ -40,10 +40,9 @@ type Network struct {
 // deployments.
 //
 // secretStore (auth-design.md L0) is the operator-configured secret
-// backend. When non-nil, ${secret:KEY} references in nodeSpec and
-// platform values are resolved at load time. nil preserves the
-// plaintext-only behavior — references in specs become hard errors
-// at load.
+// backend. ${secret:KEY} references in SSH logins resolve against it
+// at every operation. nil means plaintext only — a reference is a hard
+// error when it is resolved.
 func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore secret.Store, platforms map[string]*spec.PlatformSpec) (*Network, error) {
 	net, err := netpkg.NewNetwork(specDir, topologyName, pr, secretStore, platforms)
 	if err != nil {

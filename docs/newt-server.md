@@ -99,7 +99,7 @@ scenario overrides this default for every call that scenario makes.
 |------|---------|---------|
 | `--audit` | `false` | Enable per-network mutation audit logging. Each network's mutations are recorded in its own folder (`<networks-base>/<network>/audit/audit.log`) — no path to configure. Empty disables audit emission. |
 | `--audit-integrity` | `false` | Hash-chain each per-network audit log (one chain per network) so tampering is detectable via `bin/newtron audit verify`. Requires `--audit`. |
-| `--secret-store` | `""` | File path for the operator-managed secret store. When set, `${secret:KEY}` references in spec values resolve at network load. Empty disables — references become hard errors at load. |
+| `--secret-store` | `""` | File path for the operator-managed secret store. When set, `${secret:KEY}` references resolve against it — SSH logins at every operation, platform credentials at startup ([secret-store.md](newtron/secret-store.md) §5). Empty disables — a reference becomes a hard error when it is resolved. |
 
 ### TLS (auth-design.md §L2a)
 

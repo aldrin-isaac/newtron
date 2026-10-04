@@ -86,11 +86,10 @@ type Network struct {
 	portResolver sonic.PortResolver
 
 	// secretStore is the operator-configured secret backend
-	// (auth-design.md L0). When non-nil, ${secret:KEY} references in
-	// nodeSpec and platform values are resolved at load time. When
-	// nil (the L0 disabled state), references are an error and
-	// plaintext values pass through — preserving the pre-L0
-	// behavior exactly.
+	// (auth-design.md L0). ${secret:KEY} references in SSH logins resolve
+	// against it at every operation. When nil (the L0 disabled state),
+	// plaintext values pass through and a reference is an error when it
+	// is resolved.
 	secretStore secret.Store
 
 	// specDir is this network's spec directory (where secrets.json lives).
@@ -120,9 +119,9 @@ type Network struct {
 // tests and real-hardware deployments.
 //
 // secretStore (auth-design.md L0) is the operator-configured secret
-// backend. When non-nil, ${secret:KEY} references in spec values
-// (currently NodeSpec.SSHPass and PlatformSpec.Credentials)
-// are resolved at network load. nil triggers spec-dir auto-discovery
+// backend. ${secret:KEY} references in SSH logins resolve against it at
+// every operation (platform credentials are resolved once, at server
+// startup, by ResolvePlatformSecrets). nil triggers spec-dir auto-discovery
 // (#176): if <specDir>/secrets.json exists, it's opened as a
 // FileStore and used; otherwise resolution stays disabled — plaintext
 // spec values keep working, but a reference under a nil store is a
