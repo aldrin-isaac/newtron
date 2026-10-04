@@ -2,7 +2,8 @@
 // secret material referenced from newtron spec files (auth-design.md
 // L0). Spec values may contain references of the form
 // "${secret:KEY}"; the Resolve helper in this package looks the key
-// up in a Store and substitutes the stored value at load time.
+// up in a Store and substitutes the stored value when the reference is
+// resolved.
 //
 // The package exposes a Store interface so a deployment can plug in
 // any backend (an age-encrypted file, an HSM-backed KMS, the
