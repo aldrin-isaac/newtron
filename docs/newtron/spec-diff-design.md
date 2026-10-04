@@ -1,8 +1,9 @@
 # Spec-Diff: Separating "Behind" From "Drifted"
 
-Status: **proposed** — justification, three candidate designs, and decision record.
-No code implements either today. A partial earlier attempt (#486 rung 0a) was built
-and removed; the reasons are recorded in "What the first attempt got wrong."
+Status: **proposed** — justification, three candidate designs, an implementation
+plan for Design C, and decision record. No code implements any of them today. A
+partial earlier attempt (#486 rung 0a) was built and removed; the reasons are
+recorded in "What the first attempt got wrong."
 
 ## The defect this fixes
 
@@ -281,23 +282,23 @@ today's code. A rendering change moves `Current` and leaves `Applied` alone, so 
 reads as Behind, never as Drifted — the limitation Design A needs a build identity
 to work around does not arise.
 
-## Design C — a digest of what each intent read
+## Design C — a digest of each intent's inputs
 
 Design A answers per device and Design B per field. Between them sits a question
 neither answers cheaply and an operator asks first: **which of this device's
 operations are behind?** Not "the switch drifted", not "these forty fields
 differ", but "TRANSIT on Ethernet0 and Ethernet4 is behind its spec".
 
-Stamp each intent record, at delivery, with a digest of the inputs its operation
-read. On every later read, compare it with a digest of the same inputs as they stand
-now, and look at the drift on that intent's rows:
+Stamp each intent record, when it is written, with a digest of the inputs that
+determine what it renders. When the guard finds drift, recompute each device
+record's digest from the inputs as they stand now and compare:
 
-| Stored vs current digest | Drift on the intent's rows | Meaning | Resolution |
+| Stored vs current digest | Drift on the device | Meaning | Resolution |
 |---|---|---|---|
-| same | empty | current | proceed |
-| same | non-empty | **Drifted** — the device was edited | reconcile |
-| differs | non-empty | **Behind** — an input moved | refresh these intents; the drift rows are the preview |
-| differs | empty | an input moved without changing this device's rows | re-stamp, proceed |
+| same for every record | non-empty | **Drifted** — the device changed after delivery | reconcile |
+| differs for some records | non-empty | **Behind** — those records' inputs moved | reconcile applies the spec changes |
+| missing on some records, none differs | non-empty | **Unclassified** — those records predate stamping | reconcile, which stamps them |
+| any | empty | current — some inputs may have moved without changing any row | proceed |
 
 It records no applied *values*, so Design B's closure — every spec-derived value a
 generator consumes — does not arise, and neither does §21's grain: the digest is
@@ -305,42 +306,252 @@ never fed to a generator, so it cannot disagree with the specs in a way that cha
 what is rendered. It needs four things, and each is a way to get a confidently wrong
 answer if missed.
 
-1. **The inputs are what the operation read, not the spec it names.** A service
-   intent depends on its service, and through it on a filter, prefix lists, route
-   policies, a QoS policy, IP-VPN and MAC-VPN specs — each possibly overridden at the
-   zone or the node — and on node values: loopback, ASN, the EVPN peers derived from
-   other nodes' specs and the topology. A digest of the service spec alone misses an
-   edit to its filter. The set must therefore be collected, not declared: every spec
-   an operation resolves passes through `SpecProvider`, so recording the names
-   resolved during the operation and digesting their resolved content covers the
-   transitive set without a per-operation list to forget. The node values come from
-   the resolved node spec instead and are digested whole — coarse, since a loopback
-   change then marks every intent on the node, but never wrong in the safe direction.
+1. **The inputs are a function of the record, declared once and proved by test.** A
+   service intent depends on its service, and through it on a filter, prefix lists,
+   route policies, a QoS policy, IP-VPN and MAC-VPN specs — each possibly overridden at
+   the zone or the node — and on node values: loopback, ASN, the EVPN peers derived from
+   other nodes' specs and the topology, the platform. A digest of the service spec
+   alone misses an edit to its filter. Two existing declarations give the transitive
+   set without a per-operation list: the operation registry declares which of a
+   record's params names a spec, and the `ref:"…"` tags declare every spec-to-spec
+   reference (`spec/references.go`). Node values are digested whole — coarse, since a
+   loopback change then marks every intent on the node, but never wrong in the safe
+   direction.
+
+   Collecting what an operation reads at run time looks simpler and is wrong. A
+   composite `apply-service` writes `vlan|300`; a rebuild re-creates `vlan|300`
+   through its own `create-vlan` step. One record would get two answers, one per
+   path, and every composite-created record would read as behind forever. A function
+   of the record gives one answer on every path. What run-time reads are good for is
+   checking the declaration: a test replays every registered operation and fails if a
+   spec is read that no record's declared inputs cover.
 2. **newtron's build identity is part of the digest.** Otherwise a release that
    renders the same specs differently (the second cause of "behind", above) reads as
-   "same digest, drift present" and is reported as a device edit. That requires every
+   "same digest, drift present" and is reported as drift. That requires every
    rendering-changing release to carry a distinct identity.
-3. **The digest is stamped at delivery and carried through reconstruction.** A
-   rebuild that re-derived it from current specs would make it always equal and tell
-   nothing. It is carried forward the way the params some `Replay` closures already
-   thread unchanged are, and written only when a ChangeSet reaches the device.
-4. **Drift rows have to be attributed to intents.** The table is per intent, and
-   the projection does not record which intent produced a row — that is the
-   resolution-provenance question, deferred. Without it, a drifted row on a shared
-   object cannot be blamed on one intent. The service projection's technique —
-   remove one intent, replay, diff — can attribute rows, at the cost of a replay per
-   intent examined.
+3. **The stamp is written with the record and read back from the device.** The one
+   writer of intent records stamps each record it writes, on the live path and in
+   replay alike. The device keeps the stamp from the record's last delivery. The guard
+   compares the device's stored stamps — never the rebuilt records, which a rebuild
+   re-stamps from current inputs and so always match. Nothing has to be carried
+   through reconstruction.
+4. **Drift rows are not attributed to intents.** The projection does not record
+   which intent produced a row — that is the resolution-provenance question, deferred.
+   The classification is therefore per device: it names the records whose inputs
+   moved, and reports "behind" when any did. The service projection's technique —
+   remove one intent, replay, diff — could attribute rows later, at the cost of a
+   replay per intent examined.
 
-The compound case Design A accepts persists here per intent: an input that moved
-**and** a hand edit on the same intent's rows classify as Behind, and the refresh
-overwrites the edit — safe, for the same reason.
+The compound case Design A accepts persists here: an input that moved **and** a hand
+edit on the same device classify as Behind, and the reconcile overwrites the edit —
+safe, for the same reason.
 
 **Relationship to A and B.** Design C is the "per-spec digest set" Design A names as
 a refinement, moved from the device onto each intent and made to cover what an
-operation actually read. It answers which operations are behind but not which values
-changed; the drift rows on those intents supply the values. It is an alternative to
-both, not a stage between them: building it and then B would discard it, as building
-A and then B would.
+intent's rendering depends on. It answers which operations are behind but not which
+values changed; the drift entries supply the values. It is an alternative to both,
+not a stage between them: building it and then B would discard it, as building A and
+then B would.
+
+## Design C — implementation plan
+
+Nothing here is built; the plan waits on the trigger named in "Assessment". Its
+file, function and line references were checked against main when it was written.
+
+### What it delivers
+
+When the drift guard refuses a write, the refusal says why, as a typed **409**
+instead of today's untyped error (which `httpStatusFromError` maps to 500):
+
+- **drifted** — every record's stored digest equals its current one, so the device
+  changed after delivery. That is a hand edit, or a delivery that failed part-way
+  (a commit that stopped between a config delete and its intent delete leaves the
+  same signal). The message does not claim which.
+- **behind** — these named records' inputs (specs, node values, or the build) moved
+  since they were written. Reconcile applies the change.
+- **unclassified** — some device records carry no digest (written before this
+  lands, or left by an interrupted write), so the cause cannot be told.
+
+Node status gains the list of behind records. The guard still refuses in every
+case; nothing about when it refuses changes.
+
+The resolution is `reconcile`, not a per-service refresh: `RefreshService` runs
+through `Execute` and therefore through the same guard.
+
+### The digest
+
+`inputDigest(operation, params, view)` — one pure function, in a new
+`network/node/input_digest.go`:
+
+```
+SHA-256( build ‖ node values ‖ for each spec in the closure, sorted: kind, name, JSON(value) or null )
+```
+
+truncated to 16 hex characters.
+
+- **Build** — `version.Version` and `version.GitCommit`. A plain `go build` leaves
+  both at `dev`/`unknown`, so a rendering change between two such builds reads as
+  drifted, as it does today; Makefile builds carry a distinct identity.
+- **Node values** — the resolved node spec except `SSHUser`/`SSHPass`, plus the
+  node's platform spec with `Credentials` removed (credentials are plaintext after
+  secret resolution, and the node package reads the platform through
+  `GetPlatform(resolved.Platform)` in `evpn_ops.go` and `service_ops.go`). A
+  reflection test fails when a `ResolvedNodeSpec` field is added without being
+  classified as included or excluded.
+- **Closure** — start from the record's params that name a spec, then follow every
+  `ref:` tag in each spec reached (`CollectRefs`). A missing spec contributes `null`,
+  so a record whose spec was deleted reads as behind with no separate orphan
+  handling.
+- `encoding/json` sorts map keys; no spec type in the closure has unexported or
+  `json:"-"` fields, so the encoding is complete and deterministic.
+- A view never changes within an operation, so each spec's encoding and the node
+  values are hashed once per view and reused by every record a rebuild writes.
+
+**Declarations.** `ParamSpec` in `op_registry.go` gains the kind of spec a param
+names, using the `kind:` vocabulary of `OverridableSpecs`. Five params name a spec:
+
+| Operation | Param | Kind |
+|---|---|---|
+| `apply-service` | `service_name` | `ServiceSpec` |
+| `bind-macvpn` | `macvpn` | `MACVPNSpec` |
+| `bind-ipvpn` | `ipvpn` | `IPVPNSpec` |
+| `create-acl` | `filter` | `FilterSpec` |
+| `bind-qos` | `policy` | `QoSPolicy` |
+
+Every other spec lookup in the node package is reached through these by a `ref:` tag
+(a service's IP-VPN, MAC-VPN, filters, QoS policy, route policies, prefix lists; a
+filter rule's or route-policy rule's prefix lists) or is the platform. The lookups
+were enumerated: `vrf_ops.go:136`, `qos_ops.go:73,195,326`, `evpn_ops.go:33,44`,
+`service_ops.go:208–1200`, `op_registry.go:295`. One crosses records:
+`bindMemberQoS` renders a member port's QoS from the irb binding's policy, which the
+binding's closure covers. `FindMACVPNByVNI` has no production caller.
+
+**Spec lookup by kind.** The closure walk looks specs up by `(kind, name)`. That
+lookup belongs to `OverridableSpecs`, which already owns the kind vocabulary (its
+`kind:` tags and `EachSpec`); `ResolvedSpecs` holds its merged view as one, and
+exposes the lookup through `SpecProvider`. The unit-test provider gains the same
+method.
+
+### Where it is stamped
+
+In `writeIntent`, the only writer of intent records (`intent_ops.go`): the record's
+fields gain `input_digest = inputDigest(op, params, view)` before the change is
+queued and rendered. That one line covers every delivery:
+
+- **Live writes** — the stamp travels in the same ChangeSet as the record. It is
+  truthful: the guard ran on this operation with an empty diff (or there were no
+  intents yet), so after the commit every row the record owns is what its current
+  inputs render.
+- **Reconcile** — full and delta export the rebuilt in-memory records, which replay
+  wrote through `writeIntent`, so they carry current digests.
+
+The field is not added to `Intent` or to `ToFields`. Parent registration rewrites a
+parent from `ToFields()` (an HSET merge), so leaving the field out preserves the
+parent's stamp on the device and in memory; putting it in would rewrite the old
+stamp in the same commit that might re-stamp it. `NewIntent` strips it from params
+(an identity key), so it never reaches a topology step or `topology.json`.
+
+**Records the operation did not write keep their old stamp**, even when their inputs
+moved without changing any row. A later hand edit on such a device is then reported
+as behind — over-reporting in the safe direction, cleared by the next reconcile or
+write of that record. Re-stamping them would cost every write a read of the
+device's intent records and a write per stale record; the plan does not pay for it.
+
+**Delta reconcile** delivers intent records before `ApplyDrift`, as today. If
+`ApplyDrift` then fails, current stamps sit over unpatched rows and a later refusal
+says "drifted"; the failed reconcile already reported its error, and the "drifted"
+message names an incomplete delivery as a possible cause.
+
+### The guard
+
+`Lock` keeps its diff. When the diff is non-empty it reads the device's
+`NEWTRON_INTENT` (one read, on the refusal path only) and returns
+`classifyDrift(entries, deviceRecords, digestFn)` — a pure function, unit-testable
+without a device:
+
+- `behind` = device records whose stored digest is set and differs from
+  `inputDigest` of that record now; sorted. `unstamped` = records with no digest.
+- `behind` non-empty → cause **behind**: *"device is behind its specs: N intent(s)
+  changed inputs since delivery (first five, then "and K more") — M entries differ;
+  reconcile to apply the spec changes"*.
+- else `unstamped > 0` → cause **unclassified**, today's message.
+- else → cause **drifted**, today's message unchanged — the drift suite asserts its
+  substring (`2node-vs-drift-actuated/08-verify-guard.yaml`).
+
+`util.DriftError{Device, Entries, Cause, Behind, Unstamped}`, aliased in
+`pkg/newtron/types.go` like `ConflictError`; `httpStatusFromError` maps it to 409 and
+`writeError` puts it in the response's `data`, as it does for `AuthorizationError`.
+
+**Node status** gains `behind_intents`, filled after the existing rebuild and drift
+read when the node is actuated and the diff is non-empty, through one public
+delegating method so the guard and status share one classifier.
+
+### Other changes
+
+- `intent snapshot-diff` and newtrun's `verify-snapshot` (`DiffIntentRecords`)
+  ignore `input_digest`. The snapshot catches residual or missing intent *content*;
+  without this, a newtron upgrade followed by one write would report every record
+  in a saved baseline as changed. The field name is one exported constant in
+  `util/intent_diff.go`, used by both `DiffIntentRecords` and `intentIdentityFields`.
+- The NEWTRON_INTENT schema lists the field explicitly (`schema.go`,
+  `yang/constraints.md`, `schema_test.go`), although the table allows extra fields.
+- Write results include the stamp in each written record's fields; no extra changes
+  are emitted.
+
+### Tests
+
+Each is watched failing against a deliberately broken variant before it counts.
+
+| Test | Proves | Fails against |
+|---|---|---|
+| Read coverage | Replaying the round-trip sequence reads no spec outside the union of the records' declared closures, and every spec kind the node package looks up is exercised (non-vacuous) | a removed param declaration |
+| Sensitivity | Editing a spec the fixture uses changes the digest of exactly the records whose closure holds it; a loopback or build change moves every record | a closure that skips `ref:` tags |
+| Determinism | Twenty rebuilds of the fixture give identical digests | unsorted closure |
+| Field classification | Every `ResolvedNodeSpec` field is classified; SSH and platform credentials never move the digest | a new unclassified field |
+| `TestOpRoundTrip` | Live and replayed records carry equal digests, composites included (the digest key joins its envelope fields) | digesting the live operation's reads |
+| `classifyDrift` | drifted, behind, unclassified (alone and alongside behind) | — |
+| API | `DriftError` → 409 with `data` | — |
+| Snapshot diff | Records differing only in the digest compare equal; a params difference still shows | — |
+| Budget | `TestRebuildProjectionBudget` with service-bearing intents, so the closure walk is measured | — |
+
+The round-trip fixture needs a service whose routing names route policies and prefix
+lists, so the coverage test reaches those lookups.
+
+### Suites (cold)
+
+- A new scenario in `2node-vs-drift-actuated`, after `12-verify-unblocked`:
+  `update-macvpn` on `EXTEND_VLAN300` with its full body but `arp_suppression: false`
+  (it replaces the whole definition and nothing refuses an in-use macvpn; `BindMACVPN`
+  renders `SUPPRESS_VLAN_NEIGH` from it) → a write on the switch carrying `EBRD` is
+  refused with *"behind its specs"* → node status lists behind records → reconcile →
+  the write succeeds → restore the macvpn → reconcile → drift empty for
+  `14-teardown`.
+- Re-run: both drift suites; 2node-vs/ngdp-primitive and 2node-vs-service (snapshot
+  and reconcile-provision paths); 2node-ngdp-service; 1node-vs-config (loopback);
+  1node-vs-basic and 1node-vs-architecture (they read write results).
+
+### Documents changed with it
+
+This document's status; `DESIGN_PRINCIPLES_NEWTRON.md` (the guard and the
+"Reconstruction and device state" gap); `unified-pipeline-architecture.md`;
+`device-lld.md`, `hld.md`, `lld.md`; `api.md` (409, payload, `behind_intents`, the
+field); CLAUDE.md's summary row; a full-file audit afterwards. newtcon is told in the
+same session: the status code (already announced as coming), the payload, the
+status field, the record field.
+
+### Size
+
+About 200–250 production lines: the digest and closure walk, the kind lookup, five
+registry declarations, one line in `writeIntent`, the classifier and its error type,
+the API mapping and status field. No per-operation code changes.
+
+### Limitations accepted
+
+- Node values are coarse: a loopback change marks every record behind.
+- Rendering-neutral spec fields (descriptions) mark records behind until they are
+  next written or reconciled.
+- A drift-excluded change (DEVICE_METADATA, PORT) is invisible to the guard, as it is
+  today.
 
 ## Cost
 
@@ -350,9 +561,9 @@ A and then B would.
 | New CLI verbs | 1 | 0 | 0 | 0 |
 | New public types | 2 | 0 (a field on an existing response) | 0 (fields on an existing response) | 0 (fields on an existing response) |
 | New client methods | 1 | 0 | 0 | 0 |
-| Internal machinery | ~150 lines + test | one stored value, one classifier, one guard branch | a change to how every record is written, plus the recorded-set closure | read-set collection in `SpecProvider`, one digest per record carried through replay, a per-intent classifier, and row attribution |
+| Internal machinery | ~150 lines + test | one stored value, one classifier, one guard branch | a change to how every record is written, plus the recorded-set closure | one digest function over declared inputs, one stamp in the intent writer, one classifier (~200–250 lines) |
 | Behaviour changed | none | the write-guard defect is fixed | the write-guard defect is fixed | the write-guard defect is fixed |
-| Question answered | recorded params its replay recomputed | is this device current, and if not, why | which fields differ, and whether the device or the spec moved | which operations are behind, and which drifted |
+| Question answered | recorded params its replay recomputed | is this device current, and if not, why | which fields differ, and whether the device or the spec moved | which operations are behind |
 | Granularity | partial, per param | per device | per field | per intent |
 
 ## Assessment: bloat, or better architecture?
@@ -391,7 +602,7 @@ smallest thing that lets the system actually know.
 behaviour is the only thing that matters: it is small, it changes no record-writing
 path, and its coarse network digest never produces a false "behind" because the
 classification requires drift to be non-empty. Design C is the right build if the
-operator's question is "what do I need to refresh?" — it names the operations, and
+operator's question is "which operations are behind?" — it names the operations, and
 it is the only design that does so without recording applied values. Design B is the
 right build if the per-field question is being asked — "which fields will a refresh
 change?" — or if applied state is wanted for its own sake. Each is an alternative;
@@ -416,7 +627,7 @@ quantity it named:
 | Question | Mechanism | Status |
 |---|---|---|
 | Is this device current with its specs? | a stored digest of the spec directory (Design A) | proposed |
-| *Which operations* are behind, and which drifted? | a digest of each intent's inputs, stamped at delivery (Design C) | proposed |
+| *Which operations* are behind? | a digest of each intent's declared inputs, stamped when the record is written (Design C) | proposed; implementation planned |
 | *Which* fields differ, and did the device or the spec move? | applied values stamped at delivery (Design B) | proposed |
 | *Why* does this field differ — which spec field produced it? | ChangeSet entries tagged with the spec field that produced them | deferred (resolution provenance) |
 
@@ -425,5 +636,6 @@ earlier one built. Nor does any of them imply the next.
 Design B does not require provenance: comparing values tells the operator what will
 change without attributing the cause. This document should not be used to justify
 provenance, and provenance should not be used to justify any design here. Design C
-needs rows attributed to intents, which is a narrower question than provenance (which
-spec *field* produced a row) and is answerable by replay without it.
+as planned names records without attributing rows to them; attributing rows is a
+narrower question than provenance (which spec *field* produced a row) and is
+answerable by replay without it.
