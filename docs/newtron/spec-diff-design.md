@@ -1,6 +1,6 @@
 # Spec-Diff: Separating "Behind" From "Drifted"
 
-Status: **proposed** — justification, two candidate designs, and decision record.
+Status: **proposed** — justification, three candidate designs, and decision record.
 No code implements either today. A partial earlier attempt (#486 rung 0a) was built
 and removed; the reasons are recorded in "What the first attempt got wrong."
 
@@ -107,7 +107,7 @@ most recently — and nothing in the manifest distinguishes the two. `SourceReco
 own comment ("re-resolved during replay") describes the majority case, not an
 invariant.
 
-**The consequence that shapes both designs below:** replay cannot produce `Applied`,
+**The consequence that shapes the designs below:** replay cannot produce `Applied`,
 so a diagnostic built on replay reports whichever recorded params happen to be
 recomputed. `Applied` is not recoverable by replay — but it *is* recordable at
 delivery, which is the second design.
@@ -281,18 +281,79 @@ today's code. A rendering change moves `Current` and leaves `Applied` alone, so 
 reads as Behind, never as Drifted — the limitation Design A needs a build identity
 to work around does not arise.
 
+## Design C — a digest of what each intent read
+
+Design A answers per device and Design B per field. Between them sits a question
+neither answers cheaply and an operator asks first: **which of this device's
+operations are behind?** Not "the switch drifted", not "these forty fields
+differ", but "TRANSIT on Ethernet0 and Ethernet4 is behind its spec".
+
+Stamp each intent record, at delivery, with a digest of the inputs its operation
+read. On every later read, compare it with a digest of the same inputs as they stand
+now, and look at the drift on that intent's rows:
+
+| Stored vs current digest | Drift on the intent's rows | Meaning | Resolution |
+|---|---|---|---|
+| same | empty | current | proceed |
+| same | non-empty | **Drifted** — the device was edited | reconcile |
+| differs | non-empty | **Behind** — an input moved | refresh these intents; the drift rows are the preview |
+| differs | empty | an input moved without changing this device's rows | re-stamp, proceed |
+
+It records no applied *values*, so Design B's closure — every spec-derived value a
+generator consumes — does not arise, and neither does §21's grain: the digest is
+never fed to a generator, so it cannot disagree with the specs in a way that changes
+what is rendered. It needs four things, and each is a way to get a confidently wrong
+answer if missed.
+
+1. **The inputs are what the operation read, not the spec it names.** A service
+   intent depends on its service, and through it on a filter, prefix lists, route
+   policies, a QoS policy, IP-VPN and MAC-VPN specs — each possibly overridden at the
+   zone or the node — and on node values: loopback, ASN, the EVPN peers derived from
+   other nodes' specs and the topology. A digest of the service spec alone misses an
+   edit to its filter. The set must therefore be collected, not declared: every spec
+   an operation resolves passes through `SpecProvider`, so recording the names
+   resolved during the operation and digesting their resolved content covers the
+   transitive set without a per-operation list to forget. The node values come from
+   the resolved node spec instead and are digested whole — coarse, since a loopback
+   change then marks every intent on the node, but never wrong in the safe direction.
+2. **newtron's build identity is part of the digest.** Otherwise a release that
+   renders the same specs differently (the second cause of "behind", above) reads as
+   "same digest, drift present" and is reported as a device edit. That requires every
+   rendering-changing release to carry a distinct identity.
+3. **The digest is stamped at delivery and carried through reconstruction.** A
+   rebuild that re-derived it from current specs would make it always equal and tell
+   nothing. It is carried forward the way the params some `Replay` closures already
+   thread unchanged are, and written only when a ChangeSet reaches the device.
+4. **Drift rows have to be attributed to intents.** The table is per intent, and
+   the projection does not record which intent produced a row — that is the
+   resolution-provenance question, deferred. Without it, a drifted row on a shared
+   object cannot be blamed on one intent. The service projection's technique —
+   remove one intent, replay, diff — can attribute rows, at the cost of a replay per
+   intent examined.
+
+The compound case Design A accepts persists here per intent: an input that moved
+**and** a hand edit on the same intent's rows classify as Behind, and the refresh
+overwrites the edit — safe, for the same reason.
+
+**Relationship to A and B.** Design C is the "per-spec digest set" Design A names as
+a refinement, moved from the device onto each intent and made to cover what an
+operation actually read. It answers which operations are behind but not which values
+changed; the drift rows on those intents supply the values. It is an alternative to
+both, not a stage between them: building it and then B would discard it, as building
+A and then B would.
+
 ## Cost
 
-| | Rung 0a (built, removed) | Design A (digest) | Design B (stamping) |
-|---|---|---|---|
-| New API endpoints | 1 | 0 | 0 |
-| New CLI verbs | 1 | 0 | 0 |
-| New public types | 2 | 0 (a field on an existing response) | 0 (fields on an existing response) |
-| New client methods | 1 | 0 | 0 |
-| Internal machinery | ~150 lines + test | one stored value, one classifier, one guard branch | a change to how every record is written, plus the recorded-set closure |
-| Behaviour changed | none | the write-guard defect is fixed | the write-guard defect is fixed |
-| Question answered | recorded params its replay recomputed | is this device current, and if not, why | which fields differ, and whether the device or the spec moved |
-| Granularity | partial, per param | per device | per field |
+| | Rung 0a (built, removed) | Design A (digest) | Design B (stamping) | Design C (per-intent digest) |
+|---|---|---|---|---|
+| New API endpoints | 1 | 0 | 0 | 0 |
+| New CLI verbs | 1 | 0 | 0 | 0 |
+| New public types | 2 | 0 (a field on an existing response) | 0 (fields on an existing response) | 0 (fields on an existing response) |
+| New client methods | 1 | 0 | 0 | 0 |
+| Internal machinery | ~150 lines + test | one stored value, one classifier, one guard branch | a change to how every record is written, plus the recorded-set closure | read-set collection in `SpecProvider`, one digest per record carried through replay, a per-intent classifier, and row attribution |
+| Behaviour changed | none | the write-guard defect is fixed | the write-guard defect is fixed | the write-guard defect is fixed |
+| Question answered | recorded params its replay recomputed | is this device current, and if not, why | which fields differ, and whether the device or the spec moved | which operations are behind, and which drifted |
+| Granularity | partial, per param | per device | per field | per intent |
 
 ## Assessment: bloat, or better architecture?
 
@@ -301,12 +362,12 @@ adding a verb.**
 
 Newtron exposes five comparison reads — `drift`, `projection-diff`, `snapshot`,
 `snapshot-diff`, plus reconcile's delta. Adding a sixth to answer "behind" would
-be bloat, and that is precisely what rung 0a did. Neither design here adds one:
+be bloat, and that is precisely what rung 0a did. None of the designs here adds one:
 both take the comparison operators already use and make it say which of two things
 it found.
 
 The coherence argument is stronger than the feature argument, and it holds for
-either design:
+any of the designs:
 
 - **"Drift" becomes a single concept again.** Today it means "the device diverged
   from expectations" where expectations silently include spec edits. Afterward it
@@ -326,15 +387,18 @@ or a device edit"). That is nearly free and dishonest in a smaller way: it admit
 the system cannot tell, and leaves the write-freeze in place. Design A is the
 smallest thing that lets the system actually know.
 
-**Between the two designs.** Design A is the right first build if the guard's
+**Between the designs.** Design A is the right first build if the guard's
 behaviour is the only thing that matters: it is small, it changes no record-writing
 path, and its coarse network digest never produces a false "behind" because the
-classification requires drift to be non-empty. Design B is the right build if the
-per-field question is being asked — "which fields will a refresh change?" — or if
-applied state is wanted for its own sake. Building A and then B means discarding A.
-Neither is required for teardown exactness (see Design B, "Two goals").
+classification requires drift to be non-empty. Design C is the right build if the
+operator's question is "what do I need to refresh?" — it names the operations, and
+it is the only design that does so without recording applied values. Design B is the
+right build if the per-field question is being asked — "which fields will a refresh
+change?" — or if applied state is wanted for its own sake. Each is an alternative;
+building one and then another discards the first. None is required for teardown
+exactness (see Design B, "Two goals").
 
-**Recommendation: build neither until a spec edit against a live fleet is an
+**Recommendation: build none until a spec edit against a live fleet is an
 operation someone actually performs.** The defect is real but latent — it bites
 whoever edits a spec while devices are provisioned. Until then, the gap is recorded
 in "Reconstruction and device state", and this document is the plan. Deferring is consistent
@@ -352,6 +416,7 @@ quantity it named:
 | Question | Mechanism | Status |
 |---|---|---|
 | Is this device current with its specs? | a stored digest of the spec directory (Design A) | proposed |
+| *Which operations* are behind, and which drifted? | a digest of each intent's inputs, stamped at delivery (Design C) | proposed |
 | *Which* fields differ, and did the device or the spec move? | applied values stamped at delivery (Design B) | proposed |
 | *Why* does this field differ — which spec field produced it? | ChangeSet entries tagged with the spec field that produced them | deferred (resolution provenance) |
 
@@ -359,4 +424,6 @@ The rows are ordered by refinement, not by dependency — a later one does not n
 earlier one built. Nor does any of them imply the next.
 Design B does not require provenance: comparing values tells the operator what will
 change without attributing the cause. This document should not be used to justify
-provenance, and provenance should not be used to justify either design here.
+provenance, and provenance should not be used to justify any design here. Design C
+needs rows attributed to intents, which is a narrower question than provenance (which
+spec *field* produced a row) and is answerable by replay without it.

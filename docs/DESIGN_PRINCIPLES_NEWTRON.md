@@ -3106,10 +3106,10 @@ recomputed. newtron today reports drift without separating the two
 causes, and treats a spec edit the same as a CONFIG_DB edit — it freezes
 writes rather than treating the spec change as a pending refresh.
 `newtron/spec-diff-design.md` carries the justification, why replay
-cannot produce the applied state, the two candidate designs — a
-spec-directory digest that answers at device granularity and applied
-values stamped at delivery that answer per field — and the trigger agreed
-for building one.
+cannot produce the applied state, the three candidate designs — a
+spec-directory digest that answers per device, a digest of each intent's
+inputs that answers per operation, and applied values stamped at delivery
+that answer per field — and the trigger agreed for building one.
 
 ### Bounded footprint and rollback history
 
