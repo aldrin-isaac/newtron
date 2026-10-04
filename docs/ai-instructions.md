@@ -54,7 +54,7 @@ the full definition before reasoning about the term.
 
 ---
 
-## 3. Every New Function Must Answer: "Why Doesn't This Already Exist?" — IMPL
+## 3. Every New Function Must Answer: "Why Doesn't This Already Exist?" — PLAN+IMPL
 
 Creating a new function or pattern is a red flag. The architecture defines the
 operations and their responsibilities. If a new function is needed, either:
@@ -62,6 +62,11 @@ operations and their responsibilities. If a new function is needed, either:
 - **(a)** The architecture has a gap — flag it to the user before implementing
 - **(b)** You are reimplementing something that already exists at a different
   layer — use the existing mechanism instead
+
+The same question applies to data. Before designing a new record, field, or
+table to hold some fact, look for one that already carries it. Earned here: a
+design proposed a new place to record a port's provisioned settings when a
+per-property intent record for exactly that already existed.
 
 ---
 
@@ -132,11 +137,29 @@ principle did I violate?"** — not "What is the quickest fix?"
 
 ---
 
-## 7. Second Instance of a Pattern = Stop and Question — IMPL
+## 7. Second Instance of a Pattern = Stop and Question — PLAN+IMPL
 
 Writing the same workaround a second time is proof the workaround is wrong. The
 correct response is to stop, identify why the pattern keeps being needed, and fix
 the root cause.
+
+Designs repeat the failure in two forms:
+
+- **Mechanisms that accumulate.** When successive fixes in one area each add a
+  mechanism (a skip list, an exemption list, a special repair path, a per-case
+  filter), stop adding. State the one principle those mechanisms approximate,
+  then derive the rules that replace them. Judge a design by how many
+  mechanisms it deletes against how many it adds. Earned here: two issues about
+  drift each proposed a fix, until stating the principle showed four existing
+  mechanisms collapsing into one per-table declaration.
+- **One fact, two definitions.** When a design gives the same thing two answers
+  on two paths (a live path and a replay path, a write and a check), the
+  definition is duplicated. Define it once and have both paths call it — never
+  add machinery that makes the two answers agree (§25 is the same rule applied
+  to code). Earned here: a plan computed a record's inputs one way when the
+  record was written and another way when it was rebuilt, then added an extra
+  rebuild per write to reconcile them; defining the inputs as one function of
+  the record deleted the reconciliation entirely.
 
 ---
 
@@ -190,6 +213,13 @@ that leaves a fresh synonym alive. Run the same check on the fix that you
 ran on the original code. The discipline is recursive, not one-pass: every
 fix is itself subject to the principle it cited.
 
+**Plans and design documents get the same audit** against the code they
+describe, before they are published: every name, key, line reference and cost
+claim checked at its source. After a redesign, re-read every sentence that
+described the old mechanism. Earned here: a design plan carried a param key
+written from memory, a cost claim that outlived the redesign it described, and a
+table missing a case its own text defined, each found only by a further pass.
+
 ---
 
 ## 10. Drift Detection = Stop and Escalate — IMPL
@@ -220,7 +250,17 @@ on — **read the actual code**.
 The same applies to document claims. Documents lag behind code (§20). Before
 citing a document as justification — "CLAUDE.md says X", "the architecture doc
 requires Y" — verify the claim against the current code. A document that described
-the system accurately last month may be stale today.
+the system accurately last month may be stale today. A code comment's stated
+reason is the same kind of claim: check it against the code beside it before
+repeating it. Earned here: a table was excluded from drift checks as "too
+noisy" because the platform's factory fields share its rows, while the subset
+comparison in the same file — added in the same commit — already ignored those
+fields.
+
+A gap found by reading code is a hypothesis about the running system until
+someone hits it or it is measured. Say which it is; measure before building a
+fix, and hold an unobserved gap to the same trigger as any other speculative
+work.
 
 The discipline covers claims of *completeness*, not only correctness. "Fixed in
 both docs", "every caller updated", "removed everywhere", "the twin got the
