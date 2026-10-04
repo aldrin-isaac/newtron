@@ -75,9 +75,12 @@ tools:
 check-doc-links:
 	python3 scripts/check-doc-links.py docs README.md CLAUDE.md
 
-# Lint
+# Lint with staticcheck, version-pinned and fetched on demand (no install step).
+# It must be built with a Go at least as new as go.mod's, so it runs under this
+# module's own toolchain (go env GOVERSION) rather than whatever Go is installed.
+# Not run in CI; CI runs go vet.
 lint:
-	golangci-lint run ./...
+	GOTOOLCHAIN=$$(go env GOVERSION) go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
 
 # Clean
 clean:

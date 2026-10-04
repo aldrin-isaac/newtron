@@ -134,7 +134,7 @@ func FromSONiCPlatformJSON(data []byte, opts SONiCImportOptions) (*PlatformSpec,
 			return nil, fmt.Errorf("%w. Per-port shape lives in <hwsku>/port_config.ini "+
 				"under the device tree (sibling to platform.json), not in platform.json. "+
 				"Pass that path to FromPortConfigINI (or `--port-config-ini` on the CLI; "+
-				"the CLI auto-discovers a sibling `<hwsku>/port_config.ini` when none is supplied).",
+				"the CLI auto-discovers a sibling `<hwsku>/port_config.ini` when none is supplied)",
 				ErrEmptyInterfaces)
 		}
 		return nil, fmt.Errorf("SONiC platform.json: no \"interfaces\" entries (expected one per front-panel port)")

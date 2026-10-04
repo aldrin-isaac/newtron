@@ -489,7 +489,8 @@ Always `go build -o bin/<tool> ./cmd/<tool>` before testing — `go run` compile
 
 ## Static Analysis
 
-golangci-lint is not installed. Use `go vet` for static analysis.
+CI runs `go vet` (and a `gofmt` check). `make lint` runs staticcheck, pinned and
+fetched on demand — no install step. It is not in CI; run it before a review.
 
 ## Model Routing
 
