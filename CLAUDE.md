@@ -371,8 +371,10 @@ and CONFIG_DB key names are canonical. Operations code never calls `NormalizeNam
 *See `DESIGN_PRINCIPLES_NEWTRON.md` §7 for the full principle, including the
 network-floor invariant for scoped writes.*
 
-Specs exist at the network level, independent of any device. `ResolvedSpecs` is a
-per-node snapshot; `Get*` methods must fall through to `network.Get*` on miss.
+Specs exist at the network level, independent of any device. A node's view of its
+specs (`Network.ResolveNodeSpecs`) is resolved at the start of every operation
+and never kept between operations — no snapshot, no fallback; spec writes publish
+an edited copy and never edit a published spec in place.
 In newtrun, network-level steps call `r.Client.*` directly (no `devices:` field).
 
 **Scoped writes (network-floor invariant).** Specs are authored at network, zone,

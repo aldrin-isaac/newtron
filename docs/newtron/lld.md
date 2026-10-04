@@ -1766,21 +1766,35 @@ The hydrator registry (`configdb_parsers.go`) is the central bridge — 33 typed
 
 ### 6.9 Spec Resolution
 
-`buildResolvedSpecs()` in `network.go` merges the three-level hierarchy (network → zone → node) into a per-node `ResolvedSpecs` snapshot. This snapshot implements the `SpecProvider` interface that all node operations use for spec lookups:
+`Network.ResolveNodeSpecs(name)` in `network.go` resolves a node's view of its specs — a `node.SpecView`:
 
 ```go
-type SpecProvider interface {
-    GetService(name string) *spec.ServiceSpec
-    GetIPVPN(name string) *spec.IPVPNSpec
-    GetMACVPN(name string) *spec.MACVPNSpec
-    GetFilter(name string) *spec.FilterSpec
-    GetQoSPolicy(name string) *spec.QoSPolicy
-    GetRoutePolicy(name string) *spec.RoutePolicy
-    GetPrefixList(name string) []string
+type SpecView struct {
+    Specs    SpecProvider             // the seven spec maps, merged
+    NodeSpec *spec.NodeSpec           // the node's own spec, secrets resolved
+    Resolved *spec.ResolvedNodeSpec   // ASN, loopback, SSH login, EVPN neighbors
 }
 ```
 
-Lookups fall through: node-level checked first, then zone, then network. Specs added via the API after snapshot time are invisible in the snapshot — all `Get*` methods on `ResolvedSpecs` fall through to `network.Get*` on miss (the live network, not the snapshot).
+`Specs` is a `ResolvedSpecs`: `buildResolvedSpecs()` merges the three-level hierarchy (network → zone → node, lower level wins) into one map per kind. It implements `SpecProvider`, the interface all node operations look specs up through:
+
+```go
+type SpecProvider interface {
+    GetService(name string) (*spec.ServiceSpec, error)
+    GetIPVPN(name string) (*spec.IPVPNSpec, error)
+    GetMACVPN(name string) (*spec.MACVPNSpec, error)
+    GetQoSPolicy(name string) (*spec.QoSPolicy, error)
+    GetFilter(name string) (*spec.FilterSpec, error)
+    GetPlatform(name string) (*spec.PlatformSpec, error)
+    GetPrefixList(name string) ([]string, error)
+    GetRoutePolicy(name string) (*spec.RoutePolicy, error)
+    FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec)
+}
+```
+
+The merge is complete, so a miss is a `*spec.NotFoundError` — the same error a network-level read returns, which replay uses to recognize an orphaned intent. `GetPlatform` reads the global platform registry, which is not hierarchical.
+
+`Network` implements `node.SpecSource`. `node.New` / `node.NewAbstract` call `ResolveNodeSpecs` when they build a node, and `Node.RebuildProjection` calls it again at the start of every operation, before replaying intents; the node replaces its three fields together. A view is never kept between operations (`DESIGN_PRINCIPLES_NEWTRON §7`). Within one operation it holds still, because spec writes publish an edited copy and never edit a published spec in place (HLD §8.3).
 
 Names are normalized once at spec load time (uppercase, hyphens → underscores). Operations code never calls `NormalizeName()`.
 

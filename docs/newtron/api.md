@@ -5250,11 +5250,11 @@ The server uses an actor model to manage device connections:
 - Each registered network gets a **networkEntity**: a per-network registration record
   that owns the engine `*Network` and a NodeActor cache. It is not an actor — it
   holds no goroutine and no spec lock. Spec atomicity lives in the engine layer via
-  per-key locks (`keyNetworkSpec`, `keyTopology`, `keyNodes`).
+  per-key locks (`keyNetworkSpec`, `keyTopology`).
 - Each device gets a **NodeActor** (created on first access) that serializes
   device operations and caches the SSH connection.
-- The SSH tunnel is reused across requests. Each request still refreshes CONFIG_DB
-  from Redis before operating.
+- The SSH tunnel is reused across requests. Each request still re-reads the
+  device's intents from Redis and re-resolves the node's specs before operating.
 - After `idle-timeout` of inactivity, the SSH connection is automatically closed.
 - The next request to that device transparently re-establishes the connection.
 

@@ -645,36 +645,54 @@ Same principle — define once, override the exceptions.
 capabilities — HWSKU, port count, NIC driver — not network intent.
 They have no meaningful per-zone or per-node variation.
 
-The merge is performed once at startup, producing a resolved view for
-each device. This cleanly separates two concerns: **what specs exist**
-(the three-level hierarchy) and **what specs does this device see**
-(the merged view). Device-level code does not know about zones,
-networks, or override logic. It asks for a service by name and gets
-the right definition — already resolved.
+Each node resolves its view of the specs — the merged spec maps, its own
+node spec, and the values resolved from them (ASN, loopback, SSH login,
+EVPN neighbors). This separates **what specs exist** (the three-level
+hierarchy) from **what specs does this device see** (the node's view).
+Node code does not know about zones, networks, or override logic. It asks
+for a service by name and gets the right definition — already resolved.
 
-### The snapshot problem and live fallback
+### A node's view is resolved per operation
 
-Decoupling definition from execution creates a timing question. Each
-device receives a merged snapshot of its specs at connection time.
-Specs added to the network after the snapshot — and this is not
-hypothetical, since the API can add specs at runtime — would be
-invisible to every connected device until the server restarts.
+A node never keeps its view between operations. `RebuildProjection`, which
+runs before every operation, resolves the view afresh through
+`Network.ResolveNodeSpecs` before it replays a single intent, and the
+operation uses that one view until it ends. The node's two inputs — its
+intents and its specs — are re-derived at the same moment, by the same rule.
 
-The resolution: spec lookups check the device's merged snapshot first
-(preserving override semantics — node spec wins over zone wins
-over network). On miss, they fall through to the network-level
-definitions. The hierarchy stays intact for overrides; the network
-level stays open for additions:
+newtron learned this from a defect that went unnoticed for months. When
+newtron was a CLI, each command was a new process: it loaded the specs,
+built the node, ran one operation and exited, so resolving the view once
+when the node was built *was* resolving it per operation. The server made
+nodes long-lived, and the view built with the node lived as long. New
+specs went unseen, and the repair sent a lookup that missed the kept view
+on to the network. That caught additions and nothing else. A policy
+deleted and re-created with four queues was bound with the two the kept
+view still held; `update-service`, any zone or node override, and a
+rotated secret were missed the same way; and drift stayed clean, because
+the node rebuilt its expectations from the same stale view. The gap
+closed only when the node itself was replaced — after the idle timeout
+(five minutes by default) or a server restart — with nothing to connect the change in behavior to
+the spec write behind it. The fallback was the wrong kind of fix — a repair
+of the one symptom that had been noticed, on a mechanism that should not
+have existed once the runtime changed.
 
-```
-device.GetService("TRANSIT")
-  1. Check merged snapshot → found (profile override) → return it
-  2. Miss → fall through to network.GetService("TRANSIT") → found
-  3. Miss at both levels → "service not found" error
-```
+Holding a view still for one operation is the other half, and it rests on
+the writers: **no published spec is ever edited in place.** Every spec write
+edits a private copy and publishes it whole once it is on disk. Zone and
+node writes get their copy by re-reading their file
+(`Loader.MutateZoneSpec`, `Loader.MutateNodeSpec`); network-scope writes
+clone the spec maps (`withWriteTarget`, `withSSHTarget`); topology writes
+swap in an edited copy (`applyTopology`). A view therefore points only at
+definitions that will not change under it — and a refused or failed write
+leaves the specs exactly as they were, in memory as on disk. The view is
+taken under the same read locks the writers take, so no write lands
+halfway through it.
 
-Every spec lookup must include the network fallback. A snapshot-only
-lookup is a bug.
+The cost is small. Resolving a view takes about 30µs on this repository's
+`2node-vs` network and about 0.3ms with 2,000 specs, against roughly 90ms
+for the projection rebuild of a 1,000-intent device that already runs at
+the same point (§35).
 
 ### Authoring overrides: the network-floor invariant
 
@@ -691,7 +709,7 @@ form with no special-casing.
 Scoped writes hold to one invariant: **a resource may exist at zone or
 node scope only if it also exists at network scope.** An override is a
 *refinement of an existing base*, never a new name introduced at a leaf.
-This is what keeps the live fallback total — every device's chain bottoms
+This is what keeps resolution total — every device's chain bottoms
 out at the network definition, so a reference can never dangle from any
 device's perspective, no matter which of hundreds resolves it.
 
@@ -717,8 +735,8 @@ typo. The floor invariant trades a small authoring discipline — define the
 base first — for resolution that is total by construction.
 
 **Define once at the broadest applicable scope; override only where
-necessary; resolve once at node creation. An override always rests on a
-network-level base.**
+necessary; resolve afresh at the start of every operation, never keep the
+view. An override always rests on a network-level base.**
 
 ---
 
@@ -2472,7 +2490,8 @@ on-demand design has zero.
 Before every operation, `execute()` calls `RebuildProjection()` which
 re-derives the projection from the latest intents. This ensures each
 operation sees fresh, authoritative state — not stale cache from a
-prior operation. In actuated mode, the drift guard also fires at this
+prior operation. The node's view of the specs is resolved again at the
+same point (§7). In actuated mode, the drift guard also fires at this
 point, comparing the projection against actual device CONFIG_DB.
 
 This is not transactional isolation. The distributed lock coordinates
