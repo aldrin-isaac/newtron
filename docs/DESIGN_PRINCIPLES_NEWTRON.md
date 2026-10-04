@@ -678,11 +678,14 @@ never a miss.
 Holding a view still for one operation is the other half, and it rests on
 the writers: **nothing a view can reach is ever edited in place.** Every
 write to the specs a node resolves — the spec maps, the SSH logins, zone and
-node specs, the topology — edits a private copy and publishes it whole once
-it is on disk. Zone and node writes get their copy by re-reading their file
+node specs — edits a private copy and publishes it whole once it is on disk.
+Zone and node writes get their copy by re-reading their file
 (`Loader.MutateZoneSpec`, `Loader.MutateNodeSpec`); network-scope writes
-copy the spec maps (`withWriteTarget`) or the SSH login (`withSSHTarget`);
-topology writes swap in an edited copy (`applyTopology`). A view therefore
+copy the spec maps (`withWriteTarget`) or the SSH login (`withSSHTarget`).
+From the topology a view reads only which devices it holds, and every write
+that changes that swaps in an edited copy (`applyTopology`); saving a
+device's intents edits its steps in place (`SaveDeviceIntents`), which no
+view reads. A view therefore
 points only at definitions that will not change under it — and a refused
 or failed write leaves the specs exactly as they were, in memory as on
 disk. The view is taken under the same read locks the writers take, so no

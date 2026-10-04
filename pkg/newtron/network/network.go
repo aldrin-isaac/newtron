@@ -1696,9 +1696,10 @@ func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 // EVPN neighbors are derived from), and the loader's own lock for zone and node
 // files, acquired inside. Order keyNetworkSpec → keyTopology → loader, matching
 // the write paths. Every object the view points at is published whole by its
-// writer and never edited afterwards (withWriteTarget, Loader.MutateZoneSpec,
-// Loader.MutateNodeSpec, applyTopology), so a view stays the same for as long
-// as its operation holds it.
+// writer and never edited afterwards (withWriteTarget, withSSHTarget,
+// Loader.MutateZoneSpec, Loader.MutateNodeSpec), so a view stays the same for
+// as long as its operation holds it. The view keeps no reference to the
+// topology: it reads which devices the topology holds while resolving.
 func (n *Network) ResolveNodeSpecs(name string) (node.SpecView, error) {
 	netMu := n.locks.lock(keyNetworkSpec)
 	netMu.RLock()
