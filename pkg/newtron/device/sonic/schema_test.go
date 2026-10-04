@@ -190,8 +190,8 @@ func TestValidateEntry_VLAN_Vlan4094_Valid(t *testing.T) {
 
 func TestValidateEntry_VLAN_UnknownField(t *testing.T) {
 	err := Schema["VLAN"].ValidateEntry("VLAN", "Vlan100", map[string]string{
-		"vlanid":  "100",
-		"bogus":   "field",
+		"vlanid": "100",
+		"bogus":  "field",
 	})
 	if err == nil {
 		t.Error("unknown field should fail")
@@ -537,7 +537,7 @@ func TestSchema_VLANKeyPattern_BoundaryValues(t *testing.T) {
 		{"Vlan100", true},
 		{"Vlan999", true},
 		{"Vlan4094", true},
-		{"Vlan1", false},    // reserved
+		{"Vlan1", false}, // reserved
 		{"Vlan0", false},
 		{"Vlan4095", false},
 		{"Vlan5000", false},

@@ -33,7 +33,7 @@ func TestSaveLoadRunState(t *testing.T) {
 
 	state := &RunState{
 		Suite:    "test-suite",
-		Network: "2node-ngdp",
+		Network:  "2node-ngdp",
 		Platform: "sonic-vpp",
 		Status:   SuiteStatusRunning,
 		Started:  time.Now().Truncate(time.Second),
@@ -186,4 +186,3 @@ func TestCheckPausing(t *testing.T) {
 		t.Error("expected true for pausing suite")
 	}
 }
-

@@ -100,7 +100,7 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 	}
 	child := &Runner{
 		SuiteDir:           childDir,
-		NetworksBase:     r.NetworksBase,
+		NetworksBase:       r.NetworksBase,
 		ServerURL:          r.ServerURL,
 		NetworkID:          r.NetworkID,
 		Client:             r.Client,
@@ -109,7 +109,7 @@ func (e *runSuiteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		HostConns:          r.HostConns,
 		Progress:           r.Progress,
 		Network:            r.Network,
-		Dir:            r.Dir,
+		Dir:                r.Dir,
 		discoveredPlatform: r.discoveredPlatform,
 	}
 

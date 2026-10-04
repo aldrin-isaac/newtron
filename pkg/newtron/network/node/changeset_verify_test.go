@@ -74,9 +74,9 @@ func TestVerifyWithReader_Site2_FieldMismatch(t *testing.T) {
 	// Device has local_asn=65002 but the change wrote local_asn=65001.
 	reader := newFakeReader(map[string]map[string]string{
 		"BGP_GLOBALS|default": {
-			"local_asn":   "65002",
-			"router_id":   "10.0.0.1",
-			"hold_timer":  "180",
+			"local_asn":  "65002",
+			"router_id":  "10.0.0.1",
+			"hold_timer": "180",
 		},
 	})
 

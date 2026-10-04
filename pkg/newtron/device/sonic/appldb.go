@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/go-redis/redis/v8"
-
 )
 
 // AppDBClient wraps Redis client for APP_DB access (DB 0).

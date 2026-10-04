@@ -18,10 +18,10 @@ func TestParseUname(t *testing.T) {
 		{"Darwin arm64\n", "darwin", "arm64", false},
 		{"Darwin x86_64\n", "darwin", "amd64", false},
 		{"Linux amd64\n", "linux", "amd64", false},
-		{"FreeBSD amd64\n", "", "", true},      // unsupported OS
-		{"Linux mips\n", "", "", true},          // unsupported arch
-		{"badformat\n", "", "", true},           // wrong field count
-		{"", "", "", true},                      // empty
+		{"FreeBSD amd64\n", "", "", true}, // unsupported OS
+		{"Linux mips\n", "", "", true},    // unsupported arch
+		{"badformat\n", "", "", true},     // wrong field count
+		{"", "", "", true},                // empty
 	}
 
 	for _, tt := range tests {

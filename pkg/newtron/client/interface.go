@@ -110,4 +110,3 @@ func (c *Client) UnconfigureInterface(device, iface string, opts newtron.ExecOpt
 func (c *Client) RemoveTrunkVLAN(device, iface string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	return c.interfaceWrite(device, iface, "remove-trunk-vlan", api.RemoveTrunkVLANRequest{VLAN: vlanID}, opts)
 }
-

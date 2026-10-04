@@ -42,7 +42,6 @@ func (c *ConfigDBClient) PipelineSet(changes []Entry) error {
 	return nil
 }
 
-
 // ApplyDrift applies only the drifted entries to CONFIG_DB, using a single
 // atomic TxPipeline. Entries are ordered by table dependency: deletes run
 // children-first (descending priority), creates/modifies run parents-first

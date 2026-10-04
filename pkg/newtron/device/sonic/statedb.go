@@ -400,4 +400,3 @@ func (c *ConfigDBClient) WriteIntent(device string, intent *OperationIntent) err
 	}
 	return nil
 }
-

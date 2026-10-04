@@ -329,4 +329,3 @@ func GetServiceQoSPolicy(sp SpecProvider, svc *spec.ServiceSpec) (string, *spec.
 	}
 	return "", nil
 }
-

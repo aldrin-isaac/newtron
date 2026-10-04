@@ -27,7 +27,7 @@ import (
 type Suite struct {
 	Name        string                   `yaml:"name"`
 	Description string                   `yaml:"description,omitempty"`
-	Network    string                   `yaml:"network"`
+	Network     string                   `yaml:"network"`
 	Platform    string                   `yaml:"platform,omitempty"`
 	Targets     map[string][]string      `yaml:"targets,omitempty"`
 	Parameters  map[string]ParameterSpec `yaml:"parameters,omitempty"`

@@ -423,9 +423,9 @@ func TestServerStopCancelsInFlightRuns(t *testing.T) {
 func TestReconcileStaleStatus(t *testing.T) {
 	srv, _ := newTestServer(t)
 	cases := []struct {
-		name           string
-		startStatus    newtrun.SuiteStatus
-		acquireFirst   bool // populate the registry with the runKey
+		name            string
+		startStatus     newtrun.SuiteStatus
+		acquireFirst    bool // populate the registry with the runKey
 		wantStatusAfter newtrun.SuiteStatus
 	}{
 		{"running + not in registry → aborted", newtrun.SuiteStatusRunning, false, newtrun.SuiteStatusAborted},

@@ -17,12 +17,12 @@ import (
 //
 // Pattern syntax — one matcher across all dimensions:
 //
-//   "edge-1"                       — exact match
-//   "edge-*"                       — glob (suffix wildcard)
-//   "edge-1,edge-2"                — comma-OR (any of)
-//   "!permissions"                 — exclusion (bang prefix)
-//   "!permissions,!user_groups"    — exclusion list (none of)
-//   "edge-*,!edge-broken"          — mixed: include glob, exclude one
+//	"edge-1"                       — exact match
+//	"edge-*"                       — glob (suffix wildcard)
+//	"edge-1,edge-2"                — comma-OR (any of)
+//	"!permissions"                 — exclusion (bang prefix)
+//	"!permissions,!user_groups"    — exclusion list (none of)
+//	"edge-*,!edge-broken"          — mixed: include glob, exclude one
 //
 // When include and exclude are mixed, the include-set must match AND
 // the exclude-set must not match. When everything is excludes, it

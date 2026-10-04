@@ -19,7 +19,7 @@ func newTestServer(t *testing.T) *Server {
 	logger := log.New(&strings.Builder{}, "", 0) // silence test logger
 	return NewServer(Config{
 		NetworksBase: base,
-		Logger:         logger,
+		Logger:       logger,
 	})
 }
 

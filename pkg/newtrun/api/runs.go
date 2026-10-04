@@ -371,10 +371,10 @@ func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
 
 	// Inline-namespaced initial state.
 	state := &newtrun.RunState{
-		Suite:    runID,
+		Suite:   runID,
 		Network: scenario.Network,
-		Status:   newtrun.SuiteStatusRunning,
-		Started:  entry.Started,
+		Status:  newtrun.SuiteStatusRunning,
+		Started: entry.Started,
 	}
 	if err := newtrun.SaveInlineRunState(state); err != nil {
 		s.registry.Release(runID, &RunResult{Err: err})
@@ -608,16 +608,16 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 // resolveNetworkID determines which newtron network identifier the runner
 // should connect to. The fallback chain (most specific wins):
 //
-//   1. reqNetworkID — operator explicitly named the network via the
-//      request body.
-//   2. suiteNetwork — for file-backed runs, the suite manifest declares
-//      the topology it targets, and that becomes the default network id
-//      so concurrent suites against one newt-server don't compete for a
-//      single "default" registration slot (closes #116).
-//   3. cfgDefault — the server's configured default (Config.NetworkID,
-//      "default" out of the box). Used when the request is empty AND
-//      the suite has no topology, or for inline runs which have no
-//      suite manifest to derive from.
+//  1. reqNetworkID — operator explicitly named the network via the
+//     request body.
+//  2. suiteNetwork — for file-backed runs, the suite manifest declares
+//     the topology it targets, and that becomes the default network id
+//     so concurrent suites against one newt-server don't compete for a
+//     single "default" registration slot (closes #116).
+//  3. cfgDefault — the server's configured default (Config.NetworkID,
+//     "default" out of the box). Used when the request is empty AND
+//     the suite has no topology, or for inline runs which have no
+//     suite manifest to derive from.
 //
 // The function is package-private but extracted for direct unit testing —
 // the fallback chain is the entire surface area of the change for #116.

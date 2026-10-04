@@ -10,7 +10,7 @@ import (
 // It uses *Node which provides access to both device state
 // and network-level configuration through parent references.
 type PreconditionChecker struct {
-	node    *Node
+	node      *Node
 	operation string
 	resource  string
 	errors    []error
@@ -19,7 +19,7 @@ type PreconditionChecker struct {
 // NewPreconditionChecker creates a new precondition checker
 func NewPreconditionChecker(d *Node, operation, resource string) *PreconditionChecker {
 	return &PreconditionChecker{
-		node:    d,
+		node:      d,
 		operation: operation,
 		resource:  resource,
 	}
@@ -225,4 +225,3 @@ func (p *PreconditionChecker) Result() error {
 	}
 	return util.NewValidationError(msgs...)
 }
-

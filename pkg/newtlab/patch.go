@@ -24,12 +24,12 @@ var patchesFS embed.FS
 // BootPatch defines a declarative patch to apply after VM boot.
 // Patch descriptors are JSON files under patches/<dataplane>/.
 type BootPatch struct {
-	Description  string      `json:"description"`
-	PreCommands  []string    `json:"pre_commands,omitempty"`
-	DisableFiles []string    `json:"disable_files,omitempty"`
-	Files        []FilePatch `json:"files,omitempty"`
+	Description  string       `json:"description"`
+	PreCommands  []string     `json:"pre_commands,omitempty"`
+	DisableFiles []string     `json:"disable_files,omitempty"`
+	Files        []FilePatch  `json:"files,omitempty"`
 	Redis        []RedisPatch `json:"redis,omitempty"`
-	PostCommands []string    `json:"post_commands,omitempty"`
+	PostCommands []string     `json:"post_commands,omitempty"`
 
 	// dir is the embedded FS directory containing this patch's templates.
 	dir string
@@ -71,10 +71,12 @@ var templateFuncs = template.FuncMap{
 
 // QEMUPCIAddrs returns deterministic PCI addresses for data NICs.
 // QEMU assigns PCI slots sequentially on the i440FX bus:
-//   slot 0: host bridge, slot 1: ISA/IDE/ACPI, slot 2: VGA
-//   slot 3: first -device (our management NIC)
-//   slot 4: second -device (first data NIC)
-//   slot 5: third -device (second data NIC), etc.
+//
+//	slot 0: host bridge, slot 1: ISA/IDE/ACPI, slot 2: VGA
+//	slot 3: first -device (our management NIC)
+//	slot 4: second -device (first data NIC)
+//	slot 5: third -device (second data NIC), etc.
+//
 // Data NICs start at slot 4 (slot 3 + 1, skipping mgmt).
 func QEMUPCIAddrs(dataNICs int) []string {
 	addrs := make([]string, dataNICs)

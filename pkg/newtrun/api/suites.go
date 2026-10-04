@@ -48,8 +48,8 @@ var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 // required — every suite declares its target topology on creation so
 // the runner can guard against topology/scenario mismatches.
 type CreateSuiteRequest struct {
-	Name     string `json:"name"`
-	Network   string          `json:"network"`
+	Name    string `json:"name"`
+	Network string `json:"network"`
 }
 
 // CreateSuiteResponse is the body returned by POST /api/suites.
@@ -195,7 +195,7 @@ func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request
 		return
 	}
 	resp := SuiteScenariosResponse{
-		Suite:    suite,
+		Suite:   suite,
 		Network: loaded.Network,
 	}
 	// Topology and Platform are on the SuiteScenariosResponse envelope,

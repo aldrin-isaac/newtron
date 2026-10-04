@@ -21,12 +21,12 @@ type reporterEvents struct {
 	suiteEndResults  []*ScenarioResult
 }
 
-func (r *reporterEvents) SuiteStart(_, _ string, _ []*Scenario)              { r.suiteStartCalled.Store(true) }
-func (r *reporterEvents) ScenarioStart(string, int, int)                     {}
-func (r *reporterEvents) ScenarioEnd(*ScenarioResult, int, int)              {}
-func (r *reporterEvents) StepStart(string, *Step, int, int)                  {}
-func (r *reporterEvents) StepProgress(string, *Step, *sonic.DeviceOp, int)   {}
-func (r *reporterEvents) StepEnd(string, *StepResult, int, int)              {}
+func (r *reporterEvents) SuiteStart(_, _ string, _ []*Scenario)            { r.suiteStartCalled.Store(true) }
+func (r *reporterEvents) ScenarioStart(string, int, int)                   {}
+func (r *reporterEvents) ScenarioEnd(*ScenarioResult, int, int)            {}
+func (r *reporterEvents) StepStart(string, *Step, int, int)                {}
+func (r *reporterEvents) StepProgress(string, *Step, *sonic.DeviceOp, int) {}
+func (r *reporterEvents) StepEnd(string, *StepResult, int, int)            {}
 func (r *reporterEvents) SuiteEnd(results []*ScenarioResult, status SuiteStatus, _ time.Duration) {
 	r.suiteEndCalled.Store(true)
 	r.suiteEndStatus = status

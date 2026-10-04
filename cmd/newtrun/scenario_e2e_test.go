@@ -59,7 +59,7 @@ func newE2EServer(t *testing.T) (ts *httptest.Server, networksBase string) {
 	}
 	srv := api.NewServer(api.Config{
 		NetworksBase: networksBase,
-		Logger:         log.New(io.Discard, "", 0),
+		Logger:       log.New(io.Discard, "", 0),
 	})
 	ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

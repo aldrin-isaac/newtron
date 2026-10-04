@@ -83,10 +83,10 @@ func testEvent(user, device, operation string) *Event {
 }
 
 // Test-only builder methods (lowercase — not exported, only used in tests).
-func (e *Event) withService(s string) *Event    { e.Service = s; return e }
-func (e *Event) withInterface(i string) *Event   { e.Interface = i; return e }
-func (e *Event) withSuccess() *Event             { e.Success = true; return e }
-func (e *Event) withError(err error) *Event      { e.Error = err.Error(); return e }
+func (e *Event) withService(s string) *Event   { e.Service = s; return e }
+func (e *Event) withInterface(i string) *Event { e.Interface = i; return e }
+func (e *Event) withSuccess() *Event           { e.Success = true; return e }
+func (e *Event) withError(err error) *Event    { e.Error = err.Error(); return e }
 
 // TestFileLogger_FindByID proves the per-event detail lookup returns the full
 // event — including RequestBody, which the paged list omits — and that a

@@ -23,7 +23,7 @@ const (
 // ScenarioResult holds the result of a single scenario execution.
 type ScenarioResult struct {
 	Name        string
-	Network    string
+	Network     string
 	Platform    string
 	Status      StepStatus
 	Duration    time.Duration
@@ -81,7 +81,7 @@ func ResultsFromRunState(state *RunState) []*ScenarioResult {
 	for _, sc := range state.Scenarios {
 		r := &ScenarioResult{
 			Name:       sc.Name,
-			Network:   state.Network,
+			Network:    state.Network,
 			Platform:   state.Platform,
 			Status:     StepStatus(sc.Status),
 			Duration:   parseReportDuration(sc.Duration),

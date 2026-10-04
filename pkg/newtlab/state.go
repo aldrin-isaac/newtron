@@ -44,9 +44,9 @@ type LabState struct {
 	// the /newtlab/v1/labs/{networkID} key — so it is authoritative from the
 	// path, not from this persisted copy: LoadState stamps it from the directory.
 	// A lab has no second "name" that could drift from its network-id.
-	NetworkID string                  `json:"network_id"`
+	NetworkID  string                  `json:"network_id"`
 	Created    time.Time               `json:"created"`
-	Dir    string                  `json:"dir"`
+	Dir        string                  `json:"dir"`
 	SSHKeyPath string                  `json:"ssh_key_path,omitempty"` // path to lab Ed25519 private key
 	Nodes      map[string]*NodeState   `json:"nodes"`
 	Links      []*LinkState            `json:"links"`
@@ -63,8 +63,8 @@ type LabState struct {
 // NodeState tracks per-node runtime state.
 type NodeState struct {
 	PID            int    `json:"pid"`
-	Status         string `json:"status"`          // "running", "stopped", "error"
-	Phase          string `json:"phase,omitempty"` // deploy phase: "booting", "bootstrapping", "patching"
+	Status         string `json:"status"`                // "running", "stopped", "error"
+	Phase          string `json:"phase,omitempty"`       // deploy phase: "booting", "bootstrapping", "patching"
 	DeviceType     string `json:"device_type,omitempty"` // "host" for non-switch devices, "host-vm" for coalesced VM
 	Image          string `json:"image,omitempty"`       // VM image path
 	SSHPort        int    `json:"ssh_port"`
@@ -72,8 +72,8 @@ type NodeState struct {
 	OriginalMgmtIP string `json:"original_mgmt_ip"`
 	Host           string `json:"host,omitempty"`      // host name (empty = local)
 	HostIP         string `json:"host_ip,omitempty"`   // host IP address (empty = 127.0.0.1)
-	SSHUser        string `json:"ssh_user,omitempty"`   // SSH username (for cmd_ssh.go)
-	VMName         string `json:"vm_name,omitempty"`    // virtual hosts: parent VM name
+	SSHUser        string `json:"ssh_user,omitempty"`  // SSH username (for cmd_ssh.go)
+	VMName         string `json:"vm_name,omitempty"`   // virtual hosts: parent VM name
 	Namespace      string `json:"namespace,omitempty"` // virtual hosts: netns name
 }
 

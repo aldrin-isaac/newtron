@@ -9,13 +9,13 @@ import (
 
 // Sentinel errors for precondition failures
 var (
-	ErrNotConnected          = errors.New("device not connected")
-	ErrPermissionDenied      = errors.New("permission denied")
-	ErrPreconditionFailed    = errors.New("precondition not met")
-	ErrValidationFailed      = errors.New("validation failed")
-	ErrDeviceLocked          = errors.New("device is locked by another process")
+	ErrNotConnected       = errors.New("device not connected")
+	ErrPermissionDenied   = errors.New("permission denied")
+	ErrPreconditionFailed = errors.New("precondition not met")
+	ErrValidationFailed   = errors.New("validation failed")
+	ErrDeviceLocked       = errors.New("device is locked by another process")
 	ErrDeviceZombieIntent = errors.New("device has a zombie operation from a crashed process — inspect with 'device zombie', then rollback or clear before proceeding")
-	ErrConflict              = errors.New("conflict: referenced by other entities")
+	ErrConflict           = errors.New("conflict: referenced by other entities")
 )
 
 // ConflictError indicates a requested mutation would violate an invariant
@@ -143,4 +143,3 @@ func (v *ValidationBuilder) Build() error {
 	}
 	return &ValidationError{Errors: v.errors}
 }
-

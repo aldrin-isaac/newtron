@@ -31,13 +31,13 @@ type Decision struct {
 	// stamped onto the emitted event so the per-network audit read path
 	// scopes authorization decisions to their network, matching
 	// request-level events (Event.Network).
-	Network    string
-	Device     string
-	Service    string
-	Interface  string
-	Resource   string
-	Field      string
-	Error      error
+	Network   string
+	Device    string
+	Service   string
+	Interface string
+	Resource  string
+	Field     string
+	Error     error
 }
 
 // LogDecision emits an audit Event for one Network.checkPermission

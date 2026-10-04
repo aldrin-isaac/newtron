@@ -108,9 +108,9 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	// disrupts intfmgrd on CiscoVS (see RCA-037). Skip enableIpRouting in that case.
 	var entries []sonic.Entry
 	if i.VRF() == "" {
-		entries = append(enableIpRoutingConfig(i.name), assignIpAddressConfig(i.name,ipAddr)...)
+		entries = append(enableIpRoutingConfig(i.name), assignIpAddressConfig(i.name, ipAddr)...)
 	} else {
-		entries = assignIpAddressConfig(i.name,ipAddr)
+		entries = assignIpAddressConfig(i.name, ipAddr)
 	}
 	cs := buildChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
 
@@ -168,7 +168,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 		return nil, fmt.Errorf("cannot bind PortChannel member to VRF")
 	}
 
-	cs := buildChangeSet(n.Name(), "interface.set-vrf", bindVrfConfig(i.name,vrfName), ChangeModify)
+	cs := buildChangeSet(n.Name(), "interface.set-vrf", bindVrfConfig(i.name, vrfName), ChangeModify)
 
 	if err := n.render(cs); err != nil {
 		return nil, err
@@ -410,7 +410,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		if cfg.VRF != "default" && n.GetIntent("vrf|"+cfg.VRF) == nil {
 			return nil, fmt.Errorf("VRF '%s' does not exist", cfg.VRF)
 		}
-		cs.Adds(bindVrfConfig(i.name,cfg.VRF))
+		cs.Adds(bindVrfConfig(i.name, cfg.VRF))
 	}
 
 	// IP address (requires base entry — either from VRF binding above or enableIpRouting)
@@ -422,7 +422,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 			// No VRF binding — need base INTERFACE entry for IP routing
 			cs.Adds(enableIpRoutingConfig(i.name))
 		}
-		cs.Adds(assignIpAddressConfig(i.name,cfg.IP))
+		cs.Adds(assignIpAddressConfig(i.name, cfg.IP))
 	}
 
 	cs.ReverseOp = "interface.unconfigure-interface"
@@ -596,7 +596,7 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 		if remaining == 0 {
 			cs.Deletes(deleteInterfaceBaseConfig(i.name))
 		} else {
-			cs.Adds(bindVrfConfig(i.name,""))
+			cs.Adds(bindVrfConfig(i.name, ""))
 		}
 	} else if ip != "" {
 		remaining := 0
@@ -823,5 +823,3 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 	util.WithDevice(n.Name()).Infof("Cleared %s on interface %s", property, i.name)
 	return cs, nil
 }
-
-

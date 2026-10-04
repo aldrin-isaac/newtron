@@ -17,11 +17,11 @@ func TestFeatureDependencies(t *testing.T) {
 		// VPP: directly unsupported
 		{"vpp-acl", vpp, "acl", false},
 		{"vpp-evpn-vxlan", vpp, "evpn-vxlan", false},
-		
+
 		// VPP: unsupported via dependency
 		{"vpp-macvpn", vpp, "macvpn", false},
 		{"vpp-ipvpn", vpp, "ipvpn", false},
-		
+
 		// CiscoVS: all supported
 		{"ciscovs-acl", &PlatformSpec{}, "acl", true},
 		{"ciscovs-evpn-vxlan", &PlatformSpec{}, "evpn-vxlan", true},
@@ -41,11 +41,11 @@ func TestFeatureDependencies(t *testing.T) {
 
 func TestGetUnsupportedDueTo(t *testing.T) {
 	affected := GetUnsupportedDueTo("evpn-vxlan")
-	
+
 	// Should include macvpn and ipvpn (both depend on evpn-vxlan)
 	expectedCount := 2
 	if len(affected) != expectedCount {
-		t.Errorf("GetUnsupportedDueTo(evpn-vxlan) returned %d features, want %d: %v", 
+		t.Errorf("GetUnsupportedDueTo(evpn-vxlan) returned %d features, want %d: %v",
 			len(affected), expectedCount, affected)
 	}
 

@@ -559,7 +559,6 @@ func TestHasRequires(t *testing.T) {
 	}
 }
 
-
 // ============================================================================
 // Report with SkipReason Tests
 // ============================================================================
@@ -568,7 +567,7 @@ func TestWriteJUnit_SkipReason(t *testing.T) {
 	results := []*ScenarioResult{
 		{
 			Name:       "skipped-test",
-			Network:   "2node-ngdp",
+			Network:    "2node-ngdp",
 			Platform:   "sonic-vpp",
 			Status:     StepStatusSkipped,
 			SkipReason: "requires 'boot-ssh' which failed",
@@ -826,7 +825,7 @@ func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
 	results := []*ScenarioResult{
 		{
 			Name:     "churn",
-			Network: "2node-ngdp",
+			Network:  "2node-ngdp",
 			Platform: "sonic-vpp",
 			Status:   StepStatusPassed,
 			Repeat:   3,
@@ -1112,7 +1111,7 @@ func TestIterateScenarios_Normal(t *testing.T) {
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
 		return &ScenarioResult{
 			Name:     sc.Name,
-			Network: r.Network,
+			Network:  r.Network,
 			Platform: platform,
 			Status:   StepStatusPassed,
 		}, nil
@@ -1132,7 +1131,6 @@ func TestIterateScenarios_Normal(t *testing.T) {
 		t.Errorf("names = [%q, %q], want [sc1, sc2]", results[0].Name, results[1].Name)
 	}
 }
-
 
 func TestIterateScenarios_Resume(t *testing.T) {
 	r := &Runner{}

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/go-redis/redis/v8"
-
 )
 
 // AsicDBClient wraps Redis client for ASIC_DB access (DB 1).

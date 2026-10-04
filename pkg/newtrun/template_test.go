@@ -36,7 +36,7 @@ func TestApplyTemplateURL_QueryPositionUsesQueryEscape(t *testing.T) {
 		nil,
 		map[string]any{"q": "a&evil=1"},
 		nil,
-		)
+	)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestApplyTemplateURL_PathPositionStillUsesPathEscape(t *testing.T) {
 		map[string]string{"device": "switch1"},
 		nil,
 		nil,
-		)
+	)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -67,7 +67,7 @@ func TestApplyTemplateURL_BothPathAndQuery(t *testing.T) {
 		map[string]string{"device": "switch1"},
 		map[string]any{"f": "vrf=red&owner=me"},
 		nil,
-		)
+	)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

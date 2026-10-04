@@ -42,7 +42,7 @@ func newTestServer(t *testing.T) (*Server, func()) {
 
 	srv := NewServer(Config{
 		NetworksBase: networksBase,
-		Logger:         log.New(io.Discard, "", 0),
+		Logger:       log.New(io.Discard, "", 0),
 	})
 	return srv, func() {}
 }
@@ -61,11 +61,11 @@ func suitesRoot(srv *Server) string {
 func seedSuite(t *testing.T, srv *Server, name string, status newtrun.SuiteStatus) {
 	t.Helper()
 	state := &newtrun.RunState{
-		Suite:    name,
+		Suite:   name,
 		Network: testTopology,
-		Status:   status,
-		Started:  time.Now().Add(-time.Hour),
-		Updated:  time.Now().Add(-30 * time.Minute),
+		Status:  status,
+		Started: time.Now().Add(-time.Hour),
+		Updated: time.Now().Add(-30 * time.Minute),
 	}
 	if status == newtrun.SuiteStatusComplete || status == newtrun.SuiteStatusFailed {
 		state.Finished = time.Now().Add(-15 * time.Minute)

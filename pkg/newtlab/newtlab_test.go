@@ -455,7 +455,7 @@ func TestSaveAndLoadState(t *testing.T) {
 
 	state := &LabState{
 		NetworkID: "test-lab",
-		Dir:  "/tmp/specs",
+		Dir:       "/tmp/specs",
 		Nodes: map[string]*NodeState{
 			"spine1": {PID: 1234, Status: "running", SSHPort: 40000, ConsolePort: 30000},
 		},
@@ -995,8 +995,8 @@ func waitForBridgeStats(t *testing.T, bridge *Bridge, wantAtoZ, wantZtoA int64, 
 // that push to nowhere.
 func TestSetupBridgesRequiresOrchestratorURL(t *testing.T) {
 	lab := &Lab{
-		NetworkID:  "guard-test",
-		State: &LabState{NetworkID: "guard-test"},
+		NetworkID: "guard-test",
+		State:     &LabState{NetworkID: "guard-test"},
 		Links: []*LinkConfig{
 			{
 				A:     LinkEndpoint{Device: "spine1", Interface: "Ethernet0"},

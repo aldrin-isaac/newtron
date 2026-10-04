@@ -95,7 +95,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ShowFilter":              true,
 			"ListPlatforms":           true,
 			"ShowPlatform":            true,
-			"PlatformPortDefaults":           true, // #301: GET /platforms/{name}/ports
+			"PlatformPortDefaults":    true, // #301: GET /platforms/{name}/ports
 			"ListRoutePolicies":       true,
 			"ListPrefixLists":         true,
 			"ShowPrefixList":          true,
@@ -448,7 +448,7 @@ func TestAPICompleteness(t *testing.T) {
 			"ListPlatforms":           "spec read",
 			"ShowPlatform":            "spec read",
 			"NodeInterfaceInventory":  "spec read — platform-supported interface inventory (#403)",
-			"PlatformPortDefaults":           "spec read — default port-config authoring template (#301)",
+			"PlatformPortDefaults":    "spec read — default port-config authoring template (#301)",
 			"ListRoutePolicies":       "spec read",
 			"ListPrefixLists":         "spec read",
 			"ShowPrefixList":          "spec read",

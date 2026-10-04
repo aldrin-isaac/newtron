@@ -32,8 +32,8 @@ import (
 type Scenario struct {
 	Name             string   `yaml:"name"`
 	Description      string   `yaml:"description"`
-	Network          string   `yaml:"network,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
-	Platform         string   `yaml:"platform,omitempty"`          // suite-level field; LoadSuite rejects scenarios that set it
+	Network          string   `yaml:"network,omitempty"`  // suite-level field; LoadSuite rejects scenarios that set it
+	Platform         string   `yaml:"platform,omitempty"` // suite-level field; LoadSuite rejects scenarios that set it
 	Requires         []string `yaml:"requires,omitempty"`
 	After            []string `yaml:"after,omitempty"`             // Run after these scenarios (ordering only, no pass/fail gate)
 	RequiresFeatures []string `yaml:"requires_features,omitempty"` // Platform features required (e.g., ["acl", "macvpn"])

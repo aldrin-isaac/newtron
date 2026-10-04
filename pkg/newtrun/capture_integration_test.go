@@ -65,9 +65,9 @@ steps:
 	}
 
 	var (
-		mu                sync.Mutex
-		deleteAuthHeader  string
-		deleteParamsBody  string
+		mu               sync.Mutex
+		deleteAuthHeader string
+		deleteParamsBody string
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

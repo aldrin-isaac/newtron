@@ -11,24 +11,24 @@ func LoadSettings() (*UserSettings, error) {
 		return nil, err
 	}
 	return &UserSettings{
-		DefaultNetwork:  s.DefaultNetwork,
-		Dir:         s.Dir,
-		DefaultSuite:    s.DefaultSuite,
-		NetworksDir:   s.NetworksDir,
-		ServerURL:       s.ServerURL,
-		NetworkID:       s.NetworkID,
+		DefaultNetwork: s.DefaultNetwork,
+		Dir:            s.Dir,
+		DefaultSuite:   s.DefaultSuite,
+		NetworksDir:    s.NetworksDir,
+		ServerURL:      s.ServerURL,
+		NetworkID:      s.NetworkID,
 	}, nil
 }
 
 // SaveSettings saves user settings to the default path.
 func SaveSettings(us *UserSettings) error {
 	s := &settings.Settings{
-		DefaultNetwork:  us.DefaultNetwork,
-		Dir:         us.Dir,
-		DefaultSuite:    us.DefaultSuite,
-		NetworksDir:   us.NetworksDir,
-		ServerURL:       us.ServerURL,
-		NetworkID:       us.NetworkID,
+		DefaultNetwork: us.DefaultNetwork,
+		Dir:            us.Dir,
+		DefaultSuite:   us.DefaultSuite,
+		NetworksDir:    us.NetworksDir,
+		ServerURL:      us.ServerURL,
+		NetworkID:      us.NetworkID,
 	}
 	return s.Save()
 }

@@ -155,7 +155,7 @@ type rewrapKey struct{}
 // scan would misroute it (netID is the logger key).
 func TestAuditPathValues(t *testing.T) {
 	cases := []struct {
-		path                   string
+		path                      string
 		wantNet, wantNode, wantIf string
 	}{
 		{"/newtron/v1/networks/prod/nodes/switch1/interfaces/Ethernet0/set-property", "prod", "switch1", "Ethernet0"},
