@@ -1116,22 +1116,25 @@ Every state-changing CLI command calls `requireServer` before its real work. Str
 
 ### 14.3 cmd_start.go highlights
 
-`cmd_start` is the most complex command — it subscribes to SSE, renders events to the terminal, tracks the terminal status, and exits with the right code:
+`cmd_start` is the most complex command — it subscribes to SSE, renders events to the terminal, and exits with the right code. The outcome is read from one event, `SuiteEnd`: its results are the run's final list, including scenarios that errored before emitting any event of their own (a lab that could not be ensured), so it is the only place the outcome is complete. `markSuiteEnd` reads it in both the rendered and the `--monitor` path.
 
 | Behavior | Field tracked |
 |----------|---------------|
-| Any scenario FAIL → exit 1 | `hasFailure atomic.Bool` |
-| Any scenario ERROR → exit 1 | `hasError atomic.Bool` |
+| Any SuiteEnd result FAIL → exit 1 | `hasFailure atomic.Bool` |
+| Any SuiteEnd result ERROR → exit 2 | `hasError atomic.Bool` |
 | SuiteEnd ever arrived? | `suiteEndSeen atomic.Bool` |
 | SuiteEnd.Status == aborted? | `suiteAborted atomic.Bool` |
 
 Post-run logic:
 - If stream ended without SuiteEnd → `errInfraError("connection lost mid-run")` → exit 2.
 - If SuiteEnd.Status == aborted → `errInfraError("run was aborted")` → exit 2.
-- Else if `hasFailure || hasError` → `errTestFailure` → exit 1.
+- Else if `hasError` → `errInfraError` → exit 2 (a scenario could not run: deploy, device connection).
+- Else if `hasFailure` → `errTestFailure` → exit 1.
 - Else → nil → exit 0.
 
-Markdown report is written to `newtrun/.generated/report.md` after every run; JUnit XML only when `--junit <path>` is set.
+A scenario that errored before running a step has no step line to carry its cause, so the SuiteEnd render prints each distinct cause once (`newtrun: run could not start: …`), and the reports carry it: a single JUnit error test case, and the markdown row's note.
+
+The markdown report is written to `.newtrun/reports/report.md` after every run; JUnit XML only when `--junit <path>` is set. Both are built from the SuiteEnd results.
 
 ### 14.4 cmd_scenario.go
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -144,8 +145,13 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 			// (auto-refresh dashboard reading state.json directly). The
 			// terminal exit code still derives from the same atomic
 			// flags so behavior matches the non-monitor case.
-			var hasFailure, hasError, suiteEndSeen, suiteAborted atomic.Bool
-			scenarioResults := make([]*newtrun.ScenarioResult, 0)
+			// The outcome — exit code and report — comes from SuiteEnd alone.
+			// Its results are the run's final list, including scenarios that
+			// errored before emitting any event of their own (a lab that could
+			// not be ensured, #508), so it is the one place the outcome can be
+			// read completely, in both the rendered and the monitor path.
+			var suiteEndSeen, suiteAborted, hasFailure, hasError atomic.Bool
+			var scenarioResults []*newtrun.ScenarioResult
 			var resultsMu sync.Mutex
 
 			// markSuiteEnd is called from the SSE handler whenever a
@@ -160,14 +166,19 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 					return
 				}
 				suiteEndSeen.Store(true)
-				if payload, err := json.Marshal(ev.Payload); err == nil {
-					var p api.SuiteEndPayload
-					if err := json.Unmarshal(payload, &p); err == nil {
-						if p.Status == newtrun.SuiteStatusAborted {
-							suiteAborted.Store(true)
-						}
-					}
+				p, ok := decodeSuiteEnd(ev)
+				if !ok {
+					return
 				}
+				if p.Status == newtrun.SuiteStatusAborted {
+					suiteAborted.Store(true)
+				}
+				results, failed, errored := suiteOutcome(p)
+				hasFailure.Store(failed)
+				hasError.Store(errored)
+				resultsMu.Lock()
+				scenarioResults = results
+				resultsMu.Unlock()
 			}
 
 			var streamDone chan struct{}
@@ -176,8 +187,6 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				go func() {
 					defer close(streamDone)
 					_ = c.StreamEvents(ctx, started.Suite, func(ev api.Event) {
-						trackStatus(ev, &hasFailure, &hasError)
-						collectResult(ev, &scenarioResults, &resultsMu)
 						markSuiteEnd(ev)
 						if ev.Type == api.EventSuiteEnd {
 							cancel()
@@ -191,8 +200,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				<-streamDone
 			} else {
 				streamErr := c.StreamEvents(ctx, started.Suite, func(ev api.Event) {
-					renderEvent(ev, &hasFailure, &hasError)
-					collectResult(ev, &scenarioResults, &resultsMu)
+					renderEvent(ev)
 					markSuiteEnd(ev)
 					if ev.Type == api.EventSuiteEnd {
 						cancel()
@@ -262,58 +270,50 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 	return cmd
 }
 
-// collectResult builds ScenarioResults from SSE events so the CLI can
-// hand them to ReportGenerator at run end. Mirrors the original in-process
-// pipeline where the Runner returned ScenarioResults directly. We
-// reconstruct from event payloads since the server side already discards
-// the in-memory slice.
-// trackStatus updates the FAIL/ERROR flags used for the process exit code.
-// Called from both monitor and non-monitor paths so the exit code is
-// consistent regardless of how events were rendered.
-func trackStatus(ev api.Event, hasFailure, hasError *atomic.Bool) {
-	if ev.Type != api.EventScenarioEnd {
-		return
-	}
+// decodeSuiteEnd re-marshals a SuiteEnd event's payload (decoded as
+// map[string]any by the client) into its typed form.
+func decodeSuiteEnd(ev api.Event) (api.SuiteEndPayload, bool) {
+	var p api.SuiteEndPayload
 	payload, err := json.Marshal(ev.Payload)
 	if err != nil {
-		return
+		return p, false
 	}
-	var p api.ScenarioEndPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
-		return
+		return p, false
 	}
-	switch string(p.Status) {
-	case "FAIL":
-		hasFailure.Store(true)
-	case "ERROR":
-		hasError.Store(true)
-	}
+	return p, true
 }
 
-func collectResult(ev api.Event, results *[]*newtrun.ScenarioResult, mu *sync.Mutex) {
-	if ev.Type != api.EventScenarioEnd {
-		return
+// suiteOutcome reads a run's outcome from its SuiteEnd payload: the results
+// for the report, and whether any scenario failed (exit 1) or errored (exit 2).
+// ERROR covers a scenario that never ran because the run could not start —
+// infrastructure, not a test failure.
+func suiteOutcome(p api.SuiteEndPayload) (results []*newtrun.ScenarioResult, failed, errored bool) {
+	for _, r := range p.Results {
+		switch r.Status {
+		case newtrun.StepStatusFailed:
+			failed = true
+		case newtrun.StepStatusError:
+			errored = true
+		}
+		results = append(results, scenarioResultFrom(r))
 	}
-	payload, err := json.Marshal(ev.Payload)
-	if err != nil {
-		return
-	}
-	var p api.ScenarioEndPayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return
-	}
-	// Translate the wire payload back into a ScenarioResult — the same
-	// shape the original in-process Runner produced for the report
-	// generator. Fields not present on the payload (like DeployError as a
-	// Go error type) get reasonable defaults; the report renders fine
-	// without them.
+	return results, failed, errored
+}
+
+// scenarioResultFrom translates a wire payload back into the ScenarioResult
+// the report generator takes — the same shape the in-process Runner produced.
+func scenarioResultFrom(p api.ScenarioEndPayload) *newtrun.ScenarioResult {
 	r := &newtrun.ScenarioResult{
 		Name:       p.Name,
-		Network:   p.Network,
+		Network:    p.Network,
 		Platform:   p.Platform,
 		Status:     p.Status,
 		Duration:   parseDuration(p.Duration),
 		SkipReason: p.SkipReason,
+	}
+	if p.DeployError != "" {
+		r.DeployError = errors.New(p.DeployError)
 	}
 	for _, s := range p.Steps {
 		r.Steps = append(r.Steps, newtrun.StepResult{
@@ -325,9 +325,7 @@ func collectResult(ev api.Event, results *[]*newtrun.ScenarioResult, mu *sync.Mu
 			Iteration: s.Iteration,
 		})
 	}
-	mu.Lock()
-	*results = append(*results, r)
-	mu.Unlock()
+	return r
 }
 
 // parseDuration accepts the durationString output from pkg/newtrun/api/types.go
@@ -353,9 +351,9 @@ func parseDuration(s string) time.Duration {
 
 // renderEvent prints a one-line summary of each event in the SSE
 // stream — a per-step, per-scenario terminal view for an operator
-// watching `newtrun start`. Status tracking for the exit code is
-// done via atomic flags so concurrent renders are safe.
-func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
+// watching `newtrun start`. It only renders; the exit code and the
+// report come from SuiteEnd (markSuiteEnd).
+func renderEvent(ev api.Event) {
 	// The event payload was decoded as map[string]any by the client.
 	// Re-marshal to inspect typed fields.
 	payload, err := json.Marshal(ev.Payload)
@@ -397,12 +395,6 @@ func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
 		var p api.ScenarioEndPayload
 		_ = json.Unmarshal(payload, &p)
 		fmt.Fprintf(os.Stderr, "          %s (%s)\n\n", p.Status, p.Duration)
-		switch string(p.Status) {
-		case "FAIL":
-			hasFailure.Store(true)
-		case "ERROR":
-			hasError.Store(true)
-		}
 
 	case api.EventSuiteEnd:
 		var p api.SuiteEndPayload
@@ -418,6 +410,15 @@ func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
 				skipped++
 			case "ERROR":
 				errored++
+			}
+		}
+		// A scenario that errored before running a step has no step line
+		// to carry its cause — print each distinct one here (#508).
+		seen := map[string]bool{}
+		for _, r := range p.Results {
+			if r.DeployError != "" && !seen[r.DeployError] {
+				seen[r.DeployError] = true
+				fmt.Fprintf(os.Stderr, "newtrun: run could not start: %s\n", firstLines(r.DeployError, 3))
 			}
 		}
 		fmt.Fprintf(os.Stderr, "---\n")

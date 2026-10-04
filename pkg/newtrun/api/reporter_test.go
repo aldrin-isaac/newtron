@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,4 +183,28 @@ func (c *capturingReporter) StepEnd(scenario string, result *newtrun.StepResult,
 }
 func (c *capturingReporter) SuiteEnd(results []*newtrun.ScenarioResult, _ newtrun.SuiteStatus, duration time.Duration) {
 	c.suiteEnds++
+}
+
+// TestReporterSuiteEndCarriesDeployError pins the link #508 depends on: a
+// scenario that errored before any step ran reaches the client only through
+// SuiteEnd, so its deploy error must be on that payload.
+func TestReporterSuiteEndCarriesDeployError(t *testing.T) {
+	b := httputil.NewBroker[Event]()
+	events, unsub := b.Subscribe("test-suite")
+	defer unsub()
+	r := NewHTTPReporter(b, "test-suite", nil)
+	r.SuiteEnd([]*newtrun.ScenarioResult{{
+		Name:        "boot-ssh",
+		Status:      newtrun.StepStatusError,
+		DeployError: &newtrun.InfraError{Op: "deploy", Err: errors.New("lab not found")},
+	}}, newtrun.SuiteStatusFailed, time.Second)
+	select {
+	case ev := <-events:
+		p := ev.Payload.(SuiteEndPayload)
+		if len(p.Results) != 1 || !strings.Contains(p.Results[0].DeployError, "lab not found") {
+			t.Errorf("SuiteEnd results = %+v, want the deploy error carried", p.Results)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for SuiteEnd")
+	}
 }
