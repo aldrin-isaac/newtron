@@ -8,11 +8,22 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// Table is a network's authorization table: the three network.json fields a
+// Checker decides against.
+type Table struct {
+	UserGroups  map[string][]string
+	Permissions map[string]spec.PermissionGrants
+	SuperUsers  []string
+}
+
 // Checker decides whether a caller is granted a permission against a
-// loaded NetworkSpecFile. Caller identity is supplied per-call via
+// network's authorization table. Caller identity is supplied per-call via
 // Context.Caller — the Checker holds no ambient "current user."
 type Checker struct {
-	network *spec.NetworkSpecFile
+	// table returns the network's authorization table as it stands now. Each
+	// decision reads it once, so one Check never mixes two versions of the
+	// table, and an edit to the table reaches the next Check.
+	table func() Table
 	// globalSuperUsers are super-users across every network (server-level, from
 	// --super-users / NEWTRON_SUPER_USERS), OR'd with this network's own
 	// super_users. A global super-user bypasses every permission check on every
@@ -20,18 +31,20 @@ type Checker struct {
 	globalSuperUsers map[string]bool
 }
 
-// NewChecker builds a Checker bound to network. globalSuperUsers (optional) are
-// super-users for every network, layered above the network's own super_users.
-// The returned Checker is stateless w.r.t. caller identity — every Check reads
-// the username from its Context argument.
-func NewChecker(network *spec.NetworkSpecFile, globalSuperUsers ...string) *Checker {
+// NewChecker builds a Checker that decides against the table returned by table,
+// which must return the current table and a value its owner never edits
+// afterwards. globalSuperUsers (optional) are super-users for every network,
+// layered above the network's own super_users. The returned Checker is
+// stateless w.r.t. caller identity — every Check reads the username from its
+// Context argument.
+func NewChecker(table func() Table, globalSuperUsers ...string) *Checker {
 	g := make(map[string]bool, len(globalSuperUsers))
 	for _, u := range globalSuperUsers {
 		if u != "" {
 			g[u] = true
 		}
 	}
-	return &Checker{network: network, globalSuperUsers: g}
+	return &Checker{table: table, globalSuperUsers: g}
 }
 
 // Check decides whether ctx.Caller has permission. A nil ctx or an
@@ -51,7 +64,7 @@ func (c *Checker) Check(permission Permission, ctx *Context) error {
 			Context:    ctx,
 		}
 	}
-	return c.checkUser(ctx.Caller, permission, ctx)
+	return c.checkUser(c.table(), ctx.Caller, permission, ctx)
 }
 
 // checkUser evaluates one user against the loaded grant table.
@@ -66,11 +79,11 @@ func (c *Checker) Check(permission Permission, ctx *Context) error {
 // collapsed in #165 because L5 already expressed the same
 // constraint uniformly and the embedded mechanism duplicated the
 // network's authorization table inside instance specs (DPN §27).
-func (c *Checker) checkUser(username string, permission Permission, ctx *Context) error {
-	if c.isSuperUser(username) {
+func (c *Checker) checkUser(t Table, username string, permission Permission, ctx *Context) error {
+	if c.isSuperUser(t, username) {
 		return nil
 	}
-	if c.checkGlobalPermission(username, permission, ctx) {
+	if c.checkPermissionMap(t, username, permission, ctx) {
 		return nil
 	}
 	return &PermissionError{
@@ -80,8 +93,8 @@ func (c *Checker) checkUser(username string, permission Permission, ctx *Context
 	}
 }
 
-func (c *Checker) isSuperUser(username string) bool {
-	return c.globalSuperUsers[username] || slices.Contains(c.network.SuperUsers, username)
+func (c *Checker) isSuperUser(t Table, username string) bool {
+	return c.globalSuperUsers[username] || slices.Contains(t.SuperUsers, username)
 }
 
 // HasPermissionEntry reports whether the loaded grant table has any
@@ -97,18 +110,11 @@ func (c *Checker) isSuperUser(username string) bool {
 // but empty. Either way the gate's engage-when-configured semantics
 // fall back to allow.
 func (c *Checker) HasPermissionEntry(permission Permission) bool {
-	if c.network == nil || len(c.network.Permissions) == 0 {
-		return false
-	}
-	grants, ok := c.network.Permissions[string(permission)]
+	grants, ok := c.table().Permissions[string(permission)]
 	if !ok {
 		return false
 	}
 	return len(grants) > 0
-}
-
-func (c *Checker) checkGlobalPermission(username string, permission Permission, ctx *Context) bool {
-	return c.checkPermissionMap(username, permission, c.network.Permissions, ctx)
 }
 
 // checkPermissionMap walks the permission's grant list, evaluating
@@ -119,25 +125,25 @@ func (c *Checker) checkGlobalPermission(username string, permission Permission, 
 // First-match wins — declaration order in network.json determines
 // evaluation order. Grants with an empty Where clause behave
 // identically to the pre-L5 flat group list (matches every Context).
-func (c *Checker) checkPermissionMap(username string, permission Permission, permMap map[string]spec.PermissionGrants, ctx *Context) bool {
-	if grants, ok := permMap["all"]; ok {
-		if c.grantsMatch(username, grants, ctx) {
+func (c *Checker) checkPermissionMap(t Table, username string, permission Permission, ctx *Context) bool {
+	if grants, ok := t.Permissions["all"]; ok {
+		if grantsMatch(t, username, grants, ctx) {
 			return true
 		}
 	}
-	grants, ok := permMap[string(permission)]
+	grants, ok := t.Permissions[string(permission)]
 	if !ok {
 		return false
 	}
-	return c.grantsMatch(username, grants, ctx)
+	return grantsMatch(t, username, grants, ctx)
 }
 
-func (c *Checker) userInGroups(username string, allowedGroups []string) bool {
+func userInGroups(t Table, username string, allowedGroups []string) bool {
 	for _, group := range allowedGroups {
 		if group == username {
 			return true
 		}
-		if members, ok := c.network.UserGroups[group]; ok {
+		if members, ok := t.UserGroups[group]; ok {
 			if slices.Contains(members, username) {
 				return true
 			}

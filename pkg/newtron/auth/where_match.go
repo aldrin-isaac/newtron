@@ -136,9 +136,9 @@ func matchSingle(pattern, value string) bool {
 //  1. username is a member of one of grant.Groups (literal username
 //     match OR membership in a UserGroups entry of the same name); AND
 //  2. ctx satisfies grant.Where (or Where is empty/nil).
-func (c *Checker) grantsMatch(username string, grants spec.PermissionGrants, ctx *Context) bool {
+func grantsMatch(t Table, username string, grants spec.PermissionGrants, ctx *Context) bool {
 	for _, grant := range grants {
-		if !c.userInGroups(username, grant.Groups) {
+		if !userInGroups(t, username, grant.Groups) {
 			continue
 		}
 		if !whereMatches(grant.Where, ctx) {
