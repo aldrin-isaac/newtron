@@ -66,8 +66,9 @@ func (n *Node) ClearUnsavedIntents() { n.internal.ClearUnsavedIntents() }
 // DisconnectTransport closes the SSH+Redis transport without affecting the projection.
 func (n *Node) DisconnectTransport() { n.internal.DisconnectTransport() }
 
-// RebuildProjection rebuilds the projection from the current intent DB.
-// Called at the start of each operation to ensure the projection is the
+// RebuildProjection re-resolves the node's specs and rebuilds the projection
+// from the current intent DB. Called at the start of each operation so the
+// operation sees the specs as they stand now and a projection that is the
 // canonical derivation of the intents — not a cumulative approximation.
 func (n *Node) RebuildProjection(ctx context.Context) error {
 	return n.internal.RebuildProjection(ctx)

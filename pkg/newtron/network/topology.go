@@ -34,7 +34,7 @@ func NewTopologyProvisioner(network *Network) (*TopologyProvisioner, error) {
 }
 
 // BuildAbstractNode constructs a fully-replayed abstract Node for a device.
-// Creates NewAbstract with the device's nodeSpec and resolved specs, registers
+// Creates NewAbstract (which resolves the device's specs), registers
 // ports from topology.Ports, then replays all topology steps via node.ReplayStep.
 // Returns the Node with a populated intent DB and projection.
 // Returns error for host devices (no SONiC CONFIG_DB) or devices with no steps.
@@ -51,24 +51,14 @@ func (tp *TopologyProvisioner) BuildAbstractNode(deviceName string) (*node.Node,
 		return nil, fmt.Errorf("device '%s' has no provisioning steps in topology.json", deviceName)
 	}
 
-	// Load and resolve node spec
-	nodeSpec, err := tp.network.loadNodeSpec(deviceName)
-	if err != nil {
-		return nil, fmt.Errorf("loading node spec: %w", err)
-	}
-	resolved, err := tp.network.resolveNodeSpec(deviceName, nodeSpec)
-	if err != nil {
-		return nil, fmt.Errorf("resolving node spec: %w", err)
-	}
-
-	// Build per-device ResolvedSpecs for hierarchical spec lookups
-	resolvedSpecs := tp.network.buildResolvedSpecs(nodeSpec)
-
 	ctx := context.Background()
 
 	// Create abstract node with empty projection.
 	// Operations build desired state; Reconcile delivers it.
-	n := node.NewAbstract(resolvedSpecs, deviceName, nodeSpec, resolved, tp.network.topologyName, tp.network.portResolver)
+	n, err := node.NewAbstract(tp.network, deviceName, tp.network.topologyName, tp.network.portResolver)
+	if err != nil {
+		return nil, err
+	}
 
 	// Register physical ports (enables GetInterface for interface-scoped steps)
 	for portName, pc := range topoDev.Ports {
@@ -90,7 +80,7 @@ func (tp *TopologyProvisioner) BuildAbstractNode(deviceName string) (*node.Node,
 }
 
 // BuildEmptyAbstractNode constructs an abstract Node for a device without replaying steps.
-// Creates NewAbstract with the device's nodeSpec and resolved specs, registers
+// Creates NewAbstract (which resolves the device's specs), registers
 // ports from topology.Ports, and returns the node. The intent DB is empty and
 // the projection contains only PORT entries from RegisterPort.
 // Used when intent-first operations will be applied fresh (not reconstructed from steps).
@@ -104,21 +94,11 @@ func (tp *TopologyProvisioner) BuildEmptyAbstractNode(deviceName string) (*node.
 		return nil, err
 	}
 
-	// Load and resolve node spec
-	nodeSpec, err := tp.network.loadNodeSpec(deviceName)
-	if err != nil {
-		return nil, fmt.Errorf("loading node spec: %w", err)
-	}
-	resolved, err := tp.network.resolveNodeSpec(deviceName, nodeSpec)
-	if err != nil {
-		return nil, fmt.Errorf("resolving node spec: %w", err)
-	}
-
-	// Build per-device ResolvedSpecs for hierarchical spec lookups
-	resolvedSpecs := tp.network.buildResolvedSpecs(nodeSpec)
-
 	// Create abstract node with empty projection.
-	n := node.NewAbstract(resolvedSpecs, deviceName, nodeSpec, resolved, tp.network.topologyName, tp.network.portResolver)
+	n, err := node.NewAbstract(tp.network, deviceName, tp.network.topologyName, tp.network.portResolver)
+	if err != nil {
+		return nil, err
+	}
 
 	// Register physical ports (enables GetInterface for interface-scoped steps)
 	for portName, pc := range topoDev.Ports {

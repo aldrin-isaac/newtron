@@ -29,11 +29,10 @@ import (
 // the lockManager hands out distinct *sync.RWMutex instances for. Each key
 // matches a single ownership scope:
 //
-//   - keyNetworkSpec covers everything in network.json (the OverridableSpecs
-//     maps plus Zones) and the file write that persists them.
+//   - keyNetworkSpec covers everything in network.json and the file write
+//     that persists it. Zones live in their own files under the loader's lock.
 //   - keyTopology covers topology.json (Devices + Links) and the file write
 //     that persists them.
-//   - keyNodes covers the runtime *node.Node cache populated by GetNode.
 //
 // NodeSpecs are not in this set — spec.Loader has its own RWMutex (added in
 // PR #100) and serializes per-nodeSpec correctly on its own.
@@ -48,7 +47,6 @@ import (
 // are exempt; the rule only kicks in when a caller needs more than one.
 const (
 	keyNetworkSpec lockKey = "network.json"
-	keyNodes       lockKey = "nodes"
 	keyTopology    lockKey = "topology.json"
 )
 
@@ -102,10 +100,6 @@ type Network struct {
 
 	// Loader for loading nodes (already initialized with Load())
 	loader *spec.Loader
-
-	// Connected devices (created in this Network's context). Protected by
-	// the keyNodes lock.
-	devices map[string]*node.Node
 
 	// locks hands out per-key *sync.RWMutex instances. See the lock key
 	// constants above for the keys in use here. Embedded as a value so
@@ -173,7 +167,6 @@ func NewNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStore
 		secretStore:  secretStore,
 		specDir:      specDir,
 		loader:       loader,
-		devices:      make(map[string]*node.Node),
 	}, nil
 }
 
@@ -290,12 +283,9 @@ func ResolvePlatformSecrets(platforms map[string]*spec.PlatformSpec, store secre
 // reached SSH-tunnel construction untouched and SSH'd with the
 // literal "${secret:KEY}" as the password.
 //
-// Called by Network.loadNodeSpec after the loader's per-nodeSpec cache
-// hit/miss path returns, so the in-memory nodeSpec cached by the
-// loader carries the resolved value; subsequent cache reads return
-// the resolved bytes without re-resolving. resolve is idempotent —
-// a value with no "${secret:" prefix returns unchanged — so
-// re-running over a cached nodeSpec is a no-op.
+// Called by Network.loadNodeSpec on its own copy of the node spec — never on
+// the loader's cached one — so the cache keeps the authored references and
+// every load resolves against the secret's current value.
 func resolveNodeSpecSecrets(nodeSpec *spec.NodeSpec, store secret.Store) error {
 	if nodeSpec == nil {
 		return nil
@@ -479,21 +469,6 @@ func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
 // GetRoutePolicyAt returns a route policy from a specific scope, no base fallback.
 func (n *Network) GetRoutePolicyAt(scope, instance, name string) (*spec.RoutePolicy, error) {
 	return getSpecAt(n, scope, instance, "route policy", name, func(s *spec.OverridableSpecs) map[string]*spec.RoutePolicy { return s.RoutePolicies })
-}
-
-// FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.
-// Returns ("", nil) if no MACVPN matches.
-func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	for name, def := range n.spec.MACVPNs {
-		if def.VNI == vni {
-			return name, def
-		}
-	}
-	return "", nil
 }
 
 // ListServices returns all available service names.
@@ -1240,9 +1215,9 @@ func (n *Network) UpdateFilterRule(scope, instance, filter string, currentSeq in
 				}
 			}
 		}
-		// Replace target's fields with newRule's. Done in place (same pointer)
-		// so any external references stay valid; the slice doesn't need to
-		// rebuild.
+		// Replace target's fields with newRule's. target belongs to this write's
+		// private copy of the specs (withWriteTarget), so the slice needn't be
+		// rebuilt and no reader of the published specs sees the edit early.
 		*target = *newRule
 		// Re-sort by sequence — the rule may have rotated to a different slot.
 		sort.Slice(f.Rules, func(i, j int) bool {
@@ -1695,75 +1670,62 @@ func (n *Network) DeleteZone(name string) error {
 // Device (Node) Management
 // ============================================================================
 
-// GetDevice returns an existing device or loads it from nodeSpec.
-// The Device is created in this Network's context and has access to all
-// Network-level specs through its parent reference.
+// GetNode builds a Node for the named device, resolving its specs now. Each
+// call builds a new Node: a node kept between callers would carry the specs it
+// was built with into every later use (DESIGN_PRINCIPLES_NEWTRON §7).
 func (n *Network) GetNode(name string) (*node.Node, error) {
-	// Lock-ordering rule: alphabetical by key. keyNetworkSpec < keyNodes.
-	// resolveNodeSpec + buildResolvedSpecs read the network.json spec maps
-	// (n.spec, under keyNetworkSpec) and the loader-owned zones (n.loader.Zone,
-	// under the loader's own lock — order keyNetworkSpec → loader, matching the
-	// write path); the cache write requires keyNodes.Lock.
-	netMu := n.locks.lock(keyNetworkSpec)
-	netMu.RLock()
-	defer netMu.RUnlock()
-	nodesMu := n.locks.lock(keyNodes)
-	nodesMu.Lock()
-	defer nodesMu.Unlock()
-
-	// Return existing device if already loaded
-	if dev, ok := n.devices[name]; ok {
-		return dev, nil
-	}
-
-	// Host devices have no SONiC — cannot create a Node
-	if n.isHostDeviceLocked(name) {
-		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostConnection() instead", name)
-	}
-
-	// Load node spec and create new Device in this Network's context
-	nodeSpec, err := n.loadNodeSpec(name)
-	if err != nil {
-		return nil, fmt.Errorf("loading node spec for %s: %w", name, err)
-	}
-
-	// Resolve nodeSpec with inheritance
-	resolved, err := n.resolveNodeSpec(name, nodeSpec)
-	if err != nil {
-		return nil, fmt.Errorf("resolving node spec for %s: %w", name, err)
-	}
-
-	// Build per-device ResolvedSpecs (hierarchical merge: network > zone > nodeSpec)
-	resolvedSpecs := n.buildResolvedSpecs(nodeSpec)
-
-	// Create Node with ResolvedSpecs as SpecProvider for hierarchical spec access
-	dev := node.New(resolvedSpecs, name, nodeSpec, resolved, n.topologyName, n.portResolver)
-
-	n.devices[name] = dev
-	return dev, nil
-}
-
-// GetAbstractNode creates an offline abstract Node for the named device.
-// Same nodeSpec/spec resolution as GetNode, but the Node starts with an empty
-// projection and no device connection. Used for composite generation.
-func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
-	// Host devices have no SONiC — cannot create a Node
 	if n.IsHostDevice(name) {
 		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostConnection() instead", name)
 	}
+	return node.New(n, name, n.topologyName, n.portResolver)
+}
+
+// GetAbstractNode builds an offline abstract Node for the named device — the
+// same spec resolution as GetNode, but the Node starts with an empty projection
+// and no device connection. Used for composite generation.
+func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
+	if n.IsHostDevice(name) {
+		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostConnection() instead", name)
+	}
+	return node.NewAbstract(n, name, n.topologyName, n.portResolver)
+}
+
+// ResolveNodeSpecs resolves everything the named node reads from its specs —
+// spec lookups, node spec, and the values resolved from them — from network →
+// zone → node as they stand now. It implements node.SpecSource and is the one
+// place a node's view of its specs is built: nodes call it when they are built
+// and again at the start of every operation (DESIGN_PRINCIPLES_NEWTRON §7).
+//
+// The view is taken under the read locks the spec writers take, so no write
+// lands halfway through it: keyNetworkSpec for network.json (the spec maps and
+// the network-scope SSH login), keyTopology for topology.json (which peers the
+// EVPN neighbors are derived from), and the loader's own lock for zone and node
+// files, acquired inside. Order keyNetworkSpec → keyTopology → loader, matching
+// the write paths. Every object the view points at is published whole by its
+// writer and never edited afterwards (withWriteTarget, Loader.MutateZoneSpec,
+// Loader.MutateNodeSpec, applyTopology), so a view stays the same for as long
+// as its operation holds it.
+func (n *Network) ResolveNodeSpecs(name string) (node.SpecView, error) {
+	netMu := n.locks.lock(keyNetworkSpec)
+	netMu.RLock()
+	defer netMu.RUnlock()
+	topoMu := n.locks.lock(keyTopology)
+	topoMu.RLock()
+	defer topoMu.RUnlock()
 
 	nodeSpec, err := n.loadNodeSpec(name)
 	if err != nil {
-		return nil, fmt.Errorf("loading node spec for %s: %w", name, err)
+		return node.SpecView{}, fmt.Errorf("loading node spec for %s: %w", name, err)
 	}
-
 	resolved, err := n.resolveNodeSpec(name, nodeSpec)
 	if err != nil {
-		return nil, fmt.Errorf("resolving node spec for %s: %w", name, err)
+		return node.SpecView{}, fmt.Errorf("resolving node spec for %s: %w", name, err)
 	}
-
-	resolvedSpecs := n.buildResolvedSpecs(nodeSpec)
-	return node.NewAbstract(resolvedSpecs, name, nodeSpec, resolved, n.topologyName, n.portResolver), nil
+	return node.SpecView{
+		Specs:    n.buildResolvedSpecs(nodeSpec),
+		NodeSpec: nodeSpec,
+		Resolved: resolved,
+	}, nil
 }
 
 // ConnectNodeForSetup connects without requiring frrcfgd. Used by
@@ -1798,19 +1760,6 @@ func (n *Network) InitFromDeviceIntent(ctx context.Context, name string) (*node.
 		return nil, err
 	}
 	return dev, nil
-}
-
-// ListDevices returns names of all loaded devices.
-func (n *Network) ListNodes() []string {
-	mu := n.locks.lock(keyNodes)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	names := make([]string, 0, len(n.devices))
-	for name := range n.devices {
-		names = append(names, name)
-	}
-	return names
 }
 
 // ============================================================================
@@ -1875,12 +1824,6 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 		return fmt.Errorf("topology device name required")
 	}
 
-	// Lock-ordering rule: alphabetical by key. keyNodes < keyTopology.
-	// keyNodes covers the n.devices cache clear at the end of this method;
-	// keyTopology covers the topology.json mutation.
-	nodesMu := n.locks.lock(keyNodes)
-	nodesMu.Lock()
-	defer nodesMu.Unlock()
 	topoMu := n.locks.lock(keyTopology)
 	topoMu.Lock()
 	defer topoMu.Unlock()
@@ -1924,8 +1867,6 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 		return err
 	}
 
-	// Also clear any in-memory loaded Node for this name; the spec entry is gone.
-	delete(n.devices, name)
 	return nil
 }
 
@@ -1933,8 +1874,10 @@ func (n *Network) DeleteTopologyDevice(name string, force bool) error {
 // TopologyNode (full-replacement semantics; no partial patch). Returns
 // NotFoundError when the name doesn't exist. Validates nodeSpec file.
 //
-// Does NOT close any api-layer NodeActor cache — handler's job (the cached
-// abstract node now reflects stale spec until the actor is reset).
+// Does NOT close any api-layer NodeActor cache — handler's job. A topology-mode
+// node registers its ports and replays its steps from this entry only when it is
+// built, so it keeps the old ones until the actor is reset. (Its view of the
+// specs needs no reset: that is resolved per operation.)
 func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) error {
 	if name == "" {
 		return fmt.Errorf("topology device name required")
@@ -1943,12 +1886,6 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) e
 		return fmt.Errorf("device entry required")
 	}
 
-	// Lock-ordering rule: alphabetical by key. keyNodes < keyTopology.
-	// keyNodes covers the n.devices cache clear at the end; keyTopology
-	// covers the topology.json mutation.
-	nodesMu := n.locks.lock(keyNodes)
-	nodesMu.Lock()
-	defer nodesMu.Unlock()
 	topoMu := n.locks.lock(keyTopology)
 	topoMu.Lock()
 	defer topoMu.Unlock()
@@ -1974,9 +1911,6 @@ func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyNode) e
 	if err := n.applyTopology(working); err != nil {
 		return err
 	}
-	// In-memory loaded Node (if any) is now stale — drop it so the next
-	// access rebuilds from the new spec.
-	delete(n.devices, name)
 	return nil
 }
 
@@ -2192,23 +2126,30 @@ func (n *Network) isHostDeviceLocked(name string) bool {
 	return platform.IsHost()
 }
 
-// loadNodeSpec loads a node spec from the nodes directory and
-// resolves any ${secret:KEY} references in its SSH credentials
-// (auth-design.md L0). The loader caches the in-memory nodeSpec, so
-// once resolution runs the cached value carries plaintext; later
-// reads return the resolved value without re-resolving. A missing
-// store + a reference in the nodeSpec is a hard error from
-// secret.Resolve — operators learn at the first GetNodeSpec call
-// rather than silently SSH'ing with "${secret:...}" as the password.
+// loadNodeSpec loads a node spec from the nodes directory with any
+// ${secret:KEY} references in its SSH credentials resolved (auth-design.md L0).
+//
+// It resolves into a copy, as EffectiveNodeSpec does. The loader's cached spec
+// is the authored file — shared by every reader, including the raw node-scope
+// read that must return the reference itself (GetSSHCredentialsAt) — so it is
+// never written: resolving into it would race concurrent loads, show plaintext
+// where a reference was authored, and pin the first resolved value, so a rotated
+// secret would never be seen again. The copy is shallow and overwrites only the
+// two SSH scalars.
+//
+// A missing store + a reference in the nodeSpec is a hard error from
+// secret.Resolve — operators learn at the first GetNodeSpec call rather than
+// silently SSH'ing with "${secret:...}" as the password.
 func (n *Network) loadNodeSpec(name string) (*spec.NodeSpec, error) {
-	nodeSpec, err := n.loader.LoadNodeSpec(name)
+	authored, err := n.loader.LoadNodeSpec(name)
 	if err != nil {
 		return nil, err
 	}
-	if err := resolveNodeSpecSecrets(nodeSpec, n.secretStore); err != nil {
+	nodeSpec := *authored
+	if err := resolveNodeSpecSecrets(&nodeSpec, n.secretStore); err != nil {
 		return nil, fmt.Errorf("node spec %q: %w", name, err)
 	}
-	return nodeSpec, nil
+	return &nodeSpec, nil
 }
 
 // firstNonEmpty returns the first non-empty string in vals ("" if all empty) —

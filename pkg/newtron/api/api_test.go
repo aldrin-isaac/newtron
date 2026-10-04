@@ -165,8 +165,6 @@ func TestAPICompleteness(t *testing.T) {
 			"IsHostDevice":         true,
 			"GetHostConnection":    true,
 			"InitDevice":           true,
-			// Connection
-			"ListNodes": true,
 			// Platform-supported interface inventory (issue #403)
 			"NodeInterfaceInventory": true, // GET /networks/{netID}/nodes/{node}/interfaces
 			// Device status (issue #75A+B)
@@ -469,7 +467,6 @@ func TestAPICompleteness(t *testing.T) {
 			"TopologyNodeNames":       "spec read",
 			"IsHostDevice":            "spec read",
 			"GetHostConnection":       "spec read",
-			"ListNodes":               "spec read",
 			"ProbeOnline":             "device read (TCP probe + newtlab port resolve)",
 			"TopologyDrift":           "device read (diff topology against device CONFIG_DB)",
 			"GetAuthorization":        "spec read (authorization-table inspector)",

@@ -17,7 +17,7 @@
   },
   "qos_policies": {
     "NS_TEST": {
-      "description": "4-queue fixture for the qos-namespace scenario (48); a fixture rather than runtime-authored so the bind cannot race spec propagation",
+      "description": "4-queue fixture for the qos-namespace scenario (48)",
       "queues": [
         {
           "name": "bulk",

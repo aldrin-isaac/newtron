@@ -2,6 +2,7 @@
 package spec
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -53,6 +54,26 @@ type OverridableSpecs struct {
 	IPVPNs        map[string]*IPVPNSpec   `json:"ipvpns,omitempty" kind:"IPVPNSpec"`
 	MACVPNs       map[string]*MACVPNSpec  `json:"macvpns,omitempty" kind:"MACVPNSpec"`
 	Services      map[string]*ServiceSpec `json:"services,omitempty" kind:"ServiceSpec"`
+}
+
+// Clone returns a deep copy of o: no map, slice or pointer in the copy is shared
+// with o, so the copy can be edited without touching anything a reader of o
+// holds.
+//
+// The copy is made through the specs' JSON form — the form they are stored and
+// reloaded in — so it carries exactly what a save and reload would. No type
+// reachable from OverridableSpecs excludes a field from JSON or customizes its
+// encoding (TestOverridableSpecsClone pins the round trip).
+func (o *OverridableSpecs) Clone() (*OverridableSpecs, error) {
+	data, err := json.Marshal(o)
+	if err != nil {
+		return nil, fmt.Errorf("cloning specs: %w", err)
+	}
+	var out OverridableSpecs
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("cloning specs: %w", err)
+	}
+	return &out, nil
 }
 
 // SSHCredentials is the device SSH login (the tunnel to CONFIG_DB Redis),

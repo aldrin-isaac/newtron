@@ -324,7 +324,7 @@ Overrides are authored through the same write API as network specs — `scope`/`
 └─────────────────────┘
 ```
 
-At runtime, `buildResolvedSpecs()` merges all three levels into a `ResolvedSpecs` snapshot per node. This snapshot implements the `SpecProvider` interface used by all node operations — lookups fall through from node to zone to network until a match is found.
+At runtime, `Network.ResolveNodeSpecs()` merges all three levels into a node's view of its specs: a `ResolvedSpecs` (lower level wins; it implements the `SpecProvider` interface every node operation looks specs up through), the node spec, and the values resolved from them. A node resolves this view when it is built and again at the start of every operation, and never keeps it between operations — so every spec change, at any level, reaches the next operation on every node (`DESIGN_PRINCIPLES_NEWTRON §7`).
 
 Specs are network-scoped; execution is device-scoped. A service can be defined before any device connects, and a device can consume a service defined after it connected. Operations accept spec names (strings) and resolve them internally — callers never pre-resolve specs.
 
@@ -499,47 +499,53 @@ Spec atomicity and runtime concurrency are owned by the layer that owns the data
 
 | Layer | Lock | Protects |
 |-------|------|----------|
-| `pkg/newtron/spec` | `spec.Loader.mu sync.RWMutex` | Profile cache + the `network` / `topology` pointer fields (reassigned by `SaveNetwork` / `SaveTopology`) |
-| `pkg/newtron/network` | `*network.Network`'s `lockManager` (per-key dynamic `sync.RWMutex`) | The maps in `NetworkSpecFile`, the maps in `TopologySpecFile`, the runtime `n.devices` cache |
+| `pkg/newtron/spec` | `spec.Loader.mu sync.RWMutex` | Node-spec and zone-spec caches + the `network` / `topology` pointer fields (reassigned by `SaveNetwork` / `SaveTopology`) |
+| `pkg/newtron/network` | `*network.Network`'s `lockManager` (per-key dynamic `sync.RWMutex`) | The `network.json` state (`NetworkSpecFile`) and the `topology.json` state (`TopologySpecFile`) |
 | `pkg/newtron/api` | None (for spec data); `networkEntity.nodeMu sync.Mutex` (for the NodeActor cache); per-device `NodeActor` goroutine | NodeActor registry + per-device operation serialization |
 
 `networkEntity` carries no spec lock. Every public Network method (Create/Update/Delete/Add/Remove/List/Show/Get/Snapshot) is engine-atomic on its own: it takes its key's lock, performs the composition under that lock, releases. The API layer just calls it.
 
 ### 8.2 The three engine keys
 
-The lockManager (`pkg/newtron/network/locks.go`) hands out one `*sync.RWMutex` per key, lazily on first request. There are three:
+The lockManager (`pkg/newtron/network/locks.go`) hands out one `*sync.RWMutex` per key, lazily on first request. There are two:
 
 | Key | What it protects |
 |-----|------------------|
-| `keyNetworkSpec` | Everything in `network.json` — the 7 OverridableSpecs maps (Services, Filters, IPVPNs, MACVPNs, QoSPolicies, RoutePolicies, PrefixLists) plus Zones — and the `persistSpec` call that writes the file. |
+| `keyNetworkSpec` | Everything in `network.json` — the seven OverridableSpecs maps (Services, Filters, IPVPNs, MACVPNs, QoSPolicies, RoutePolicies, PrefixLists), the network-scope SSH login, and the authorization fields — and the `persistSpec` call that writes the file. |
 | `keyTopology` | `topology.json` — Devices, Links — and the `applyTopology` call that writes the file. |
-| `keyNodes` | The runtime `n.devices` cache populated by `GetNode`. Not persistent; just the API server's in-memory map of currently-built `*Node` instances. |
 
-Profile files are not covered by a Network-layer key. `spec.Loader` has its own RWMutex (added in PR #100) and serializes per-profile correctly on its own — the Loader's atomic `CreateProfile` does the check + file write + cache update under a single Lock.
+Node-spec and zone-spec files are not covered by a Network-layer key. `spec.Loader` has its own RWMutex and serializes them on its own — `Loader.CreateNodeSpec` does the check + file write + cache update under a single Lock.
+
+The Network keeps no cache of built nodes. A `*Node` is built when an operation needs one and resolves its view of the specs at the start of every operation (`DESIGN_PRINCIPLES_NEWTRON §7`); the API server's `NodeActor` (§8.7) is what keeps a device's node between requests.
 
 ### 8.3 Atomicity
 
-Every public Create/Update/Delete/Add/Remove method on `*newtron.Network` is internally atomic. The atomic method holds the appropriate key's `Lock` from existence check through in-memory mutation through disk persist:
+Every public Create/Update/Delete/Add/Remove method on `*newtron.Network` is internally atomic: it holds its key's `Lock` from the existence check through the disk persist. A write to the specs a node resolves — the spec maps, the SSH logins, zone and node specs, the topology — also never edits the published spec in place: it edits a private copy and publishes it only once it is on disk. For a network-scope spec write, `withWriteTarget` does:
 
 ```go
-// pkg/newtron/network/network.go
-func (n *Network) CreateService(name string, def *spec.ServiceSpec) error {
-    mu := n.locks.lock(keyNetworkSpec)
-    mu.Lock()
-    defer mu.Unlock()
-
-    name = util.NormalizeName(name)
-    if _, exists := n.spec.Services[name]; exists {
-        return fmt.Errorf("service '%s' already exists", name)
-    }
-    spec.NormalizeServiceRefs(def)
-    if n.spec.Services == nil {
-        n.spec.Services = make(map[string]*spec.ServiceSpec)
-    }
-    n.spec.Services[name] = def
-    return n.persistSpec()
+// pkg/newtron/network/scoped_writes.go — the network-scope case
+mu := n.locks.lock(keyNetworkSpec)
+mu.Lock()
+defer mu.Unlock()
+working, err := n.spec.OverridableSpecs.Clone()
+if err != nil {
+	return err
 }
+if err := fn(working); err != nil {
+	return err
+}
+prev := n.spec.OverridableSpecs
+n.spec.OverridableSpecs = *working
+if err := n.persistSpec(); err != nil {
+	n.spec.OverridableSpecs = prev
+	return err
+}
+return nil
 ```
+
+`fn` is the per-kind body — `CreateService`'s existence and reference checks, then the insert. Zone and node writes get the same property by re-reading their file and writing the edited copy back (`Loader.MutateZoneSpec`, `Loader.MutateNodeSpec`); topology writes edit a `cloneTopology` copy and swap it in (`applyTopology`).
+
+Two properties follow. A refused or failed write leaves the specs exactly as they were, in memory as on disk. And none of those specs, once published, is edited again — so a node's view resolved from it holds still for the operation using it (`DESIGN_PRINCIPLES_NEWTRON §7`).
 
 Two concurrent `CreateService("X")` calls cannot both succeed. The pre-#101 layout had the public layer compose internal `GetService` + `SaveService` as two separate critical sections; the gap between them was a TOCTOU race that the API-layer `networkEntity.mu` masked. With the engine layer atomic, the API-layer lock is no longer needed; PR #101 (Phase C) removed it.
 
@@ -551,11 +557,10 @@ Spec reads (List/Show/Get) take RLock on the same key and run concurrently with 
 
 A few engine methods touch more than one key. Examples in the current code:
 
-- `DeleteProfile` reads `topology.Devices` (under `keyTopology.RLock`) to decide whether to cascade-delete the matching topology device before calling `Loader.DeleteProfile`.
-- `DeleteTopologyDevice` and `UpdateTopologyDevice` both mutate `topology.Devices` (under `keyTopology.Lock`) and clear the matching entry from `n.devices` (under `keyNodes.Lock`).
-- `GetNode` reads `n.spec.Zones` via `resolveProfile` (`keyNetworkSpec.RLock`) and writes the lazy-loaded `*Node` to `n.devices` (`keyNodes.Lock`).
+- `ResolveNodeSpecs` reads the spec maps and the network-scope SSH login (`keyNetworkSpec.RLock`), the topology its EVPN neighbors are derived from (`keyTopology.RLock`), and the node and zone specs (the Loader's lock, inside).
+- `DeleteNodeSpec` reads `topology.Devices` (under `keyTopology.RLock`, released before it continues) to decide whether to remove the node's topology placement before calling `Loader.DeleteNodeSpec`.
 
-The lock-ordering rule for any multi-key caller is: **acquire locks in alphabetical order of key string.** With the current three keys, alphabetical order is `keyNetworkSpec` < `keyNodes` < `keyTopology`. Every multi-key call site in `pkg/newtron/network/network.go` follows this rule; new ones must too.
+The lock-ordering rule for any multi-key caller is: **acquire locks in alphabetical order of key string, and the Loader's lock last.** With the current two keys, that is `keyNetworkSpec` < `keyTopology` → Loader. Every multi-key call site in `pkg/newtron/network/network.go` follows this rule; new ones must too.
 
 ### 8.6 Cycle deadlocks
 

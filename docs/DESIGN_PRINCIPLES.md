@@ -781,36 +781,45 @@ spec at every level; you only define what differs.
 capabilities — HWSKU, port count, NIC driver — not network intent.
 They have no meaningful per-zone or per-node variation.
 
-The merge is performed once at startup, producing a resolved view for
-each device. This cleanly separates two concerns: **what specs exist**
-(the three-level hierarchy) and **what specs does this device see**
-(the merged view). Device-level code does not know about zones,
-networks, or override logic. It asks for a service by name and gets
-the right definition — already resolved.
+Resolution produces a view for each device. This cleanly separates two
+concerns: **what specs exist** (the three-level hierarchy) and **what
+specs does this device see** (the merged view). Device-level code does
+not know about zones, networks, or override logic. It asks for a service
+by name and gets the right definition — already resolved.
 
-### The snapshot problem and live fallback
+### The view is derived, never kept
 
-Decoupling definition from execution creates a timing question. Each
-device receives a merged snapshot of its specs at connection time.
-Specs added to the network after the snapshot — and this is not
-hypothetical, since the API can add specs at runtime — would be
-invisible to every connected device until the server restarts.
+Decoupling definition from execution raises a timing question: when is a
+device's view resolved? Resolve it once and keep it, and every spec change
+made afterwards has to find its way into views already handed out — and
+most changes cannot. A lookup that misses a kept view can be sent on to the
+network, which catches a newly *added* definition. Nothing catches a
+*replaced* one. An updated service, a policy deleted and re-created under
+the same name, an override authored at a zone or a node: each leaves the
+old definition in the kept view under the same name, the lookup hits it,
+and the network is never asked. The device goes on executing a definition
+the network no longer holds. Every check reads clean — the device and the
+view it was configured from agree — and the divergence surfaces only when
+something resolves the view from scratch, typically a restart, long after
+the change that caused it, with nothing connecting the two.
 
-The resolution: spec lookups check the device's merged snapshot first
-(preserving override semantics — node spec wins over zone wins
-over network). On miss, they fall through to the network-level
-definitions. The hierarchy stays intact for overrides; the network
-level stays open for additions:
+So the view is never kept. It is resolved from the three levels at the
+start of every unit of work, and that unit of work uses it throughout:
 
-```
-device.GetService("TRANSIT")
-  1. Check merged snapshot → found (profile override) → return it
-  2. Miss → fall through to network.GetService("TRANSIT") → found
-  3. Miss at both levels → "service not found" error
-```
+- **Fresh between units of work.** Every spec change reaches the next
+  unit of work — added, replaced, deleted, or overridden at any level —
+  because nothing remembers the previous answer. There is no catching up
+  to do and no case to handle separately.
+- **Fixed within one.** A spec written while an operation runs does not
+  reach that operation. This holds only if a resolved view points at
+  definitions nothing will edit again, so a spec write builds the next
+  version of what it changes and publishes it whole, once it is stored —
+  never editing in place what readers already hold. A refused or failed
+  write then also leaves the specs exactly as they were.
 
-Every spec lookup must include the network fallback. A snapshot-only
-lookup is a bug.
+The device state follows the same rule (§34: fresh state per unit of
+work). The view of the specs is the other input an operation reads, and it
+is derived the same way, at the same moment.
 
 ### Authoring overrides: the base-layer invariant
 
@@ -820,7 +829,7 @@ value may exist at a narrower layer only if it also exists at the broadest
 layer.** An override refines an existing base; it never introduces a name
 that lives only at a leaf.
 
-This is what keeps fallback total. Every consumer's lookup chain bottoms
+This is what keeps resolution total. Every consumer's lookup chain bottoms
 out at the base layer, so a reference can never resolve from some vantage
 points and dangle from others — a failure mode that is both expensive to
 check (it is per-consumer) and impossible to tell apart from a typo. With
@@ -832,8 +841,8 @@ authoring discipline (define the base first) for resolution that is total
 by construction.
 
 **Define once at the broadest applicable scope; override only where
-necessary; resolve once at consumption. An override always rests on a
-base-layer definition.**
+necessary; resolve at every unit of work, never keep the result. An
+override always rests on a base-layer definition.**
 
 ---
 
@@ -2618,7 +2627,8 @@ opportunities per operation for stale state.
 
 **Projection rebuild — fresh state per unit of work.** Before every
 operation, the projection is re-derived from the latest intents. This ensures each operation sees fresh, authoritative
-state — not stale cache from a prior operation. In actuated mode, the
+state — not stale cache from a prior operation. The device's view of the
+specs is resolved again at the same point (§7). In actuated mode, the
 drift guard also fires at this point, comparing the projection against
 actual device CONFIG_DB.
 

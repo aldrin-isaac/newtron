@@ -11,6 +11,30 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// staticSpecs is a SpecSource that resolves to the same view every time — for
+// tests that build a node from fixed specs. A test that edits the provider's
+// maps still sees the edit, because the view holds the provider itself.
+type staticSpecs SpecView
+
+func (s staticSpecs) ResolveNodeSpecs(string) (SpecView, error) { return SpecView(s), nil }
+
+// newStaticNode and newStaticAbstract build nodes over staticSpecs.
+func newStaticNode(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.ResolvedNodeSpec) *Node {
+	n, err := New(staticSpecs{Specs: sp, NodeSpec: nodeSpec, Resolved: resolved}, name, "", nil)
+	if err != nil {
+		panic(err) // staticSpecs never fails
+	}
+	return n
+}
+
+func newStaticAbstract(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.ResolvedNodeSpec) *Node {
+	n, err := NewAbstract(staticSpecs{Specs: sp, NodeSpec: nodeSpec, Resolved: resolved}, name, "", nil)
+	if err != nil {
+		panic(err) // staticSpecs never fails
+	}
+	return n
+}
+
 // testSpecProvider implements SpecProvider for unit tests, using simple maps
 // for each spec type. Methods return *spec.NotFoundError when a key is absent,
 // mirroring production getSpec so orphan-intent classification (errors.As) is

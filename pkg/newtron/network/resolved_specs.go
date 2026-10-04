@@ -1,15 +1,15 @@
-// resolved_specs.go provides a per-device SpecProvider that holds the merged
-// result of hierarchical spec resolution (network → zone → node).
+// resolved_specs.go provides the spec lookups of a node's SpecView: the seven
+// overridable spec maps merged network → zone → node, lower level wins.
 //
-// Built at Node creation time in resolveNodeSpec(). All 7 overridable spec
-// maps are merged with lower-level-wins semantics: node > zone > network.
+// Built by Network.ResolveNodeSpecs at the start of every operation
+// (DESIGN_PRINCIPLES_NEWTRON §7). The merge is complete — every name the node can see
+// at any level is in it — so a miss means the spec does not exist for this node.
 package network
 
 import (
-	"sync"
-
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // Compile-time check that ResolvedSpecs satisfies node.SpecProvider.
@@ -17,11 +17,10 @@ var _ node.SpecProvider = (*ResolvedSpecs)(nil)
 
 // ResolvedSpecs holds the merged spec maps for a single device after
 // hierarchical resolution (network > zone > nodeSpec). It implements
-// node.SpecProvider so it can be passed directly to node.New().
+// node.SpecProvider. It is never written after it is built, so it needs no lock.
 type ResolvedSpecs struct {
 	merged  spec.OverridableSpecs
 	network *Network // for GetPlatform() only — platforms don't participate in hierarchy
-	mu      sync.RWMutex
 }
 
 // newResolvedSpecs creates a ResolvedSpecs from pre-merged maps.
@@ -32,69 +31,45 @@ func newResolvedSpecs(merged spec.OverridableSpecs, network *Network) *ResolvedS
 	}
 }
 
-func (r *ResolvedSpecs) GetService(name string) (*spec.ServiceSpec, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.Services[name]; ok {
+// lookupResolved returns the merged definition of name. It looks the name up
+// exactly as a network-level read does (getSpecAt): canonicalized first, and a
+// miss is the same *spec.NotFoundError — replay relies on that type to
+// recognize an orphaned intent.
+func lookupResolved[V any](m map[string]V, kind, name string) (V, error) {
+	name = util.NormalizeName(name)
+	if v, ok := m[name]; ok {
 		return v, nil
 	}
-	// Fall through to network-level specs for dynamically added entries
-	// (CreateService writes to n.spec.Services after merge was built).
-	return r.network.GetService(name)
+	var zero V
+	return zero, &spec.NotFoundError{Kind: kind, Name: name}
+}
+
+func (r *ResolvedSpecs) GetService(name string) (*spec.ServiceSpec, error) {
+	return lookupResolved(r.merged.Services, "service", name)
 }
 
 func (r *ResolvedSpecs) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.IPVPNs[name]; ok {
-		return v, nil
-	}
-	return r.network.GetIPVPN(name)
+	return lookupResolved(r.merged.IPVPNs, "ipvpn", name)
 }
 
 func (r *ResolvedSpecs) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.MACVPNs[name]; ok {
-		return v, nil
-	}
-	return r.network.GetMACVPN(name)
+	return lookupResolved(r.merged.MACVPNs, "macvpn", name)
 }
 
 func (r *ResolvedSpecs) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.QoSPolicies[name]; ok {
-		return v, nil
-	}
-	return r.network.GetQoSPolicy(name)
+	return lookupResolved(r.merged.QoSPolicies, "QoS policy", name)
 }
 
 func (r *ResolvedSpecs) GetFilter(name string) (*spec.FilterSpec, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.Filters[name]; ok {
-		return v, nil
-	}
-	return r.network.GetFilter(name)
+	return lookupResolved(r.merged.Filters, "filter", name)
 }
 
 func (r *ResolvedSpecs) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.RoutePolicies[name]; ok {
-		return v, nil
-	}
-	return r.network.GetRoutePolicy(name)
+	return lookupResolved(r.merged.RoutePolicies, "route policy", name)
 }
 
 func (r *ResolvedSpecs) GetPrefixList(name string) ([]string, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.PrefixLists[name]; ok {
-		return v, nil
-	}
-	return r.network.GetPrefixList(name)
+	return lookupResolved(r.merged.PrefixLists, "prefix list", name)
 }
 
 func (r *ResolvedSpecs) GetPlatform(name string) (*spec.PlatformSpec, error) {
@@ -102,14 +77,10 @@ func (r *ResolvedSpecs) GetPlatform(name string) (*spec.PlatformSpec, error) {
 }
 
 func (r *ResolvedSpecs) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	for name, def := range r.merged.MACVPNs {
 		if def.VNI == vni {
 			return name, def
 		}
 	}
-	// Fall through to network-level specs for dynamically added entries
-	// (CreateMACVPN writes to n.spec.MACVPNs after merge was built).
-	return r.network.FindMACVPNByVNI(vni)
+	return "", nil
 }

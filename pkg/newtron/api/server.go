@@ -656,12 +656,17 @@ func (s *Server) getNetworkInfo(id string) *NetworkInfo {
 // canonical wire shape. Single source of truth for the projection so
 // the list path and the per-id path never diverge.
 func networkInfoFor(id string, entity *networkEntity) NetworkInfo {
+	// The topology's device names; [] rather than null when there is no topology.
+	nodes := entity.net.TopologyNodeNames()
+	if nodes == nil {
+		nodes = []string{}
+	}
 	info := NetworkInfo{
 		ID:          id,
 		Dir:         entity.specDir,
 		HasTopology: entity.net.HasTopology(),
 		Topology:    networkName(entity.specDir),
-		Nodes:       entity.net.ListNodes(),
+		Nodes:       nodes,
 	}
 	if wc, held := entity.controlStatus(); held {
 		info.WriteControl = &WriteControlInfo{Holder: wc.Holder, Since: wc.Since, ExpiresAt: wc.ExpiresAt}

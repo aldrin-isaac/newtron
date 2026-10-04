@@ -1184,7 +1184,9 @@ Returns the per-Node projection slices the named service contributes. For each
 loaded Node that binds the service via an actuated `apply-service` intent, the
 server runs the replay-diff technique (snapshot intent DB → trim the service's
 intents → rebuild projection from trimmed set → diff against the full
-projection) and returns the resulting `[]sonic.DriftEntry` per Node.
+projection) and returns the resulting `[]sonic.DriftEntry` per Node. Each Node
+first re-resolves its specs and rebuilds its projection, as at the start of any
+operation, so the slices reflect the specs as they stand now.
 
 **Response (200):** `ServiceProjectionResult` with:
 
@@ -4128,7 +4130,7 @@ Response shape (`NodeStatus`):
 | `online_reason` | One of `ssh_port_resolved`, `newtlab_not_realised`, `port_closed`, `unreachable`, `no_resolver`. Browser UI dispatches on this string rather than parsing free-form errors. |
 | `has_unsaved_intents` | True when the cached node has CRUD mutations not yet saved to topology.json. False when no node is cached. |
 | `intent_source` | `intent` (built from device NEWTRON_INTENT), `topology` (built from topology.json), `loopback` (offline config testing), or `unloaded` (no cached node yet). Mirrors the `?mode=` enum (§1 Common Query Parameters). |
-| `intent_drift_count` | Diff entries between cached projection and CONFIG_DB. Populated **only when the cached actor already has a live device connection** — otherwise `intent_drift_reason` explains why the count is `0` (typically `"not_connected"` or `"drift_query_failed"`). |
+| `intent_drift_count` | Diff entries between the cached node's projection — rebuilt first from the current specs and intents, over the connection the actor already holds — and CONFIG_DB. Populated **only when the cached actor already has a live device connection** — otherwise `intent_drift_reason` explains why the count is `0` (typically `"not_connected"` or `"drift_query_failed"`). |
 
 Cost: sub-second when the runtime is available (one resolver call + one
 non-blocking TCP dial). The drift count adds at most one device-CONFIG_DB
@@ -5250,11 +5252,11 @@ The server uses an actor model to manage device connections:
 - Each registered network gets a **networkEntity**: a per-network registration record
   that owns the engine `*Network` and a NodeActor cache. It is not an actor — it
   holds no goroutine and no spec lock. Spec atomicity lives in the engine layer via
-  per-key locks (`keyNetworkSpec`, `keyTopology`, `keyNodes`).
+  per-key locks (`keyNetworkSpec`, `keyTopology`).
 - Each device gets a **NodeActor** (created on first access) that serializes
   device operations and caches the SSH connection.
-- The SSH tunnel is reused across requests. Each request still refreshes CONFIG_DB
-  from Redis before operating.
+- The SSH tunnel is reused across requests. Each request still re-reads the
+  device's intents from Redis and re-resolves the node's specs before operating.
 - After `idle-timeout` of inactivity, the SSH connection is automatically closed.
 - The next request to that device transparently re-establishes the connection.
 

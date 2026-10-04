@@ -363,10 +363,7 @@ func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, 
 				return nil, err
 			}
 		}
-		// Re-read intents from device (when connected) and rebuild projection.
-		// All operations — reads and writes — see fresh, authoritative state.
-		if err := na.node.RebuildProjection(ctx); err != nil {
-			na.closeNode()
+		if err := na.rebuildNode(ctx); err != nil {
 			return nil, err
 		}
 		result, err := fn()
@@ -388,6 +385,24 @@ func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, 
 		}
 		return result, nil
 	})
+}
+
+// rebuildNode starts an operation on the actor's cached node: it re-resolves the
+// node's specs, re-reads its intents from the device (when connected) and
+// rebuilds its projection (Node.RebuildProjection), so the operation — read or
+// write — sees fresh, authoritative state, never what an earlier operation left
+// (DESIGN_PRINCIPLES_NEWTRON §7, §35). A node whose rebuild failed holds a partial
+// projection, so it is discarded rather than reused.
+//
+// Every use of a cached node goes through here first: execute, and the handlers
+// that read cached nodes without building one (service projection, node status).
+// Must be called on the actor goroutine, with na.node non-nil.
+func (na *NodeActor) rebuildNode(ctx context.Context) error {
+	if err := na.node.RebuildProjection(ctx); err != nil {
+		na.closeNode()
+		return err
+	}
+	return nil
 }
 
 // saveTopologyNow rewrites this device's entry in topology.json from the
