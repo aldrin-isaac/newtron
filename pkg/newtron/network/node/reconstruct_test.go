@@ -143,7 +143,7 @@ func newTestAbstract() *Node {
 		RouterID:    "10.0.0.1",
 		LoopbackIP:  "10.0.0.1",
 	}
-	n := NewAbstract(sp, "test", nodeSpec, resolved, "", nil)
+	n := newStaticAbstract(sp, "test", nodeSpec, resolved)
 	// Register some ports so interface ops can work
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "mtu": "9100"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "mtu": "9100"})

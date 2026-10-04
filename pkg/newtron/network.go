@@ -190,11 +190,6 @@ func (net *Network) InitDevice(ctx context.Context, device string, force bool) e
 	return nil
 }
 
-// ListNodes returns the names of all devices that have been loaded into this Network.
-func (net *Network) ListNodes() []string {
-	return net.internal.ListNodes()
-}
-
 // HasTopology returns true if a topology.json was loaded with the spec files.
 func (net *Network) HasTopology() bool {
 	return net.internal.HasTopology()

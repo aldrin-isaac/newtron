@@ -46,12 +46,25 @@ import (
 // against it under the right lock, and persists. It is the single place that
 // knows where each scope lives and how it is locked/persisted:
 //
-//   - network → n.spec.OverridableSpecs, under keyNetworkSpec, persist network.json
-//   - zone    → the zone's OverridableSpecs, under keyNetworkSpec, persist network.json
-//   - node    → the nodeSpec's OverridableSpecs, persisted to nodes/<name>.json via
-//     loader.MutateNodeSpec (serialized, secret-safe). The network-spec RLock is
-//     held for the duration so the floor base that fn checks (checkOverrideBase)
-//     can't be deleted mid-write, and so lock order stays keyNetworkSpec → loader.
+//   - network → a copy of n.spec.OverridableSpecs, under keyNetworkSpec (write
+//     lock), persisted to network.json, then published in place of the original
+//   - zone    → the zone's OverridableSpecs, read fresh from zones/<name>.json and
+//     persisted there via loader.MutateZoneSpec, under keyNetworkSpec (read lock)
+//   - node    → the nodeSpec's OverridableSpecs, read fresh from nodes/<name>.json
+//     and persisted there via loader.MutateNodeSpec (serialized, secret-safe),
+//     under keyNetworkSpec (read lock)
+//
+// At every scope fn edits a private copy, and the copy replaces the original only
+// once the write has passed its checks and reached disk. Two things depend on
+// that. A refused or failed write leaves the specs exactly as they were, in memory
+// as on disk. And no published spec is ever edited afterwards, so a node's view
+// resolved from them (ResolveNodeSpecs) holds still for the operation using it
+// (DESIGN_PRINCIPLES §7). Zone and node writes get their copy by re-reading their
+// file; the network scope clones its specs.
+//
+// The read lock at zone and node scope keeps the floor base that fn checks
+// (checkOverrideBase) from being deleted mid-write, and keeps lock order
+// keyNetworkSpec → loader.
 //
 // fn mutates the passed container and runs the per-kind checks (existence,
 // checkRefsResolve, checkOverrideBase) — all of which read n.spec under the lock
@@ -62,10 +75,20 @@ func (n *Network) withWriteTarget(scope, instance string, fn func(specs *spec.Ov
 		mu := n.locks.lock(keyNetworkSpec)
 		mu.Lock()
 		defer mu.Unlock()
-		if err := fn(&n.spec.OverridableSpecs); err != nil {
+		working, err := n.spec.OverridableSpecs.Clone()
+		if err != nil {
 			return err
 		}
-		return n.persistSpec()
+		if err := fn(working); err != nil {
+			return err
+		}
+		prev := n.spec.OverridableSpecs
+		n.spec.OverridableSpecs = *working
+		if err := n.persistSpec(); err != nil {
+			n.spec.OverridableSpecs = prev
+			return err
+		}
+		return nil
 	case spec.ScopeZone:
 		// Localize the write to zones/<instance>.json (mirrors the node case).
 		// keyNetworkSpec.RLock guards the network base MutateZoneSpec reads for

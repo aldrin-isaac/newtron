@@ -363,8 +363,9 @@ func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, 
 				return nil, err
 			}
 		}
-		// Re-read intents from device (when connected) and rebuild projection.
-		// All operations — reads and writes — see fresh, authoritative state.
+		// Re-resolve the node's specs, re-read intents from device (when
+		// connected) and rebuild projection. All operations — reads and
+		// writes — see fresh, authoritative state.
 		if err := na.node.RebuildProjection(ctx); err != nil {
 			na.closeNode()
 			return nil, err

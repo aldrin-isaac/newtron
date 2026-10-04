@@ -19,9 +19,8 @@ import (
 // defaultLockTTL is the TTL in seconds for distributed device locks.
 const defaultLockTTL = 3600 // 1 hour
 
-// SpecProvider is the interface that Node uses to access Network-level specs.
-// Network implements this interface; Node embeds it so that callers can write
-// node.GetService("x") directly.
+// SpecProvider is the interface that Node uses to look up specs by name.
+// Node embeds it so that callers can write node.GetService("x") directly.
 type SpecProvider interface {
 	GetService(name string) (*spec.ServiceSpec, error)
 	GetIPVPN(name string) (*spec.IPVPNSpec, error)
@@ -34,11 +33,34 @@ type SpecProvider interface {
 	FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec)
 }
 
+// SpecView is everything a node reads from its specs, resolved network → zone →
+// node at one moment: the spec lookups, the node's own spec, and the values
+// resolved from them (ASN, loopback, SSH login, EVPN neighbors).
+type SpecView struct {
+	Specs    SpecProvider
+	NodeSpec *spec.NodeSpec
+	Resolved *spec.ResolvedNodeSpec
+}
+
+// SpecSource resolves a node's SpecView from the specs as they stand now.
+// Network implements it.
+//
+// A node never keeps a view between operations (DESIGN_PRINCIPLES §7): it
+// resolves one when it is built and again at the start of every operation
+// (RebuildProjection), and uses that one view until the operation ends. A view
+// kept longer goes stale silently — a spec replaced or deleted under the same
+// name still answers from the old view, and nothing reports the difference.
+type SpecSource interface {
+	ResolveNodeSpecs(name string) (SpecView, error)
+}
+
 // Node represents a SONiC switch within the context of a Network.
 //
-// Key design: Node embeds a SpecProvider (implemented by Network), giving it
-// direct access to all Network-level configuration (services, filters, etc.)
-// without importing the network package (avoiding circular imports).
+// Key design: Node embeds a SpecProvider, giving it direct access to the
+// network's specs (services, filters, etc.) without importing the network
+// package (avoiding circular imports). The SpecProvider, nodeSpec and resolved
+// fields are one SpecView, replaced together from specSource at the start of
+// every operation.
 //
 // The Node's primary state is its intent collection (NEWTRON_INTENT records)
 // and the projection (typed CONFIG_DB tables derived from intent replay).
@@ -55,6 +77,9 @@ type Node struct {
 	name     string
 	nodeSpec *spec.NodeSpec
 	resolved *spec.ResolvedNodeSpec
+
+	// specSource re-resolves the three fields above (see SpecSource).
+	specSource SpecSource
 
 	// Runtime infrastructure plumbed from Network. topology and
 	// portResolver are forwarded to sonic.Device at Connect time so
@@ -95,22 +120,25 @@ type Node struct {
 	reconstructing bool
 }
 
-// New creates a new Node with the given SpecProvider and nodeSpec.
+// New creates a new Node whose specs come from src, resolving its first
+// SpecView now.
 //
 // topology and pr are forwarded to sonic.Device at Connect time so
 // SSH port allocation flows from the injected resolver, not from
 // the spec layer. Pass "" and nil for tests and real-hardware
 // deployments.
-func New(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
-	return &Node{
-		SpecProvider: sp,
+func New(src SpecSource, name string, topology string, pr sonic.PortResolver) (*Node, error) {
+	n := &Node{
 		name:         name,
-		nodeSpec:     nodeSpec,
-		resolved:     resolved,
+		specSource:   src,
 		topology:     topology,
 		portResolver: pr,
 		interfaces:   make(map[string]*Interface),
 	}
+	if err := n.resolveSpecs(); err != nil {
+		return nil, err
+	}
+	return n, nil
 }
 
 // NewAbstract creates an abstract Node with an empty projection.
@@ -119,22 +147,32 @@ func New(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.R
 //
 // Usage:
 //
-//	n := node.NewAbstract(specs, "switch1", nodeSpec, resolved, topology, resolver)
+//	n, err := node.NewAbstract(src, "switch1", topology, resolver)
 //	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 //	iface, _ := n.GetInterface("Ethernet0")
 //	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
 //	n.Drift(ctx) // or n.Reconcile(ctx, ReconcileOpts{Mode: "full"})
-func NewAbstract(sp SpecProvider, name string, nodeSpec *spec.NodeSpec, resolved *spec.ResolvedNodeSpec, topology string, pr sonic.PortResolver) *Node {
-	return &Node{
-		SpecProvider: sp,
-		name:         name,
-		nodeSpec:     nodeSpec,
-		resolved:     resolved,
-		topology:     topology,
-		portResolver: pr,
-		interfaces:   make(map[string]*Interface),
-		configDB:     sonic.NewConfigDB(),
+func NewAbstract(src SpecSource, name string, topology string, pr sonic.PortResolver) (*Node, error) {
+	n, err := New(src, name, topology, pr)
+	if err != nil {
+		return nil, err
 	}
+	n.configDB = sonic.NewConfigDB()
+	return n, nil
+}
+
+// resolveSpecs replaces the node's SpecView with one resolved from the specs as
+// they stand now. The three fields change together, so no reader ever sees a
+// node spec from one moment and spec lookups from another.
+func (n *Node) resolveSpecs() error {
+	view, err := n.specSource.ResolveNodeSpecs(n.name)
+	if err != nil {
+		return fmt.Errorf("resolving specs for %s: %w", n.name, err)
+	}
+	n.SpecProvider = view.Specs
+	n.nodeSpec = view.NodeSpec
+	n.resolved = view.Resolved
+	return nil
 }
 
 // HasActuatedIntent returns true if this node was initialized from device intents.
@@ -168,10 +206,17 @@ func (n *Node) RestoreIntentDB(snapshot map[string]map[string]string) {
 	n.configDB.NewtronIntent = snapshot
 }
 
-// RebuildProjection rebuilds the projection from the intent DB.
-// In actuated mode (transport connected), re-reads NEWTRON_INTENT from the
-// device's CONFIG_DB via Redis — the device's intents are the authority.
-// In topology mode (no transport), replays from the cached intent DB.
+// RebuildProjection re-derives the node's state from its two sources at the
+// start of an operation: the specs and the intent DB.
+//
+// The specs are resolved afresh (resolveSpecs), so the operation and the replay
+// below both see the specs as they stand now — never a view kept from an
+// earlier operation (DESIGN_PRINCIPLES §7).
+//
+// The intent DB: in actuated mode (transport connected), re-reads
+// NEWTRON_INTENT from the device's CONFIG_DB via Redis — the device's intents
+// are the authority. In topology mode (no transport), replays from the cached
+// intent DB.
 //
 // Creates a fresh configDB, re-registers ports, and replays all intents.
 // The SSH connection and transport state are preserved.
@@ -181,6 +226,9 @@ func (n *Node) RestoreIntentDB(snapshot map[string]map[string]string) {
 // CLAUDE.md: "In actuated mode, the device's own NEWTRON_INTENT records
 // ARE the authoritative state."
 func (n *Node) RebuildProjection(ctx context.Context) error {
+	if err := n.resolveSpecs(); err != nil {
+		return err
+	}
 	// In actuated mode, re-read intents from the device — they are the authority.
 	intents := n.configDB.NewtronIntent
 	if n.conn != nil {

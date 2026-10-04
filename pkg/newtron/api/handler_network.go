@@ -493,7 +493,7 @@ func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	ne.removeNodeActor(name) // built node now reflects stale spec
+	ne.removeNodeActor(name) // its node was built from the old ports and steps
 	httputil.WriteJSON(w, http.StatusOK, &device)
 }
 

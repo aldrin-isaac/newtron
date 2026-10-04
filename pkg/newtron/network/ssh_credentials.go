@@ -92,10 +92,19 @@ func (n *Network) withSSHTarget(scope, instance string, fn func(*spec.SSHCredent
 		mu := n.locks.lock(keyNetworkSpec)
 		mu.Lock()
 		defer mu.Unlock()
-		if err := fn(&n.spec.SSHCredentials); err != nil {
+		// Edit a copy and publish it only once it is on disk, as withWriteTarget
+		// does, so a refused or failed write leaves the login as it was.
+		working := n.spec.SSHCredentials
+		if err := fn(&working); err != nil {
 			return err
 		}
-		return n.persistSpec()
+		prev := n.spec.SSHCredentials
+		n.spec.SSHCredentials = working
+		if err := n.persistSpec(); err != nil {
+			n.spec.SSHCredentials = prev
+			return err
+		}
+		return nil
 	case spec.ScopeZone:
 		mu := n.locks.lock(keyNetworkSpec)
 		mu.RLock()
