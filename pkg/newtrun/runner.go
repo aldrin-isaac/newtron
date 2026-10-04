@@ -267,6 +267,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Network)
 		cleanup, deployErr := r.deployTopology(ctx, r.Dir, opts)
 		if deployErr != nil {
+			fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s failed: %v\n", r.Network, deployErr)
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,
@@ -295,6 +296,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (results []*ScenarioR
 	} else {
 		fmt.Fprintf(os.Stderr, "newtrun: connecting to devices...\n")
 		if connErr := r.connectDevices(); connErr != nil {
+			fmt.Fprintf(os.Stderr, "newtrun: connecting to devices failed: %v\n", connErr)
 			for _, sc := range scenarios {
 				results = append(results, &ScenarioResult{
 					Name:        sc.Name,

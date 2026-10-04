@@ -178,6 +178,21 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 			Time: r.Duration.Seconds(),
 		}
 
+		// Scenario-level error before any step ran (the lab could not be
+		// ensured, devices could not be reached): emit a single error test
+		// case carrying it, or the suite would be empty and hide the cause.
+		if r.DeployError != nil && len(r.Steps) == 0 {
+			suite.Tests = 1
+			suite.Errors = 1
+			suite.Cases = append(suite.Cases, junitTestCase{
+				Name:      r.Name,
+				ClassName: r.Name,
+				Error:     &junitError{Message: r.DeployError.Error(), Type: "deploy"},
+			})
+			suites.Suites = append(suites.Suites, suite)
+			continue
+		}
+
 		// Scenario-level skip: emit a single skipped test case
 		if r.Status == StepStatusSkipped && r.SkipReason != "" {
 			suite.Tests = 1
@@ -237,11 +252,15 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 // scenarioNote composes the markdown summary row's Note column from
 // the result's skip reason, repeat-iteration outcome, and parameterized
 // target count. Returns the skip reason verbatim when the scenario was
-// skipped; otherwise combines a repeat tag and a target-count tag with
-// a comma separator when both apply.
+// skipped, and the deploy error when it errored before any step ran;
+// otherwise combines a repeat tag and a target-count tag with a comma
+// separator when both apply.
 func scenarioNote(r *ScenarioResult) string {
 	if r.SkipReason != "" {
 		return r.SkipReason
+	}
+	if r.DeployError != nil {
+		return r.DeployError.Error()
 	}
 	var parts []string
 	if r.Repeat > 1 && r.FailedIteration > 0 {

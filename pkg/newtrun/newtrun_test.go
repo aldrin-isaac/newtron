@@ -595,6 +595,40 @@ func TestWriteJUnit_SkipReason(t *testing.T) {
 	}
 }
 
+// A scenario that errored before any step ran (the lab could not be ensured)
+// must still carry its error into the report — not an empty suite (#508).
+func TestWriteJUnit_DeployError(t *testing.T) {
+	results := []*ScenarioResult{
+		{
+			Name:        "boot-ssh",
+			Network:     "2node-vs",
+			Status:      StepStatusError,
+			DeployError: &InfraError{Op: "deploy", Err: errors.New("lab 2node-vs not found")},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.xml")
+	gen := &ReportGenerator{Results: results}
+	if err := gen.WriteJUnit(path); err != nil {
+		t.Fatalf("WriteJUnit error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading JUnit: %v", err)
+	}
+	xmlStr := string(data)
+	if !strings.Contains(xmlStr, "<error") {
+		t.Errorf("expected an <error> element for the deploy error, got: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "lab 2node-vs not found") {
+		t.Errorf("expected the deploy error message in JUnit XML, got: %s", xmlStr)
+	}
+	if note := scenarioNote(results[0]); !strings.Contains(note, "lab 2node-vs not found") {
+		t.Errorf("markdown note = %q, want the deploy error", note)
+	}
+}
+
 // ============================================================================
 // Scenario Requires Parsing Test
 // ============================================================================
