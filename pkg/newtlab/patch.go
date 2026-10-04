@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -255,6 +256,31 @@ func ApplyBootPatches(ctx context.Context, host string, port int, user, pass str
 	return nil
 }
 
+// fallbackPortSpeed is the port speed, in Mbps, a VPP port is given when its
+// platform declares no default_speed.
+const fallbackPortSpeed = 25000
+
+// portSpeedMbps returns the platform's default_speed in the Mbps form the
+// synthesized port_config.ini and PORT entries carry. The platform authors it
+// as "100G"; spec.PortConfig owns the translation to "100000" (RCA-050), so the
+// boot patch renders it the same way newtron's port writes do.
+func portSpeedMbps(nodeName string, platform *spec.PlatformSpec) int {
+	if platform.DefaultSpeed == "" {
+		util.Logger.Warnf("newtlab: %s: platform %s declares no default_speed; using %d Mbps",
+			nodeName, platform.Name, fallbackPortSpeed)
+		return fallbackPortSpeed
+	}
+	pc := spec.PortConfig{Speed: platform.DefaultSpeed}
+	if err := pc.ValidateConstraints("default_speed of platform " + platform.Name); err != nil {
+		util.Logger.Warnf("newtlab: %s: %v; using %d Mbps", nodeName, err, fallbackPortSpeed)
+		return fallbackPortSpeed
+	}
+	// A validated speed renders from the owner's table, which holds only
+	// numeric Mbps strings.
+	mbps, _ := strconv.Atoi(pc.Fields()["speed"])
+	return mbps
+}
+
 // buildPatchVars computes template variables from node config and platform spec.
 func buildPatchVars(node *NodeConfig, platform *spec.PlatformSpec) *PatchVars {
 	// Count data NICs (Index > 0)
@@ -265,11 +291,7 @@ func buildPatchVars(node *NodeConfig, platform *spec.PlatformSpec) *PatchVars {
 		}
 	}
 
-	// Parse default speed (e.g. "25000" → 25000)
-	speed, _ := strconv.Atoi(platform.DefaultSpeed)
-	if speed == 0 {
-		speed = 25000
-	}
+	speed := portSpeedMbps(node.Name, platform)
 
 	// VPP port synthesis (RCA-013): VPP has no in-image port_config.ini, so the
 	// boot patch generates one. The port names come from the platform's port

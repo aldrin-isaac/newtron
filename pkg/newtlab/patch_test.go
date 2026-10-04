@@ -130,7 +130,7 @@ func TestBuildPatchVars(t *testing.T) {
 	}
 	platform := &spec.PlatformSpec{
 		HWSKU:          "Force10-S6000",
-		DefaultSpeed:   "25000",
+		DefaultSpeed:   "100G",
 		Dataplane:      "vpp",
 		VMImageRelease: "202405",
 		Ports: []spec.PortSpec{
@@ -156,8 +156,8 @@ func TestBuildPatchVars(t *testing.T) {
 	if vars.HWSkuDir != "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000" {
 		t.Errorf("HWSkuDir = %q", vars.HWSkuDir)
 	}
-	if vars.PortSpeed != 25000 {
-		t.Errorf("PortSpeed = %d, want 25000", vars.PortSpeed)
+	if vars.PortSpeed != 100000 {
+		t.Errorf("PortSpeed = %d, want 100000 (default_speed 100G in Mbps)", vars.PortSpeed)
 	}
 	if vars.Dataplane != "vpp" {
 		t.Errorf("Dataplane = %q, want 'vpp'", vars.Dataplane)
@@ -296,5 +296,28 @@ func TestRenderString_Plain(t *testing.T) {
 	}
 	if got != "/etc/sonic/vpp/syncd_vpp_env" {
 		t.Errorf("renderString = %q, want plain path", got)
+	}
+}
+
+// default_speed is authored as "100G" in every platform file; the boot patch must
+// render it in Mbps, as newtron's port writes do. Parsing it as a number fails
+// and silently gave every VPP port 25000 (#531).
+func TestPortSpeedMbps(t *testing.T) {
+	tests := []struct {
+		defaultSpeed string
+		want         int
+	}{
+		{"100G", 100000},
+		{"40G", 40000},
+		{"25G", 25000},
+		{"", fallbackPortSpeed},       // platform declares none
+		{"100000", fallbackPortSpeed}, // the wire form is not the authored vocabulary
+		{"7G", fallbackPortSpeed},
+	}
+	for _, tt := range tests {
+		got := portSpeedMbps("leaf1", &spec.PlatformSpec{Name: "p", DefaultSpeed: tt.defaultSpeed})
+		if got != tt.want {
+			t.Errorf("portSpeedMbps(%q) = %d, want %d", tt.defaultSpeed, got, tt.want)
+		}
 	}
 }
