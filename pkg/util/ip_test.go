@@ -6,11 +6,11 @@ import (
 
 func Test_parseIPWithMask(t *testing.T) {
 	tests := []struct {
-		name        string
-		cidr        string
-		wantIP      string
-		wantMask    int
-		wantErr     bool
+		name     string
+		cidr     string
+		wantIP   string
+		wantMask int
+		wantErr  bool
 	}{
 		{
 			name:     "valid /24",
@@ -327,4 +327,3 @@ func TestSplitIPMask_InvalidMask(t *testing.T) {
 		t.Errorf("SplitIPMask() mask = %d, want 0", mask)
 	}
 }
-

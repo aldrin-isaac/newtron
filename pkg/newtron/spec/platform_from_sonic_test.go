@@ -51,11 +51,11 @@ func TestParseModeSpeed(t *testing.T) {
 		// what reality would look like if the parser silently
 		// accepted it.
 		{"", "", 0, false},
-		{"100G", "", 0, false},     // missing "count x" prefix
-		{"1xfoo", "", 0, false},    // non-digit speed
-		{"0x100G", "", 0, false},   // zero-count rejected (would 0-divide downstream)
-		{"1x0G", "", 0, false},     // zero-speed rejected (no real port runs at 0)
-		{"1x100T", "", 0, false},   // unknown suffix — translator only models G and M
+		{"100G", "", 0, false},   // missing "count x" prefix
+		{"1xfoo", "", 0, false},  // non-digit speed
+		{"0x100G", "", 0, false}, // zero-count rejected (would 0-divide downstream)
+		{"1x0G", "", 0, false},   // zero-speed rejected (no real port runs at 0)
+		{"1x100T", "", 0, false}, // unknown suffix — translator only models G and M
 		{"foo", "", 0, false},
 	}
 	for _, c := range cases {

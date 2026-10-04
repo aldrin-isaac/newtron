@@ -1507,6 +1507,7 @@ type PortChannelCreateRequest struct {
 	Fallback bool     `json:"fallback,omitempty"`
 	MTU      int      `json:"mtu,omitempty"`
 }
+
 // Config converts the wire request to the domain config — see
 // ACLRuleAddRequest.Config.
 func (r PortChannelCreateRequest) Config() PortChannelConfig {

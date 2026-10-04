@@ -41,6 +41,7 @@ type fixMap struct {
 
 // nolint:unused — fields are referenced by the reflection extractor under test
 type fixHidden struct {
+	//lint:ignore U1000 tests that the extractor skips unexported fields
 	private string //nolint:unused // tests unexported filter
 	Skip    string `json:"-"` // explicitly hidden
 	Real    string `json:"real" label:"Real"`

@@ -136,8 +136,8 @@ func TestSSHPort_LabNotDeployed(t *testing.T) {
 func TestSSHPort_DeviceNotInLab(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		state := newtlab.LabState{
-			NetworkID:  "1node-vs",
-			Nodes: map[string]*newtlab.NodeState{"switch1": {SSHPort: 13000}},
+			NetworkID: "1node-vs",
+			Nodes:     map[string]*newtlab.NodeState{"switch1": {SSHPort: 13000}},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": state})

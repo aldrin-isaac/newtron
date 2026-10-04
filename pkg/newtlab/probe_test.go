@@ -399,4 +399,3 @@ func TestResolveNewtLabConfig_WithServers(t *testing.T) {
 		t.Errorf("expected SSHPortBase=50000, got %d", resolved.SSHPortBase)
 	}
 }
-

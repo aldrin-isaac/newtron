@@ -58,7 +58,7 @@ func (e Event) Body() any { return e.Payload }
 // browser consumers don't need at suite-start time. Per-step detail
 // is surfaced incrementally via step_start / step_end events.
 type SuiteStartPayload struct {
-	Network  string            `json:"network,omitempty"`
+	Network   string            `json:"network,omitempty"`
 	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
@@ -92,7 +92,7 @@ type ScenarioStartPayload struct {
 // Wire consumers report "failed on iteration K/N" from this pair.
 type ScenarioEndPayload struct {
 	Name            string              `json:"name"`
-	Network  string            `json:"network,omitempty"`
+	Network         string              `json:"network,omitempty"`
 	Platform        string              `json:"platform,omitempty"`
 	Status          newtrun.StepStatus  `json:"status"`
 	Duration        string              `json:"duration"`
@@ -116,10 +116,10 @@ type StepStartPayload struct {
 
 // StepEndPayload mirrors ProgressReporter.StepEnd(scenario, *StepResult, index, total).
 type StepEndPayload struct {
-	Scenario string             `json:"scenario"`
-	Result   StepResultPayload  `json:"result"`
-	Index    int                `json:"index"`
-	Total    int                `json:"total"`
+	Scenario string            `json:"scenario"`
+	Result   StepResultPayload `json:"result"`
+	Index    int               `json:"index"`
+	Total    int               `json:"total"`
 }
 
 // StepProgressPayload mirrors ProgressReporter.StepProgress(scenario,
@@ -131,11 +131,11 @@ type StepEndPayload struct {
 // writes land in real time" UX renders one of these per row in the
 // per-device-op timeline.
 type StepProgressPayload struct {
-	Scenario string                 `json:"scenario"`
-	Step     string                 `json:"step"`
-	Action   newtrun.StepAction     `json:"action"`
-	Index    int                    `json:"index"`
-	Op       sonic.DeviceOp   `json:"op"`
+	Scenario string             `json:"scenario"`
+	Step     string             `json:"step"`
+	Action   newtrun.StepAction `json:"action"`
+	Index    int                `json:"index"`
+	Op       sonic.DeviceOp     `json:"op"`
 }
 
 // SuiteEndPayload mirrors ProgressReporter.SuiteEnd. The Status field
@@ -195,7 +195,7 @@ func scenarioEndFrom(r *newtrun.ScenarioResult, index, total int) ScenarioEndPay
 	}
 	return ScenarioEndPayload{
 		Name:            r.Name,
-		Network:        r.Network,
+		Network:         r.Network,
 		Platform:        r.Platform,
 		Status:          r.Status,
 		Duration:        durationString(r.Duration),
@@ -204,8 +204,8 @@ func scenarioEndFrom(r *newtrun.ScenarioResult, index, total int) ScenarioEndPay
 		SkipReason:      r.SkipReason,
 		Repeat:          r.Repeat,
 		FailedIteration: r.FailedIteration,
-		Index:       index,
-		Total:       total,
+		Index:           index,
+		Total:           total,
 	}
 }
 
@@ -246,19 +246,19 @@ func durationString(d time.Duration) string {
 
 // RunInfo is the response shape for GET /api/runs (list).
 type RunInfo struct {
-	Suite    string             `json:"suite"`
-	Network  string            `json:"network,omitempty"`
+	Suite    string              `json:"suite"`
+	Network  string              `json:"network,omitempty"`
 	Status   newtrun.SuiteStatus `json:"status"`
-	Started  time.Time          `json:"started,omitempty"`
-	Updated  time.Time          `json:"updated,omitempty"`
-	Finished time.Time          `json:"finished,omitempty"`
+	Started  time.Time           `json:"started,omitempty"`
+	Updated  time.Time           `json:"updated,omitempty"`
+	Finished time.Time           `json:"finished,omitempty"`
 }
 
 // runInfoFrom summarizes a *newtrun.RunState to its list-view form.
 func runInfoFrom(s *newtrun.RunState) RunInfo {
 	return RunInfo{
 		Suite:    s.Suite,
-		Network: s.Network,
+		Network:  s.Network,
 		Status:   s.Status,
 		Started:  s.Started,
 		Updated:  s.Updated,
@@ -284,7 +284,7 @@ type HealthResponse struct {
 // summaries don't repeat them.
 type SuiteScenariosResponse struct {
 	Suite     string            `json:"suite"`
-	Network  string            `json:"network,omitempty"`
+	Network   string            `json:"network,omitempty"`
 	Platform  string            `json:"platform,omitempty"`
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }

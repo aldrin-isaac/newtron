@@ -7,46 +7,46 @@ import "testing"
 // issue #116 — every other change in the PR routes through this function.
 func TestResolveNetworkID(t *testing.T) {
 	cases := []struct {
-		name           string
-		reqNetworkID   string
-		suiteNetwork  string
-		cfgDefault     string
-		want           string
+		name         string
+		reqNetworkID string
+		suiteNetwork string
+		cfgDefault   string
+		want         string
 	}{
 		{
-			name:          "request_override_wins",
-			reqNetworkID:  "operator-override",
+			name:         "request_override_wins",
+			reqNetworkID: "operator-override",
 			suiteNetwork: "from-suite",
-			cfgDefault:    "default",
-			want:          "operator-override",
+			cfgDefault:   "default",
+			want:         "operator-override",
 		},
 		{
-			name:          "suite_topology_used_when_request_empty",
-			reqNetworkID:  "",
+			name:         "suite_topology_used_when_request_empty",
+			reqNetworkID: "",
 			suiteNetwork: "2node-vs-service",
-			cfgDefault:    "default",
-			want:          "2node-vs-service",
+			cfgDefault:   "default",
+			want:         "2node-vs-service",
 		},
 		{
-			name:          "server_default_used_when_both_empty",
-			reqNetworkID:  "",
+			name:         "server_default_used_when_both_empty",
+			reqNetworkID: "",
 			suiteNetwork: "",
-			cfgDefault:    "default",
-			want:          "default",
+			cfgDefault:   "default",
+			want:         "default",
 		},
 		{
-			name:          "request_override_wins_over_suite_topology",
-			reqNetworkID:  "operator-override",
+			name:         "request_override_wins_over_suite_topology",
+			reqNetworkID: "operator-override",
 			suiteNetwork: "2node-vs-service",
-			cfgDefault:    "default",
-			want:          "operator-override",
+			cfgDefault:   "default",
+			want:         "operator-override",
 		},
 		{
-			name:          "inline_path_empty_suite_topology_falls_through",
-			reqNetworkID:  "",
+			name:         "inline_path_empty_suite_topology_falls_through",
+			reqNetworkID: "",
 			suiteNetwork: "",
-			cfgDefault:    "running-lab",
-			want:          "running-lab",
+			cfgDefault:   "running-lab",
+			want:         "running-lab",
 		},
 	}
 

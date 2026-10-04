@@ -35,9 +35,9 @@ func TestChangeTypeConstants(t *testing.T) {
 
 func TestChange_Structure(t *testing.T) {
 	c := Change{
-		Table:    "PORT",
-		Key:      "Ethernet0",
-		Type:     ChangeModify,
+		Table:  "PORT",
+		Key:    "Ethernet0",
+		Type:   ChangeModify,
 		Fields: map[string]string{"mtu": "9100"},
 	}
 
@@ -402,12 +402,12 @@ func TestInterface_Name(t *testing.T) {
 
 func TestInterface_Properties(t *testing.T) {
 	configDB := &sonic.ConfigDB{
-		Port:                  map[string]sonic.PortEntry{},
-		Interface:             map[string]sonic.InterfaceEntry{},
-		PortChannel:           map[string]sonic.PortChannelEntry{},
-		PortChannelMember:     map[string]map[string]string{},
-		NewtronIntent: map[string]map[string]string{},
-		ACLTable:              map[string]sonic.ACLTableEntry{},
+		Port:              map[string]sonic.PortEntry{},
+		Interface:         map[string]sonic.InterfaceEntry{},
+		PortChannel:       map[string]sonic.PortChannelEntry{},
+		PortChannelMember: map[string]map[string]string{},
+		NewtronIntent:     map[string]map[string]string{},
+		ACLTable:          map[string]sonic.ACLTableEntry{},
 	}
 	configDB.Port["Ethernet0"] = sonic.PortEntry{AdminStatus: "up", Speed: "100G", MTU: "9100"}
 	// VRF and IP are read from the intent DB (Phase 2: intent-based reads).
@@ -456,13 +456,13 @@ func TestInterface_Properties(t *testing.T) {
 func TestInterface_HasService(t *testing.T) {
 	t.Run("with service", func(t *testing.T) {
 		configDB := &sonic.ConfigDB{
-		Port:                  map[string]sonic.PortEntry{},
-		Interface:             map[string]sonic.InterfaceEntry{},
-		PortChannel:           map[string]sonic.PortChannelEntry{},
-		PortChannelMember:     map[string]map[string]string{},
-		NewtronIntent: map[string]map[string]string{},
-		ACLTable:              map[string]sonic.ACLTableEntry{},
-	}
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannel:       map[string]sonic.PortChannelEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent:     map[string]map[string]string{},
+			ACLTable:          map[string]sonic.ACLTableEntry{},
+		}
 		configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{"service_name": "CUSTOMER_L3", "state": "actuated", "operation": "apply-service", "name": "CUSTOMER_L3"}
 		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
 		intf := &Interface{node: d, name: "Ethernet0"}
@@ -476,13 +476,13 @@ func TestInterface_HasService(t *testing.T) {
 
 	t.Run("without service", func(t *testing.T) {
 		configDB := &sonic.ConfigDB{
-		Port:                  map[string]sonic.PortEntry{},
-		Interface:             map[string]sonic.InterfaceEntry{},
-		PortChannel:           map[string]sonic.PortChannelEntry{},
-		PortChannelMember:     map[string]map[string]string{},
-		NewtronIntent: map[string]map[string]string{},
-		ACLTable:              map[string]sonic.ACLTableEntry{},
-	}
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannel:       map[string]sonic.PortChannelEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent:     map[string]map[string]string{},
+			ACLTable:          map[string]sonic.ACLTableEntry{},
+		}
 		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
 		intf := &Interface{node: d, name: "Ethernet0"}
 		if intf.HasService() {
@@ -496,12 +496,12 @@ func TestInterface_HasService(t *testing.T) {
 
 func TestInterface_ServiceBindingProperties(t *testing.T) {
 	configDB := &sonic.ConfigDB{
-		Port:                  map[string]sonic.PortEntry{},
-		Interface:             map[string]sonic.InterfaceEntry{},
-		PortChannel:           map[string]sonic.PortChannelEntry{},
-		PortChannelMember:     map[string]map[string]string{},
-		NewtronIntent: map[string]map[string]string{},
-		ACLTable:              map[string]sonic.ACLTableEntry{},
+		Port:              map[string]sonic.PortEntry{},
+		Interface:         map[string]sonic.InterfaceEntry{},
+		PortChannel:       map[string]sonic.PortChannelEntry{},
+		PortChannelMember: map[string]map[string]string{},
+		NewtronIntent:     map[string]map[string]string{},
+		ACLTable:          map[string]sonic.ACLTableEntry{},
 	}
 	configDB.NewtronIntent["interface|Ethernet0|service"] = map[string]string{
 		"service_name": "CUSTOMER_L3",
@@ -580,10 +580,10 @@ func TestInterface_PortChannelMembership(t *testing.T) {
 func stringTestIntf(port sonic.PortEntry, portState sonic.PortStateEntry, configDB *sonic.ConfigDB) *Interface {
 	if configDB == nil {
 		configDB = &sonic.ConfigDB{
-			Port:                  map[string]sonic.PortEntry{},
-			Interface:             map[string]sonic.InterfaceEntry{},
-			PortChannelMember:     map[string]map[string]string{},
-			NewtronIntent: map[string]map[string]string{},
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent:     map[string]map[string]string{},
 		}
 	}
 	configDB.Port["Ethernet0"] = port

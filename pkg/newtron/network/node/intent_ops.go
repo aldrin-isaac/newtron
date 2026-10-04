@@ -199,11 +199,9 @@ func removeItem(slice []string, item string) []string {
 	return result
 }
 
-
 // intentKind extracts the kind prefix from a resource key.
 // "interface|Ethernet0|qos" → "interface", "device" → "device"
 func intentKind(resource string) string {
 	parts := strings.SplitN(resource, "|", 2)
 	return parts[0]
 }
-

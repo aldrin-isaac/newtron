@@ -227,7 +227,6 @@ type PortChannelInfo struct {
 	AdminStatus   string
 }
 
-
 // GetPortChannel retrieves PortChannel information from the intent DB.
 func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
 	if n.configDB == nil {

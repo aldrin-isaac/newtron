@@ -59,7 +59,7 @@ type DeployRequest struct {
 // complete/error, or poll /api/labs/{networkID}/status. Op names what was
 // accepted; the lab is addressed by its network-id (#396).
 type LabOpResponse struct {
-	Op        string `json:"op"`         // "deploy" | "provision"
+	Op        string `json:"op"` // "deploy" | "provision"
 	NetworkID string `json:"network_id"`
 	Started   string `json:"started"` // RFC3339
 }
@@ -132,8 +132,8 @@ type ErrorPayload struct {
 // canonical newtlab.BridgeStats verbatim (§46 — Wire Shape Mirrors
 // Canonical Types). Empty Host represents the local worker.
 type BridgeStatsSnapshot struct {
-	Host       string             `json:"host"`
-	UpdatedAt  string             `json:"updated_at"`  // RFC3339Nano UTC
-	AgeSeconds float64            `json:"age_seconds"` // computed at GET time
+	Host       string              `json:"host"`
+	UpdatedAt  string              `json:"updated_at"`  // RFC3339Nano UTC
+	AgeSeconds float64             `json:"age_seconds"` // computed at GET time
 	Stats      newtlab.BridgeStats `json:"stats"`
 }

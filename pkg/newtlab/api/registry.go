@@ -107,4 +107,3 @@ func (r *LabOpRegistry) CancelAll(maxWait time.Duration) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
-

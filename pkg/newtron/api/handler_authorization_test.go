@@ -205,10 +205,10 @@ func TestGetAuthorization_WireForm_ShorthandVsTyped(t *testing.T) {
 // TestGetAuthorization_EngageWhenConfigured_Fallback pins the
 // auth.read engage-when-configured contract:
 //
-//	1) --enforce-authorization=true ON
-//	2) network.json has NO auth.read entry
-//	3) Caller is mallory (no group, would be denied by any actual
-//	   gate)
+//  1. --enforce-authorization=true ON
+//  2. network.json has NO auth.read entry
+//  3. Caller is mallory (no group, would be denied by any actual
+//     gate)
 //
 // The endpoint MUST still return 200 — the gate is in fallback mode
 // because no operator has opted in. This preserves the

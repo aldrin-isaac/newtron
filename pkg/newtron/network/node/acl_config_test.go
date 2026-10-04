@@ -14,7 +14,7 @@ import (
 // the policy reaches, as long as each stays single-VLAN.
 func TestMemberPolicy_TaggedAndUntagged(t *testing.T) {
 	ctx := context.Background()
-	n, e0 := testInterface() // Ethernet0 — will join untagged (access)
+	n, e0 := testInterface()               // Ethernet0 — will join untagged (access)
 	e4, err := n.GetInterface("Ethernet4") // Ethernet4 — will join tagged (trunk)
 	if err != nil {
 		t.Fatalf("GetInterface Ethernet4: %v", err)
@@ -73,8 +73,10 @@ func TestFilterHashIsUnqualified(t *testing.T) {
 	if f := buildAclRuleFields(filter.Rules[0], "", ""); f["VLAN_ID"] != "" {
 		t.Fatalf("rule carries VLAN_ID = %q, want none (rules are unqualified)", f["VLAN_ID"])
 	}
-	// The hash is over content alone and deterministic.
-	if computeFilterHash(filter) != computeFilterHash(filter) {
-		t.Fatal("hash is not deterministic for a fixed filter")
+	// The hash is over content alone: a separately built filter with the same
+	// content hashes the same.
+	same := &spec.FilterSpec{Type: "ipv4", Rules: []*spec.FilterRule{{Sequence: 10, Action: "permit"}}}
+	if computeFilterHash(filter) != computeFilterHash(same) {
+		t.Fatal("two filters with the same content hash differently")
 	}
 }

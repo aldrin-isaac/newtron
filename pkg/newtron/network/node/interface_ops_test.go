@@ -18,7 +18,7 @@ func testInterface() (*Node, *Interface) {
 	d := testDevice()
 	intf := &Interface{
 		node: d,
-		name:   "Ethernet0",
+		name: "Ethernet0",
 	}
 	d.interfaces["Ethernet0"] = intf
 	return d, intf
@@ -158,9 +158,9 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	d.configDB.ACLRule["CUSTOMER_L3_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
 	// ACL intent with rule as child intent (DAG format)
 	d.configDB.NewtronIntent["acl|CUSTOMER_L3_IN"] = map[string]string{
-		"operation":  sonic.OpCreateACL,
-		"state":      "actuated",
-		"_children":  "acl|CUSTOMER_L3_IN|RULE_10",
+		"operation": sonic.OpCreateACL,
+		"state":     "actuated",
+		"_children": "acl|CUSTOMER_L3_IN|RULE_10",
 	}
 	d.configDB.NewtronIntent["acl|CUSTOMER_L3_IN|RULE_10"] = map[string]string{
 		"operation": sonic.OpAddACLRule,
@@ -445,8 +445,8 @@ func TestRemoveBGPPeer(t *testing.T) {
 	}
 	// Intent records: parent interface intent + bgp-peer sub-resource from AddBGPPeer
 	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
-		"operation":  sonic.OpInterfaceInit,
-		"_children":  "interface|Ethernet0|bgp-peer",
+		"operation": sonic.OpInterfaceInit,
+		"_children": "interface|Ethernet0|bgp-peer",
 	}
 	d.configDB.NewtronIntent["interface|Ethernet0|bgp-peer"] = map[string]string{
 		"operation":           sonic.OpAddBGPPeer,
@@ -664,8 +664,8 @@ func TestRoundTrip_AddRemoveBGPPeer(t *testing.T) {
 	// Simulate applying the ChangeSet to configDB (as Redis would do in production)
 	d.configDB.BGPNeighbor["default|10.1.0.1"] = sonic.BGPNeighborEntry{ASN: "65002", LocalAddr: "10.1.0.0"}
 	d.configDB.NewtronIntent["interface|Ethernet0|bgp-peer"] = map[string]string{
-		"operation":             sonic.OpAddBGPPeer,
-		"_parents":              "interface|Ethernet0",
+		"operation":            sonic.OpAddBGPPeer,
+		"_parents":             "interface|Ethernet0",
 		sonic.FieldNeighborIP:  "10.1.0.1",
 		sonic.FieldRemoteAS:    "65002",
 		sonic.FieldDescription: "test-peer",

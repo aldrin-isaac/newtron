@@ -56,12 +56,12 @@ type Change = sonic.ConfigChange
 
 // ChangeSet represents a collection of configuration changes.
 type ChangeSet struct {
-	Device       string                     `json:"device"`
-	Operation    string                     `json:"operation"`
-	Timestamp    time.Time                  `json:"timestamp"`
-	Changes      []Change                   `json:"changes"`
-	AppliedCount int                        `json:"applied_count"`            // number of changes successfully written by Apply(); 0 before Apply()
-	Verification *sonic.VerificationResult `json:"verification,omitempty"`   // populated after apply+verify in execute mode
+	Device       string                    `json:"device"`
+	Operation    string                    `json:"operation"`
+	Timestamp    time.Time                 `json:"timestamp"`
+	Changes      []Change                  `json:"changes"`
+	AppliedCount int                       `json:"applied_count"`          // number of changes successfully written by Apply(); 0 before Apply()
+	Verification *sonic.VerificationResult `json:"verification,omitempty"` // populated after apply+verify in execute mode
 
 	// DeviceOps records the outcome of each Device I/O Operation the ChangeSet
 	// performed — one entry per Redis HSET/DEL during Apply, plus one
@@ -601,4 +601,3 @@ func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange, seqSt
 
 	return result, ops, nil
 }
-

@@ -653,7 +653,6 @@ func exportApplyService(intent *sonic.Intent) map[string]any {
 	return result
 }
 
-
 // RegisteredOps exposes the registry to conformance sweeps (pkg/conformance)
 // and orchestration that dispatches by verb. Callers treat it as read-only —
 // the table is assembled once at init and never mutated.

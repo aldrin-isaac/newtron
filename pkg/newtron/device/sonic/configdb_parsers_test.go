@@ -61,15 +61,15 @@ func TestParseEntry_RoundTrip(t *testing.T) {
 			table: "BGP_NEIGHBOR",
 			entry: "10.0.0.2",
 			vals: map[string]string{
-				"asn":           "65001",
-				"local_addr":    "10.0.0.1",
-				"name":          "spine1",
-				"holdtime":      "180",
-				"keepalive":     "60",
-				"admin_status":  "up",
+				"asn":             "65001",
+				"local_addr":      "10.0.0.1",
+				"name":            "spine1",
+				"holdtime":        "180",
+				"keepalive":       "60",
+				"admin_status":    "up",
 				"peer_group_name": "SPINE_PEERS",
-				"ebgp_multihop": "2",
-				"password":      "secret",
+				"ebgp_multihop":   "2",
+				"password":        "secret",
 			},
 			check: func(t *testing.T, db *ConfigDB) {
 				n := db.BGPNeighbor["10.0.0.2"]
@@ -353,8 +353,8 @@ func TestNewEmptyConfigDB(t *testing.T) {
 // the field key name for the round-trip to hold.)
 func TestExportEntries_RoundTrip(t *testing.T) {
 	tests := []struct {
-		name   string
-		entry  Entry
+		name  string
+		entry Entry
 	}{
 		{
 			name: "PORT",
@@ -456,10 +456,10 @@ func TestExportEntries_RoundTrip(t *testing.T) {
 				Table: "DEVICE_METADATA",
 				Key:   "localhost",
 				Fields: map[string]string{
-					"hostname":    "switch1",
-					"mac":         "aa:bb:cc:dd:ee:ff",
-					"platform":    "x86_64-grub",
-					"hwsku":       "Force10-S6000",
+					"hostname": "switch1",
+					"mac":      "aa:bb:cc:dd:ee:ff",
+					"platform": "x86_64-grub",
+					"hwsku":    "Force10-S6000",
 				},
 			},
 		},
@@ -565,4 +565,3 @@ func TestStructToFields(t *testing.T) {
 		}
 	})
 }
-

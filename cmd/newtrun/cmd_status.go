@@ -376,7 +376,6 @@ func findRunningSuite(suites []string) string {
 	return ""
 }
 
-
 func checkNetworkStatus(network string) string {
 	// The network name is the lab name (PR #116 — the lab's deployment
 	// id IS its network id). Routes through newtlab-server's HTTP

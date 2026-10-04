@@ -223,7 +223,9 @@ func (n *Node) CreateACL(ctx context.Context, name string, opts ACLConfig) (*Cha
 	}
 	cs, err := n.op(sonic.OpCreateACL, name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
-		func() []sonic.Entry { return createAclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) },
+		func() []sonic.Entry {
+			return createAclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description)
+		},
 		"device.delete-acl")
 	if err != nil {
 		return nil, err

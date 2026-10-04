@@ -117,7 +117,6 @@ func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*C
 	return cs, nil
 }
 
-
 // UpdateIRB atomically mutates the operator-authored IRB identity for a
 // VLAN — the §48 in-place path: the VLAN_INTERFACE base row is never
 // touched, so intfmgrd observes an edit to the gateway's sub-entries, not
@@ -281,7 +280,6 @@ type MACVPNInfo struct {
 	L2VNI          int    `json:"l2_vni,omitempty"` // L2VNI from VXLAN_TUNNEL_MAP
 	ARPSuppression bool   `json:"arp_suppression"`  // ARP suppression enabled
 }
-
 
 // GetVLAN retrieves VLAN information from the intent DB.
 func (n *Node) GetVLAN(id int) (*VLANInfo, error) {

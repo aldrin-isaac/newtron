@@ -47,4 +47,3 @@ func Dim(s string) string {
 	}
 	return "\033[2m" + s + "\033[0m"
 }
-

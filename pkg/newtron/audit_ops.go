@@ -133,4 +133,3 @@ func VerifyAuditIntegrity(path string) (AuditIntegrityResult, error) {
 	}
 	return out, nil
 }
-

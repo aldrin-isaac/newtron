@@ -5,9 +5,9 @@
 // the engage-when-configured pattern (CheckAuditReadGate; see
 // authorization_ops.go):
 //
-//   GET /newtron/v1/networks/{netID}/audit/events?...        — paged, filtered
-//   GET /newtron/v1/networks/{netID}/audit/events/{eventID}  — single event
-//   GET /newtron/v1/networks/{netID}/audit/integrity         — hash-chain status
+//	GET /newtron/v1/networks/{netID}/audit/events?...        — paged, filtered
+//	GET /newtron/v1/networks/{netID}/audit/events/{eventID}  — single event
+//	GET /newtron/v1/networks/{netID}/audit/integrity         — hash-chain status
 //
 // Per-network scoping: the events and detail endpoints filter by the
 // path's {netID} (Event.Network), so a caller authorized to read one

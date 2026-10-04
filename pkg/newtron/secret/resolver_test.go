@@ -95,8 +95,8 @@ func TestIsRef(t *testing.T) {
 		{"${secret:foo}", true},
 		{"${secret:}", true}, // syntactically a ref; Resolve will reject the empty key
 		{"YourPaSsWoRd", false},
-		{"${secret:foo", false},  // missing close
-		{"secret:foo}", false},   // missing prefix
+		{"${secret:foo", false}, // missing close
+		{"secret:foo}", false},  // missing prefix
 		{"", false},
 		{"$secret:foo", false}, // shell-style sigil only, no braces
 	}

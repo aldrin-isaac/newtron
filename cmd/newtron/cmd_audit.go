@@ -155,9 +155,10 @@ shows the content.`,
 // removed, reordered, or modified after the fact.
 //
 // Exit codes:
-//   0   chain verified clean (or file missing — nothing to tamper)
-//   1   tamper detected; the breakpoint is printed to stderr
-//   2   I/O or argument error
+//
+//	0   chain verified clean (or file missing — nothing to tamper)
+//	1   tamper detected; the breakpoint is printed to stderr
+//	2   I/O or argument error
 var auditVerifyCmd = &cobra.Command{
 	Use:   "verify [path]",
 	Short: "Verify the hash chain on an audit log",

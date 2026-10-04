@@ -57,9 +57,9 @@ func TestSettings_SaveLoad(t *testing.T) {
 	// Create settings
 	original := &Settings{
 		DefaultNetwork: "production",
-		Dir:        "/etc/newtron",
+		Dir:            "/etc/newtron",
 		DefaultSuite:   "networks/2node-ngdp/suites/2node-ngdp-incremental",
-		NetworksDir:  "networks",
+		NetworksDir:    "networks",
 	}
 
 	// Save

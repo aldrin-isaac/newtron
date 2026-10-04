@@ -25,10 +25,10 @@ func TestSaveLoadInlineRunStateRoundTrip(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	state := &RunState{
-		Suite:    "test-uuid",
+		Suite:   "test-uuid",
 		Network: "test-topo",
-		Status:   SuiteStatusRunning,
-		Started:  time.Now().UTC(),
+		Status:  SuiteStatusRunning,
+		Started: time.Now().UTC(),
 	}
 	if err := SaveInlineRunState(state); err != nil {
 		t.Fatalf("Save: %v", err)

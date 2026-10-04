@@ -70,7 +70,6 @@ func (net *Network) PlatformSupportsFeature(platform, feature string) bool {
 	return p.SupportsFeature(feature)
 }
 
-
 // Platform CRUD is removed: platforms are a global registry loaded
 // once at newt-server startup from --platforms-base. Operators
 // author platforms by editing files under that directory directly

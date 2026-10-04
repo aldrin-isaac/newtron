@@ -222,7 +222,6 @@ func TestNormalizeVRFName(t *testing.T) {
 	}
 }
 
-
 func TestParseInterfaceName(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -87,20 +87,20 @@ type Event struct {
 	// network's audit sees only that network's events. Empty for events
 	// with no network context (e.g. network creation, a server-registry
 	// lifecycle act rather than a network-scoped mutation).
-	Network            string             `json:"network,omitempty"`
-	Device             string             `json:"device"`
-	Operation          string             `json:"operation"`
-	Service            string             `json:"service,omitempty"`
-	Interface          string             `json:"interface,omitempty"`
+	Network   string `json:"network,omitempty"`
+	Device    string `json:"device"`
+	Operation string `json:"operation"`
+	Service   string `json:"service,omitempty"`
+	Interface string `json:"interface,omitempty"`
 	// Resource and Field are populated on authcheck:* decision events
 	// (auth-design.md L3+L5). Resource is the specific entity acted on
 	// (vlan id, vrf name, …); Field is the meta-authorization dimension
 	// — the top-level spec area being mutated (services, permissions,
 	// user_groups, …). Reviewers reconstruct the full L5 where-clause
 	// evaluation context from these plus Device/Service/Interface.
-	Resource string `json:"resource,omitempty"`
-	Field    string `json:"field,omitempty"`
-	Changes            []node.Change      `json:"changes"`
+	Resource string        `json:"resource,omitempty"`
+	Field    string        `json:"field,omitempty"`
+	Changes  []node.Change `json:"changes"`
 	// RequestBody is the raw JSON payload the caller submitted, captured by
 	// the audit middleware with secret-bearing fields redacted. It answers
 	// "what did this operation submit?" — the content half of an audit trail,
@@ -111,13 +111,13 @@ type Event struct {
 	// only by the per-event detail endpoint, never the paged list — bodies are
 	// unbounded and the list stays lean.
 	RequestBody json.RawMessage `json:"request_body,omitempty"`
-	Success            bool               `json:"success"`
-	Error              string             `json:"error,omitempty"`
-	ExecuteMode        bool               `json:"execute_mode"` // true if -x was used
-	DryRun             bool               `json:"dry_run"`
-	Duration           time.Duration      `json:"duration"`
-	ClientIP           string             `json:"client_ip,omitempty"`
-	SessionID          string             `json:"session_id,omitempty"`
+	Success     bool            `json:"success"`
+	Error       string          `json:"error,omitempty"`
+	ExecuteMode bool            `json:"execute_mode"` // true if -x was used
+	DryRun      bool            `json:"dry_run"`
+	Duration    time.Duration   `json:"duration"`
+	ClientIP    string          `json:"client_ip,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
 }
 
 // Filter defines criteria for querying audit events

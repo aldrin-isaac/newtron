@@ -103,7 +103,7 @@ func TestEnsureTopology_ReusesRunningLab(t *testing.T) {
 // (2) LabStatus reports a mix of running and stopped nodes.
 func TestEnsureTopology_RedeploysWhenPartialOrMissing(t *testing.T) {
 	cases := []struct {
-		name    string
+		name     string
 		statusFn func(ctx context.Context, lab string) (*newtlab.LabState, error)
 	}{
 		{

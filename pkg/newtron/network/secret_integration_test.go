@@ -569,18 +569,6 @@ func (n *Network) resolveNodeSpecByName(name string) (*spec.ResolvedNodeSpec, er
 	return n.resolveNodeSpec(name, p)
 }
 
-func plainSwitch1NodeSpec() string {
-	return `{
-		"mgmt_ip": "127.0.0.1",
-		"loopback_ip": "10.0.0.1",
-		"zone": "amer",
-		"platform": "p1",
-		"ssh_user": "admin",
-		"ssh_pass": "YourPaSsWoRd",
-		"underlay_asn": 65001
-	}`
-}
-
 // TestNewNetwork_SpecDirSecretStoreAutoDiscovery pins the #176
 // convention: when the operator passes secretStore=nil AND
 // <specDir>/secrets.json exists, the loader auto-opens it as a

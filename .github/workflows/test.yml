@@ -34,6 +34,17 @@ jobs:
       - name: Install PAM development headers
         run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
 
+      # Every Go file is gofmt-formatted. gofmt -l lists the files that are
+      # not; any output fails the step and names them.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-formatted (run: gofmt -w <file>):"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: go build ./...
         run: go build ./...
 

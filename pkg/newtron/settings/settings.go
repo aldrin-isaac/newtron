@@ -94,4 +94,3 @@ func (s *Settings) GetDir() string {
 	}
 	return DefaultDir
 }
-

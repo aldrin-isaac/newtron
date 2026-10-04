@@ -23,7 +23,7 @@ func TestReporterCallbacksProduceCorrectEventTypes(t *testing.T) {
 	}
 	scenarioResult := &newtrun.ScenarioResult{
 		Name:     "s1",
-		Network: "topo",
+		Network:  "topo",
 		Status:   newtrun.StepStatusPassed,
 		Duration: 2 * time.Second,
 	}
@@ -120,7 +120,7 @@ func TestReporterScenarioEndCarriesResultFields(t *testing.T) {
 
 	result := &newtrun.ScenarioResult{
 		Name:     "scenario-x",
-		Network: "topo-y",
+		Network:  "topo-y",
 		Status:   newtrun.StepStatusFailed,
 		Duration: 5 * time.Second,
 		Steps: []newtrun.StepResult{

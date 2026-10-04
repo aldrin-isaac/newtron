@@ -46,7 +46,7 @@ func TestBuildPortsFromRows_SkipIsContiguous(t *testing.T) {
 	cols := portConfigColumns{name: 2, speed: 4, lanes: 0}
 	rows := [][]string{
 		{"1,2", "a", "Ethernet0", "0", "100000"}, // valid
-		{"1,2", "a"},                              // too short to reach name (col 2) → skipped
+		{"1,2", "a"},                             // too short to reach name (col 2) → skipped
 		{"5,6", "a", "Ethernet4", "1", "100000"}, // valid
 	}
 	got := buildPortsFromRows(rows, cols)
@@ -97,9 +97,9 @@ func TestFindColumns(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "comment-without-speed-keyword-ignored",
-			input:   "# this is some banner\n# name lanes alias index speed\nEthernet0 1 a 1 40000\n",
-			want:    4,
+			name:  "comment-without-speed-keyword-ignored",
+			input: "# this is some banner\n# name lanes alias index speed\nEthernet0 1 a 1 40000\n",
+			want:  4,
 		},
 	}
 	for _, c := range cases {

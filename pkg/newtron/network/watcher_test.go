@@ -249,7 +249,6 @@ func TestSpecWatcher_Remove(t *testing.T) {
 	}
 }
 
-
 // TestSpecWatcher_AdoptsSubdirCreatedAfterAdd pins #469: a nodes/ or zones/
 // subdirectory that does not exist at Add is picked up when it appears, so
 // edits to per-file specs inside it still reload.

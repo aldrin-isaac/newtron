@@ -374,4 +374,3 @@ func kvmAvailable() bool {
 	f.Close()
 	return true
 }
-

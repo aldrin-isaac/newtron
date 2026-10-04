@@ -89,7 +89,7 @@ const (
 	// name budgets DERIVED from VRFNameMaxLen — not independent magic numbers:
 	//   shared:    "Vrf_" + name            ≤ 15 → name ≤ 11
 	//   interface: "Vrf_" + name + "_" + I  ≤ 15 → name ≤ 5 (I ≤ 5)
-	MaxSharedServiceName    = VRFNameMaxLen - len(vrfPrefix)                    // 11
+	MaxSharedServiceName    = VRFNameMaxLen - len(vrfPrefix)                     // 11
 	MaxInterfaceServiceName = VRFNameMaxLen - len(vrfPrefix) - 1 - shortIfaceMax // 5
 )
 
@@ -132,9 +132,9 @@ func shortenInterfaceForVRF(name string) string {
 // (uppercase, underscores).
 //
 //   - shared:    "Vrf_<SERVICE>"           — one VRF shared across the service's
-//                                             interfaces (e.g. "Vrf_OVERLAY_A").
+//     interfaces (e.g. "Vrf_OVERLAY_A").
 //   - interface: "Vrf_<SERVICE>_<IFACE>"   — one VRF per interface, the interface
-//                                             single-lettered (e.g. "Vrf_IRB_E2").
+//     single-lettered (e.g. "Vrf_IRB_E2").
 //
 // Both must fit VRFNameMaxLen; the service-name budgets (MaxServiceNameLen) keep
 // them there, and ValidateVRFNameLength is the fail-closed backstop for the runtime
@@ -303,4 +303,3 @@ func MergeMaps[K comparable, V any](maps ...map[K]V) map[K]V {
 	}
 	return result
 }
-

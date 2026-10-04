@@ -228,5 +228,3 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	util.WithDevice(n.Name()).Infof("Removing direct BGP peer %s from interface %s", neighborIP, i.name)
 	return cs, nil
 }
-
-

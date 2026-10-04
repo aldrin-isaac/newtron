@@ -143,7 +143,9 @@ func (n *Node) BindIPVPN(ctx context.Context, ipvpnName, vrfName string) (*Chang
 	resolved := n.Resolved()
 	cs, err := n.op(sonic.OpBindIPVPN, ipvpnName, ChangeModify,
 		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
-		func() []sonic.Entry { return bindIpvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) },
+		func() []sonic.Entry {
+			return bindIpvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID)
+		},
 		"device.unbind-ipvpn")
 	if err != nil {
 		return nil, err
@@ -378,7 +380,6 @@ type VRFInfo struct {
 	L3VNI      int
 	Interfaces []string
 }
-
 
 // GetVRF retrieves VRF information from the intent DB.
 func (n *Node) GetVRF(name string) (*VRFInfo, error) {

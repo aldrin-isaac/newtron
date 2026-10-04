@@ -19,7 +19,7 @@ func TestResultsFromRunState_NilStateReturnsNil(t *testing.T) {
 // `newtrun report` CLI relies on.
 func TestResultsFromRunState_PreservesScenarioFields(t *testing.T) {
 	state := &RunState{
-		Network: "1node-vs",
+		Network:  "1node-vs",
 		Platform: "sonic-vs",
 		Scenarios: []ScenarioState{
 			{

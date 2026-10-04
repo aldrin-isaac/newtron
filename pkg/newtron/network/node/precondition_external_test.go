@@ -16,21 +16,21 @@ func testNode(configDB *sonic.ConfigDB, connected, locked bool) *node.Node {
 // emptyConfigDB creates a ConfigDB with all maps initialized to empty.
 func emptyConfigDB() *sonic.ConfigDB {
 	return &sonic.ConfigDB{
-		DeviceMetadata:        make(map[string]map[string]string),
-		Port:                  make(map[string]sonic.PortEntry),
-		VLAN:                  make(map[string]sonic.VLANEntry),
-		VLANMember:            make(map[string]sonic.VLANMemberEntry),
-		VLANInterface:         make(map[string]map[string]string),
-		Interface:             make(map[string]sonic.InterfaceEntry),
-		PortChannel:           make(map[string]sonic.PortChannelEntry),
-		PortChannelMember:     make(map[string]map[string]string),
-		LoopbackInterface:     make(map[string]map[string]string),
-		VRF:                   make(map[string]sonic.VRFEntry),
-		VXLANTunnel:           make(map[string]sonic.VXLANTunnelEntry),
-		BGPNeighbor:           make(map[string]sonic.BGPNeighborEntry),
-		ACLTable:              make(map[string]sonic.ACLTableEntry),
-		NewtronIntent: make(map[string]map[string]string),
-		BGPPeerGroup:          make(map[string]sonic.BGPPeerGroupEntry),
+		DeviceMetadata:    make(map[string]map[string]string),
+		Port:              make(map[string]sonic.PortEntry),
+		VLAN:              make(map[string]sonic.VLANEntry),
+		VLANMember:        make(map[string]sonic.VLANMemberEntry),
+		VLANInterface:     make(map[string]map[string]string),
+		Interface:         make(map[string]sonic.InterfaceEntry),
+		PortChannel:       make(map[string]sonic.PortChannelEntry),
+		PortChannelMember: make(map[string]map[string]string),
+		LoopbackInterface: make(map[string]map[string]string),
+		VRF:               make(map[string]sonic.VRFEntry),
+		VXLANTunnel:       make(map[string]sonic.VXLANTunnelEntry),
+		BGPNeighbor:       make(map[string]sonic.BGPNeighborEntry),
+		ACLTable:          make(map[string]sonic.ACLTableEntry),
+		NewtronIntent:     make(map[string]map[string]string),
+		BGPPeerGroup:      make(map[string]sonic.BGPPeerGroupEntry),
 	}
 }
 

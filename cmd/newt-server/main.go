@@ -237,9 +237,9 @@ func main() {
 	}
 
 	newtronSrv := newtronapi.NewServer(newtronapi.Config{
-		Logger:               logger,
-		IdleTimeout:          *idleTimeout,
-		PortResolver:         newtronPortResolver,
+		Logger:       logger,
+		IdleTimeout:  *idleTimeout,
+		PortResolver: newtronPortResolver,
 		// LabDeployed lets the delete-network guard refuse while a lab still runs
 		// under the name. Reaches newtlab through the same loopback client the
 		// port resolver uses (§27 — never the ~/.newtlab files); ListLabs returns
