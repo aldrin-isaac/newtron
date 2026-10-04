@@ -271,7 +271,7 @@ func TestAPICompleteness(t *testing.T) {
 	// excludedMethods lists methods intentionally NOT exposed via HTTP.
 	excludedMethods := map[string]map[string]string{
 		"Network": {
-			"AddTopologyDevice":      "engine placement primitive — create-node auto-places the node's topology entry (#393), so there is no standalone topology create-node endpoint; retained as the internal seam CreateNodeSpec calls and the topology-invariant test fixture",
+			"AddTopologyDevice":      "engine placement primitive — create-node auto-places the node's topology entry (#393), so there is no standalone topology create-node endpoint; retained as the setup step the TestTopologyCRUD_* tests use to place a second device (CreateNodeSpec calls the internal network.AddTopologyDevice, not this wrapper)",
 			"EnableAuthorization":    "server-internal initialization — invoked by api.Server when --enforce-authorization is set (auth-design.md L3); not a request-handled action",
 			"SetAuditLogger":         "server-internal initialization — api.Server hands each network its per-network audit logger on RegisterNetwork/ReloadNetwork (auth-design.md L1); not a request-handled action",
 			"Authorize":              "server-internal permission gate — invoked by api.Server for the write-control reservation handlers (control.request/control.takeover); not itself a request-handled action",
