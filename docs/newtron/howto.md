@@ -1063,10 +1063,14 @@ newtron leaf1 interface set Ethernet8 admin-status down -x
 
 | Property | Valid Values | Notes |
 |----------|-------------|-------|
-| `mtu` | Integer | Validated by `util.ValidateMTU()` |
-| `speed` | `1G`, `10G`, `25G`, `40G`, `50G`, `100G`, `200G`, `400G` | Must match platform capabilities |
+| `mtu` | Integer, 68–9216 | |
+| `speed` | `1G`, `10G`, `25G`, `40G`, `50G`, `100G`, `200G`, `400G` | Written to CONFIG_DB in Mbps (`100G` → `100000`), the form SONiC parses. Not checked against the platform; SAI refuses a speed the port can't run. Refused on a platform that declares no `default_speed`. |
 | `admin-status` | `up`, `down` | |
-| `description` | Any string | |
+| `description` | Any non-empty string | |
+
+Values are validated by the same rules as a port's settings in `topology.json`.
+`interface clear <port> <property>` reverts `mtu` to 9100, `admin-status` to `up`,
+`speed` to the platform's `default_speed`, and `description` to empty.
 
 **Constraint:** LAG members cannot be configured directly — configure the parent LAG instead.
 

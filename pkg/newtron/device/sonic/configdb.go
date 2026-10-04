@@ -128,6 +128,7 @@ const (
 	FieldDescription    = "description"
 	FieldProperty       = "property"
 	FieldValue          = "value"
+	FieldDefaultSpeed   = "default_speed"
 	FieldIntfIP         = "ip"
 	FieldRemoteAS       = "remote_as"
 	FieldQoSPolicy      = "policy"

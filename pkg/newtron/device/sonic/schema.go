@@ -397,13 +397,14 @@ var Schema = map[string]TableSchema{
 	},
 
 	"PORT": {
-		// YANG: sonic-port.yang — speed is uint32 1..1600000 (Mbps); newtron writes string enum
+		// YANG: sonic-port.yang — speed is uint32 1..1600000 (Mbps). Operators author
+		// "100G"; spec.PortConfig renders it as "100000" before it reaches this table.
 		KeyPattern: `^Ethernet\d+$`,
 		Fields: map[string]FieldConstraint{
-			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}},                                             // YANG: default "down"
-			"mtu":          {Type: FieldInt, Range: intRange(68, 9216)},                                                 // YANG: uint16 68..9216
-			"speed":        {Type: FieldEnum, Enum: []string{"1G", "10G", "25G", "40G", "50G", "100G", "200G", "400G"}}, // YANG: uint32; newtron uses string
-			"description":  {Type: FieldString},                                                                         // YANG: length 0..255
+			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}}, // YANG: default "down"
+			"mtu":          {Type: FieldInt, Range: intRange(68, 9216)},     // YANG: uint16 68..9216
+			"speed":        {Type: FieldInt, Range: intRange(1, 1600000)},   // YANG: uint32 1..1600000 (Mbps)
+			"description":  {Type: FieldString},                             // YANG: length 0..255
 		},
 	},
 

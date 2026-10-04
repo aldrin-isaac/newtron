@@ -467,8 +467,11 @@ func buildOpRegistry() map[string]*OpSpec {
 
 		sonic.OpSetProperty: {
 			Op: sonic.OpSetProperty, Scope: ScopeInterface, Inverse: "interface.clear-property",
-			Needs:  []InterfaceCapability{CapabilityPortProperties},
-			Params: []ParamSpec{required(sonic.FieldProperty), required(sonic.FieldValue)},
+			Needs: []InterfaceCapability{CapabilityPortProperties},
+			Params: []ParamSpec{
+				required(sonic.FieldProperty), required(sonic.FieldValue),
+				recorded(sonic.FieldDefaultSpeed), // speed only: the value clear-property restores
+			},
 			Replay: func(ctx context.Context, _ *Node, i *Interface, p map[string]any) error {
 				property := paramString(p, "property")
 				value := paramString(p, "value")

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -728,55 +729,38 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		return nil, fmt.Errorf("cannot configure PortChannel member directly - configure the parent PortChannel")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface."+sonic.OpSetProperty)
-	if err := i.createInterfaceIntent(cs); err != nil {
-		return nil, err
-	}
-	if err := i.node.writeIntent(cs, sonic.OpSetProperty, "interface|"+i.name+"|"+property,
-		map[string]string{sonic.FieldProperty: property, sonic.FieldValue: value},
-		[]string{"interface|" + i.name}); err != nil {
-		return nil, err
-	}
 	// Per-property granularity within CapabilityPortProperties: speed and
 	// description exist only on the physical PORT row.
 	if _, known := propertyApplicability[property]; known && !propertyAppliesTo(property, i.Kind()) {
 		return nil, fmt.Errorf("property %q does not apply to a %s", property, i.Kind())
 	}
 
-	fields := make(map[string]string)
+	// The value is validated and rendered by spec.PortConfig — the one owner of
+	// port-property values, shared with the topology's port config — so a speed
+	// is written in the Mbps form SONiC parses, never as authored (RCA-050).
+	fields, err := portPropertyFields(i.name, property, value)
+	if err != nil {
+		return nil, err
+	}
 
-	switch property {
-	case "mtu":
-		mtuVal := 0
-		if _, err := fmt.Sscanf(value, "%d", &mtuVal); err != nil {
-			return nil, fmt.Errorf("invalid MTU value: %s", value)
-		}
-		if err := util.ValidateMTU(mtuVal); err != nil {
+	intentParams := map[string]string{sonic.FieldProperty: property, sonic.FieldValue: value}
+	if property == "speed" {
+		// clear-property writes this back; recorded here so the reverse never
+		// reads the platform spec (§20).
+		defaultSpeed, err := n.platformDefaultSpeed(i.name)
+		if err != nil {
 			return nil, err
 		}
-		fields["mtu"] = value
+		intentParams[sonic.FieldDefaultSpeed] = defaultSpeed
+	}
 
-	case "speed":
-		// Validate speed format (e.g., 10G, 25G, 40G, 100G)
-		validSpeeds := map[string]bool{
-			"1G": true, "10G": true, "25G": true, "40G": true, "50G": true, "100G": true, "200G": true, "400G": true,
-		}
-		if !validSpeeds[value] {
-			return nil, fmt.Errorf("invalid speed: %s (valid: 1G, 10G, 25G, 40G, 50G, 100G, 200G, 400G)", value)
-		}
-		fields["speed"] = value
-
-	case "admin-status", "admin_status":
-		if value != "up" && value != "down" {
-			return nil, fmt.Errorf("admin-status must be 'up' or 'down'")
-		}
-		fields["admin_status"] = value
-
-	case "description":
-		fields["description"] = value
-
-	default:
-		return nil, fmt.Errorf("unknown property: %s (valid: mtu, speed, admin-status, description)", property)
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpSetProperty)
+	if err := i.createInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	if err := i.node.writeIntent(cs, sonic.OpSetProperty, "interface|"+i.name+"|"+property,
+		intentParams, []string{"interface|" + i.name}); err != nil {
+		return nil, err
 	}
 
 	cs.Updates(setPropertyConfig(propertyTable(i.name), i.name, fields))
@@ -808,7 +792,11 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 
 	switch property {
 	case "mtu", "speed", "admin-status", "admin_status", "description":
-		cs.Updates(clearPropertyConfig(propertyTable(i.name), i.name, property))
+		defaultSpeed := intent.Params[sonic.FieldDefaultSpeed]
+		if property == "speed" && defaultSpeed == "" {
+			return nil, fmt.Errorf("speed intent on %s records no default speed to revert to", i.name)
+		}
+		cs.Updates(clearPropertyConfig(propertyTable(i.name), i.name, property, defaultSpeed))
 	default:
 		return nil, fmt.Errorf("unknown property: %s", property)
 	}
@@ -822,4 +810,28 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 
 	util.WithDevice(n.Name()).Infof("Cleared %s on interface %s", property, i.name)
 	return cs, nil
+}
+
+// platformDefaultSpeed returns the speed a port with no speed override runs at —
+// the platform's default_speed, which an unset port inherits — in the Mbps form
+// SONiC parses, rendered by spec.PortConfig like every other port value. Without
+// one a speed override could not be reverted, so the override is refused as a
+// precondition (409; replay skips such an intent rather than aborting).
+func (n *Node) platformDefaultSpeed(intfName string) (string, error) {
+	refuse := func(detail string) error {
+		return util.NewPreconditionError(sonic.OpSetProperty, intfName,
+			"platform declares a valid default_speed", detail)
+	}
+	platform, err := n.GetPlatform(n.resolved.Platform)
+	if err != nil {
+		return "", refuse(err.Error())
+	}
+	pc := spec.PortConfig{Speed: platform.DefaultSpeed}
+	if platform.DefaultSpeed == "" {
+		return "", refuse(fmt.Sprintf("platform %s declares no default_speed, so a speed override could not be reverted", n.resolved.Platform))
+	}
+	if err := pc.ValidateConstraints("default_speed of platform " + n.resolved.Platform); err != nil {
+		return "", refuse(err.Error())
+	}
+	return pc.Fields()["speed"], nil
 }

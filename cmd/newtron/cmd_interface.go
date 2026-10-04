@@ -227,11 +227,11 @@ var interfaceSetCmd = &cobra.Command{
 Requires -D (device) flag.
 
 Properties:
-  mtu <value>           - Interface MTU
+  mtu <68-9216>          - Interface MTU
+  speed <1G|10G|25G|40G|50G|100G|200G|400G>
+                         - Port speed (physical ports; written in Mbps)
   admin-status <up|down> - Administrative status
-  description <text>    - Interface description
-  vrf <name>            - VRF binding
-  ip <address/prefix>   - IP address
+  description <text>     - Interface description
 
 Examples:
   newtron -D leaf1-ny interface set Ethernet0 mtu 9000 -x
@@ -351,14 +351,15 @@ var interfaceClearCmd = &cobra.Command{
 	Short: "Clear a property from an interface",
 	Long: `Clear (remove) a property from an interface.
 
-This is the reverse of 'interface set'. It removes the specified property,
-restoring the default or removing the configuration entirely.
+This is the reverse of 'interface set'. It removes the property override and
+restores the default: mtu 9100, admin-status up, speed the platform's
+default_speed, description empty.
 
 Requires -D (device) flag.
 
 Examples:
-  newtron leaf1 interface clear Ethernet0 vrf -x
-  newtron leaf1 interface clear Ethernet0 ip -x
+  newtron leaf1 interface clear Ethernet0 mtu -x
+  newtron leaf1 interface clear Ethernet0 speed -x
   newtron leaf1 interface clear Ethernet0 description -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {

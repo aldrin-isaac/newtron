@@ -72,14 +72,6 @@ func IsValidIPv4CIDR(cidr string) bool {
 	return ip != nil && ip.To4() != nil
 }
 
-// ValidateMTU checks if MTU is within valid range
-func ValidateMTU(mtu int) error {
-	if mtu < 68 || mtu > 9216 {
-		return fmt.Errorf("MTU must be between 68 and 9216, got %d", mtu)
-	}
-	return nil
-}
-
 // SplitIPMask splits a CIDR notation into IP and mask length
 // Returns the IP (without mask) and mask length
 func SplitIPMask(cidr string) (string, int) {

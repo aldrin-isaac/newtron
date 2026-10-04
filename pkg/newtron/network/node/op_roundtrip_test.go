@@ -56,6 +56,9 @@ func roundTripNode() *Node {
 		n.interfaces[p] = &Interface{node: n, name: p}
 	}
 	sp := n.SpecProvider.(*testSpecProvider)
+	// set-property speed records the platform's default speed for its reverse.
+	n.resolved.Platform = "RT_PLATFORM"
+	sp.platforms["RT_PLATFORM"] = &spec.PlatformSpec{Name: "RT_PLATFORM", DefaultSpeed: "40G"}
 	sp.macvpn["SERVERS"] = &spec.MACVPNSpec{
 		Description:    "server macvpn",
 		VlanID:         200,
@@ -252,6 +255,14 @@ var roundTripSequence = []opInvocation{
 			return err
 		}
 		_, err = i.SetProperty(ctx, "mtu", "9100")
+		return err
+	}},
+	{"set-property", func(ctx context.Context, n *Node) error {
+		i, err := iface(n, "Ethernet20")
+		if err != nil {
+			return err
+		}
+		_, err = i.SetProperty(ctx, "speed", "100G") // records default_speed
 		return err
 	}},
 	{"bind-acl", func(ctx context.Context, n *Node) error {

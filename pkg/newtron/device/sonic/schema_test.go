@@ -686,3 +686,30 @@ func TestQueueKeyPatternBound(t *testing.T) {
 			"than the constant, so a teardown sweep would leave rows behind", over)
 	}
 }
+
+// PORT speed is the wire value orchagent parses: Mbps, uint32 1..1600000
+// (sonic-port.yang). The authored form ("100G") must never pass — orchagent
+// rejects it and on CiscoVS one bad port stalls every port (RCA-050).
+func TestValidateEntry_PORT_SpeedIsMbps(t *testing.T) {
+	tests := []struct {
+		speed string
+		ok    bool
+	}{
+		{"100000", true},
+		{"1000", true},
+		{"1600000", true},
+		{"100G", false},
+		{"", false},
+		{"0", false},
+		{"1600001", false},
+	}
+	for _, tt := range tests {
+		err := Schema["PORT"].ValidateEntry("PORT", "Ethernet0", map[string]string{"speed": tt.speed})
+		if tt.ok && err != nil {
+			t.Errorf("speed %q: unexpected error %v", tt.speed, err)
+		}
+		if !tt.ok && err == nil {
+			t.Errorf("speed %q: should be rejected", tt.speed)
+		}
+	}
+}
