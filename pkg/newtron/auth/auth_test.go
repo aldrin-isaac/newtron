@@ -9,6 +9,13 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
+// tableOf serves a fixture network's authorization table to a Checker.
+func tableOf(n *spec.NetworkSpecFile) func() Table {
+	return func() Table {
+		return Table{UserGroups: n.UserGroups, Permissions: n.Permissions, SuperUsers: n.SuperUsers}
+	}
+}
+
 // shorthand makes a spec.PermissionGrants with one grant whose
 // Where clause is empty — the in-test equivalent of the pre-L5
 // ["group1", "group2"] flat list. Tests that exercise the L5
@@ -70,23 +77,23 @@ func callerCtx(caller string) *Context {
 
 func TestChecker_SuperUser(t *testing.T) {
 	network := createTestNetworkSpec()
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	// Superuser should pass all checks
 	if err := checker.Check(PermServiceApply, callerCtx("admin")); err != nil {
 		t.Errorf("Superuser should be allowed: %v", err)
 	}
-	if !checker.isSuperUser("admin") {
+	if !checker.isSuperUser(checker.table(), "admin") {
 		t.Error("admin should be superuser")
 	}
 }
 
 func TestChecker_GlobalSuperUser(t *testing.T) {
 	network := createTestNetworkSpec() // super_users: ["admin", "root"] — NOT "global-admin"
-	checker := NewChecker(network, "global-admin", "")
+	checker := NewChecker(tableOf(network), "global-admin", "")
 
 	// A global super-user not named in this network's super_users still bypasses.
-	if !checker.isSuperUser("global-admin") {
+	if !checker.isSuperUser(checker.table(), "global-admin") {
 		t.Error("global super-user 'global-admin' should bypass on every network")
 	}
 	if err := checker.Check(PermServiceApply, callerCtx("global-admin")); err != nil {
@@ -94,26 +101,26 @@ func TestChecker_GlobalSuperUser(t *testing.T) {
 	}
 	// Per-network super-user still works; empty entries are ignored; a normal
 	// user is unaffected.
-	if !checker.isSuperUser("admin") {
+	if !checker.isSuperUser(checker.table(), "admin") {
 		t.Error("per-network super-user should still bypass")
 	}
-	if checker.isSuperUser("") {
+	if checker.isSuperUser(checker.table(), "") {
 		t.Error("empty username must never be a super-user")
 	}
-	if checker.isSuperUser("nobody") {
+	if checker.isSuperUser(checker.table(), "nobody") {
 		t.Error("a non-listed user must not be a super-user")
 	}
 
 	// Without the global list, 'global-admin' is just a normal user.
-	plain := NewChecker(network)
-	if plain.isSuperUser("global-admin") {
+	plain := NewChecker(tableOf(network))
+	if plain.isSuperUser(plain.table(), "global-admin") {
 		t.Error("global-admin is not a per-network super-user; without the global list it must not bypass")
 	}
 }
 
 func TestChecker_GlobalPermissions(t *testing.T) {
 	network := createTestNetworkSpec()
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	t.Run("user in allowed group", func(t *testing.T) {
 		if err := checker.Check(PermServiceApply, callerCtx("alice")); err != nil {
@@ -152,7 +159,7 @@ func TestChecker_WhereServiceScoping(t *testing.T) {
 			},
 		},
 	}
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	t.Run("matches when Service equals pattern", func(t *testing.T) {
 		ctx := callerCtx("alice").WithService("transit")
@@ -178,7 +185,7 @@ func TestChecker_WhereServiceScoping(t *testing.T) {
 
 func TestChecker_PermissionError(t *testing.T) {
 	network := createTestNetworkSpec()
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	ctx := callerCtx("eve").WithService("customer-l3").WithDevice("leaf1-ny")
 	err := checker.Check(PermServiceApply, ctx)
@@ -217,7 +224,7 @@ func TestChecker_DirectUserPermission(t *testing.T) {
 			"service.apply": shorthand("direct-user"), // Direct user, not a group
 		},
 	}
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	if err := checker.Check(PermServiceApply, callerCtx("direct-user")); err != nil {
 		t.Errorf("Direct user permission should work: %v", err)
@@ -231,7 +238,7 @@ func TestChecker_DirectUserPermission(t *testing.T) {
 // absence of one IS the absence of verified authentication, which
 // must not be allowed to act.
 func TestChecker_EmptyCallerDenied(t *testing.T) {
-	checker := NewChecker(createTestNetworkSpec())
+	checker := NewChecker(tableOf(createTestNetworkSpec()))
 
 	t.Run("nil context", func(t *testing.T) {
 		if err := checker.Check(PermServiceApply, nil); err == nil {
@@ -298,7 +305,7 @@ func TestChecker_EmptyCallerDeniedDespiteDegenerateConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			checker := NewChecker(tc.network)
+			checker := NewChecker(tableOf(tc.network))
 			if err := checker.Check(PermServiceApply, NewContext()); err == nil {
 				t.Errorf("empty Caller authorized under degenerate config %q — Check guard must fail-closed before reading the table", tc.name)
 			}
@@ -315,7 +322,7 @@ func TestChecker_GlobalPermissionNotFound(t *testing.T) {
 		UserGroups:  map[string][]string{},
 		Permissions: map[string]spec.PermissionGrants{}, // No permissions defined
 	}
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	err := checker.Check(PermServiceApply, callerCtx("anyone"))
 	if err == nil {
@@ -335,7 +342,7 @@ func TestChecker_GlobalAllPermissionNotGranted(t *testing.T) {
 			"all": shorthand("admins"), // Only admins have 'all'
 		},
 	}
-	checker := NewChecker(network)
+	checker := NewChecker(tableOf(network))
 
 	// normal-user should be denied (not in admins group)
 	err := checker.Check(PermServiceApply, callerCtx("normal-user"))

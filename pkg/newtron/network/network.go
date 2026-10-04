@@ -18,6 +18,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/secret"
@@ -318,30 +319,21 @@ func (n *Network) PortResolver() sonic.PortResolver {
 // These are available to Device and Interface objects through parent reference
 // ============================================================================
 
-// Authorization is a snapshot of the network's authorization table —
-// the user_groups, permissions, and super_users an operator authors
-// in network.json and that newtron's authorization checker consumes
-// at every mutation (auth-design.md §L3). The three fields share
-// underlying memory with the live NetworkSpecFile; callers receive
-// a read-only view suitable for serialization but must not mutate
-// the returned maps or slice.
-type Authorization struct {
-	UserGroups  map[string][]string
-	Permissions map[string]spec.PermissionGrants
-	SuperUsers  []string
-}
-
-// GetAuthorization returns the network's authorization table. The
-// table is one cohesive object owned by the network (DPN §27) —
-// authored together in network.json, applied together on
-// --enforce-authorization + reload, consumed together by the
-// auth.Checker — so one accessor returns all three fields, mirroring
-// the network.json shape.
-func (n *Network) GetAuthorization() Authorization {
+// GetAuthorization returns the network's authorization table — the
+// user_groups, permissions and super_users an operator authors in network.json,
+// which the auth.Checker decides every mutation against (auth-design.md §L3).
+// The table is one cohesive object owned by the network (DPN §27): authored
+// together, consumed together, so one accessor returns all three fields.
+//
+// It is read under keyNetworkSpec, and the returned maps and slice are never
+// edited afterwards — writers publish replacements (AddSuperUser, RemoveSuperUser)
+// — so a caller may hold the table for as long as one decision takes. Callers
+// must not mutate it.
+func (n *Network) GetAuthorization() auth.Table {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.RLock()
 	defer mu.RUnlock()
-	return Authorization{
+	return auth.Table{
 		UserGroups:  n.spec.UserGroups,
 		Permissions: n.spec.Permissions,
 		SuperUsers:  n.spec.SuperUsers,
@@ -349,9 +341,9 @@ func (n *Network) GetAuthorization() Authorization {
 }
 
 // AddSuperUser adds username to the network's super_users (idempotent) and
-// persists network.json. The live auth.Checker reads this same n.spec.SuperUsers
-// slice, so the grant takes effect immediately — no reload. Caller is the API
-// layer after the meta-authorization gate (spec.author scoped to super_users).
+// persists network.json. The checker reads the table per decision, so the grant
+// takes effect at the next check — no reload. Caller is the API layer after the
+// meta-authorization gate (spec.author scoped to super_users).
 func (n *Network) AddSuperUser(username string) error {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
@@ -359,12 +351,11 @@ func (n *Network) AddSuperUser(username string) error {
 	if slices.Contains(n.spec.SuperUsers, username) {
 		return nil
 	}
-	n.spec.SuperUsers = append(n.spec.SuperUsers, username)
-	return n.persistSpec()
+	return n.publishSuperUsers(append(slices.Clone(n.spec.SuperUsers), username))
 }
 
 // RemoveSuperUser drops username from the network's super_users (idempotent) and
-// persists. Takes effect immediately for the live checker.
+// persists. Takes effect at the checker's next decision.
 func (n *Network) RemoveSuperUser(username string) error {
 	mu := n.locks.lock(keyNetworkSpec)
 	mu.Lock()
@@ -373,8 +364,21 @@ func (n *Network) RemoveSuperUser(username string) error {
 	if idx < 0 {
 		return nil
 	}
-	n.spec.SuperUsers = slices.Delete(n.spec.SuperUsers, idx, idx+1)
-	return n.persistSpec()
+	return n.publishSuperUsers(slices.Delete(slices.Clone(n.spec.SuperUsers), idx, idx+1))
+}
+
+// publishSuperUsers replaces super_users with next and persists it, restoring
+// the previous list if the write fails. next is always a new slice: tables
+// already handed out by GetAuthorization share the old one, so it is never
+// edited. Caller holds keyNetworkSpec (write lock).
+func (n *Network) publishSuperUsers(next []string) error {
+	prev := n.spec.SuperUsers
+	n.spec.SuperUsers = next
+	if err := n.persistSpec(); err != nil {
+		n.spec.SuperUsers = prev
+		return err
+	}
+	return nil
 }
 
 // GetService returns a service definition by name (network base).
@@ -1384,9 +1388,8 @@ func (n *Network) RemoveRuleFromRoutePolicy(scope, instance, policy string, sequ
 // Each method takes keyNetworkSpec.RLock and returns a shallow copy of the
 // underlying map. Callers iterate the returned map freely without racing
 // any concurrent writer (the RLock blocks Lock until the snapshot is
-// built). These replace the pre-PR-B pattern where public ListIPVPNs et al
-// reached into net.internal.Spec() and iterated the raw map — a concurrent
-// Save mutating that map would panic the runtime under -race.
+// built). No accessor hands out the raw spec: iterating a live map while a
+// writer replaces entries would race.
 
 // ServicesSnapshot returns a shallow copy of the Services map under read lock.
 func (n *Network) ServicesSnapshot() map[string]*spec.ServiceSpec {
@@ -1476,15 +1479,6 @@ func (n *Network) PrefixListsSnapshot() map[string][]string {
 // loader-owned, one file each).
 func (n *Network) ZonesSnapshot() map[string]*spec.ZoneSpec {
 	return n.loader.Zones()
-}
-
-// Spec returns the raw network spec (for advanced access).
-//
-// Deprecated for read iteration — callers iterating any of the OverridableSpecs
-// maps without holding keyNetworkSpec.RLock will race with concurrent writers
-// and panic the runtime. Use a *Snapshot method instead.
-func (n *Network) Spec() *spec.NetworkSpecFile {
-	return n.spec
 }
 
 // GetTopology returns the topology spec, or nil if no topology.json was loaded.

@@ -987,7 +987,8 @@ one. An operator holding the `spec.author` + `where: {field:
 `POST /networks/{n}/super-users` and `DELETE
 /networks/{n}/super-users/{user}` (see [api.md](api.md)) — no file
 editing, no restart. The mutation persists `network.json` atomically
-and the live `auth.Checker` reads the same `super_users` slice, so a
+and publishes a new `super_users` list; the `auth.Checker` reads the
+authorization table through `GetAuthorization` at every decision, so a
 grant or revocation takes effect on the next request. Each call is
 audited as a write (caller, before/after) like any spec mutation.
 
@@ -1192,10 +1193,10 @@ Per editing-guidelines §11 ("Document What Is, Not What's Intended"):
   called → `net.auth` stays nil → every `checkPermission` is a
   no-op (pre-L3 behavior). On → `EnableAuthorization` is invoked
   for each registered network at `RegisterNetwork` and
-  `ReloadNetwork` time, binding the Checker to the live
-  `NetworkSpecFile` so subsequent in-process mutations
-  (`CreateService`, etc.) take effect against the same grant table
-  the Checker sees.
+  `ReloadNetwork` time, binding the Checker to that network's
+  `GetAuthorization`. The Checker reads the table once per decision,
+  so in-process changes to it (`AddSuperUser`, `RemoveSuperUser`) take
+  effect at the next check.
 - **L1 audit log is shipping.** The identity-extraction and audit-
   emission middlewares (`pkg/newtron/api/caller_middleware.go`,
   `pkg/newtron/api/audit_middleware.go`) live inside the newtron

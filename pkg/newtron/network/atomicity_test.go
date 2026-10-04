@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
@@ -237,5 +238,46 @@ func TestUpdateFilterRule_AtomicAgainstConcurrentUpdates(t *testing.T) {
 		if r.Action != "deny" {
 			t.Errorf("rule seq=%d: action=%q, want 'deny' (concurrent update was lost)", r.Sequence, r.Action)
 		}
+	}
+}
+
+// TestAuthorization_CheckDoesNotRaceWithSuperUserEdits pins that a checker
+// deciding against the authorization table never reads a super_users list a
+// writer is editing: AddSuperUser and RemoveSuperUser publish a new list, and
+// the checker reads the table through GetAuthorization. Detected by -race.
+func TestAuthorization_CheckDoesNotRaceWithSuperUserEdits(t *testing.T) {
+	n := loadTestNetwork(t)
+	c := auth.NewChecker(n.GetAuthorization)
+	const readers = 8
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for r := 0; r < readers; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = c.Check(auth.PermVLANCreate, auth.NewContext().WithCaller("bob"))
+				}
+			}
+		}()
+	}
+	for i := 0; i < 100; i++ {
+		_ = n.AddSuperUser("alice")
+		_ = n.AddSuperUser("carol")
+		_ = n.RemoveSuperUser("alice")
+		_ = n.RemoveSuperUser("carol")
+	}
+	close(stop)
+	wg.Wait()
+
+	if err := n.AddSuperUser("alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Check(auth.PermVLANCreate, auth.NewContext().WithCaller("alice")); err != nil {
+		t.Errorf("super-user added after the checker was built is not honored: %v", err)
 	}
 }

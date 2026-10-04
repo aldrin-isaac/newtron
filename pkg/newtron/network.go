@@ -63,12 +63,11 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 // half of the §2.4 enable/disable contract — operators opt in via
 // the --enforce-authorization flag.
 //
-// EnableAuthorization binds the checker to the spec snapshot live at
-// call time. ReloadNetwork replaces the whole Network and so a fresh
-// EnableAuthorization is required to re-bind the checker against the
-// new spec. In-process spec mutations after EnableAuthorization
-// (CreateService, DeleteNodeSpec, …) are observed through the same
-// spec pointer — no re-call needed for grant changes to take effect.
+// The checker reads the network's authorization table through
+// GetAuthorization at every decision, so in-process changes to it
+// (AddSuperUser, RemoveSuperUser) take effect at the next check.
+// ReloadNetwork replaces the whole Network, and so a fresh
+// EnableAuthorization binds a checker to the new one.
 //
 // globalSuperUsers are super-users across every network (server-level), layered
 // above this network's own super_users list — a global super-user bypasses
@@ -77,7 +76,7 @@ func LoadNetwork(specDir, topologyName string, pr sonic.PortResolver, secretStor
 // networkID is the registry id this network is served under; it is stamped onto
 // authorization decision events (audit) so they scope to the right network.
 func (net *Network) EnableAuthorization(networkID string, globalSuperUsers ...string) {
-	net.auth = auth.NewChecker(net.internal.Spec(), globalSuperUsers...)
+	net.auth = auth.NewChecker(net.internal.GetAuthorization, globalSuperUsers...)
 	net.auditNetworkID = networkID
 }
 
