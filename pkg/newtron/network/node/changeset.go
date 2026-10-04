@@ -308,7 +308,7 @@ func (cs *ChangeSet) String() string {
 		}
 
 		sb.WriteString(fmt.Sprintf("  %s %s|%s", typeStr, c.Table, c.Key))
-		if c.Fields != nil && len(c.Fields) > 0 {
+		if len(c.Fields) > 0 {
 			sb.WriteString(fmt.Sprintf(" → %v", c.Fields))
 		}
 		sb.WriteString("\n")

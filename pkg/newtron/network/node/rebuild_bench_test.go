@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 )
@@ -89,5 +88,5 @@ func TestRebuildProjectionBudget(t *testing.T) {
 	if elapsed > budget {
 		t.Errorf("rebuild of 1000 intents took %v — over the %v fence; the replay path has a complexity regression (see rebuild_bench_test.go for the epoch-skip escape)", elapsed, budget)
 	}
-	t.Log(fmt.Sprintf("rebuild of 1000 intents: %v (fence %v)", elapsed, budget))
+	t.Logf("rebuild of 1000 intents: %v (fence %v)", elapsed, budget)
 }

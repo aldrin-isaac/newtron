@@ -180,7 +180,7 @@ func resolvePortConfigINIPath(jsonPath, hwsku, explicit string) (string, error) 
 	}
 	return "", fmt.Errorf("platform.json signals the older per-HWSKU convention but no port_config.ini was found. "+
 		"Auto-discovery looked at %s (sibling-of-platform.json + --hwsku + port_config.ini). "+
-		"Pass --port-config-ini PATH to override the location.", auto)
+		"Pass --port-config-ini PATH to override the location", auto)
 }
 
 // emitPlatformToStdout writes the generated PlatformSpec as a
