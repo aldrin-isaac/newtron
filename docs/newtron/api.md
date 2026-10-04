@@ -4504,7 +4504,12 @@ Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `property` | string | yes | Property name (e.g., `"mtu"`, `"admin_status"`) |
-| `value` | string | yes | Property value |
+| `value` | string | yes | Property value; must be non-empty |
+
+`speed` takes `"1G"` … `"400G"` and is written to CONFIG_DB in Mbps (`"100G"` →
+`"100000"`). A speed override records the platform's `default_speed` for its
+reverse, and is refused (409) on a platform that declares none. An invalid value
+is refused with 400. Either refusal happens before anything is written.
 
 **Response (200):** `WriteResult`
 
@@ -4519,6 +4524,10 @@ Clear a previously-set property on the interface (reverse of `set-property`).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `property` | string | yes | Property name to clear (e.g., `"mtu"`, `"admin_status"`) |
+
+Clearing reverts the field to its default: `mtu` to 9100, `admin_status` to `up`,
+`speed` to the platform `default_speed` recorded when it was set, `description`
+to empty.
 
 **Response (200):** `WriteResult`
 

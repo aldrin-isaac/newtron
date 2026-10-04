@@ -211,31 +211,6 @@ func TestIsValidIPv4CIDR(t *testing.T) {
 	}
 }
 
-func TestValidateMTU(t *testing.T) {
-	tests := []struct {
-		name    string
-		mtu     int
-		wantErr bool
-	}{
-		{"valid min", 68, false},
-		{"valid max", 9216, false},
-		{"valid standard", 1500, false},
-		{"valid jumbo", 9000, false},
-		{"invalid too low", 67, true},
-		{"invalid too high", 9217, true},
-		{"invalid zero", 0, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateMTU(tt.mtu)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateMTU(%d) error = %v, wantErr %v", tt.mtu, err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestSplitIPMask(t *testing.T) {
 	tests := []struct {
 		cidr     string

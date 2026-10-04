@@ -48,8 +48,8 @@ func newRawAbstractNode() *Node {
 		DeviceName:  "test-leaf",
 	}
 	n := newStaticAbstract(sp, "test-leaf", nodeSpec, resolved)
-	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "speed": "100G"})
-	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "speed": "100G"})
+	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "speed": "100000"})
+	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "speed": "100000"})
 	return n
 }
 

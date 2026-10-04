@@ -6,6 +6,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -76,22 +77,58 @@ func deleteInterfaceBaseConfig(intfName string) []sonic.Entry {
 	return []sonic.Entry{{Table: l3Table(intfName), Key: intfName}}
 }
 
+// portPropertyFields validates one interface property and renders it as the
+// CONFIG_DB fields that carry it. spec.PortConfig does both — the one owner of
+// port-property values, shared with the topology's port config (§27) — so a
+// speed reaches the device in Mbps, the only form orchagent parses (RCA-050).
+func portPropertyFields(intfName, property, value string) (map[string]string, error) {
+	var pc spec.PortConfig
+	switch property {
+	case "mtu":
+		mtu, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, util.NewValidationError(fmt.Sprintf("invalid MTU value: %s", value))
+		}
+		pc.MTU = mtu
+	case "speed":
+		pc.Speed = value
+	case "admin-status", "admin_status":
+		pc.AdminStatus = value
+	case "description":
+		pc.Description = value
+	default:
+		return nil, util.NewValidationError(fmt.Sprintf("unknown property: %s (valid: mtu, speed, admin-status, description)", property))
+	}
+	if err := pc.ValidateConstraints(intfName); err != nil {
+		return nil, err
+	}
+	fields := pc.Fields()
+	if len(fields) == 0 {
+		return nil, util.NewValidationError(fmt.Sprintf("property %s on %s needs a value; clear-property reverts it to its default", property, intfName))
+	}
+	return fields, nil
+}
+
 // setPropertyConfig returns an update entry for setting a property on a port or PortChannel.
 func setPropertyConfig(tableName, intfName string, fields map[string]string) []sonic.Entry {
 	return []sonic.Entry{{Table: tableName, Key: intfName, Fields: fields}}
 }
 
 // clearPropertyConfig returns an update entry for clearing a property to its default.
-func clearPropertyConfig(tableName, intfName, property string) []sonic.Entry {
+// defaultSpeed is the platform's default port speed in Mbps, recorded on the
+// set-property intent; it is read only for property "speed".
+func clearPropertyConfig(tableName, intfName, property, defaultSpeed string) []sonic.Entry {
 	// mtu/admin_status revert to the shared default port convention (spec is the
 	// single owner — the same values DefaultPortConfig authors, so clearing an
-	// override never silently changes a port). speed/description clear to empty.
+	// override never silently changes a port). speed reverts to the platform's
+	// default speed, which an unset port inherits — never to "", which orchagent
+	// refuses to parse. description clears to empty.
 	var fields map[string]string
 	switch property {
 	case "mtu":
 		fields = map[string]string{"mtu": strconv.Itoa(spec.DefaultPortMTU)}
 	case "speed":
-		fields = map[string]string{"speed": ""}
+		fields = map[string]string{"speed": defaultSpeed}
 	case "admin-status", "admin_status":
 		fields = map[string]string{"admin_status": spec.DefaultPortAdminStatus}
 	case "description":
