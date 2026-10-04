@@ -45,7 +45,7 @@ type SpecView struct {
 // SpecSource resolves a node's SpecView from the specs as they stand now.
 // Network implements it.
 //
-// A node never keeps a view between operations (DESIGN_PRINCIPLES §7): it
+// A node never keeps a view between operations (DESIGN_PRINCIPLES_NEWTRON §7): it
 // resolves one when it is built and again at the start of every operation
 // (RebuildProjection), and uses that one view until the operation ends. A view
 // kept longer goes stale silently — a spec replaced or deleted under the same
@@ -211,7 +211,7 @@ func (n *Node) RestoreIntentDB(snapshot map[string]map[string]string) {
 //
 // The specs are resolved afresh (resolveSpecs), so the operation and the replay
 // below both see the specs as they stand now — never a view kept from an
-// earlier operation (DESIGN_PRINCIPLES §7).
+// earlier operation (DESIGN_PRINCIPLES_NEWTRON §7).
 //
 // The intent DB: in actuated mode (transport connected), re-reads
 // NEWTRON_INTENT from the device's CONFIG_DB via Redis — the device's intents

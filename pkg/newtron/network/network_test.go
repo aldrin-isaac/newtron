@@ -219,48 +219,6 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 	}
 }
 
-func TestResolvedSpecs_LiveFallback_NodeSpecOverrideStillWins(t *testing.T) {
-	// §39: NodeSpec-level override must still win over network-level,
-	// even when the network level has been modified after snapshot build.
-	n := loadResolveTest(t, spec.OverridableSpecs{
-		Services: map[string]*spec.ServiceSpec{
-			"SVC": {Description: "network-level", ServiceType: "routed"},
-		},
-	}, map[string]spec.OverridableSpecs{"amer": {}}, nil)
-
-	nodeSpec := &spec.NodeSpec{
-		Zone: "amer",
-		OverridableSpecs: spec.OverridableSpecs{
-			Services: map[string]*spec.ServiceSpec{
-				"SVC": {Description: "nodeSpec-level"},
-			},
-		},
-	}
-
-	rs := n.buildResolvedSpecs(nodeSpec)
-
-	// NodeSpec override should win
-	svc, err := rs.GetService("SVC")
-	if err != nil {
-		t.Fatalf("GetService failed: %v", err)
-	}
-	if svc.Description != "nodeSpec-level" {
-		t.Errorf("nodeSpec should win, got %q", svc.Description)
-	}
-
-	// Now modify the network-level spec
-	n.spec.Services["SVC"] = &spec.ServiceSpec{Description: "network-modified"}
-
-	// NodeSpec override should STILL win (snapshot has it)
-	svc, err = rs.GetService("SVC")
-	if err != nil {
-		t.Fatalf("GetService after network modify failed: %v", err)
-	}
-	if svc.Description != "nodeSpec-level" {
-		t.Errorf("nodeSpec should still win after network modify, got %q", svc.Description)
-	}
-}
-
 func TestResolvedSpecs_GetPlatformDelegatesToNetwork(t *testing.T) {
 	n := loadResolveTest(t, spec.OverridableSpecs{}, map[string]spec.OverridableSpecs{"amer": {}},
 		map[string]*spec.PlatformSpec{

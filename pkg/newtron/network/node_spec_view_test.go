@@ -1,6 +1,6 @@
 package network
 
-// These tests pin DESIGN_PRINCIPLES §7 "a node's view is resolved per
+// These tests pin DESIGN_PRINCIPLES_NEWTRON §7 "a node's view is resolved per
 // operation": a node sees every spec change — added, replaced, deleted, or
 // overridden at any scope — at its next operation; a view holds still within
 // one operation; a refused write changes nothing; and resolving a view races
@@ -193,6 +193,31 @@ func TestNodeSpecView_NodeOverride(t *testing.T) {
 	}
 	if svc.Description != "node" {
 		t.Errorf("node resolved TRANSIT from %q, want the node override", svc.Description)
+	}
+}
+
+// Updating the network base does not unseat a node override of the same name.
+func TestNodeSpecView_OverrideOutranksUpdatedBase(t *testing.T) {
+	n := loadViewTestNetwork(t)
+	if err := n.CreateService("", "", "TRANSIT", &spec.ServiceSpec{ServiceType: "routed", Description: "network"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.CreateService(spec.ScopeNode, "switch1", "TRANSIT", &spec.ServiceSpec{ServiceType: "routed", Description: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	dev := buildSwitch1(t, n)
+
+	if err := n.UpdateService("", "", "TRANSIT", &spec.ServiceSpec{ServiceType: "routed", Description: "network-updated"}); err != nil {
+		t.Fatal(err)
+	}
+
+	startOperation(t, dev)
+	svc, err := dev.GetService("TRANSIT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Description != "node" {
+		t.Errorf("node resolved TRANSIT from %q after the base was updated, want the node override", svc.Description)
 	}
 }
 

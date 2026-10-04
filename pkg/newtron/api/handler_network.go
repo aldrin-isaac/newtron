@@ -256,6 +256,9 @@ func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request)
 			if actor.node == nil {
 				return nil, nil // not currently built — skip
 			}
+			if err := actor.rebuildNode(r.Context()); err != nil {
+				return nil, err
+			}
 			if !actor.node.BindsService(serviceName) {
 				return nil, nil
 			}

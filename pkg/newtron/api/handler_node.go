@@ -1348,7 +1348,14 @@ func fillNodeStatusFromActor(status *NodeStatus, nodeActor *NodeActor, ctx conte
 		return
 	}
 
-	intentDrift, err := n.Drift(ctx)
+	// Drift compares the projection against the device, so the projection must
+	// be rebuilt from the current specs and intents first — over the transport
+	// the node already holds, so no new session.
+	if err := nodeActor.rebuildNode(ctx); err != nil {
+		status.IntentDriftReason = "drift_query_failed"
+		return
+	}
+	intentDrift, err := nodeActor.node.Drift(ctx)
 	if err != nil {
 		status.IntentDriftReason = "drift_query_failed"
 		return

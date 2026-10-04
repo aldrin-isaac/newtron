@@ -59,7 +59,7 @@ import (
 // that. A refused or failed write leaves the specs exactly as they were, in memory
 // as on disk. And no published spec is ever edited afterwards, so a node's view
 // resolved from them (ResolveNodeSpecs) holds still for the operation using it
-// (DESIGN_PRINCIPLES §7). Zone and node writes get their copy by re-reading their
+// (DESIGN_PRINCIPLES_NEWTRON §7). Zone and node writes get their copy by re-reading their
 // file; the network scope clones its specs.
 //
 // The read lock at zone and node scope keeps the floor base that fn checks

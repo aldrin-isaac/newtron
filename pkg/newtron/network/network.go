@@ -471,21 +471,6 @@ func (n *Network) GetRoutePolicyAt(scope, instance, name string) (*spec.RoutePol
 	return getSpecAt(n, scope, instance, "route policy", name, func(s *spec.OverridableSpecs) map[string]*spec.RoutePolicy { return s.RoutePolicies })
 }
 
-// FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.
-// Returns ("", nil) if no MACVPN matches.
-func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
-	mu := n.locks.lock(keyNetworkSpec)
-	mu.RLock()
-	defer mu.RUnlock()
-
-	for name, def := range n.spec.MACVPNs {
-		if def.VNI == vni {
-			return name, def
-		}
-	}
-	return "", nil
-}
-
 // ListServices returns all available service names.
 func (n *Network) ListServices() []string {
 	mu := n.locks.lock(keyNetworkSpec)
@@ -1687,7 +1672,7 @@ func (n *Network) DeleteZone(name string) error {
 
 // GetNode builds a Node for the named device, resolving its specs now. Each
 // call builds a new Node: a node kept between callers would carry the specs it
-// was built with into every later use (DESIGN_PRINCIPLES §7).
+// was built with into every later use (DESIGN_PRINCIPLES_NEWTRON §7).
 func (n *Network) GetNode(name string) (*node.Node, error) {
 	if n.IsHostDevice(name) {
 		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostConnection() instead", name)
@@ -1709,7 +1694,7 @@ func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 // spec lookups, node spec, and the values resolved from them — from network →
 // zone → node as they stand now. It implements node.SpecSource and is the one
 // place a node's view of its specs is built: nodes call it when they are built
-// and again at the start of every operation (DESIGN_PRINCIPLES §7).
+// and again at the start of every operation (DESIGN_PRINCIPLES_NEWTRON §7).
 //
 // The view is taken under the read locks the spec writers take, so no write
 // lands halfway through it: keyNetworkSpec for network.json (the spec maps and

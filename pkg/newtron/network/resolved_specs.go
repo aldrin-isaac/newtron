@@ -1,11 +1,9 @@
 // resolved_specs.go provides the spec lookups of a node's SpecView: the seven
 // overridable spec maps merged network → zone → node, lower level wins.
 //
-// Built by Network.ResolveNodeSpecs, at the start of every operation. The merge
-// is complete — every name the node can see at any level is in it — so a miss
-// means the spec does not exist for this node. Nothing falls through to the
-// network afterwards: a view that is resolved fresh per operation has nothing to
-// catch up on (DESIGN_PRINCIPLES §7).
+// Built by Network.ResolveNodeSpecs at the start of every operation
+// (DESIGN_PRINCIPLES_NEWTRON §7). The merge is complete — every name the node can see
+// at any level is in it — so a miss means the spec does not exist for this node.
 package network
 
 import (
