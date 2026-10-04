@@ -13,10 +13,8 @@ description: |
   invisible to an exists-check on a single key — which is how the extent defect this
   scenario was written alongside stayed hidden.
 
-  NS_TEST is a fixture in network.json rather than authored here. Authoring a policy
-  and binding it in the same run exercises spec propagation as much as QoS: the
-  node's resolved-spec snapshot can lag a spec write made through the server, so the
-  bind saw a partial policy and the scenario failed on a count it had just set.
+  NS_TEST is a fixture in network.json rather than authored here, so the scenario
+  depends on no spec-authoring steps and tests QoS reaping alone.
 
   Not covered here, by design: the shrink case (a bound policy losing queues, then
   being unbound). Loopback cannot show it — the projection is the only reality, so

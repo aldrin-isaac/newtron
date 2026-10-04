@@ -806,8 +806,8 @@ the change that caused it, with nothing connecting the two.
 So the view is never kept. It is resolved from the three levels at the
 start of every unit of work, and that unit of work uses it throughout:
 
-- **Fresh between units of work.** No spec change outlives the operation
-  in progress — added, replaced, deleted, or overridden at any level —
+- **Fresh between units of work.** Every spec change reaches the next
+  unit of work — added, replaced, deleted, or overridden at any level —
   because nothing remembers the previous answer. There is no catching up
   to do and no case to handle separately.
 - **Fixed within one.** A spec written while an operation runs does not

@@ -1794,7 +1794,7 @@ type SpecProvider interface {
 
 The merge is complete, so a miss is a `*spec.NotFoundError` — the same error a network-level read returns, which replay uses to recognize an orphaned intent. `GetPlatform` reads the global platform registry, which is not hierarchical.
 
-`Network` implements `node.SpecSource`. `node.New` / `node.NewAbstract` call `ResolveNodeSpecs` when they build a node, and `Node.RebuildProjection` calls it again at the start of every operation, before replaying intents; the node replaces its three fields together. A view is never kept between operations (`DESIGN_PRINCIPLES_NEWTRON §7`). Within one operation it holds still, because spec writes publish an edited copy and never edit a published spec in place (HLD §8.3).
+`Network` implements `node.SpecSource`. `node.New` / `node.NewAbstract` call `ResolveNodeSpecs` when they build a node, and `Node.RebuildProjection` calls it again at the start of every operation, before replaying intents; the node replaces its three fields together. A view is never kept between operations (`DESIGN_PRINCIPLES_NEWTRON §7`). Within one operation it holds still, because writes to the specs a node resolves publish an edited copy and never edit a published spec in place (HLD §8.3).
 
 Names are normalized once at spec load time (uppercase, hyphens → underscores). Operations code never calls `NormalizeName()`.
 
@@ -1852,7 +1852,7 @@ HTTP middleware applied to all routes (outer → inner):
 Each `NodeActor` serializes access to its cached `*Node` — only one operation runs at a time per device. The actor also manages the SSH connection lifecycle:
 
 - **Idle timeout** (default 5 minutes): Connection closed when no requests arrive within the timeout window, eliminating persistent SSH sessions for inactive devices.
-- **Connection caching**: `ensureActuatedIntent` / `ensureTopologyIntent` run once to construct the node; subsequent requests reuse the cached node.
+- **Connection caching**: `ensureActuatedIntent` / `ensureTopologyIntent` run once to construct the node; subsequent requests reuse the cached node. Every use of it — `execute`, and the service-projection and status reads — starts with `rebuildNode`, which re-resolves the node's specs and rebuilds its projection (`DESIGN_PRINCIPLES_NEWTRON §7`).
 - **Graceful disconnect**: `DisconnectTransport()` on timeout, `Disconnect()` on unregister.
 
 ---

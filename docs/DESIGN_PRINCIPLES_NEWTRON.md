@@ -649,8 +649,9 @@ Each node resolves its view of the specs — the merged spec maps, its own
 node spec, and the values resolved from them (ASN, loopback, SSH login,
 EVPN neighbors). This separates **what specs exist** (the three-level
 hierarchy) from **what specs does this device see** (the node's view).
-Node code does not know about zones, networks, or override logic. It asks
-for a service by name and gets the right definition — already resolved.
+Operation code calls `GetService(name)` on the node and receives the
+definition that wins for that device; zones and overrides are invisible
+to it.
 
 ### A node's view is resolved per operation
 
@@ -660,39 +661,36 @@ runs before every operation, resolves the view afresh through
 operation uses that one view until it ends. The node's two inputs — its
 intents and its specs — are re-derived at the same moment, by the same rule.
 
-newtron learned this from a defect that went unnoticed for months. When
-newtron was a CLI, each command was a new process: it loaded the specs,
-built the node, ran one operation and exited, so resolving the view once
-when the node was built *was* resolving it per operation. The server made
-nodes long-lived, and the view built with the node lived as long. New
-specs went unseen, and the repair sent a lookup that missed the kept view
-on to the network. That caught additions and nothing else. A policy
-deleted and re-created with four queues was bound with the two the kept
-view still held; `update-service`, any zone or node override, and a
-rotated secret were missed the same way; and drift stayed clean, because
-the node rebuilt its expectations from the same stale view. The gap
-closed only when the node itself was replaced — after the idle timeout
-(five minutes by default) or a server restart — with nothing to connect the change in behavior to
-the spec write behind it. The fallback was the wrong kind of fix — a repair
-of the one symptom that had been noticed, on a mechanism that should not
-have existed once the runtime changed.
+Resolving the view once, when the node is built, is the same thing only
+while a node lives for one operation — true of a process that runs one
+command and exits, false of a server whose nodes outlive many. Kept
+any longer, the view answers from definitions the network has replaced.
+A QoS policy deleted and re-created with four queues is bound with the two
+the kept view still holds; an `update-service`, a zone or node override, a
+rotated secret are missed the same way. Drift stays clean, because the node
+rebuilds its expectations from the same stale view, and the gap closes only
+when the node itself is replaced — after the actor's idle timeout or a
+server restart — with nothing to tie the change in behavior to the spec
+write behind it. A lookup that falls through to the network on a miss
+cannot repair this: it reaches new names, and a replaced definition is
+never a miss.
 
 Holding a view still for one operation is the other half, and it rests on
-the writers: **no published spec is ever edited in place.** Every spec write
-edits a private copy and publishes it whole once it is on disk. Zone and
-node writes get their copy by re-reading their file
+the writers: **nothing a view can reach is ever edited in place.** Every
+write to the specs a node resolves — the spec maps, the SSH logins, zone and
+node specs, the topology — edits a private copy and publishes it whole once
+it is on disk. Zone and node writes get their copy by re-reading their file
 (`Loader.MutateZoneSpec`, `Loader.MutateNodeSpec`); network-scope writes
-clone the spec maps (`withWriteTarget`, `withSSHTarget`); topology writes
-swap in an edited copy (`applyTopology`). A view therefore points only at
-definitions that will not change under it — and a refused or failed write
-leaves the specs exactly as they were, in memory as on disk. The view is
-taken under the same read locks the writers take, so no write lands
-halfway through it.
+copy the spec maps (`withWriteTarget`) or the SSH login (`withSSHTarget`);
+topology writes swap in an edited copy (`applyTopology`). A view therefore
+points only at definitions that will not change under it — and a refused
+or failed write leaves the specs exactly as they were, in memory as on
+disk. The view is taken under the same read locks the writers take, so no
+write lands halfway through it.
 
-The cost is small. Resolving a view takes about 30µs on this repository's
-`2node-vs` network and about 0.3ms with 2,000 specs, against roughly 90ms
-for the projection rebuild of a 1,000-intent device that already runs at
-the same point (§35).
+Resolving a view merges the spec maps and reads the cached node and zone
+specs — small next to the projection rebuild that already runs at the same
+point (§35).
 
 ### Authoring overrides: the network-floor invariant
 

@@ -520,7 +520,7 @@ The Network keeps no cache of built nodes. A `*Node` is built when an operation 
 
 ### 8.3 Atomicity
 
-Every public Create/Update/Delete/Add/Remove method on `*newtron.Network` is internally atomic. It holds its key's `Lock` from the existence check through the disk persist, and it never edits the published spec in place: the write edits a private copy and publishes it only once it is on disk. For a network-scope spec write, `withWriteTarget` does:
+Every public Create/Update/Delete/Add/Remove method on `*newtron.Network` is internally atomic: it holds its key's `Lock` from the existence check through the disk persist. A write to the specs a node resolves — the spec maps, the SSH logins, zone and node specs, the topology — also never edits the published spec in place: it edits a private copy and publishes it only once it is on disk. For a network-scope spec write, `withWriteTarget` does:
 
 ```go
 // pkg/newtron/network/scoped_writes.go — the network-scope case
@@ -545,7 +545,7 @@ return nil
 
 `fn` is the per-kind body — `CreateService`'s existence and reference checks, then the insert. Zone and node writes get the same property by re-reading their file and writing the edited copy back (`Loader.MutateZoneSpec`, `Loader.MutateNodeSpec`); topology writes edit a `cloneTopology` copy and swap it in (`applyTopology`).
 
-Two properties follow. A refused or failed write leaves the specs exactly as they were, in memory as on disk. And a spec, once published, is never edited — so a node's view resolved from it holds still for the operation using it (`DESIGN_PRINCIPLES_NEWTRON §7`).
+Two properties follow. A refused or failed write leaves the specs exactly as they were, in memory as on disk. And none of those specs, once published, is edited again — so a node's view resolved from it holds still for the operation using it (`DESIGN_PRINCIPLES_NEWTRON §7`).
 
 Two concurrent `CreateService("X")` calls cannot both succeed. The pre-#101 layout had the public layer compose internal `GetService` + `SaveService` as two separate critical sections; the gap between them was a TOCTOU race that the API-layer `networkEntity.mu` masked. With the engine layer atomic, the API-layer lock is no longer needed; PR #101 (Phase C) removed it.
 
