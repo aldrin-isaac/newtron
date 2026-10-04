@@ -54,13 +54,23 @@ Three states exist:
 
 1. **Applied** — what this device was configured with, at the time it was configured.
 2. **Actual** — the device's CONFIG_DB right now.
-3. **Current** — what today's specs would produce for this device.
+3. **Current** — what today's specs would produce for this device, rendered by
+   today's newtron.
 
 Newtron computes only one comparison, `Current ↔ Actual`, and calls the result
 drift. The two causes separate cleanly only if `Applied` is available:
 
 - `Applied ↔ Actual` — someone changed the device. **True drift.**
-- `Applied ↔ Current` — someone changed a spec. **Behind.**
+- `Applied ↔ Current` — someone changed a spec, or newtron changed how it renders
+  one. **Behind.**
+
+The second cause of "behind" is easy to miss, because no operator acted. A newtron
+release that renders the same spec differently moves `Current` for every device it
+touches: #516 took a QoS binding from one `QUEUE` row per policy queue to one per
+platform queue, so every port bound before it looked different from replay the
+moment the new release ran, with no spec edited and no device touched. Replay goes
+through the code as well as the specs, so a code change is a spec change as far as
+`Current` is concerned.
 
 ## Why replay cannot produce `Applied`
 
@@ -187,6 +197,20 @@ hashed) would narrow the coarse network digest and make "differs + empty drift"
 rarer. It is a refinement, not a prerequisite, and should not be built until the
 coarse form proves insufficient.
 
+### Known limitation: a newtron release looks like drift
+
+The digest hashes the spec files, and a newtron release changes none of them. When
+a release renders a spec differently, the digest is unchanged and drift is
+non-empty, so the device classifies as **Drifted**: the guard refuses and tells the
+operator the device was edited, when only newtron changed. Unlike the compound case
+above, this degradation is not safe — it misnames the cause, on every device the
+change touches, at once.
+
+Stamping newtron's own identity beside the digest would close it: a different build
+then reads as "differs", which classifies as Behind. That only works if every
+release that can change rendering carries a distinct identity, which a development
+build reporting `dev` does not.
+
 ## Design B — stamp applied values at delivery
 
 `Applied` is not recoverable by replay. It is recordable at delivery.
@@ -250,6 +274,12 @@ They are alternatives, not stages. A stamped record answers Q1–Q3 per field, w
 everything the digest answers and more, so building the digest first would be work to
 discard. The digest's advantage is entirely its size: one stored value, one
 classifier, one guard branch, and no change to how records are written.
+
+Design B also classifies a newtron release correctly with no extra mechanism.
+`Applied` is what was delivered; `Current` is a replay through today's specs and
+today's code. A rendering change moves `Current` and leaves `Applied` alone, so it
+reads as Behind, never as Drifted — the limitation Design A needs a build identity
+to work around does not arise.
 
 ## Cost
 
