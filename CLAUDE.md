@@ -526,6 +526,23 @@ Before making any change to `service_ops.go`, `*_ops.go`, or any shared code pat
 
 Tracking what was working (update this as test suites are validated):
 
+**Interface association sweep 2026-10-04 (#535, branch feat/interface-association-model)**:
+`interface|<port>` is now the port's identity only; its VLAN membership
+(`interface|<port>|vlan|<id>`, untagged or tagged) and its routed association
+(`interface|<port>|routed`) are their own records, so the order things are put on a
+port no longer matters ("parents mismatch" gone) and removing a bridged service
+removes its membership even when the port carries other records. **Cold, both
+platforms, all green — 2node-vs-primitive 25/25, 2node-vs-service 7/7, 2node-vs-drift
+7/7, 2node-vs-drift-actuated 8/8, 2node-ngdp-primitive 22/22, 2node-ngdp-service 6/6,
+1node-vs-basic 9/9, 1node-vs-architecture 32/32 (49m6s), 1node-vs-config 29/29
+loopback** (145 scenarios). **The first cold run caught a bug the unit tests had
+missed:** a PortChannel's IP replayed before the PortChannel existed, because the
+routed record's only parent is the LAG's `interface-init` identity, which replay
+skips — so the drift guard saw two missing `PORTCHANNEL_INTERFACE` rows and refused
+every later write on that switch. Replay ordering now passes through skipped
+side-effect records to their parents; `TestOpRoundTrip` gained a routed-LAG step that
+fails without the fix.
+
 **Design-principles audit arc 2026-09-21 (PRs #480–#485, issue #486; docs/process only, no suite run)**:
 a two-round external review of `DESIGN_PRINCIPLES.md` + `DESIGN_PRINCIPLES_NEWTRON.md`,
 every finding verified against code (not the reverse), corrected the docs and
