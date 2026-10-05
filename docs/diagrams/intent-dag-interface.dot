@@ -1,0 +1,19 @@
+digraph intent_dag_interface {
+  rankdir=TB;
+  node [shape=box, fontname="monospace", fontsize=10];
+  edge [fontname="monospace", fontsize=9];
+
+  vlan_id     [label="vlan|ID"];
+  intf        [label="interface|INTF"];
+  vrf_name    [label="vrf|NAME"];
+  intf_vlan   [label="interface|INTF|vlan|ID"];
+  intf_routed [label="interface|INTF|routed"];
+  intf_bgp    [label="interface|INTF|bgp-peer"];
+
+  vlan_id -> intf_vlan;
+  intf -> intf_vlan;
+  intf -> intf_routed;
+  vrf_name -> intf_routed;
+  intf -> intf_bgp;
+  intf_routed -> intf_bgp;
+}

@@ -17,16 +17,15 @@ Every NEWTRON_INTENT record is a Redis hash stored in CONFIG_DB with the key
 parameters, and DAG metadata:
 
 ```
-NEWTRON_INTENT|interface|Ethernet0 → {
+NEWTRON_INTENT|interface|Ethernet0|service → {
     operation:    "apply-service"
     state:        "actuated"
-    name:         "TRANSIT"
     service_name: "TRANSIT"
     service_type: "routed"
     vrf_name:     "Vrf_TRANSIT"
     ip_address:   "10.10.1.1/31"
-    _parents:     "vrf|Vrf_TRANSIT,service|TRANSIT"
-    _children:    "interface|Ethernet0|qos"
+    _parents:     "interface|Ethernet0,vrf|Vrf_TRANSIT,service|TRANSIT"
+    _children:    ""
 }
 ```
 
@@ -231,9 +230,9 @@ The spec may have changed between apply and remove; the intent captures what
 was actually applied.
 
 Examples:
-- `ipvpn|VRFNAME` stores `l3vni` and `l3vni_vlan` so `UnbindIPVPN` can
+- `ipvpn|IPVPN` stores `l3vni` and `l3vni_vlan` so `UnbindIPVPN` can
   tear down transit VLAN infrastructure without looking up the IP-VPN spec.
-- `interface|INTF` (apply-service) stores `vrf_name`, `vrf_type`, `l3vni`,
+- `interface|INTF|service` (apply-service) stores `vrf_name`, `vrf_type`, `l3vni`,
   `l3vni_vlan`, `ingress_acl`, `egress_acl`, `qos_policy`, etc. so
   `RemoveService` can tear down everything without re-resolving specs.
 - `service|NAME` stores `route_policy_keys` so the last-user removal can
@@ -268,8 +267,8 @@ instead of projection scanning:
   children. `removeSharedACL` checks `acl|NAME._children` — if non-empty,
   other interfaces still reference the ACL. Only when childless is the ACL
   deleted.
-- **Service lifecycle:** `service|NAME` has `interface|INTF` bindings as
-  children. `RemoveService` checks `service|NAME._children` — if other
+- **Service lifecycle:** `service|NAME` has the service's bindings
+  (`interface|INTF|service`) as children. `RemoveService` checks `service|NAME._children` — if other
   interfaces remain, shared objects (route policies, peer group) are kept.
 
 This replaced projection scanning (`IntentsByPrefix`, `IntentsByParam` loops)
@@ -284,41 +283,80 @@ documented in the per-intent tables in §7.
 Source: `docs/diagrams/intent-dag-tree.dot`
 
 ```
-                           ┌────────────────────────────────────────────────────────────────────────┐
-                           │                                                                        │
-                           │                                              ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐
-                           │                                              │ route|default|PREFIX │  │  │    service|NAME    │     │   interface|INTF|qos   │
-                           │                                              └──────────────────────┘  │  └────────────────────┘     └────────────────────────┘
-                           │                                                ▲                       │    ▲                          ▲
-                           │                                                │                       │    │                          │
-                           ▼                                                │                       │    │                          │
-┌──────────────────┐     ┌───────────────┐┌─────────────────────────┐     ┌─────────────────────────────────────────────────┐     ┌───────────────────────────────────────────────────┐     ┌─────────────────────────┐
-│ route|VRF|PREFIX │ ◀── │   vrf|NAME    ││    portchannel|NAME     │ ◀── │                                                 │ ──▶ │                  interface|INTF                   │ ──▶ │ interface|INTF|PROPERTY │
-└──────────────────┘     └───────────────┘└─────────────────────────┘     │                                                 │     └───────────────────────────────────────────────────┘     └─────────────────────────┘
-                           │                │                             │                                                 │       │                         │
-                           │                │                             │                     device                      │       │                         │
-                           ▼                ▼                             │                                                 │       ▼                         ▼
-                         ┌───────────────┐┌─────────────────────────┐     │                                                 │     ┌────────────────────────┐┌─────────────────────────┐
-                         │ ipvpn|VRFNAME ││ portchannel|NAME|MEMBER │     │                                                 │     │ interface|INTF|acl|DIR ││ interface|INTF|bgp-peer │
-                         └───────────────┘└─────────────────────────┘     └─────────────────────────────────────────────────┘     └────────────────────────┘└─────────────────────────┘
-                                                                            │                       │    │
-                                                                            │                       │    │
-                                                                            ▼                       │    ▼
-                                                                          ┌──────────────────────┐  │  ┌────────────────────┐
-                                                                          │       acl|NAME       │  │  │   evpn-peer|ADDR   │
-                                                                          └──────────────────────┘  │  └────────────────────┘
-                                                                            │                       │
-                                                                            │                       │
-                                                                            ▼                       │
-                                                                          ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐
-                                                                          │    acl|NAME|RULE     │  └▶ │      vlan|ID       │ ──▶ │     macvpn|VLANID      │
-                                                                          └──────────────────────┘     └────────────────────┘     └────────────────────────┘
-                                                                                                         │
-                                                                                                         │
-                                                                                                         ▼
-                                                                                                       ┌────────────────────┐
-                                                                                                       │ interface|Vlan{ID} │
-                                                                                                       └────────────────────┘
+
+                           ┌──────────────────────────────────────────────────────────────────────┐
+                           │                                                                      │
+                           │                                            ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐     ┌─────────────────────────┐
+                           │                                            │ route|default|PREFIX │  │  │    service|NAME    │     │ interface|INTF|routed  │     │ interface|INTF|service  │
+                           │                                            └──────────────────────┘  │  └────────────────────┘     └────────────────────────┘     └─────────────────────────┘
+                           │                                              ▲                       │    ▲                          ▲                              ▲
+                           │                                              │                       │    │                          │                              │
+                           ▼                                              │                       │    │                          │                              │
+┌──────────────────┐     ┌─────────────┐┌─────────────────────────┐     ┌─────────────────────────────────────────────────┐     ┌────────────────────────────────────────────────────────┐     ┌─────────────────────────┐
+│ route|VRF|PREFIX │ ◀── │  vrf|NAME   ││    portchannel|NAME     │ ◀── │                                                 │ ──▶ │                                                        │ ──▶ │ interface|INTF|PROPERTY │
+└──────────────────┘     └─────────────┘└─────────────────────────┘     │                                                 │     │                                                        │     └─────────────────────────┘
+                           │              │                             │                                                 │     │                                                        │
+                           │              │                             │                     device                      │     │                     interface|INTF                     │
+                           ▼              ▼                             │                                                 │     │                                                        │
+                         ┌─────────────┐┌─────────────────────────┐     │                                                 │     │                                                        │     ┌─────────────────────────┐
+                         │ ipvpn|IPVPN ││ portchannel|NAME|MEMBER │     │                                                 │     │                                                        │ ──▶ │   interface|INTF|qos    │
+                         └─────────────┘└─────────────────────────┘     └─────────────────────────────────────────────────┘     └────────────────────────────────────────────────────────┘     └─────────────────────────┘
+                                                                          │                       │    │                          │                         │    │
+                                                                          │                       │    │                          │                         │    │
+                                                                          ▼                       │    ▼                          ▼                         │    ▼
+                                                                        ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐  │  ┌─────────────────────────┐
+                                                                        │       acl|NAME       │  │  │   evpn-peer|ADDR   │     │ interface|INTF|acl|DIR │  │  │ interface|INTF|bgp-peer │
+                                                                        └──────────────────────┘  │  └────────────────────┘     └────────────────────────┘  │  └─────────────────────────┘
+                                                                          │                       │                                                         │
+                                                                          │                       │                                                         │
+                                                                          ▼                       │                                                         │
+                                                                        ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐  │
+                                                                        │    acl|NAME|RULE     │  └▶ │      vlan|ID       │ ─┐  │ interface|INTF|vlan|ID │ ◀┘
+                                                                        └──────────────────────┘     └────────────────────┘  │  └────────────────────────┘
+                                                                                                       │                     │
+                                                                                                       │                     │
+                                                                                                       ▼                     │
+                                                                                                     ┌────────────────────┐  │
+                                                                                                     │ interface|Vlan{ID} │  │
+                                                                                                     └────────────────────┘  │
+                                                                                                     ┌────────────────────┐  │
+                                                                                                     │   macvpn|VLANID    │ ◀┘
+                                                                                                     └────────────────────┘
+```
+
+An interface's association records have a second parent: a VLAN membership is
+also a child of its VLAN, and a routed association of its VRF, so neither the VLAN
+nor the VRF can be deleted while an interface is in it. A BGP peer is also a child
+of the record that supplies its IP (the routed association here; a routed service's
+binding when the service supplies the address).
+
+Source: `docs/diagrams/intent-dag-interface.dot`
+
+```
+                      ┌─────────────────────────┐
+  ┌────────────────── │     interface|INTF      │ ─┐
+  │                   └─────────────────────────┘  │
+  │                     │                          │
+  │                     │                          │
+  │                     ▼                          │
+  │  ┌──────────┐     ┌─────────────────────────┐  │
+  │  │ vrf|NAME │ ──▶ │  interface|INTF|routed  │  │
+  │  └──────────┘     └─────────────────────────┘  │
+  │                     │                          │
+  │                     │                          │
+  │                     ▼                          │
+  │                   ┌─────────────────────────┐  │
+  │                   │ interface|INTF|bgp-peer │ ◀┘
+  │                   └─────────────────────────┘
+  │                   ┌─────────────────────────┐
+  │                   │         vlan|ID         │
+  │                   └─────────────────────────┘
+  │                     │
+  │                     │
+  │                     ▼
+  │                   ┌─────────────────────────┐
+  └─────────────────▶ │ interface|INTF|vlan|ID  │
+                      └─────────────────────────┘
 ```
 
 ## 7. Intent Catalog
@@ -343,8 +381,8 @@ The singleton root of the DAG. All other intents descend from it.
 | **Operation** | `OpSetupDevice` (`"setup-device"`) |
 | **Created by** | `SetupDevice()` in `baseline_ops.go` |
 | **Deleted by** | Never (full reconcile overwrites) |
-| **Reconstruct** | `replayNodeStep` → `n.SetupDevice(ctx, opts)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.SetupDevice(ctx, opts)` |
+| **Side effect** | No |
 
 **Parents:** none (root).
 
@@ -391,13 +429,14 @@ A VLAN resource. Created explicitly via `CreateVLAN` or implicitly by
 | **Operation** | `OpCreateVLAN` (`"create-vlan"`) |
 | **Created by** | `CreateVLAN()` in `vlan_ops.go` |
 | **Deleted by** | `DeleteVLAN()` in `vlan_ops.go`; `RemoveService()` for service-created VLANs |
-| **Reconstruct** | `replayNodeStep` → `n.CreateVLAN(ctx, vlanID, config)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.CreateVLAN(ctx, vlanID, config)` |
+| **Side effect** | No |
 
 **Parents:** `["device"]`.
 
-**Children:** `macvpn|{ID}`, `interface|Vlan{ID}` (IRB), `interface|*`
-(bridged service bindings).
+**Children:** `macvpn|{ID}`, `interface|Vlan{ID}` (IRB), the memberships
+`interface|*|vlan|{ID}`, and the bindings `interface|*|service` of bridged
+services.
 
 **Parameters:**
 
@@ -420,13 +459,14 @@ A VRF resource. Created explicitly via `CreateVRF` or implicitly by
 | **Operation** | `OpCreateVRF` (`"create-vrf"`) |
 | **Created by** | `CreateVRF()` in `vrf_ops.go` |
 | **Deleted by** | `DeleteVRF()` in `vrf_ops.go`; `RemoveService()` for per-interface VRFs |
-| **Reconstruct** | `replayNodeStep` → `n.CreateVRF(ctx, name, VRFConfig{})` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.CreateVRF(ctx, name, VRFConfig{})` |
+| **Side effect** | No |
 
 **Parents:** `["device"]`.
 
-**Children:** `ipvpn|{NAME}`, `route|{NAME}|*`, `interface|*` (routed
-bindings), `interface|Vlan{ID}` (IRB with VRF).
+**Children:** the IP-VPN binding `ipvpn|{IPVPN}`, `route|{NAME}|*`, routed
+interfaces `interface|*|routed`, the bindings `interface|*|service` of routed
+services, and `interface|Vlan{ID}` (IRB with VRF).
 
 **Parameters:**
 
@@ -446,13 +486,13 @@ A PortChannel (LAG) resource.
 | **Operation** | `OpCreatePortChannel` (`"create-portchannel"`) |
 | **Created by** | `CreatePortChannel()` in `portchannel_ops.go` |
 | **Deleted by** | `DeletePortChannel()` in `portchannel_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.CreatePortChannel(ctx, name, config)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.CreatePortChannel(ctx, name, config)` |
+| **Side effect** | No |
 
 **Parents:** `["device"]`.
 
-**Children:** `portchannel|{NAME}|{MEMBER}`, `interface|{NAME}` (when the
-PortChannel interface is configured or has a service).
+**Children:** `portchannel|{NAME}|{MEMBER}`, `interface|{NAME}` (the LAG's
+identity, while anything is configured on the LAG).
 
 **Parameters:**
 
@@ -484,8 +524,8 @@ lifecycle root — its children (rules and bindings) keep it alive.
 | **Operation** | `OpCreateACL` (`"create-acl"`) |
 | **Created by** | `CreateACL()` in `acl_ops.go`; `ApplyService()` in `service_ops.go` |
 | **Deleted by** | `DeleteACL()` in `acl_ops.go`; `removeSharedACL()` in `service_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.CreateACL(ctx, name, config)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.CreateACL(ctx, name, config)` |
+| **Side effect** | No |
 
 **Parents:** `["device"]`.
 
@@ -511,19 +551,20 @@ Overlay intents bind EVPN constructs (IP-VPN, MAC-VPN) to infrastructure
 resources and create EVPN peering sessions. They depend on infrastructure
 intents (VRF, VLAN) and produce VXLAN tunnel maps and BGP EVPN configuration.
 
-#### `ipvpn|{VRFNAME}`
+#### `ipvpn|{IPVPN}`
 
-IP-VPN binding on a VRF. Creates VXLAN tunnel map and EVPN VNI entries for
-L3 overlay.
+IP-VPN binding on a VRF, keyed by the IP-VPN (one L3VNI per device). Creates
+VXLAN tunnel map and EVPN VNI entries for L3 overlay. The VRF it binds is
+recorded as `vrf_name`.
 
 | Field | Value |
 |-------|-------|
-| **Resource key** | `"ipvpn|" + vrfName` |
+| **Resource key** | `"ipvpn|" + ipvpnName` |
 | **Operation** | `OpBindIPVPN` (`"bind-ipvpn"`) |
 | **Created by** | `BindIPVPN()` in `vrf_ops.go` |
 | **Deleted by** | `UnbindIPVPN()` in `vrf_ops.go`; `RemoveService()` for service-bound IP-VPNs |
-| **Reconstruct** | `replayNodeStep` → `n.BindIPVPN(ctx, vrfName, ipvpnName)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.BindIPVPN(ctx, vrfName, ipvpnName)` |
+| **Side effect** | No |
 
 **Parents:** `["vrf|" + vrfName]`.
 
@@ -552,8 +593,8 @@ suppression entries for L2 overlay.
 | **Operation** | `OpBindMACVPN` (`"bind-macvpn"`) |
 | **Created by** | `BindMACVPN()` in `evpn_ops.go` |
 | **Deleted by** | `UnbindMACVPN()` in `evpn_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.BindMACVPN(ctx, vlanID, macvpnName)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.BindMACVPN(ctx, vlanID, macvpnName)` |
+| **Side effect** | No |
 
 **Parents:** `["vlan|" + strconv.Itoa(vlanID)]`.
 
@@ -581,8 +622,8 @@ sessions carrying L2VPN EVPN address family.
 | **Operation** | `OpAddBGPEVPNPeer` (`"add-bgp-evpn-peer"`) |
 | **Created by** | `AddBGPEVPNPeer()` in `bgp_ops.go` |
 | **Deleted by** | `RemoveBGPEVPNPeer()` in `bgp_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.AddBGPEVPNPeer(ctx, ip, asn, desc, evpn)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.AddBGPEVPNPeer(ctx, ip, asn, desc, evpn)` |
+| **Side effect** | No |
 
 **Parents:** `["device"]`.
 
@@ -616,13 +657,13 @@ last interface using that service is removed.
 | **Created by** | `ApplyService()` in `service_ops.go` (first interface for a service) |
 | **Deleted by** | `RemoveService()` in `service_ops.go` (last interface for a service) |
 | **Reconstruct** | Skipped — recreated as side effect of first `ApplyService` replay |
-| **skipInReconstruct** | **Yes** |
+| **Side effect** | **Yes** — not a replay step |
 
 **Parents:** `["device"]`.
 
-**Children:** `interface|{INTF}` intents that use this service with BGP
-routing. Managed automatically by DAG registration when interface intents
-list `service|{NAME}` as a parent.
+**Children:** the bindings (`interface|{INTF}|service`) of this service.
+Managed automatically by DAG registration when a binding lists
+`service|{NAME}` as a parent.
 
 **Parameters:**
 
@@ -658,104 +699,119 @@ guard per-VRF peer groups.
 
 ### 7.5 Interface
 
-Interface intents bind configuration to physical or logical ports. Three
-operations produce `interface|{INTF}` records — `interface-init` (anchor),
-`configure-interface` (explicit config), and `apply-service` (service
-binding) — but only one can exist at a time for a given interface. The
-operation field distinguishes them. Parents vary by configuration context
-(see per-entry tables below). Reconstructed via `replayInterfaceStep` (§8).
+An interface's records hang off its **identity** record `interface|{INTF}`, which
+means only that newtron manages the interface. What the interface is in the
+network — a member of VLANs, or routed in a VRF — is an **association** record of
+its own, and the service applied to it is a **binding** record. Every record on
+the interface is a child of the identity, so the order of operations never
+matters and teardown is complete. The IRB is the exception: its identity is its
+`configure-irb` record (below). Replayed through the operation registry (§8).
 
-#### `interface|{INTF}` — interface-init
-
-Auto-created anchor for sub-resource operations on interfaces that have no
-explicit configuration (no `ConfigureInterface`, no `ApplyService`). Ensures
-the `interface|{INTF}` parent exists when `SetProperty`, `BindACL`,
-`BindQoS`, or `AddBGPPeer` is called on an unconfigured interface.
+#### `interface|{INTF}` — interface-init (identity)
 
 | Field | Value |
 |-------|-------|
 | **Resource key** | `"interface|" + i.name` |
 | **Operation** | `OpInterfaceInit` (`"interface-init"`) |
-| **Created by** | `ensureInterfaceIntent()` in `interface_ops.go` |
-| **Deleted by** | Superseded when `ConfigureInterface` or `ApplyService` writes over the same key |
-| **Reconstruct** | Skipped — recreated as side effect of sub-resource replay |
-| **skipInReconstruct** | **Yes** |
+| **Created by** | `createInterfaceIntent()` in `interface_ops.go`, called by every operation that puts a record on the interface |
+| **Deleted by** | `destroyInterfaceIntent()` in `interface_ops.go`, called by every operation that removes one, once the identity has no children; `UnconfigureInterface()` |
+| **Reconstruct** | Skipped — recreated as a side effect of replaying any of its children |
+| **Side effect** | **Yes** — not a replay step |
 
-**Parents:** `["device"]`, plus `"portchannel|" + i.name` if PortChannel.
+**Parents:** `["device"]`, plus `"portchannel|" + i.name` for a LAG.
 
-**Children:** sub-resource intents that triggered its creation.
+**Children:** every record on the interface — its association(s), binding,
+properties, ACL/QoS bindings, BGP peer.
 
 **Parameters:** empty map `{}`.
 
 ---
 
-#### `interface|{INTF}` — configure-interface
+#### `interface|{INTF}|vlan|{ID}` — configure-interface / add-trunk-vlan
 
-Explicit interface configuration: bridged (VLAN member), routed (VRF + IP),
-or plain IP.
+The interface's membership in a VLAN — untagged (`configure-interface`,
+`tagged: false`) or tagged (`add-trunk-vlan`). One record per VLAN; at most one
+untagged VLAN per interface. The bridged / evpn-bridged service composite writes
+the untagged membership through the same function (`createAccessMembership`).
 
 | Field | Value |
 |-------|-------|
-| **Resource key** | `"interface|" + i.name` |
-| **Operation** | `OpConfigureInterface` (`"configure-interface"`) |
-| **Created by** | `ConfigureInterface()` in `interface_ops.go` |
-| **Deleted by** | `UnconfigureInterface()` in `interface_ops.go` |
-| **Reconstruct** | `replayInterfaceStep` → `iface.ConfigureInterface(ctx, config)` |
-| **skipInReconstruct** | No |
+| **Resource key** | `vlanMembershipKey(i.name, vlanID)` |
+| **Operation** | `OpConfigureInterface` (untagged), `OpAddTrunkVLAN` (tagged) |
+| **Created by** | `ConfigureInterface()` in `interface_ops.go`; `ApplyService()` (bridged) |
+| **Deleted by** | `RemoveTrunkVLAN()` (tagged), `UnconfigureInterface()`, `RemoveService()` (the service's own untagged membership) |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.ConfigureInterface(ctx, config)` |
+| **Side effect** | No |
 
-**Parents** (varies by configuration):
+**Parents:** `["interface|{INTF}", "vlan|{ID}"]` — so the VLAN cannot be deleted
+while the interface is a member.
 
-| Context | Parents |
-|---------|---------|
-| Bridged (VLAN set) | `["vlan\|{ID}"]` |
-| Routed (VRF set, no VLAN) | `["vrf\|{NAME}"]` |
-| IP-only (no VRF, no VLAN) | `["device"]` |
-
-When the interface is a PortChannel, `"portchannel|{NAME}"` is appended as
-an additional parent.
-
-**Children:** `interface|{INTF}|bgp-peer`, `interface|{INTF}|qos`,
-`interface|{INTF}|acl|{DIR}`, `interface|{INTF}|{PROPERTY}`.
+**Children:** none (leaf).
 
 **Parameters:**
 
 | Param | Source | Description |
 |-------|--------|-------------|
-| `vlan_id` | `InterfaceConfig.VLAN` | VLAN ID for bridged mode (integer as string) |
-| `tagged` | `InterfaceConfig.Tagged` | `"true"` or `"false"` for VLAN tagging |
-| `vrf` | `InterfaceConfig.VRF` | VRF name for routed mode |
-| `ip` | `InterfaceConfig.IP` | IP address for routed mode (CIDR) |
+| `vlan_id` | `InterfaceConfig.VLAN` | VLAN ID (integer as string) |
+| `tagged` | `InterfaceConfig.Tagged` | `"true"` or `"false"` |
 
 ---
 
-#### `interface|{INTF}` — apply-service
+#### `interface|{INTF}|routed` — configure-interface
 
-Service binding on an interface. This is the primary service lifecycle
-record — it captures every value needed for teardown so that `RemoveService`
-never needs to re-resolve specs.
+The interface's L3 association: IP address and optional VRF binding. An
+interface is routed or bridged, never both.
 
 | Field | Value |
 |-------|-------|
-| **Resource key** | `"interface|" + i.name` |
+| **Resource key** | `routedKey(i.name)` |
+| **Operation** | `OpConfigureInterface` (`"configure-interface"`) |
+| **Created by** | `ConfigureInterface()` in `interface_ops.go` |
+| **Deleted by** | `UnconfigureInterface()` in `interface_ops.go` |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.ConfigureInterface(ctx, config)` |
+| **Side effect** | No |
+
+**Parents:** `["interface|{INTF}"]`, plus `"vrf|{NAME}"` when a VRF is bound.
+
+**Children:** the interface's BGP peer, when this record supplies its IP.
+
+**Parameters:**
+
+| Param | Source | Description |
+|-------|--------|-------------|
+| `vrf` | `InterfaceConfig.VRF` | VRF name |
+| `ip` | `InterfaceConfig.IP` | IP address (CIDR) |
+
+---
+
+#### `interface|{INTF}|service` — apply-service
+
+Service binding on an interface. This is the primary service lifecycle
+record — it captures every value needed for teardown so that `RemoveService`
+never needs to re-resolve specs. `INTF` is the service's delivery point: the
+access port for routed / bridged / evpn-bridged, the IRB (`Vlan{N}`) for irb /
+evpn-irb.
+
+| Field | Value |
+|-------|-------|
+| **Resource key** | `bindingKey(i.name)` |
 | **Operation** | `OpApplyService` (`"apply-service"`) |
 | **Created by** | `ApplyService()` in `service_ops.go` |
 | **Deleted by** | `RemoveService()` in `service_ops.go` |
-| **Reconstruct** | `replayInterfaceStep` → `iface.ApplyService(ctx, serviceName, opts)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.ApplyService(ctx, serviceName, opts)` |
+| **Side effect** | No |
 
-**Parents** (varies by service type):
+**Parents:** `["interface|{INTF}"]` plus the service's infrastructure:
 
-| Service type | Parents |
+| Service type | Infrastructure parents |
 |-------------|---------|
-| bridged, evpn-bridged | `["vlan\|{ID}"]` |
-| routed | `["vrf\|{NAME}"]` |
-| irb, evpn-irb | `["vlan\|{ID}", "vrf\|{NAME}"]` |
-| No VLAN, no VRF | `["device"]` |
+| routed | `vrf\|{NAME}` (when a VRF is used) |
+| bridged, evpn-bridged | `vlan\|{ID}` |
+| irb, evpn-irb | `vlan\|{ID}`, `vrf\|{NAME}` |
 
-When the service has BGP routing, `"service|{NAME}"` is appended. When the
-interface is a PortChannel, `"portchannel|{NAME}"` is appended.
+When the service has BGP routing, `"service|{NAME}"` is appended.
 
-**Children:** `interface|{INTF}|qos` (when the service has a QoS policy).
+**Children:** the interface's BGP peer, when the service supplies its IP.
 
 **Parameters:**
 
@@ -786,10 +842,10 @@ interface is a PortChannel, `"portchannel|{NAME}"` is appended.
 | `route_reflector_client` | `opts.Params` | `"true"` if RR client (topology param) |
 | `next_hop_self` | `opts.Params` | `"true"` if next-hop-self (topology param) |
 
-`intentParamsToStepParams` selectively exports only: `service` (renamed from
-`service_name`), `ip_address`, `peer_as` (renamed from `bgp_peer_as`),
-`vlan_id`, `route_reflector_client`, `next_hop_self`. All other params are
-re-resolved from specs at replay time.
+The registry's `Export` (`exportApplyService`) writes only the caller params into
+the step: `service` (renamed from `service_name`), `ip_address`, `peer_as`
+(renamed from `bgp_peer_as`), `vlan_id`, `route_reflector_client`,
+`next_hop_self`. Everything else is re-resolved from specs at replay time.
 
 ---
 
@@ -805,12 +861,14 @@ IRB (Integrated Routing and Bridging) interface on a VLAN. Despite the
 | **Operation** | `OpConfigureIRB` (`"configure-irb"`) |
 | **Created by** | `ConfigureIRB()` in `vlan_ops.go` |
 | **Deleted by** | `UnconfigureIRB()` in `vlan_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.ConfigureIRB(ctx, vlanID, config)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.ConfigureIRB(ctx, vlanID, config)` |
+| **Side effect** | No |
 
 **Parents:** `["vlan|{ID}"]`, plus `"vrf|{NAME}"` when VRF is set.
 
-**Children:** none.
+**Children:** the IRB's service binding (`interface|Vlan{ID}|service`) and BGP
+peer, when present. The `configure-irb` record is the IRB's identity — an SVI
+exists only once configured.
 
 **Parameters:**
 
@@ -825,9 +883,9 @@ IRB (Integrated Routing and Bridging) interface on a VLAN. Despite the
 
 ### 7.6 Sub-Resources
 
-Sub-resource intents are children of `interface|{INTF}`. They represent
-configuration attached to an interface that has its own lifecycle independent
-of the interface's primary binding.
+Sub-resource intents are children of the interface's identity
+`interface|{INTF}`. They represent configuration attached to an interface that
+has its own lifecycle, independent of the interface's association and binding.
 
 #### `interface|{INTF}|bgp-peer`
 
@@ -840,10 +898,14 @@ service-level BGP neighbors which use peer groups.
 | **Operation** | `OpAddBGPPeer` (`"add-bgp-peer"`) |
 | **Created by** | `AddBGPPeer()` in `interface_bgp_ops.go` |
 | **Deleted by** | `RemoveBGPPeer()` in `interface_bgp_ops.go` |
-| **Reconstruct** | `replayInterfaceStep` → `iface.AddBGPPeer(ctx, config)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.AddBGPPeer(ctx, config)` |
+| **Side effect** | No |
 
-**Parents:** `["interface|" + i.name]`.
+**Parents:** `["interface|" + i.name]` plus the record that supplies the peer's
+update-source IP — the routed association (`interface|{INTF}|routed`) or a routed
+service's binding (`interface|{INTF}|service`); on an IRB, its identity alone. The
+peer depends on that IP, so replay orders it after the IP and the IP's source
+cannot be removed while the peer stands.
 
 **Children:** none (leaf).
 
@@ -869,8 +931,8 @@ implicitly by `ApplyService` when the service spec references a QoS policy.
 | **Operation** | `OpBindQoS` (`"bind-qos"`) |
 | **Created by** | `BindQoS()` in `qos_ops.go`; `ApplyService()` in `service_ops.go` |
 | **Deleted by** | `UnbindQoS()` in `qos_ops.go`; `RemoveService()` in `service_ops.go` |
-| **Reconstruct** | `replayInterfaceStep` → `iface.BindQoS(ctx, policyName, policy)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.BindQoS(ctx, policyName, policy)` |
+| **Side effect** | No |
 
 **Parents:** `["interface|" + i.name]`.
 
@@ -896,8 +958,8 @@ reference a shared ACL.
 | **Operation** | `OpBindACL` (`"bind-acl"`) |
 | **Created by** | `BindACL()` in `interface_ops.go` |
 | **Deleted by** | `UnbindACL()` in `interface_ops.go`; `removeSharedACL()` in `service_ops.go` |
-| **Reconstruct** | `replayInterfaceStep` → `iface.BindACL(ctx, aclName, direction)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.BindACL(ctx, aclName, direction)` |
+| **Side effect** | No |
 
 **Parents:** `["interface|" + i.name, "acl|" + aclName]`.
 
@@ -924,8 +986,8 @@ independently.
 | **Operation** | `OpSetProperty` (`"set-property"`) |
 | **Created by** | `SetProperty()` in `interface_ops.go` |
 | **Deleted by** | `ClearProperty()` in `interface_ops.go`; `UnconfigureInterface()` cascade |
-| **Reconstruct** | `replayInterfaceStep` → `iface.SetProperty(ctx, property, value)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.SetProperty(ctx, property, value)` |
+| **Side effect** | No |
 
 **Parents:** `["interface|" + i.name]`.
 
@@ -944,7 +1006,7 @@ independently.
 
 These intents are children of infrastructure intents (PortChannel, ACL) rather
 than interface intents. They include PortChannel members, ACL rules, and
-static routes. Reconstructed via `replayNodeStep` (§8).
+static routes. Replayed through the operation registry (§8).
 
 #### `portchannel|{NAME}|{MEMBER}`
 
@@ -956,8 +1018,8 @@ PortChannel member association.
 | **Operation** | `OpAddPortChannelMember` (`"add-pc-member"`) |
 | **Created by** | `AddPortChannelMember()` in `portchannel_ops.go` |
 | **Deleted by** | `RemovePortChannelMember()` in `portchannel_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.AddPortChannelMember(ctx, pcName, name)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.AddPortChannelMember(ctx, pcName, name)` |
+| **Side effect** | No |
 
 **Parents:** `["portchannel|" + pcName]`.
 
@@ -982,8 +1044,8 @@ ACL rule within an ACL table.
 | **Operation** | `OpAddACLRule` (`"add-acl-rule"`) |
 | **Created by** | `AddACLRule()` in `acl_ops.go` |
 | **Deleted by** | `DeleteACLRule()` in `acl_ops.go`; `removeSharedACL()` cascade |
-| **Reconstruct** | `replayNodeStep` → `n.AddACLRule(ctx, aclName, ruleName, config)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.AddACLRule(ctx, aclName, ruleName, config)` |
+| **Side effect** | No |
 
 **Parents:** `["acl|" + tableName]`.
 
@@ -1015,8 +1077,8 @@ Static route. Parent depends on VRF scope.
 | **Operation** | `OpAddStaticRoute` (`"add-static-route"`) |
 | **Created by** | `AddStaticRoute()` in `vrf_ops.go` |
 | **Deleted by** | `RemoveStaticRoute()` in `vrf_ops.go` |
-| **Reconstruct** | `replayNodeStep` → `n.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)` |
-| **skipInReconstruct** | No |
+| **Reconstruct** | registry `Replay` (`op_registry.go`) → `n.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)` |
+| **Side effect** | No |
 
 **Parents:** `["vrf|" + vrfName]` for named VRFs; `["device"]` for default
 VRF. The resource key uses whatever `vrfName` string the caller passes
@@ -1039,24 +1101,27 @@ Reconstruction replays intent records (§7) to rebuild the CONFIG_DB
 projection. This happens on connect (actuated mode, §4.1) and when building
 abstract nodes for topology provisioning (§4.2). The pipeline is:
 
-1. **Filter** — skip intents that are not actuated or are in
-   `skipInReconstruct`.
+1. **Filter** — skip intents that are not actuated, and side-effect intents
+   (`SideEffect: true` in the operation registry, `op_registry.go`).
 2. **Topological sort** — Kahn's algorithm produces a deterministic order
    (parents before children, ties broken alphabetically by resource key).
 3. **Replay** — each intent is converted to a `TopologyStep` via
-   `IntentToStep` and executed via `ReplayStep`. `ReplayStep` dispatches to
-   `replayNodeStep` or `replayInterfaceStep` based on URL structure.
+   `IntentToStep` and executed via `ReplayStep`, which dispatches to the
+   operation's registry entry (`opRegistry[op].Replay`).
 
-`skipInReconstruct` contains two operations:
+Two operations are side effects:
 
-| Operation | Reason |
-|-----------|--------|
-| `interface-init` | Recreated as side effect when sub-resource operations first touch an interface |
-| `deploy-service` | Recreated as side effect when the first `ApplyService` for a service replays |
+| Operation | Recreated by |
+|-----------|--------------|
+| `interface-init` | the first replayed record on the interface (its identity, §7.5) |
+| `deploy-service` | the first `ApplyService` replay for the service |
 
-These intents exist on the device but are excluded from the step list because
-replaying them directly would conflict with their parent's side-effect
-creation.
+They exist on the device but are not steps: replaying them directly would
+conflict with their re-creation as a side effect. The sort passes through a
+side-effect record to its parents, so a LAG's routed association (parent: the
+LAG's `interface-init` identity, whose parent is the portchannel) replays after
+the PortChannel. A dependency the identity does not carry needs its own edge — a
+BGP peer's edge to the record supplying its IP (§7.6).
 
 ## 9. Worked Examples
 
@@ -1072,9 +1137,9 @@ with BGP) to two interfaces, then removing one.
    → writeIntent("create-vrf", "vrf|Vrf_TRANSIT", {name: Vrf_TRANSIT}, ["device"])
    → device._children gains "vrf|Vrf_TRANSIT"
 
-2. BindIPVPN("Vrf_TRANSIT", "IPVPN_TRANSIT")
-   → writeIntent("bind-ipvpn", "ipvpn|Vrf_TRANSIT", {vrf, ipvpn, l3vni, l3vni_vlan}, ["vrf|Vrf_TRANSIT"])
-   → vrf|Vrf_TRANSIT._children gains "ipvpn|Vrf_TRANSIT"
+2. BindIPVPN("IPVPN_TRANSIT", "Vrf_TRANSIT")
+   → writeIntent("bind-ipvpn", "ipvpn|IPVPN_TRANSIT", {ipvpn, vrf_name, l3vni, l3vni_vlan, …}, ["vrf|Vrf_TRANSIT"])
+   → vrf|Vrf_TRANSIT._children gains "ipvpn|IPVPN_TRANSIT"
 
 3. Service intent (first interface)
    → GetIntent("service|TRANSIT") = nil → createPeerGroup=true
@@ -1083,12 +1148,14 @@ with BGP) to two interfaces, then removing one.
        {service_name, route_map_in, route_map_out, route_policy_keys}, ["device"])
    → device._children gains "service|TRANSIT"
 
-4. Interface intent
-   → writeIntent("apply-service", "interface|Ethernet0",
+4. Interface identity, then the binding
+   → createInterfaceIntent: writeIntent("interface-init", "interface|Ethernet0", {}, ["device"])
+   → writeIntent("apply-service", "interface|Ethernet0|service",
        {service_name, service_type, vrf_name, ip_address, ...},
-       ["vrf|Vrf_TRANSIT", "service|TRANSIT"])
-   → vrf|Vrf_TRANSIT._children gains "interface|Ethernet0"
-   → service|TRANSIT._children gains "interface|Ethernet0"
+       ["interface|Ethernet0", "vrf|Vrf_TRANSIT", "service|TRANSIT"])
+   → interface|Ethernet0._children gains "interface|Ethernet0|service"
+   → vrf|Vrf_TRANSIT._children gains "interface|Ethernet0|service"
+   → service|TRANSIT._children gains "interface|Ethernet0|service"
 ```
 
 #### Apply to Ethernet4
@@ -1097,39 +1164,38 @@ with BGP) to two interfaces, then removing one.
 5. CreateVRF("Vrf_TRANSIT")
    → writeIntent: vrf|Vrf_TRANSIT exists, parents match → idempotent update
 
-6. BindIPVPN("Vrf_TRANSIT", "IPVPN_TRANSIT")
-   → writeIntent: ipvpn|Vrf_TRANSIT exists, parents match → idempotent update
+6. BindIPVPN("IPVPN_TRANSIT", "Vrf_TRANSIT")
+   → ipvpn|IPVPN_TRANSIT exists → no-op (one L3VNI per device)
 
 7. Service intent (second interface)
    → GetIntent("service|TRANSIT") ≠ nil → createPeerGroup=false
    → addBGPRoutePolicies: route maps idempotent (content hash unchanged)
    → writeIntent: service|TRANSIT exists, parents match → update params
 
-8. Interface intent
-   → writeIntent("apply-service", "interface|Ethernet4",
-       {...}, ["vrf|Vrf_TRANSIT", "service|TRANSIT"])
-   → vrf|Vrf_TRANSIT._children gains "interface|Ethernet4"
-   → service|TRANSIT._children gains "interface|Ethernet4"
+8. Interface identity, then the binding
+   → writeIntent("interface-init", "interface|Ethernet4", {}, ["device"])
+   → writeIntent("apply-service", "interface|Ethernet4|service",
+       {...}, ["interface|Ethernet4", "vrf|Vrf_TRANSIT", "service|TRANSIT"])
+   → vrf|Vrf_TRANSIT._children gains "interface|Ethernet4|service"
+   → service|TRANSIT._children gains "interface|Ethernet4|service"
 ```
 
 #### Remove from Ethernet0
 
 ```
 9. isLastServiceUser check
-   → service|TRANSIT._children = ["interface|Ethernet0", "interface|Ethernet4"]
-   → "interface|Ethernet4" ≠ excludeKey → isLastServiceUser=false
+   → service|TRANSIT._children = ["interface|Ethernet0|service", "interface|Ethernet4|service"]
+   → "interface|Ethernet4|service" ≠ excludeKey (the binding being removed) → isLastServiceUser=false
 
-10. Delete QoS sub-intent (if exists)
-    → deleteIntent("interface|Ethernet0|qos")
-    → interface|Ethernet0._children shrinks
+10. Delete the binding
+    → deleteIntent("interface|Ethernet0|service")
+    → interface|Ethernet0, vrf|Vrf_TRANSIT and service|TRANSIT each lose it from _children
 
-11. Delete interface intent
-    → deleteIntent("interface|Ethernet0")
-    → vrf|Vrf_TRANSIT._children loses "interface|Ethernet0"
-    → service|TRANSIT._children loses "interface|Ethernet0"
+11. Delete the identity if nothing else is on the interface
+    → destroyInterfaceIntent: interface|Ethernet0 is childless → deleteIntent("interface|Ethernet0")
 
 12. Not last user → skip route policy and peer group deletion
-    → service|TRANSIT stays (still has "interface|Ethernet4" child)
+    → service|TRANSIT stays (still has "interface|Ethernet4|service" child)
     → VRF stays (still has children)
 ```
 
@@ -1144,11 +1210,11 @@ Ethernet4 also has TRANSIT but is not refreshed yet.
    → si = GetIntent("service|TRANSIT")
    → oldRoutePolicyKeys = "ROUTE_MAP:TRANSIT_IMPORT_abc123;PREFIX_SET:TRANSIT_PFX_def456"
 
-2. RemoveService(Ethernet0)
-   → isLastServiceUser check: service|TRANSIT._children has Ethernet4 → false
-   → Per-interface cleanup (BGP neighbor, VLAN member, etc.)
-   → deleteIntent("interface|Ethernet0")
-   → service|TRANSIT._children loses "interface|Ethernet0"
+2. RemoveService(Ethernet0), delivery only (the refresh keeps the delivery point)
+   → isLastServiceUser check: service|TRANSIT._children has Ethernet4's binding → false
+   → Per-interface cleanup (BGP neighbor, etc.)
+   → deleteIntent("interface|Ethernet0|service")
+   → service|TRANSIT._children loses "interface|Ethernet0|service"
    → Route policies and peer group kept (not last user)
 
 3. ApplyService(Ethernet0, "TRANSIT", ...) — re-resolves spec
@@ -1157,7 +1223,7 @@ Ethernet4 also has TRANSIT but is not refreshed yet.
    → addBGPRoutePolicies generates new content-hashed objects:
      ROUTE_MAP:TRANSIT_IMPORT_xyz789, PREFIX_SET:TRANSIT_PFX_uvw012
    → writeIntent: service|TRANSIT updated with new route_policy_keys
-   → writeIntent: interface|Ethernet0 re-registered as child
+   → writeIntent: interface|Ethernet0|service re-registered as child
 
 4. Capture new route policy keys from service intent
    → newRoutePolicyKeys = "ROUTE_MAP:TRANSIT_IMPORT_xyz789;PREFIX_SET:TRANSIT_PFX_uvw012"
@@ -1188,38 +1254,40 @@ stale relative to the service intent's current keys.
 |------|---------|
 | `baseline_ops.go` | `device` |
 | `vlan_ops.go` | `vlan\|ID`, `interface\|Vlan{ID}` |
-| `vrf_ops.go` | `vrf\|NAME`, `ipvpn\|VRFNAME`, `route\|VRF\|PREFIX` |
+| `vrf_ops.go` | `vrf\|NAME`, `ipvpn\|IPVPN`, `route\|VRF\|PREFIX` |
 | `acl_ops.go` | `acl\|NAME`, `acl\|NAME\|RULE` |
 | `portchannel_ops.go` | `portchannel\|NAME`, `portchannel\|NAME\|MEMBER` |
 | `bgp_ops.go` | `evpn-peer\|ADDR` |
-| `interface_ops.go` | `interface\|INTF` (init, configure), `interface\|INTF\|acl\|DIR`, `interface\|INTF\|PROPERTY` |
+| `interface_ops.go` | `interface\|INTF` (identity), `interface\|INTF\|vlan\|ID`, `interface\|INTF\|routed`, `interface\|INTF\|acl\|DIR`, `interface\|INTF\|PROPERTY` |
 | `interface_bgp_ops.go` | `interface\|INTF\|bgp-peer` |
 | `qos_ops.go` | `interface\|INTF\|qos` |
-| `service_ops.go` | `service\|NAME`, `interface\|INTF` (apply-service) |
+| `service_ops.go` | `service\|NAME`, `interface\|INTF\|service` (apply-service) |
 | `intent_ops.go` | `writeIntent`, `deleteIntent`, `GetIntent`, `IntentsByPrefix`, `IntentsByParam` |
-| `reconstruct.go` | `IntentsToSteps`, `ReplayStep`, `skipInReconstruct` |
+| `reconstruct.go` | `IntentsToSteps`, `ReplayStep` |
+| `op_registry.go` | one `OpSpec` per operation: params, inverse, `Replay`, `SideEffect` |
 
 ## 11. Summary Table
 
-| # | Resource Key | Op | Parents | Children | skipInReconstruct |
-|---|---|---|---|---|---|
-| 1 | `device` | `setup-device` | (root) | all top-level | No |
-| 2 | `vlan\|ID` | `create-vlan` | `[device]` | macvpn, IRB, interfaces | No |
-| 3 | `vrf\|NAME` | `create-vrf` | `[device]` | ipvpn, routes, interfaces, IRB | No |
-| 4 | `acl\|NAME` | `create-acl` | `[device]` | rules, ACL bindings | No |
-| 5 | `portchannel\|NAME` | `create-portchannel` | `[device]` | members, interfaces | No |
-| 6 | `evpn-peer\|ADDR` | `add-bgp-evpn-peer` | `[device]` | (leaf) | No |
-| 7 | `service\|NAME` | `deploy-service` | `[device]` | interfaces (BGP svc) | **Yes** |
-| 8 | `route\|VRF\|PREFIX` | `add-static-route` | `[vrf\|NAME]` or `[device]` | (leaf) | No |
-| 9 | `macvpn\|VLANID` | `bind-macvpn` | `[vlan\|ID]` | (leaf) | No |
-| 10 | `ipvpn\|VRFNAME` | `bind-ipvpn` | `[vrf\|NAME]` | (leaf) | No |
-| 11 | `interface\|Vlan{ID}` | `configure-irb` | `[vlan\|ID]` ± `[vrf\|NAME]` | (leaf) | No |
-| 12 | `interface\|INTF` | `interface-init` | `[device]` ± `[portchannel]` | sub-resources | **Yes** |
-| 13 | `interface\|INTF` | `configure-interface` | varies (§7.5) | sub-resources | No |
-| 14 | `interface\|INTF` | `apply-service` | varies (§7.5) | qos | No |
-| 15 | `interface\|INTF\|bgp-peer` | `add-bgp-peer` | `[interface\|INTF]` | (leaf) | No |
-| 16 | `interface\|INTF\|qos` | `bind-qos` | `[interface\|INTF]` | (leaf) | No |
-| 17 | `interface\|INTF\|acl\|DIR` | `bind-acl` | `[interface\|INTF, acl\|NAME]` | (leaf) | No |
-| 18 | `interface\|INTF\|PROPERTY` | `set-property` | `[interface\|INTF]` | (leaf) | No |
-| 19 | `portchannel\|NAME\|MEMBER` | `add-pc-member` | `[portchannel\|NAME]` | (leaf) | No |
-| 20 | `acl\|NAME\|RULE` | `add-acl-rule` | `[acl\|NAME]` | (leaf) | No |
+| Resource Key | Op | Parents | Children | Side effect |
+|---|---|---|---|---|
+| `device` | `setup-device` | (root) | all top-level | No |
+| `vlan\|ID` | `create-vlan` | `[device]` | macvpn, IRB, memberships | No |
+| `vrf\|NAME` | `create-vrf` | `[device]` | ipvpn, routes, routed interfaces, IRB | No |
+| `acl\|NAME` | `create-acl` | `[device]` | rules, ACL bindings | No |
+| `portchannel\|NAME` | `create-portchannel` | `[device]` | members, the LAG's identity | No |
+| `evpn-peer\|ADDR` | `add-bgp-evpn-peer` | `[device]` | (leaf) | No |
+| `service\|NAME` | `deploy-service` | `[device]` | the service's bindings | **Yes** |
+| `route\|VRF\|PREFIX` | `add-static-route` | `[vrf\|NAME]` or `[device]` | (leaf) | No |
+| `macvpn\|VLANID` | `bind-macvpn` | `[vlan\|ID]` | (leaf) | No |
+| `ipvpn\|IPVPN` | `bind-ipvpn` | `[vrf\|NAME]` | (leaf) | No |
+| `interface\|Vlan{ID}` | `configure-irb` | `[vlan\|ID]` ± `[vrf\|NAME]` | its binding, BGP peer | No |
+| `interface\|INTF` | `interface-init` | `[device]` ± `[portchannel\|NAME]` | every record on the interface | **Yes** |
+| `interface\|INTF\|vlan\|ID` | `configure-interface` / `add-trunk-vlan` | `[interface\|INTF, vlan\|ID]` | (leaf) | No |
+| `interface\|INTF\|routed` | `configure-interface` | `[interface\|INTF]` ± `[vrf\|NAME]` | BGP peer | No |
+| `interface\|INTF\|service` | `apply-service` | `[interface\|INTF]` + infrastructure (§7.5) | BGP peer (routed service) | No |
+| `interface\|INTF\|bgp-peer` | `add-bgp-peer` | `[interface\|INTF]` + IP source | (leaf) | No |
+| `interface\|INTF\|qos` | `bind-qos` | `[interface\|INTF]` | (leaf) | No |
+| `interface\|INTF\|acl\|DIR` | `bind-acl` | `[interface\|INTF, acl\|NAME]` | (leaf) | No |
+| `interface\|INTF\|PROPERTY` | `set-property` | `[interface\|INTF]` | (leaf) | No |
+| `portchannel\|NAME\|MEMBER` | `add-pc-member` | `[portchannel\|NAME]` | (leaf) | No |
+| `acl\|NAME\|RULE` | `add-acl-rule` | `[acl\|NAME]` | (leaf) | No |

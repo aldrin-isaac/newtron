@@ -4279,23 +4279,24 @@ VLAN, `tagged: false`), or bridged trunk mode (one tagged VLAN per call,
 `tagged: true`). Routed and bridged are mutually exclusive.
 
 **Trunk additivity (#224)**: each call with `tagged: true` adds one VLAN to
-the trunk and creates a per-VLAN intent record at
-`NEWTRON_INTENT|interface|{name}|trunk-vlan|{vlan_id}`. Repeated calls for
+the trunk and creates a per-VLAN membership record at
+`NEWTRON_INTENT|interface|{name}|vlan|{vlan_id}`. Repeated calls for
 different VLANs accumulate — the second call does not clobber the first.
 Repeating the same VLAN is an idempotent no-op. Access mode (`tagged:
-false`) stays singleton on the base `interface|{name}` record. This change
-restores Intent Round-Trip Completeness for trunk ports: replay of the
-intent log reconstructs the full trunk-membership set.
+false`) writes the same record form for its one untagged VLAN; a routed
+interface's IP and VRF are recorded at `interface|{name}|routed`. Each is a
+child of the interface's identity record `interface|{name}` and of the VLAN or
+VRF. Replay of the intent log reconstructs every membership.
 
-**Cross-mode swaps are rejected.** Calling configure-interface with a
-different mode than the existing intent (routed → access, access vlan N
-→ access vlan M, access → routed, routed vrf X → routed vrf Y) returns
-500 with `writeIntent ...: parents mismatch (existing [<old>], requested
-[<new>]) — delete and recreate to change parents`. Call
-`unconfigure-interface` first to clear the existing mode, then
-configure-interface for the new one. The check is at the intent DAG
-parents-mismatch guard — the interface record's `_parents` encodes mode
-(`vrf|<vrf>` for routed, `vlan|<id>` for access, `device` for empty).
+**Mode changes are refused, 409.** An interface is bridged or routed, never
+both; it has at most one untagged VLAN; it is a tagged or an untagged member of
+a VLAN, not both; and a routed interface keeps its VRF. A request that would
+break one of these (routed → VLAN, VLAN → routed, a second untagged VLAN, a
+tagged/untagged flip, routed VRF X → VRF Y) returns 409 with a precondition
+error naming the current state. Call `unconfigure-interface` first, then
+configure-interface for the new mode. Settings already on the interface
+(properties, ACL/QoS bindings) do not affect any of this: they hang off the
+identity record, not the association.
 
 **Within-mode field changes (#228)**: when the new call keeps the same
 parents but changes a sub-entry-owning field (today: the IP in routed
@@ -4327,7 +4328,7 @@ data. Concretely:
 #### POST /newtron/v1/networks/{netID}/nodes/{node}/interfaces/{name}/remove-trunk-vlan
 
 Atomically strip a single tagged VLAN from a trunk port. The named VLAN's
-`VLAN_MEMBER` entry and its `interface|{name}|trunk-vlan|{vlan_id}` intent
+`VLAN_MEMBER` entry and its `interface|{name}|vlan|{vlan_id}` intent
 record are deleted; other trunk VLANs, the access VLAN (if any), VRF/IP
 bindings, BGP peers, QoS bindings, and ACL bindings on this interface are
 untouched.

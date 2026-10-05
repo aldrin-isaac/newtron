@@ -4,10 +4,10 @@ description: |
   remove-trunk-vlan verb.
 
   Verifies:
-    - configure-interface tagged:true writes a per-VLAN intent record at
-      NEWTRON_INTENT|interface|{name}|trunk-vlan|{vlan_id} (not on the base
-      interface|{name} record). This is the Intent Round-Trip Completeness
-      fix.
+    - configure-interface tagged:true writes a per-VLAN membership record at
+      NEWTRON_INTENT|interface|{name}|vlan|{vlan_id} (not on the interface's
+      identity record interface|{name}). This is the Intent Round-Trip
+      Completeness fix.
     - A second tagged-VLAN call on the same port creates a second record
       WITHOUT clobbering the first (the bug pre-#224: vlan_id was stuffed
       on the base record and only the last call survived in intent).
@@ -50,14 +50,14 @@ steps:
   - name: verify-trunk-vlan-110-intent-exists
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110/exists?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Cvlan%7C110/exists?mode=loopback
     expect:
       jq: '.exists == true'
 
   - name: verify-trunk-vlan-110-intent-operation
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Cvlan%7C110?mode=loopback
     expect:
       jq: '.operation == "add-trunk-vlan" and .vlan_id == "110"'
 
@@ -81,14 +81,14 @@ steps:
   - name: verify-trunk-vlan-120-intent-exists
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C120/exists?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Cvlan%7C120/exists?mode=loopback
     expect:
       jq: '.exists == true'
 
   - name: verify-trunk-vlan-110-still-exists-after-second-add
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110/exists?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Cvlan%7C110/exists?mode=loopback
     expect:
       jq: '.exists == true'
 
@@ -119,7 +119,7 @@ steps:
   - name: verify-trunk-vlan-110-intent-gone
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C110/exists?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Cvlan%7C110/exists?mode=loopback
     expect:
       jq: '.exists == false'
 
@@ -133,7 +133,7 @@ steps:
   - name: verify-trunk-vlan-120-survives-reference-aware-strip
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Ctrunk-vlan%7C120/exists?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet24%7Cvlan%7C120/exists?mode=loopback
     expect:
       jq: '.exists == true'
 

@@ -344,10 +344,10 @@ func TestReplayStepConfigureInterfaceBridged(t *testing.T) {
 	if _, ok := n.ConfigDB().VLANMember["Vlan100|Ethernet0"]; !ok {
 		t.Error("expected VLAN_MEMBER|Vlan100|Ethernet0 in ConfigDB")
 	}
-	// Verify intent record
-	intent := n.GetIntent("interface|Ethernet0")
+	// Verify the membership record
+	intent := n.GetIntent(vlanMembershipKey("Ethernet0", 100))
 	if intent == nil {
-		t.Fatal("expected intent for Ethernet0")
+		t.Fatal("expected membership intent for Ethernet0 in VLAN 100")
 	}
 	if intent.Params["vlan_id"] != "100" {
 		t.Errorf("intent vlan_id = %q, want 100", intent.Params["vlan_id"])

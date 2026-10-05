@@ -13,7 +13,7 @@ import (
 // rows — covered elsewhere). They mirror what configure-interface / apply-service
 // write.
 func trunkMember(n *Node, port string, vlanID string) {
-	n.configDB.NewtronIntent["interface|"+port+"|trunk-vlan|"+vlanID] = map[string]string{
+	n.configDB.NewtronIntent["interface|"+port+"|vlan|"+vlanID] = map[string]string{
 		"operation":       sonic.OpAddTrunkVLAN,
 		"state":           "actuated",
 		sonic.FieldVLANID: vlanID,
@@ -119,7 +119,7 @@ func TestUnbindMemberQoS_Gates(t *testing.T) {
 	t.Run("LAG member emits no PORT_QOS_MAP", func(t *testing.T) {
 		trunkMember(n, "PortChannel1", "400")
 		irbQoSBinding(n, "400", "QOS1", "svc-a")
-		delete(n.configDB.NewtronIntent, "interface|PortChannel1|trunk-vlan|400")
+		delete(n.configDB.NewtronIntent, "interface|PortChannel1|vlan|400")
 
 		cs := NewChangeSet(n.Name(), "test")
 		n.unbindMemberQoS(cs, "PortChannel1", map[int]bool{400: true})

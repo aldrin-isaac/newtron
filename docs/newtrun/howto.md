@@ -524,7 +524,7 @@ steps:
   - name: verify-binding
     action: newtron-cli
     devices: [switch1]
-    command: "configdb query NEWTRON_INTENT interface|Ethernet0 --loopback"
+    command: "configdb query NEWTRON_INTENT interface|Ethernet0|service --loopback"
     expect:
       jq: '.operation == "apply-service"'
 
@@ -536,12 +536,12 @@ steps:
   - name: verify-binding-removed
     action: newtron-cli
     devices: [switch1]
-    command: "configdb exists NEWTRON_INTENT interface|Ethernet0 --loopback"
+    command: "configdb exists NEWTRON_INTENT interface|Ethernet0|service --loopback"
     expect:
       jq: '.exists == false'
 ```
 
-The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative service binding (see [newtron HLD §Device Is Source of Reality](../newtron/hld.md)). It replaced the per-binding `NEWTRON_SERVICE_BINDING` table — there is no separate binding table; the apply-service intent record IS the binding.
+The intent record at `NEWTRON_INTENT/interface|<port>|service` is the authoritative service binding (see [newtron HLD §Device Is Source of Reality](../newtron/hld.md)). It replaced the per-binding `NEWTRON_SERVICE_BINDING` table — there is no separate binding table; the apply-service intent record IS the binding.
 
 ### 10.1 Scenario fields
 

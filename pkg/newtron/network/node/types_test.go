@@ -411,7 +411,7 @@ func TestInterface_Properties(t *testing.T) {
 	}
 	configDB.Port["Ethernet0"] = sonic.PortEntry{AdminStatus: "up", Speed: "100G", MTU: "9100"}
 	// VRF and IP are read from the intent DB (Phase 2: intent-based reads).
-	configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"vrf":       "Vrf_CUST1",
@@ -641,7 +641,7 @@ func TestInterface_String(t *testing.T) {
 			Interface:         map[string]sonic.InterfaceEntry{},
 			PortChannelMember: map[string]map[string]string{},
 			NewtronIntent: map[string]map[string]string{
-				"interface|Ethernet0": {
+				routedKey("Ethernet0"): {
 					"operation": "configure-interface",
 					"state":     "actuated",
 					"ip":        "10.1.1.1/30",
@@ -666,7 +666,7 @@ func TestInterface_String(t *testing.T) {
 			Interface:         map[string]sonic.InterfaceEntry{},
 			PortChannelMember: map[string]map[string]string{},
 			NewtronIntent: map[string]map[string]string{
-				"interface|Ethernet0": {
+				routedKey("Ethernet0"): {
 					"operation": "configure-interface",
 					"state":     "actuated",
 					"vrf":       "Vrf_CUST1",

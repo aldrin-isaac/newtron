@@ -133,6 +133,9 @@ func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 	if err := i.deleteQoSBindingIntent(cs); err != nil {
 		return nil, err
 	}
+	if err := i.destroyInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}

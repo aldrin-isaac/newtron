@@ -93,7 +93,7 @@ func TestResourceInterfaceName(t *testing.T) {
 		{"interface|Ethernet0", "Ethernet0"},
 		{"interface|Ethernet0|service", "Ethernet0"},
 		{"interface|Ethernet0|acl|ingress", "Ethernet0"},
-		{"interface|Ethernet0|trunk-vlan|100", "Ethernet0"},
+		{"interface|Ethernet0|vlan|100", "Ethernet0"},
 		{"interface|Vlan100|service", "Vlan100"},
 		{"vlan|100", ""},
 		{"device", ""},

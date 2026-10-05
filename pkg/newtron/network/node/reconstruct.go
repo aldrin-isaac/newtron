@@ -190,7 +190,12 @@ func intentParamsToStepParams(op string, intent *sonic.Intent) map[string]any {
 // broken by resource key for determinism.
 //
 // Side-effect intents (registry SideEffect: interface-init, deploy-service)
-// are skipped: replaying their parent operation re-creates them.
+// are skipped: replaying their parent operation re-creates them. Their
+// dependencies are not skipped: a record parented on a side effect is ordered
+// after that side effect's own parents, transitively. A LAG's routed
+// association hangs on the LAG's interface-init identity, which hangs on the
+// portchannel; without the pass-through, nothing would order the IP after the
+// PortChannel it is configured on.
 func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
 	// Build intent objects, filtering non-actuated and side-effect operations
 	type node struct {
@@ -213,12 +218,31 @@ func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
 		inDegree[resource] = 0
 	}
 
-	// Count in-degree from parent relationships (only parents that are in the node set)
-	for resource, n := range nodes {
-		for _, parent := range n.intent.Parents {
-			if _, ok := nodes[parent]; ok {
-				inDegree[resource]++
+	// replayParents resolves a record's parents to the replayed records it
+	// depends on, passing through skipped side-effect records to their parents.
+	var replayParents func(parents []string, seen map[string]bool, out map[string]bool)
+	replayParents = func(parents []string, seen map[string]bool, out map[string]bool) {
+		for _, p := range parents {
+			if seen[p] {
+				continue
 			}
+			seen[p] = true
+			if _, ok := nodes[p]; ok {
+				out[p] = true
+				continue
+			}
+			if fields, ok := intents[p]; ok {
+				replayParents(sonic.NewIntent(p, fields).Parents, seen, out)
+			}
+		}
+	}
+	children := make(map[string][]string)
+	for resource, n := range nodes {
+		deps := map[string]bool{}
+		replayParents(n.intent.Parents, map[string]bool{resource: true}, deps)
+		for p := range deps {
+			children[p] = append(children[p], resource)
+			inDegree[resource]++
 		}
 	}
 
@@ -241,10 +265,7 @@ func IntentsToSteps(intents map[string]map[string]string) []spec.TopologyStep {
 
 		// Collect children that become ready, sort for determinism
 		var ready []string
-		for _, child := range n.intent.Children {
-			if _, ok := nodes[child]; !ok {
-				continue // child not in node set (side-effect or non-actuated)
-			}
+		for _, child := range children[resource] {
 			inDegree[child]--
 			if inDegree[child] == 0 {
 				ready = append(ready, child)

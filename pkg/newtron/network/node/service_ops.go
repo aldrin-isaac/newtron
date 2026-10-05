@@ -1547,19 +1547,25 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 	if err := n.deleteIntent(cs, excludeKey); err != nil {
 		return nil, err
 	}
-	// Reap the identity record now that the binding (its child) is gone.
+	// Reap what the service delivered on this interface, now that the binding is
+	// gone.
 	//   - irb: the composite authored the SVI gateway (ConfigureIRB on apply),
 	//     so it reaps it on the last consumer — the binding just removed. Delete
 	//     the VLAN_INTERFACE IP/base and the reference-shared SAG, mirroring
 	//     UnconfigureIRB, then the intent. (Reap-on-last-consumer, like routed's
 	//     VRF: an operator's standalone configure-irb that was never serviced
 	//     fires no last-consumer event and survives.)
-	//   - bare interface-init: the service's to remove — a service-only interface
-	//     leaves nothing behind (§15). A configure-interface identity carrying
-	//     membership or an IP the service never owned survives.
-	if identity := n.GetIntent("interface|" + i.name); identity != nil && len(identity.Children) == 0 {
-		switch {
-		case isIRB && identity.Operation == sonic.OpConfigureIRB && !deliveryOnly:
+	//   - bridged / evpn-bridged: the port's access membership in the service's
+	//     VLAN — assembled by the composite, or an operator membership it
+	//     overlapped — is reaped with the service (last consumer, no provenance,
+	//     the same rule the SVI and VRF reaps use). The membership is its own
+	//     record with no children, so whatever else the port carries never keeps
+	//     it. destroyAccessMembership is the reverse of the createAccessMembership
+	//     this teardown undoes.
+	// Then the interface identity goes if nothing else is left on it (§15).
+	if isIRB {
+		if identity := n.GetIntent("interface|" + i.name); identity != nil && len(identity.Children) == 0 &&
+			identity.Operation == sonic.OpConfigureIRB && !deliveryOnly {
 			sviVLAN := bindingInt(identity.Params[sonic.FieldVLANID])
 			if ip := identity.Params[sonic.FieldIPAddress]; ip != "" {
 				cs.Deletes(deleteSviIPConfig(sviVLAN, ip))
@@ -1580,22 +1586,17 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
 				return nil, err
 			}
-		case identity.Operation == sonic.OpConfigureInterface && identity.Params[sonic.FieldVLANID] != "" && !deliveryOnly:
-			// This port was an access member of the VLAN the removed service
-			// overlapped; reap the membership now the binding (its child) is gone.
-			// Last-consumer, no provenance — the same rule the SVI and VRF reaps use:
-			// an operator's configure-interface membership that a service overlapped
-			// is reaped with it. An operator membership no service ever overlapped
-			// keeps its binding-free identity and fires no removeService, so it
-			// survives (§15). destroyAccessMembership is the reverse of the
-			// createAccessMembership this teardown undoes.
-			if err := i.destroyAccessMembership(cs, bindingInt(identity.Params[sonic.FieldVLANID])); err != nil {
-				return nil, err
+		}
+	} else {
+		if vlanID := bindingInt(b[sonic.FieldVLANID]); vlanID > 0 && !deliveryOnly {
+			if member := n.GetIntent(vlanMembershipKey(i.name, vlanID)); member != nil && member.Operation == sonic.OpConfigureInterface {
+				if err := i.destroyAccessMembership(cs, vlanID); err != nil {
+					return nil, err
+				}
 			}
-		case identity.Operation == sonic.OpInterfaceInit:
-			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
-				return nil, err
-			}
+		}
+		if err := i.destroyInterfaceIntent(cs); err != nil {
+			return nil, err
 		}
 	}
 

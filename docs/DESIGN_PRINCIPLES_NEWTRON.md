@@ -1702,7 +1702,7 @@ Some reverses read sibling intents, not only their own record (universal
 §20: self-sufficiency is a property of the store). When a service's
 per-member policy is derived from a binding and a VLAN's membership
 (`irb-service-redesign.md`), tearing down one member's rows reads the sibling
-`interface|<name>` membership intents from the intent DB to know which members
+`interface|<name>|vlan|<id>` membership intents from the intent DB to know which members
 remain — never the service spec. §15's "never re-resolve specs at removal"
 holds exactly: sibling intents are the intent DB, not specs.
 `TestOpRoundTrip` already replays the *whole* intent DB
@@ -2379,7 +2379,7 @@ which guards the real `DeployTopology`/`DestroyTopology` pair). Apply the diagno
 the other way to place a `create`: `createBridgeDomain` has a nameable
 `destroyBridgeDomain`, so it is a create; `createInterfaceIntent` writes the
 interface's identity record — a physical port has no `create` operation of its own —
-and its reverse is the generic `deleteIntent`, so it too is a create. Using `ensure`
+and has the nameable reverse `destroyInterfaceIntent`, so it too is a create. Using `ensure`
 on either would have hidden the create/destroy pair and the §15 symmetry with it.
 
 **Exceptions.** Three categories of identifier may stay noun-form

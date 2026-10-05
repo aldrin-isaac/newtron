@@ -24,12 +24,19 @@ metadata fields:
 
 ```
 NEWTRON_INTENT|interface|Ethernet0 → {
+    operation:  "interface-init"
+    state:      "actuated"
+    _parents:   "device"                                     ← DAG: the port's identity
+    _children:  "interface|Ethernet0|mtu,interface|Ethernet0|vlan|100"  ← DAG: what is on it
+}
+
+NEWTRON_INTENT|interface|Ethernet0|vlan|100 → {
     operation:  "configure-interface"
     state:      "actuated"
     vlan_id:    "100"
     tagged:     "false"
-    _parents:   "vlan|100"                              ← DAG: member of VLAN 100
-    _children:  "interface|Ethernet0|qos,interface|Ethernet0|mtu"  ← DAG: sub-resources
+    _parents:   "interface|Ethernet0,vlan|100"               ← DAG: Ethernet0 is a member of VLAN 100
+    _children:  ""
 }
 ```
 
@@ -216,7 +223,7 @@ func (n *Node) deleteIntent(cs *ChangeSet, resource string) error
 
 **Error format:**
 ```
-deleteIntent "vlan|100": has children [interface|Ethernet0, macvpn|100]
+deleteIntent "vlan|100": has children [interface|Ethernet0|vlan|100, macvpn|100]
 ```
 
 The error message lists all children, giving the caller explicit information
@@ -237,9 +244,9 @@ When an operation calls `writeIntent`, it passes the `parents` parameter.
 The operation code determines its own parents from the arguments it received:
 
 ```go
-// ConfigureInterface knows it depends on the VLAN
-resource := "interface|" + i.name
-parents := []string{"vlan|" + strconv.Itoa(cfg.VLAN)}
+// createAccessMembership knows the membership depends on the interface and the VLAN
+resource := vlanMembershipKey(i.name, vlanID) // "interface|Ethernet0|vlan|100"
+parents := []string{"interface|" + i.name, "vlan|" + strconv.Itoa(vlanID)}
 n.writeIntent(cs, sonic.OpConfigureInterface, resource, params, parents)
 ```
 
@@ -269,10 +276,14 @@ via `deleteIntent`). The orchestrator invokes the child's own domain method —
 it does not reach into the child's intent record.
 
 ```
-RemoveService orchestrates:
-  1. iface.UnbindQoS()     → sub-resource deletes own intent, deregisters from interface
-  2. iface.UnbindACL()     → binding deletes own intent, deregisters from interface + ACL
-  3. n.deleteIntent("interface|Ethernet0")  → interface intent deleted (children already gone)
+RemoveService (a bridged service on Ethernet0, VLAN 300) orchestrates:
+  1. n.deleteIntent("interface|Ethernet0|service")  → the binding deletes itself,
+                                                       deregisters from interface, service, VLAN
+  2. iface.destroyAccessMembership(300)  → interface|Ethernet0|vlan|300 deletes itself,
+                                            deregisters from interface + VLAN
+  3. iface.destroyInterfaceIntent()      → interface|Ethernet0 deletes itself if nothing
+                                            else is on the port
+  4. n.destroyBridgeDomain(300, …)       → vlan|300 deletes itself on its last consumer
 ```
 
 The distinction: the orchestrator *calls methods*. The parent *is a record*.
@@ -305,7 +316,9 @@ fails if a declared parent does not exist.
 
 ```
 CreateVLAN(100)                     → vlan|100, _parents: [device]
-ConfigureInterface(Eth0, VLAN=100)  → interface|Ethernet0, _parents: [vlan|100]  ✓
+ConfigureInterface(Eth0, VLAN=100)  → interface|Ethernet0, _parents: [device]  (if absent)
+                                    → interface|Ethernet0|vlan|100,
+                                      _parents: [interface|Ethernet0, vlan|100]  ✓
 Node.BindMACVPN(100, 20100)         → macvpn|100, _parents: [vlan|100]  ✓
 ```
 
@@ -320,8 +333,9 @@ Children are removed before parents. Enforced mechanically by I5: `deleteIntent`
 fails if `_children` is non-empty.
 
 ```
-DeleteVLAN(100)                     → ERROR: children [interface|Ethernet0, macvpn|100]
-UnconfigureInterface(Eth0)          → deletes interface|Ethernet0, deregisters from vlan|100
+DeleteVLAN(100)                     → ERROR: children [interface|Ethernet0|vlan|100, macvpn|100]
+UnconfigureInterface(Eth0)          → deletes interface|Ethernet0|vlan|100 (deregisters from
+                                      vlan|100), then interface|Ethernet0
 UnbindMACVPN(100)                   → deletes macvpn|100, deregisters from vlan|100
 DeleteVLAN(100)                     → OK: _children = [] → deletes vlan|100  ✓
 ```
@@ -339,6 +353,16 @@ reconstruction order:
 Ties within the same topological level are broken by resource key
 (deterministic). This automatically handles new operation types — no
 manually maintained priority numbers are needed.
+
+Side-effect records (`interface-init`, `deploy-service`) are not steps — the
+first child that replays re-creates them. Their dependencies still count: the sort
+passes through a side-effect record to its own parents, so a record parented on
+one is ordered after whatever that record depends on. A LAG's routed association
+hangs on the LAG's `interface-init` identity, which hangs on
+`portchannel|PortChannel1`; the pass-through is what replays the IP after the
+PortChannel exists. A dependency the identity does not carry still needs its own
+edge: a BGP peer replays after the IP it uses because it is a child of the record
+that supplies that IP (§10.17), not merely of the interface identity.
 
 ### 6.4 Order Enforcement Subsumed by the DAG
 
@@ -375,12 +399,12 @@ function reduces to deleting its own CONFIG_DB entry and its own intent record.
 | `vni` | `vlan\|ID` | `_children` (VNI in child intent) |
 | `rules` | `acl\|NAME` | `_children` for standalone ACLs; `FieldRules` CSV retained on service-created ACL intents for self-sufficient teardown |
 | `members` | `portchannel\|NAME` | `_children` |
-| `route_policy_keys` | `interface\|INTF` | Retained on interface intent for self-sufficient route policy teardown |
+| `route_policy_keys` | `service\|NAME` | Retained on the deploy-service intent for self-sufficient route policy teardown |
 
 The `_children` field provides the same dependency information for most
 resources. Two fields are retained as intent params rather than replaced
 by `_children`: `rules` (on service-created ACL intents) and
-`route_policy_keys` (on interface intents). These are kept for
+`route_policy_keys` (on the `service|NAME` deploy-service intent). These are kept for
 self-sufficient teardown — the reverse operation reads them from the
 intent record to know exactly which policy objects to clean up, without
 re-resolving specs.
@@ -453,18 +477,21 @@ service type:
   `interface|Vlan{N}|service`. The gateway is the one delivery point for the whole
   bridge domain (`irb-service-redesign.md`).
 
-The binding parents to the delivery-point interface's own role record plus the
+The binding parents to the delivery-point interface's identity record plus the
 service's infrastructure intents (§10.7.1). Membership is *decoupled*: an access
-port joins the bridge domain through its own `interface|<port>` record
-(`configure-interface`, §10.7) parented to `vlan|ID`, independent of any service
-on the IRB. The tree for an irb service (`irb-service-redesign.md`):
+port joins the bridge domain through its own membership record
+`interface|<port>|vlan|<ID>` (§10.7.2), a child of the port's identity and of
+`vlan|ID`, independent of any service on the IRB. The tree for an irb service
+(`irb-service-redesign.md`):
 
 ```
 device
-  └── vlan|100                         (create-vlan)
-        ├── interface|EthernetN         (configure-interface; vlan param)  [members]
-        └── interface|Vlan100           (configure-irb; + vrf|X)           [the IRB]
-              └── interface|Vlan100|service   (apply-service)             [the binding]
+  ├── vlan|100                               (create-vlan)
+  │     ├── interface|EthernetN|vlan|100      (configure-interface)   [members]
+  │     └── interface|Vlan100                 (configure-irb; + vrf|X) [the IRB]
+  │           └── interface|Vlan100|service   (apply-service)         [the binding]
+  └── interface|EthernetN                     (interface-init)        [the port's identity;
+                                                                        also a parent of its membership]
 ```
 
 Interface sub-resource intents the service also writes (QoS, ACL bindings) declare
@@ -658,36 +685,60 @@ EVPN overlay BGP peer (loopback-to-loopback eBGP). Leaf intent — no children.
 
 ---
 
-### 10.7 `interface|INTF`
+### 10.6.1 `service|NAME`
 
-The interface's role record — the intent that puts an interface into a bridge
-domain or an L3 role. `ConfigureInterface` writes it directly at `interface|INTF`
-(e.g., `"interface|Ethernet0"`). Sub-resources hang off it: the service binding
-(`interface|INTF|service`, §10.7.1), ACL/QoS bindings (§10.8, §10.9), and BGP
-peers (`interface|INTF|bgp-peer`, §10.17), each requiring this record to exist
-first (I4 enforcement). The IRB is its own role record, `interface|Vlan{ID}`
-(§10.12).
+The per-service record of a BGP-routing service (`deploy-service`): it owns the
+CONFIG_DB objects the service shares across every interface it is applied to —
+route maps, prefix and community sets, the peer group for a shared or default
+VRF. Created by the first `ApplyService` of a service with BGP routing,
+idempotently updated by later applies, and deleted by the `RemoveService` that
+removes its last binding. A side-effect operation: never exported as a topology
+step; replaying the first binding re-creates it.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | configure-interface | `ConfigureInterface` | interface_ops.go |
-| Read | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
-| Delete | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
+| Create / update | deploy-service (side effect of apply-service) | `ApplyService` | service_ops.go |
+| Delete | (side effect of the last remove-service) | `RemoveService` | service_ops.go |
 
-**Parents** (vary by role):
-- bridged (VLAN member): `[vlan|ID]`
-- routed: `[vrf|NAME]`
-- IP-only: `[device]`
-When the interface is a PortChannel, `portchannel|NAME` is added as an additional
-parent, so the container cannot be deleted while the interface role exists
-(e.g., `interface|PortChannel100` routed → `[vrf|CUST, portchannel|PortChannel100]`).
+**Parents**: `[device]`. Each binding of the service (§10.7.1) is a child, so the
+record lives exactly as long as the service is applied anywhere on the device.
+`route_map_in`, `route_map_out` and `route_policy_keys` are recorded on it for
+self-sufficient teardown of the shared policy objects (§7).
 
-**One role record at a time.** Changing roles requires removing the current intent
-(`UnconfigureInterface`) before applying a new one: `deleteIntent` deregisters from
-the old parents, `writeIntent` registers with the new — no in-place overwrite that
-would strand parent `_children`. The service binding (§10.7.1) is a separate
-sub-resource, not a role, so a routed/bridged service binding and its access-port
-role coexist on the same key prefix.
+---
+
+### 10.7 `interface|INTF`
+
+The interface's identity record: it means only that newtron manages this
+interface. Everything newtron puts on the interface is a child of it — its
+properties (§10.10), ACL and QoS bindings (§10.8, §10.9), BGP peer (§10.17),
+service binding (§10.7.1), and its association: VLAN membership (§10.7.2) or
+routed IP/VRF (§10.7.3). A physical port pre-exists, so there is no
+`CreateInterface`; the first operation that puts anything on the interface creates
+the identity (`createInterfaceIntent`), and the operation that removes its last
+child removes it (`destroyInterfaceIntent`). The IRB is the exception: its identity
+is its `configure-irb` record, `interface|Vlan{ID}` (§10.12), because an SVI exists
+only once configured.
+
+| Action | Operation | Function | File |
+|--------|-----------|----------|------|
+| Create | `interface-init` (side effect of the first operation on the interface) | `createInterfaceIntent` | interface_ops.go |
+| Delete | (side effect of removing the interface's last child) | `destroyInterfaceIntent` | interface_ops.go |
+| Delete (full wipe) | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
+
+**Parents**: `[device]`; for a PortChannel also `portchannel|NAME`, so the LAG
+cannot be deleted while anything is configured on it (e.g. `interface|PortChannel100`
+→ `[device, portchannel|PortChannel100]`).
+
+The identity never changes its parents, so the order in which records are put on an
+interface does not matter: a property set before a VLAN join and one set after it
+hang off the same record. `interface-init` is a side-effect operation — it is never
+exported as a topology step; replaying any child re-creates it.
+
+**`unconfigure-interface` is a full wipe.** It removes every child through its own
+reverse — BGP peer, QoS and ACL bindings, properties — then the VLAN memberships or
+the routed association, then the identity, returning the interface to unmanaged.
+It is refused while a service is bound (`remove-service` owns that teardown).
 
 ---
 
@@ -704,7 +755,7 @@ irb/evpn-irb.
 | Read | refresh-service | `RefreshService` (remove + reapply) | service_ops.go |
 | Delete | remove-service | `RemoveService` | service_ops.go |
 
-**Parents**: the delivery-point interface's own role record plus the service's
+**Parents**: the delivery-point interface's identity record plus the service's
 infrastructure intents (`bindingParents` = `["interface|INTF"] + intentParents`,
 varying by type):
 - routed: `[interface|INTF, vrf|NAME]`
@@ -713,6 +764,50 @@ varying by type):
 
 Neither the interface record nor the infrastructure can be deleted while the
 binding exists; RemoveService reaps composed infrastructure reference-aware (§9.1).
+
+---
+
+### 10.7.2 `interface|INTF|vlan|ID`
+
+The interface's membership in VLAN `ID` — untagged (access) or tagged (trunk). One
+record per VLAN: an interface is a tagged or an untagged member of a VLAN, never
+both, and it has at most one untagged VLAN. The bridged / evpn-bridged service
+composite writes the access membership through the same function
+(`createAccessMembership`) and reaps it with the service.
+
+| Action | Operation | Function | File |
+|--------|-----------|----------|------|
+| Create (untagged) | configure-interface `{vlan_id}` | `ConfigureInterface` → `createAccessMembership` | interface_ops.go |
+| Create (tagged) | add-trunk-vlan (configure-interface `{vlan_id, tagged: true}`) | `ConfigureInterface` | interface_ops.go |
+| Delete (tagged) | remove-trunk-vlan | `RemoveTrunkVLAN` | interface_ops.go |
+| Delete (any) | unconfigure-interface, remove-service (its own membership) | `UnconfigureInterface`, `destroyAccessMembership` | interface_ops.go |
+
+**Parents**: `[interface|INTF, vlan|ID]`. The membership is a child of the VLAN, so
+`delete-vlan` is refused while any interface is a member (I5). Nothing parents to a
+membership, so it can always be removed, whatever else the interface carries.
+
+An interface is bridged or routed, never both: joining a VLAN is refused while the
+interface has a routed association (§10.7.3), and routing is refused while it has
+any membership.
+
+---
+
+### 10.7.3 `interface|INTF|routed`
+
+The interface's L3 association: its IP address and, optionally, its VRF binding.
+
+| Action | Operation | Function | File |
+|--------|-----------|----------|------|
+| Create / update in mode | configure-interface `{ip, vrf}` | `ConfigureInterface` | interface_ops.go |
+| Delete | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
+
+**Parents**: `[interface|INTF]`, plus `vrf|NAME` when a VRF is bound — so a VRF
+cannot be deleted while an interface is routed in it. Changing the VRF changes the
+parents, so it is a delete and recreate (`unconfigure-interface`, then
+`configure-interface`); changing only the IP is an in-mode update.
+
+A BGP peer on the interface (§10.17) is also a child of this record when it
+supplies the peer's IP.
 
 ---
 
@@ -767,31 +862,30 @@ and `_children` are preserved, and no parent re-registration occurs (the
 child is already in the parent's `_children`). If a `writeIntent` call
 targets an existing key with *different* parents, it is an error — the caller
 must delete and recreate. `SetProperty` always uses the same parent
-(`interface|INTF`), so the idempotent path applies. These are persistent
-leaves that remain until full reconcile.
+(`interface|INTF`), so the idempotent path applies. A property record stays
+until `clear-property` or `unconfigure-interface` removes it.
 
 ### 10.10.1 Interface Intent as Anchor
 
-The `interface|INTF` intent is the anchor for all interface-scoped
-sub-resources. QoS, ACL bindings, and port properties
-cannot exist without an interface intent — there is no purpose in configuring
-properties on an interface that the intent system doesn't know about.
+The identity record `interface|INTF` (§10.7) is the anchor for every
+interface-scoped record. Each sub-resource operation (`SetProperty`, `BindACL`,
+`BindQoS`, `AddBGPPeer`, `ApplyService`, `ConfigureInterface`) declares it as a
+parent, creating it first if it does not exist (`createInterfaceIntent`). Every
+operation that removes a record from the interface calls `destroyInterfaceIntent`
+afterwards, which removes the identity once it has no children left — so a
+managed interface always has exactly one identity record, and an interface with
+nothing on it has none.
 
-The interface intent is created by `ConfigureInterface` or `ApplyService`
-(§10.7). Sub-resource operations (`BindQoS`, `BindACL`, `SetProperty`,
-`AddBGPPeer`, etc.) require the interface intent to exist (I4 enforcement)
-and declare it as their parent. `UnconfigureInterface` / `RemoveService`
-must first remove all sub-resources (I5 — `deleteIntent` refuses if children
-exist), then delete the interface intent.
-
-There is no lazy anchor creation — sub-resource operations fail if the
-interface intent does not exist. The caller must configure the interface
-first via `ConfigureInterface` or `ApplyService`.
+The association records (§10.7.2, §10.7.3) are children of the identity like any
+other sub-resource, with a second parent — the VLAN or VRF. Keeping the
+association off the identity is what makes the order of operations irrelevant and
+teardown complete: the identity never re-parents, and nothing hangs under an
+association.
 
 **Tree rendering**: When a parent resource (like `vlan|100`) lists an
-interface as a child (membership), the tree display shows the interface as
-a leaf — the interface's own children (properties, QoS, etc.) are not shown
-under the parent's subtree. They belong to the interface's subtree (§12.3.1).
+interface record as a child (a membership), the tree display shows it as a leaf —
+the interface's other records are shown under the interface's own subtree
+(§12.3.1).
 
 ---
 
@@ -836,9 +930,11 @@ Sub-resources parent to `interface|Vlan{ID}` like any physical interface:
 
 ---
 
-### 10.13 `ipvpn|VRFNAME`
+### 10.13 `ipvpn|IPVPN`
 
-IP-VPN binding on a VRF. Creates L3VNI mapping, transit VLAN, and route targets.
+IP-VPN binding on a VRF, keyed by the IP-VPN (one L3VNI per device); the bound
+VRF is recorded as `vrf_name`. Creates L3VNI mapping, transit VLAN, and route
+targets.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
@@ -894,8 +990,10 @@ PortChannel container. The kind prefix matches the parent container's kind.
 ### 10.17 `interface|INTF|bgp-peer`
 
 BGP peer binding on an interface. Stores neighbor IP and remote AS for
-self-sufficient teardown. Requires the interface intent to exist (I4
-enforcement) before writing this sub-resource intent.
+self-sufficient teardown. The peer's update-source is the interface's IP, so the
+record is also a child of the record that supplies that IP: the routed
+association, or the service binding of a routed service. Replay therefore orders it
+after its IP, and the IP's source cannot be removed while the peer stands (I5).
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
@@ -903,79 +1001,125 @@ enforcement) before writing this sub-resource intent.
 | Read | remove-bgp-peer | `RemoveBGPPeer` | interface_bgp_ops.go |
 | Delete | remove-bgp-peer | `RemoveBGPPeer` | interface_bgp_ops.go |
 
-**Parents**: `[interface|INTF]`
+**Parents**: `[interface|INTF, interface|INTF|routed]` for a configured routed
+interface; `[interface|INTF, interface|INTF|service]` when a routed service
+supplies the IP; `[interface|Vlan{ID}]` on an IRB (its identity carries the IP).
 
 ---
 
 ### 10.18 Summary Table
 
-All 17 intent resource keys at a glance:
+Every intent resource key at a glance:
 
-| # | Resource Key | Parents | Create | Delete |
-|---|---|---|---|---|
-| 1 | `device` | `[]` | SetupDevice | (full reconcile) |
-| 2 | `vlan\|ID` | `[device]` | CreateVLAN | DeleteVLAN |
-| 3 | `vrf\|NAME` | `[device]` | CreateVRF | DeleteVRF |
-| 4 | `acl\|NAME` | `[device]` | CreateACL, ApplyService | DeleteACL, removeSharedACL |
-| 5 | `portchannel\|NAME` | `[device]` | CreatePortChannel | DeletePortChannel |
-| 6 | `evpn-peer\|ADDR` | `[device]` | AddBGPEVPNPeer | RemoveBGPEVPNPeer |
-| 7 | `interface\|INTF` | varies; +`portchannel\|NAME` for PCs | ConfigureInterface, ApplyService | UnconfigureInterface, RemoveService |
-| 8 | `interface\|INTF\|acl\|DIR` | `[interface\|INTF, acl\|NAME]` | BindACL | UnbindACL |
-| 9 | `interface\|INTF\|qos` | `[interface\|INTF]` | BindQoS | UnbindQoS |
-| 10 | `interface\|INTF\|PROPERTY` | `[interface\|INTF]` | SetProperty | ClearProperty |
-| 11 | `macvpn\|VLANID` | `[vlan\|ID]` | Node.BindMACVPN | Node.UnbindMACVPN |
-| 12 | `interface\|Vlan{ID}` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
-| 13 | `ipvpn\|VRFNAME` | `[vrf\|NAME]` | BindIPVPN | UnbindIPVPN |
-| 14 | `route\|VRF\|PREFIX` | `[vrf\|NAME]` or `[device]` | AddStaticRoute | RemoveStaticRoute |
-| 15 | `acl\|NAME\|RULE` | `[acl\|NAME]` | AddACLRule | DeleteACLRule |
-| 16 | `portchannel\|NAME\|MEMBER` | `[portchannel\|NAME]` | AddPortChannelMember | RemovePortChannelMember |
-| 17 | `interface\|INTF\|bgp-peer` | `[interface\|INTF]` | AddBGPPeer | RemoveBGPPeer |
+| Resource Key | Parents | Create | Delete |
+|---|---|---|---|
+| `device` | `[]` | SetupDevice | (full reconcile) |
+| `vlan\|ID` | `[device]` | CreateVLAN | DeleteVLAN |
+| `vrf\|NAME` | `[device]` | CreateVRF | DeleteVRF |
+| `acl\|NAME` | `[device]` | CreateACL, ApplyService | DeleteACL, removeSharedACL |
+| `portchannel\|NAME` | `[device]` | CreatePortChannel | DeletePortChannel |
+| `evpn-peer\|ADDR` | `[device]` | AddBGPEVPNPeer | RemoveBGPEVPNPeer |
+| `service\|NAME` | `[device]` | ApplyService (first binding) | RemoveService (last binding) |
+| `interface\|INTF` | `[device]`; +`portchannel\|NAME` for a LAG | first operation on the interface | removal of its last child; UnconfigureInterface |
+| `interface\|INTF\|service` | `[interface\|INTF]` + the service's infrastructure | ApplyService | RemoveService |
+| `interface\|INTF\|vlan\|ID` | `[interface\|INTF, vlan\|ID]` | ConfigureInterface (untagged or tagged), ApplyService (bridged) | RemoveTrunkVLAN, UnconfigureInterface, RemoveService |
+| `interface\|INTF\|routed` | `[interface\|INTF]` (+`vrf\|NAME`) | ConfigureInterface (routed) | UnconfigureInterface |
+| `interface\|INTF\|acl\|DIR` | `[interface\|INTF, acl\|NAME]` | BindACL | UnbindACL |
+| `interface\|INTF\|qos` | `[interface\|INTF]` | BindQoS | UnbindQoS |
+| `interface\|INTF\|PROPERTY` | `[interface\|INTF]` | SetProperty | ClearProperty |
+| `interface\|INTF\|bgp-peer` | `[interface\|INTF]` + the record supplying its IP | AddBGPPeer | RemoveBGPPeer |
+| `macvpn\|VLANID` | `[vlan\|ID]` | Node.BindMACVPN | Node.UnbindMACVPN |
+| `interface\|Vlan{ID}` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
+| `ipvpn\|IPVPN` | `[vrf\|NAME]` | BindIPVPN | UnbindIPVPN |
+| `route\|VRF\|PREFIX` | `[vrf\|NAME]` or `[device]` | AddStaticRoute | RemoveStaticRoute |
+| `acl\|NAME\|RULE` | `[acl\|NAME]` | AddACLRule | DeleteACLRule |
+| `portchannel\|NAME\|MEMBER` | `[portchannel\|NAME]` | AddPortChannelMember | RemovePortChannelMember |
 
 ### 10.19 Visual DAG
 
+The first-parent tree. Every record descends from `device`; every record on an
+interface descends from its identity `interface|INTF`.
+
+Source: `docs/diagrams/intent-dag-tree.dot`
+
 ```
-                               ┌──────────┐
-                               │  device  │
-                               └─┬──┬──┬──┘
-                   ┌─────────────┤  │  ├─────────────────┐
-                   │             │  │  │                  │
-                   ▼             ▼  │  ▼                  ▼
-              ┌──────────┐  ┌──────┴───┐  ┌──────────┐  ┌────────────────┐
-              │ vlan|100 │  │vrf|CUST  │  │acl|EDGE  │  │portchannel|PC1 │
-              └─┬──┬──┬──┘  └──┬──┬───┘  └──┬──┬────┘  └──┬──┬─────────┘
-                │  │  │        │  │         │  │           │  │
-                ▼  ▼  ▼        ▼  ▼         ▼  ▼           ▼  ▼
-         interface macvpn interface interface ipvpn acl|  ←──┐  portchannel| portchannel|
-         |Eth0 *  |100  |Vlan100* |Eth1 * |CUST  EDGE|     │  PC1|Eth8    PC1|Eth12
-           │                               RULE  ─────┘
-           ├─ interface|Eth0|qos          _10
-           ├─ interface|Eth0|acl|ingress  acl|EDGE|
-           ├─ interface|Eth0|bgp-peer     RULE_20
-           └─ interface|Eth0|mtu
-                                route|
-                                CUST|        evpn-peer|10.0.0.2
-                                10/8
 
-              * = interface|INTF is the role record (configure-interface);
-                  apply-service creates the binding sub-resource
-                  interface|INTF|service, and add-bgp-peer creates
-                  interface|INTF|bgp-peer (§10.7.1, §10.17)
+                           ┌──────────────────────────────────────────────────────────────────────┐
+                           │                                                                      │
+                           │                                            ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐     ┌─────────────────────────┐
+                           │                                            │ route|default|PREFIX │  │  │    service|NAME    │     │ interface|INTF|routed  │     │ interface|INTF|service  │
+                           │                                            └──────────────────────┘  │  └────────────────────┘     └────────────────────────┘     └─────────────────────────┘
+                           │                                              ▲                       │    ▲                          ▲                              ▲
+                           │                                              │                       │    │                          │                              │
+                           ▼                                              │                       │    │                          │                              │
+┌──────────────────┐     ┌─────────────┐┌─────────────────────────┐     ┌─────────────────────────────────────────────────┐     ┌────────────────────────────────────────────────────────┐     ┌─────────────────────────┐
+│ route|VRF|PREFIX │ ◀── │  vrf|NAME   ││    portchannel|NAME     │ ◀── │                                                 │ ──▶ │                                                        │ ──▶ │ interface|INTF|PROPERTY │
+└──────────────────┘     └─────────────┘└─────────────────────────┘     │                                                 │     │                                                        │     └─────────────────────────┘
+                           │              │                             │                                                 │     │                                                        │
+                           │              │                             │                     device                      │     │                     interface|INTF                     │
+                           ▼              ▼                             │                                                 │     │                                                        │
+                         ┌─────────────┐┌─────────────────────────┐     │                                                 │     │                                                        │     ┌─────────────────────────┐
+                         │ ipvpn|IPVPN ││ portchannel|NAME|MEMBER │     │                                                 │     │                                                        │ ──▶ │   interface|INTF|qos    │
+                         └─────────────┘└─────────────────────────┘     └─────────────────────────────────────────────────┘     └────────────────────────────────────────────────────────┘     └─────────────────────────┘
+                                                                          │                       │    │                          │                         │    │
+                                                                          │                       │    │                          │                         │    │
+                                                                          ▼                       │    ▼                          ▼                         │    ▼
+                                                                        ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐  │  ┌─────────────────────────┐
+                                                                        │       acl|NAME       │  │  │   evpn-peer|ADDR   │     │ interface|INTF|acl|DIR │  │  │ interface|INTF|bgp-peer │
+                                                                        └──────────────────────┘  │  └────────────────────┘     └────────────────────────┘  │  └─────────────────────────┘
+                                                                          │                       │                                                         │
+                                                                          │                       │                                                         │
+                                                                          ▼                       │                                                         │
+                                                                        ┌──────────────────────┐  │  ┌────────────────────┐     ┌────────────────────────┐  │
+                                                                        │    acl|NAME|RULE     │  └▶ │      vlan|ID       │ ─┐  │ interface|INTF|vlan|ID │ ◀┘
+                                                                        └──────────────────────┘     └────────────────────┘  │  └────────────────────────┘
+                                                                                                       │                     │
+                                                                                                       │                     │
+                                                                                                       ▼                     │
+                                                                                                     ┌────────────────────┐  │
+                                                                                                     │ interface|Vlan{ID} │  │
+                                                                                                     └────────────────────┘  │
+                                                                                                     ┌────────────────────┐  │
+                                                                                                     │   macvpn|VLANID    │ ◀┘
+                                                                                                     └────────────────────┘
+```
 
-              Interface sub-resources (qos, acl binding, bgp-peer,
-              property) are children of their interface intent
-              (§10.10.1).
+An interface's association records have a second parent: a VLAN membership is
+also a child of its VLAN, and a routed association of its VRF, so neither the VLAN
+nor the VRF can be deleted while an interface is in it. A BGP peer is also a child
+of the record that supplies its IP (the routed association here; a routed service's
+binding when the service supplies the address). An ACL binding (`interface|INTF|acl|DIR`) is also a
+child of its `acl|NAME`, a service binding of its `service|NAME` and the
+service's infrastructure (§10.7.1), and a LAG's identity of its
+`portchannel|NAME`.
 
-              interface|Eth0|acl|ingress has TWO parents:
-              interface|Eth0 (the interface) AND acl|EDGE (the ACL table).
-              Tree display shows it under interface|Eth0 (same kind);
-              under acl|EDGE it appears as a leaf (§12.3.1).
+Source: `docs/diagrams/intent-dag-interface.dot`
 
-              interface|Vlan100 (IRB) may have TWO parents: vlan|100
-              AND vrf|CUST (when VRF is specified — §10.12). Shown
-              under vlan|100 only for visual simplicity.
-
-              Every key starts with its kind: device, interface, vlan, vrf,
-              acl, portchannel, macvpn, ipvpn, route, evpn-peer
+```
+                      ┌─────────────────────────┐
+  ┌────────────────── │     interface|INTF      │ ─┐
+  │                   └─────────────────────────┘  │
+  │                     │                          │
+  │                     │                          │
+  │                     ▼                          │
+  │  ┌──────────┐     ┌─────────────────────────┐  │
+  │  │ vrf|NAME │ ──▶ │  interface|INTF|routed  │  │
+  │  └──────────┘     └─────────────────────────┘  │
+  │                     │                          │
+  │                     │                          │
+  │                     ▼                          │
+  │                   ┌─────────────────────────┐  │
+  │                   │ interface|INTF|bgp-peer │ ◀┘
+  │                   └─────────────────────────┘
+  │                   ┌─────────────────────────┐
+  │                   │         vlan|ID         │
+  │                   └─────────────────────────┘
+  │                     │
+  │                     │
+  │                     ▼
+  │                   ┌─────────────────────────┐
+  └─────────────────▶ │ interface|INTF|vlan|ID  │
+                      └─────────────────────────┘
 ```
 
 ### 10.20 Multi-Parent Example
@@ -1026,7 +1170,7 @@ This enables:
 
 ### 10.22 Completeness Verification
 
-Every `writeIntent` call site in the codebase must appear in §10.1–§10.17.
+Every `writeIntent` call site in the codebase must appear in this catalog (§10).
 Every `deleteIntent` call site must appear as a Delete action. Verify with:
 
 ```
@@ -1091,17 +1235,19 @@ specific resource kind or resource.
 $ newtron intent tree switch1
 device (setup-device)
 ├── vlan|100 (create-vlan)
-│   ├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
+│   ├── interface|Ethernet0|vlan|100 (configure-interface) vlan_id=100 tagged=false
 │   ├── macvpn|100 (bind-macvpn) vni=20100
 │   └── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 ├── vrf|CUSTOMER (create-vrf)
-│   ├── interface|Ethernet4 (configure-interface) vrf=CUSTOMER ip=10.0.1.0/31
+│   ├── interface|Ethernet4|routed (configure-interface) vrf=CUSTOMER ip=10.0.1.0/31
 │   ├── ipvpn|CUSTOMER (bind-ipvpn) l3vni=1001 l3vni_vlan=1001
 │   └── route|CUSTOMER|10.0.0.0/8 (add-static-route) next_hop=10.0.1.1
 ├── acl|EDGE_IN (create-acl)
 │   ├── acl|EDGE_IN|RULE_10 (add-acl-rule)
 │   ├── acl|EDGE_IN|RULE_20 (add-acl-rule)
 │   └── interface|Ethernet0|acl|ingress (bind-acl) acl_name=EDGE_IN
+├── interface|Ethernet0 (interface-init)
+├── interface|Ethernet4 (interface-init)
 └── evpn-peer|10.0.0.2 (add-bgp-evpn-peer) asn=65002
 ```
 
@@ -1110,19 +1256,19 @@ and their subtrees:
 ```
 $ newtron intent tree switch1 vlan
 vlan|100 (create-vlan)
-├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
+├── interface|Ethernet0|vlan|100 (configure-interface) vlan_id=100 tagged=false
 ├── macvpn|100 (bind-macvpn) vni=20100
 └── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 
 vlan|200 (create-vlan)
-└── interface|Ethernet8 (configure-interface) vlan_id=200 tagged=true
+└── interface|Ethernet8|vlan|200 (add-trunk-vlan) vlan_id=200 tagged=true
 ```
 
 **Filter by specific resource** — show one resource and its subtree:
 ```
 $ newtron intent tree switch1 vlan:100
 vlan|100 (create-vlan)
-├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
+├── interface|Ethernet0|vlan|100 (configure-interface) vlan_id=100 tagged=false
 ├── macvpn|100 (bind-macvpn) vni=20100
 └── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 ```
@@ -1130,7 +1276,8 @@ vlan|100 (create-vlan)
 **Filter by interface** — show an interface and its children:
 ```
 $ newtron intent tree switch1 interface:Ethernet0
-interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
+interface|Ethernet0 (interface-init)
+├── interface|Ethernet0|vlan|100 (configure-interface) vlan_id=100 tagged=false
 ├── interface|Ethernet0|qos (bind-qos) policy=STRICT_PRIORITY
 ├── interface|Ethernet0|acl|ingress (bind-acl) acl_name=EDGE_IN
 └── interface|Ethernet0|mtu (set-property) mtu=9100
@@ -1141,7 +1288,7 @@ interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
 $ newtron intent tree switch1 vlan:100 --ancestors
 device (setup-device)
 └── vlan|100 (create-vlan)
-    ├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
+    ├── interface|Ethernet0|vlan|100 (configure-interface) vlan_id=100 tagged=false
     ├── macvpn|100 (bind-macvpn) vni=20100
     └── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 ```
@@ -1170,11 +1317,11 @@ applies this rule:
 (no recursion into its children).** The child's own children are only shown
 when the child is the root of the displayed subtree.
 
-Example: `interface|Ethernet0` is a child of `vlan|100` (membership). When
-displaying `vlan|100`'s subtree, the interface appears as a leaf — its
-children (qos, acl binding, mtu) are not shown because they belong to the
-interface's story, not the VLAN's. To see the interface's children, query
-the interface directly: `newtron intent tree switch1 interface:Ethernet0`.
+Example: `interface|Ethernet0|vlan|100` is a child of `vlan|100` and of the
+interface's identity `interface|Ethernet0`. Under `vlan|100` it appears as a
+leaf — the interface's other records (qos, acl binding, mtu) belong to the
+interface's story, not the VLAN's. To see them, query the interface directly:
+`newtron intent tree switch1 interface:Ethernet0`.
 
 Similarly, `interface|Ethernet0|acl|ingress` is a child of both
 `interface|Ethernet0` and `acl|EDGE_IN`. It appears as a leaf under
@@ -1305,22 +1452,26 @@ entry comment.
 the child's own intent entry plus updates to each parent's `_children`. In
 both modes, `op()` renders each entry into the projection sequentially as it
 is added to the ChangeSet (so subsequent operations in the same composite
-see the effect). In online mode, the assembled ChangeSet is later applied to
-Redis as a pipeline at Commit time — all entries sent together.
+see the effect). In online mode, the assembled ChangeSet is applied to Redis
+at Commit time one entry at a time, in order (`ChangeSet.Apply`); it is not a
+transaction. Only full reconcile delivers in a single `MULTI/EXEC` pipeline
+(`ReplaceAll`).
 
 ### 15.2 Partial Pipeline Delivery
 
 Within a single ChangeSet, `writeIntent` adds multiple entries to the Redis
 pipeline: updates to each parent's `_children` plus the child's own intent
-record. If the process crashes mid-pipeline (e.g., parent `_children` updated
-but child intent not yet written, or vice versa), I2 may be temporarily
-violated. The health check (§11) detects and repairs this.
+record. If the process crashes or delivery fails part-way (e.g., parent
+`_children` updated but child intent not yet written, or vice versa), I2 can be
+violated on the device. No health check exists to detect this (§11.4); the
+repair is reconcile, which rewrites the device's intent records from the
+reconstructed intent DB.
 
 Between ChangeSets in a composite operation (e.g., `ApplyService` creating
 infrastructure then service intent), a crash can leave the first ChangeSet
 applied and the second unapplied. This is an existing concern with
-multi-ChangeSet operations, not specific to the DAG — the health check
-handles both cases.
+multi-ChangeSet operations, not specific to the DAG; reconcile repairs both
+cases.
 
 ### 15.3 Concurrent Access
 
@@ -1532,33 +1683,32 @@ change that has no parent to deregister from — these are orphans from
 creation, invisible to dependency enforcement, unremovable by any reverse
 operation that walks the DAG.
 
-The rule: **sub-resource intents require an interface intent as parent.** The
-interface intent (`interface|INTF`) is created by `ConfigureInterface`,
-`ApplyService`, or `AddBGPPeer` — whichever operation first gives the
-interface a role. Sub-resource operations (`BindQoS`, `BindACL`,
-`SetProperty`, `Interface.BindMACVPN`) declare `interface|INTF` as parent.
-If the interface has no intent, the sub-resource's `writeIntent` fails (I4).
+The rule: **every record on an interface is a child of the interface's identity
+record.** The identity (`interface|INTF`) means only that newtron manages the
+interface. It is created by whichever operation first puts something on the
+interface and removed by whichever operation removes the last thing (§10.7). A
+physical port pre-exists, so nothing else could own its identity.
 
-This creates a two-level tree per interface:
+What the interface *is* in the network — a member of VLANs, or routed in a VRF —
+is not the identity. It is an association record of its own, a child of the
+identity and of the VLAN or VRF:
 
 ```
-interface|Ethernet0 (configure-interface)
+interface|Ethernet0 (interface-init)
+├── interface|Ethernet0|vlan|100 (configure-interface)   also a child of vlan|100
 ├── interface|Ethernet0|qos (bind-qos)
-├── interface|Ethernet0|acl|ingress (bind-acl)
+├── interface|Ethernet0|acl|ingress (bind-acl)           also a child of acl|EDGE_IN
 └── interface|Ethernet0|mtu (set-property)
 ```
 
-Teardown respects the tree: `UnconfigureInterface` must first remove all
-sub-resources (the DAG enforces this via I5), then delete the interface
-intent. The interface is both the point of service and the anchor of
-sub-resource intent.
+Keeping the association off the identity is what makes interface configuration
+order-independent and teardown complete. The identity never changes its parents,
+so a property set before a VLAN join hangs off the same record as one set after
+it. Nothing parents to an association, so removing a membership never depends on
+what else the interface carries. Shared resources keep their protection: the VLAN
+and VRF are parents of the associations, so neither can be deleted while an
+interface is in it.
 
-**Multi-parent rendering.** Some sub-resources have multiple parents. An ACL
-binding (`interface|Ethernet0|acl|ingress`) depends on both the interface and
-the ACL table — neither can be deleted while the binding exists. When
-displaying the DAG as a tree, a child with a different kind than its display
-parent is rendered as a leaf — its own children are shown only in its own
-subtree. The VLAN's tree shows its member interfaces as leaves; the
-interface's tree shows its full sub-resource hierarchy. This prevents
-redundant subtree expansion without losing information — query the child
-directly to see its full story.
+Teardown respects the tree: `UnconfigureInterface` removes every record through
+its own reverse, the association last, then the identity. The interface is both
+the point of service and the anchor of every record on it.
