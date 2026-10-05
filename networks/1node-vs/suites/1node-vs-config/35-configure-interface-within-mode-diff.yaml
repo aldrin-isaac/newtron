@@ -7,7 +7,7 @@ description: |
     - Routed IP swap (same VRF): the old INTERFACE|<name>|<ip>
       sub-entry is deleted before the new one is added. No orphan.
     - Routed IP drop (keep VRF): same — old IP sub-entry deleted, no
-      orphan; intent record's `ip` field also cleared (not merged
+      orphan; the routed association record's `ip` field also cleared (not merged
       stale).
     - Routed IP add (from VRF-only): no spurious delete; pure add
       semantics.
@@ -71,7 +71,7 @@ steps:
   - name: verify-intent-ip-is-B-only
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28%7Crouted?mode=loopback
     expect:
       jq: '.ip == "10.228.0.2/31"'
 
@@ -95,7 +95,7 @@ steps:
   - name: verify-intent-ip-cleared-after-drop
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28%7Crouted?mode=loopback
     expect:
       jq: '(.ip // "") == ""'
 
@@ -126,7 +126,7 @@ steps:
   - name: verify-intent-ip-is-C
     action: newtron
     devices: [switch1]
-    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28?mode=loopback
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet28%7Crouted?mode=loopback
     expect:
       jq: '.ip == "10.228.0.3/31"'
 

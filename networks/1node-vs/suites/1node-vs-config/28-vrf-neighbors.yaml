@@ -2,7 +2,8 @@ name: vrf-neighbors
 description: |
   VRF BGP neighbor add/remove lifecycle.
   Requires VRF + interface to exist first.
-  Intent DAG: device → vrf|Vrf_PEER → interface|Ethernet24 → bgp-peer|Ethernet24.
+  Intent DAG: device → vrf|Vrf_PEER → interface|Ethernet24|routed →
+  interface|Ethernet24|bgp-peer (the peer is also a child of the identity interface|Ethernet24).
 requires: [setup-device]
 
 steps:

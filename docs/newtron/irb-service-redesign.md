@@ -186,10 +186,10 @@ kind (§13). This re-keys persisted intents — a data migration, addressed in �
 
 ```
 device
-  └── vlan|100                         (create-vlan)
-        ├── interface|EthernetN         (membership; vlan param)   [access members]
-        ├── interface|Vlan100           (configure-irb; +vrf|X)    [the IRB identity]
-        │     └── interface|Vlan100|service   (apply-service)      [the one binding]
+  └── vlan|100                               (create-vlan)
+        ├── interface|EthernetN|vlan|100      (membership)             [access members]
+        ├── interface|Vlan100                 (configure-irb; +vrf|X)  [the IRB identity]
+        │     └── interface|Vlan100|service   (apply-service)          [the one binding]
         └── ...
 ```
 
@@ -197,6 +197,14 @@ The VLAN is destroyable only when memberless *and* IRB-less; the IRB only when
 unbound; access members join and leave freely because nothing parents to them.
 No new machinery — the existing bottom-up deletion invariant already enforces
 every rule the two anchors need.
+
+**Amendment (#535).** The membership was first recorded on the port's identity
+record `interface|EthernetN` itself. Anything else on the port (a property, an
+ACL) then hung under the membership, which broke "nothing parents to them": a
+VLAN join after a property was refused, and a bridged teardown left the
+membership behind. The membership is now its own record,
+`interface|EthernetN|vlan|<id>`, a child of both the port's identity and the
+VLAN, as shown above.
 
 **The per-member policy rows are not in this tree.** They are projection-level, recomputed
 per §4 — the DAG records decisions, not their derivations.

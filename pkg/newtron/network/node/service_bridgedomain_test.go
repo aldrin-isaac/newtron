@@ -860,7 +860,7 @@ func TestMemberPolicy_QoSBindPointGate(t *testing.T) {
 	t.Run("join refuses a LAG into a QoS-bearing VLAN", func(t *testing.T) {
 		n, irb := lagVLAN(t, &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, QoSPolicy: "QOS1"})
 		// Re-seed without the LAG membership so the service can apply, then join.
-		delete(n.configDB.NewtronIntent, "interface|PortChannel100")
+		delete(n.configDB.NewtronIntent, vlanMembershipKey("PortChannel100", 100))
 		delete(n.configDB.VLANMember, "Vlan100|PortChannel100")
 		if _, err := irb.ApplyService(ctx, "SVC", ApplyServiceOpts{VLAN: 100}); err != nil {
 			t.Fatalf("apply with no LAG member should succeed: %v", err)

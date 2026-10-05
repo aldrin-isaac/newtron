@@ -96,7 +96,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 	if cfg.Multihop > 0 {
 		intentParams["multihop"] = strconv.Itoa(cfg.Multihop)
 	}
-	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, "interface|"+i.name+"|bgp-peer", intentParams, []string{"interface|" + i.name}); err != nil {
+	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, "interface|"+i.name+"|bgp-peer", intentParams, i.bgpPeerParents()); err != nil {
 		return nil, err
 	}
 	cs.ReverseOp = "device.remove-bgp-peer"
@@ -179,7 +179,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) 
 	if cfg.Multihop > 0 {
 		intentParams["multihop"] = strconv.Itoa(cfg.Multihop)
 	}
-	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, intentKey, intentParams, []string{"interface|" + i.name}); err != nil {
+	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, intentKey, intentParams, i.bgpPeerParents()); err != nil {
 		return nil, err
 	}
 	cs.ReverseOp = "device.remove-bgp-peer"
@@ -220,11 +220,30 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	if err := n.render(cs); err != nil {
 		return nil, err
 	}
-	// Delete the bgp-peer sub-resource intent. The parent interface|<name>
-	// intent is preserved — it belongs to ConfigureInterface.
+	// Delete the bgp-peer sub-resource intent, then the interface identity if
+	// the peer was the last record on the interface.
 	if err := n.deleteIntent(cs, intentKey); err != nil {
+		return nil, err
+	}
+	if err := i.destroyInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
 	util.WithDevice(n.Name()).Infof("Removing direct BGP peer %s from interface %s", neighborIP, i.name)
 	return cs, nil
+}
+
+// bgpPeerParents returns the parents of this interface's BGP peer record: the
+// interface identity and the record that supplies the peer's update-source IP —
+// the routed association, the service binding of a routed service, or (for an
+// IRB) the identity itself. The peer depends on that IP, so the DAG orders its
+// replay after the IP and refuses to remove the IP's source while the peer stands.
+func (i *Interface) bgpPeerParents() []string {
+	parents := []string{"interface|" + i.name}
+	if routed := i.node.GetIntent(routedKey(i.name)); routed != nil && routed.Params[sonic.FieldIntfIP] != "" {
+		return append(parents, routedKey(i.name))
+	}
+	if binding := i.node.GetIntent(bindingKey(i.name)); binding != nil && binding.Params[sonic.FieldIPAddress] != "" {
+		return append(parents, bindingKey(i.name))
+	}
+	return parents
 }

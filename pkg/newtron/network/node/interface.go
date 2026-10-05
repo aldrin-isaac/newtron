@@ -142,7 +142,7 @@ func (i *Interface) MTU() int {
 
 // VRF returns the VRF this interface is bound to.
 func (i *Interface) VRF() string {
-	intent := i.node.GetIntent("interface|" + i.name)
+	intent := i.node.GetIntent(routedKey(i.name))
 	if intent == nil {
 		return ""
 	}
@@ -150,15 +150,18 @@ func (i *Interface) VRF() string {
 }
 
 // IPAddresses returns the IP addresses configured on this interface — from
-// the identity record (configure-interface / configure-irb) or, for a routed
-// service that carries its own address, from the service binding sub-resource.
+// its routed association (configure-interface), an IRB's identity record
+// (configure-irb), or, for a routed service that carries its own address, from
+// the service binding sub-resource.
 func (i *Interface) IPAddresses() []string {
-	if intent := i.node.GetIntent("interface|" + i.name); intent != nil {
-		// configure-interface stores IP in FieldIntfIP ("ip") param
+	// configure-interface stores IP in FieldIntfIP ("ip") param
+	if intent := i.node.GetIntent(routedKey(i.name)); intent != nil {
 		if ip := intent.Params[sonic.FieldIntfIP]; ip != "" {
 			return []string{ip}
 		}
-		// configure-irb stores IP in FieldIPAddress ("ip_address") param
+	}
+	// configure-irb stores IP in FieldIPAddress ("ip_address") param
+	if intent := i.node.GetIntent("interface|" + i.name); intent != nil && intent.Operation == sonic.OpConfigureIRB {
 		if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
 			return []string{ip}
 		}

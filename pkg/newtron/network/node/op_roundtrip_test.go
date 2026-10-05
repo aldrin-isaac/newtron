@@ -233,7 +233,7 @@ var roundTripSequence = []opInvocation{
 		})
 		return err
 	}},
-	{"configure-interface (access)", func(ctx context.Context, n *Node) error {
+	{"configure-interface (tagged)", func(ctx context.Context, n *Node) error {
 		i, err := iface(n, "Ethernet4")
 		if err != nil {
 			return err
@@ -279,6 +279,16 @@ var roundTripSequence = []opInvocation{
 			return err
 		}
 		_, err = i.BindQoS(ctx, "GOLD")
+		return err
+	}},
+	{"configure-interface (untagged, after attributes)", func(ctx context.Context, n *Node) error {
+		// Ethernet20 already carries properties and ACL/QoS bindings: joining a
+		// VLAN afterwards must work — the identity record never re-parents (#535).
+		i, err := iface(n, "Ethernet20")
+		if err != nil {
+			return err
+		}
+		_, err = i.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100})
 		return err
 	}},
 	{"apply-service", func(ctx context.Context, n *Node) error {

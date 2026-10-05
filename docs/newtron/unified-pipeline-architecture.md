@@ -948,7 +948,8 @@ NodeActor.execute(ctx, fn)
   │    │
   │    └─ ReplayStep: apply-service on Ethernet0
   │         └─ iface.ApplyService(ctx, "transit", opts)
-  │              ├─ writeIntent → intent DB: "interface|Ethernet0" added
+  │              ├─ writeIntent → intent DB: "interface|Ethernet0" (identity),
+  │              │    "interface|Ethernet0|service" (binding) added
   │              ├─ sub-operations each: op() → render → projection updated
   │              └─ ChangeSet discarded (replay)
   │

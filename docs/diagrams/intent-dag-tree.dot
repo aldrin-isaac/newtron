@@ -15,11 +15,14 @@ digraph intent_dag {
 
   macvpn       [label="macvpn|VLANID"];
   irb          [label="interface|Vlan{ID}"];
-  ipvpn        [label="ipvpn|VRFNAME"];
+  ipvpn        [label="ipvpn|IPVPN"];
   rt_vrf       [label="route|VRF|PREFIX"];
   acl_rule     [label="acl|NAME|RULE"];
   pc_member    [label="portchannel|NAME|MEMBER"];
 
+  intf_vlan    [label="interface|INTF|vlan|ID"];
+  intf_routed  [label="interface|INTF|routed"];
+  intf_svc     [label="interface|INTF|service"];
   intf_bgp     [label="interface|INTF|bgp-peer"];
   intf_qos     [label="interface|INTF|qos"];
   intf_acl     [label="interface|INTF|acl|DIR"];
@@ -41,6 +44,9 @@ digraph intent_dag {
   acl_name -> acl_rule;
   pc_name -> pc_member;
 
+  intf -> intf_vlan;
+  intf -> intf_routed;
+  intf -> intf_svc;
   intf -> intf_bgp;
   intf -> intf_qos;
   intf -> intf_acl;

@@ -281,7 +281,7 @@ func TestSetIP_VRFBound(t *testing.T) {
 	d, intf := testInterface()
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
 	// VRF() reads from intent DB (Phase 2: intent-based reads).
-	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	d.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"vrf":       "Vrf_CUST1",
@@ -406,7 +406,7 @@ func TestBindACL_EmptyBindingList(t *testing.T) {
 func TestAddBGPPeer(t *testing.T) {
 	d, intf := testInterface()
 	// IPAddresses reads from intent DB (Phase 2: intent-based reads).
-	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	d.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"ip":        "10.1.0.0/31",
@@ -645,7 +645,7 @@ func TestRoundTrip_AddRemoveBGPPeer(t *testing.T) {
 	ctx := context.Background()
 
 	// IPAddresses reads from intent DB (Phase 2: intent-based reads).
-	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	d.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"ip":        "10.1.0.0/31",
@@ -687,7 +687,7 @@ func TestRoundTrip_AddRemoveBGPPeer(t *testing.T) {
 func bgpPeerSetup(t *testing.T) (*Node, *Interface) {
 	t.Helper()
 	d, intf := testInterface()
-	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	d.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"ip":        "10.1.0.0/31",
@@ -735,7 +735,7 @@ func TestUpdateBGPPeer_InPlaceASChange(t *testing.T) {
 
 func TestUpdateBGPPeer_NoExistingPeer(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	d.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"ip":        "10.1.0.0/31",
@@ -762,7 +762,7 @@ func TestRoundTrip_BindUnbindACL(t *testing.T) {
 	// Create interface intent (parent for ACL binding) via AddBGPPeer.
 	// IPAddresses reads from intent DB (Phase 2: intent-based reads).
 	n.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
-	n.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+	n.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
 		"operation": "configure-interface",
 		"state":     "actuated",
 		"ip":        "10.1.0.0/31",
@@ -829,9 +829,9 @@ func TestConfigureInterface_Trunk_WritesPerVLANRecord(t *testing.T) {
 	}
 
 	// Per-VLAN record exists; base interface record has NO vlan_id stuffed.
-	trunkIntent := n.GetIntent("interface|Ethernet0|trunk-vlan|100")
+	trunkIntent := n.GetIntent("interface|Ethernet0|vlan|100")
 	if trunkIntent == nil {
-		t.Fatal("expected interface|Ethernet0|trunk-vlan|100 intent")
+		t.Fatal("expected interface|Ethernet0|vlan|100 intent")
 	}
 	if trunkIntent.Operation != "add-trunk-vlan" {
 		t.Errorf("trunk intent op = %q, want add-trunk-vlan", trunkIntent.Operation)
@@ -857,11 +857,11 @@ func TestConfigureInterface_Trunk_Accumulates(t *testing.T) {
 	}
 
 	// Both records present — adding the second VLAN does not clobber the first.
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") == nil {
-		t.Error("trunk-vlan|100 should still exist after adding 200")
+	if n.GetIntent("interface|Ethernet0|vlan|100") == nil {
+		t.Error("vlan|100 should still exist after adding 200")
 	}
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|200") == nil {
-		t.Error("trunk-vlan|200 should exist after second add")
+	if n.GetIntent("interface|Ethernet0|vlan|200") == nil {
+		t.Error("vlan|200 should exist after second add")
 	}
 }
 
@@ -900,14 +900,14 @@ func TestRemoveTrunkVLAN_StripsOneLeavesOthers(t *testing.T) {
 		t.Fatalf("RemoveTrunkVLAN 100: %v", err)
 	}
 
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") != nil {
-		t.Error("trunk-vlan|100 should be deleted")
+	if n.GetIntent("interface|Ethernet0|vlan|100") != nil {
+		t.Error("vlan|100 should be deleted")
 	}
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|200") == nil {
-		t.Error("trunk-vlan|200 should survive (reference-aware strip)")
+	if n.GetIntent("interface|Ethernet0|vlan|200") == nil {
+		t.Error("vlan|200 should survive (reference-aware strip)")
 	}
 	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
-	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|trunk-vlan|100", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|vlan|100", ChangeDelete)
 }
 
 func TestRemoveTrunkVLAN_NotAMember(t *testing.T) {
@@ -940,11 +940,11 @@ func TestUnconfigureInterface_ClearsAllTrunkChildren(t *testing.T) {
 		t.Fatalf("UnconfigureInterface: %v", err)
 	}
 
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") != nil {
-		t.Error("trunk-vlan|100 should be cleared by unconfigure-interface")
+	if n.GetIntent("interface|Ethernet0|vlan|100") != nil {
+		t.Error("vlan|100 should be cleared by unconfigure-interface")
 	}
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|200") != nil {
-		t.Error("trunk-vlan|200 should be cleared by unconfigure-interface")
+	if n.GetIntent("interface|Ethernet0|vlan|200") != nil {
+		t.Error("vlan|200 should be cleared by unconfigure-interface")
 	}
 	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
 	assertChange(t, cs, "VLAN_MEMBER", "Vlan200|Ethernet0", ChangeDelete)
@@ -958,17 +958,17 @@ func TestRoundTrip_AddRemoveTrunkVLAN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigureInterface trunk: %v", err)
 	}
-	assertChange(t, cs1, "NEWTRON_INTENT", "interface|Ethernet0|trunk-vlan|100", ChangeAdd)
+	assertChange(t, cs1, "NEWTRON_INTENT", "interface|Ethernet0|vlan|100", ChangeAdd)
 	assertChange(t, cs1, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeAdd)
 
 	cs2, err := iface.RemoveTrunkVLAN(ctx, 100)
 	if err != nil {
 		t.Fatalf("RemoveTrunkVLAN: %v", err)
 	}
-	assertChange(t, cs2, "NEWTRON_INTENT", "interface|Ethernet0|trunk-vlan|100", ChangeDelete)
+	assertChange(t, cs2, "NEWTRON_INTENT", "interface|Ethernet0|vlan|100", ChangeDelete)
 	assertChange(t, cs2, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
 
-	if n.GetIntent("interface|Ethernet0|trunk-vlan|100") != nil {
+	if n.GetIntent("interface|Ethernet0|vlan|100") != nil {
 		t.Error("trunk-vlan intent should be cleared after RemoveTrunkVLAN")
 	}
 }
@@ -1013,8 +1013,8 @@ func TestConfigureInterface_RoutedIPSwap_NoOrphan(t *testing.T) {
 	// And the new IP subentry must be added.
 	assertChange(t, cs, "INTERFACE", "Ethernet0|10.0.0.2/31", ChangeAdd)
 
-	// Sanity: intent record reflects the new IP only.
-	intent := n.GetIntent("interface|Ethernet0")
+	// Sanity: the routed association reflects the new IP only.
+	intent := n.GetIntent(routedKey("Ethernet0"))
 	if intent == nil {
 		t.Fatal("interface intent missing")
 	}
