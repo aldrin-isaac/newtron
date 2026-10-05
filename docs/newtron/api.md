@@ -4288,6 +4288,10 @@ interface's IP and VRF are recorded at `interface|{name}|routed`. Each is a
 child of the interface's identity record `interface|{name}` and of the VLAN or
 VRF. Replay of the intent log reconstructs every membership.
 
+**Invalid requests, 400.** The body must name a VLAN, or a VRF and/or an IP
+address — not both kinds, and not neither. A malformed IP is refused. A VLAN or
+VRF that does not exist is a 409.
+
 **Mode changes are refused, 409.** An interface is bridged or routed, never
 both; it has at most one untagged VLAN; it is a tagged or an untagged member of
 a VLAN, not both; and a routed interface keeps its VRF. A request that would
@@ -4347,7 +4351,7 @@ removal path. Issue #224.
 
 **Behaviors:**
 
-- 404 if the interface is not a trunk member of the specified VLAN.
+- 409 if the interface is not a tagged member of the specified VLAN.
 - 400 if `vlan_id` is missing or non-positive.
 - Atomic — under the per-device intent lock.
 
@@ -4357,7 +4361,15 @@ removal path. Issue #224.
 
 Remove all configuration from an interface (VRF binding, IP addresses, access
 VLAN, all trunk VLAN memberships, BGP peers, QoS, ACL bindings, property
-overrides). Returns the interface to its unconfigured state.
+overrides). Returns the interface to its unconfigured state. Each record is
+removed through its own reverse, so property overrides are cleared back to their
+defaults. On an IRB (`Vlan{N}`) the gateway itself stays: `unconfigure-irb`
+removes it.
+
+**Behaviors:**
+
+- 409 while a service is bound — `remove-service` tears that down.
+- 409 if the interface carries no configuration.
 
 For removing one trunk VLAN without affecting the rest of the port, use
 `remove-trunk-vlan` instead (issue #224).

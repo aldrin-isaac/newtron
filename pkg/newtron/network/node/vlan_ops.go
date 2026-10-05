@@ -144,7 +144,9 @@ func (n *Node) UpdateIRB(ctx context.Context, vlanID int, opts IRBConfig) (*Chan
 
 	oldVRF := intent.Params[sonic.FieldVRF]
 	if opts.VRF != oldVRF {
-		return nil, fmt.Errorf("update-irb cannot move VLAN %d between VRFs (%q → %q): a VRF move re-originates the SVI's routes and is a teardown-replace by nature — use unconfigure-irb then configure-irb", vlanID, oldVRF, opts.VRF)
+		return nil, util.NewPreconditionError(sonic.OpUpdateIRB, vlanResource(vlanID),
+			"IRB keeps its VRF",
+			fmt.Sprintf("update-irb cannot move VLAN %d between VRFs (%q → %q): a VRF move re-originates the SVI's routes and is a teardown-replace by nature — use unconfigure-irb then configure-irb", vlanID, oldVRF, opts.VRF))
 	}
 	oldIP := intent.Params[sonic.FieldIPAddress]
 	oldMAC := intent.Params[sonic.FieldAnycastMAC]
@@ -169,10 +171,10 @@ func (n *Node) UpdateIRB(ctx context.Context, vlanID int, opts IRBConfig) (*Chan
 	if opts.AnycastMAC != oldMAC {
 		// SAG_GLOBAL is one device-wide row. Only this VLAN's IRB may
 		// reference it, or the change silently retargets the others.
-		for resource, other := range n.IntentsByOp(sonic.OpConfigureIRB) {
-			if resource != intentKey && other.Params[sonic.FieldAnycastMAC] != "" {
-				return nil, fmt.Errorf("anycast MAC is the device-wide SAG_GLOBAL value and %s also references it — updating it through VLAN %d would retarget every anycast gateway", resource, vlanID)
-			}
+		if other := n.otherAnycastIRB(intentKey); other != "" {
+			return nil, util.NewPreconditionError(sonic.OpUpdateIRB, vlanResource(vlanID),
+				"no other IRB uses the anycast MAC",
+				fmt.Sprintf("anycast MAC is the device-wide SAG_GLOBAL value and %s also references it — updating it through VLAN %d would retarget every anycast gateway", other, vlanID))
 		}
 		switch {
 		case oldMAC == "":
@@ -218,31 +220,7 @@ func (n *Node) UnconfigureIRB(ctx context.Context, vlanID int) (*ChangeSet, erro
 	}
 
 	cs := NewChangeSet(n.name, "device.unconfigure-irb")
-
-	// Remove IP address entry (children before parents)
-	if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
-		cs.Deletes(deleteSviIPConfig(vlanID, ip))
-	}
-
-	// Remove base VLAN_INTERFACE entry
-	cs.Deletes(deleteSviBaseConfig(vlanID))
-
-	// Remove SAG_GLOBAL if anycast MAC was set and no other IRB intent uses it
-	if intent.Params[sonic.FieldAnycastMAC] != "" {
-		// SAG_GLOBAL is shared — only remove if no other IRB intent uses anycast MAC
-		otherSAG := false
-		for resource, irbIntent := range n.IntentsByOp(sonic.OpConfigureIRB) {
-			if resource != intentKey && irbIntent.Params[sonic.FieldAnycastMAC] != "" {
-				otherSAG = true
-				break
-			}
-		}
-		if !otherSAG {
-			cs.Deletes(deleteSagGlobalConfig())
-		}
-	}
-
-	if err := n.deleteIntent(cs, intentKey); err != nil {
+	if err := n.destroyIRB(cs, vlanID); err != nil {
 		return nil, err
 	}
 	if err := n.render(cs); err != nil {
@@ -250,6 +228,39 @@ func (n *Node) UnconfigureIRB(ctx context.Context, vlanID int) (*ChangeSet, erro
 	}
 	util.WithDevice(n.name).Infof("Removed IRB for VLAN %d", vlanID)
 	return cs, nil
+}
+
+// destroyIRB is the §15 reverse of ConfigureIRB: it removes the SVI's address and
+// base entry, the device-wide SAG_GLOBAL row once no other IRB's gateway uses it,
+// and the configure-irb record. The one owner of an IRB teardown (§25), shared by
+// UnconfigureIRB and the irb service's reap. The caller renders.
+func (n *Node) destroyIRB(cs *ChangeSet, vlanID int) error {
+	key := "interface|" + VLANName(vlanID)
+	irb := n.GetIntent(key)
+	if irb == nil {
+		return nil
+	}
+	if ip := irb.Params[sonic.FieldIPAddress]; ip != "" {
+		cs.Deletes(deleteSviIPConfig(vlanID, ip))
+	}
+	cs.Deletes(deleteSviBaseConfig(vlanID))
+	if irb.Params[sonic.FieldAnycastMAC] != "" && n.otherAnycastIRB(key) == "" {
+		cs.Deletes(deleteSagGlobalConfig())
+	}
+	return n.deleteIntent(cs, key)
+}
+
+// otherAnycastIRB returns the record key of an IRB other than exceptKey whose
+// gateway uses the anycast MAC, or "" when none does. SAG_GLOBAL holds that MAC
+// once for the whole device, so this is the question both its reap and its
+// in-place update ask.
+func (n *Node) otherAnycastIRB(exceptKey string) string {
+	for resource, irb := range n.IntentsByOp(sonic.OpConfigureIRB) {
+		if resource != exceptKey && irb.Params[sonic.FieldAnycastMAC] != "" {
+			return resource
+		}
+	}
+	return ""
 }
 
 // ============================================================================

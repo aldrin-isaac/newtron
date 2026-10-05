@@ -261,80 +261,76 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 // Interface Configuration Tests
 // ============================================================================
 
-func TestSetIP(t *testing.T) {
+func TestConfigureInterface_RoutedIP(t *testing.T) {
 	_, intf := testInterface()
 	ctx := context.Background()
 
-	cs, err := intf.SetIP(ctx, "10.1.0.0/31")
+	cs, err := intf.ConfigureInterface(ctx, InterfaceConfig{IP: "10.1.0.0/31"})
 	if err != nil {
-		t.Fatalf("SetIP: %v", err)
+		t.Fatalf("ConfigureInterface: %v", err)
 	}
 
 	assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeAdd)
 	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeAdd)
-	if len(cs.Changes) != 2 {
-		t.Errorf("expected 2 changes (base + IP), got %d", len(cs.Changes))
-	}
 }
 
-func TestSetIP_VRFBound(t *testing.T) {
+// A VRF-bound address needs no plain routing base entry: the VRF binding is the
+// base entry, and re-writing it with NULL disrupts intfmgrd on CiscoVS (RCA-037).
+func TestConfigureInterface_RoutedVRFAndIP(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
-	// VRF() reads from intent DB (Phase 2: intent-based reads).
-	d.configDB.NewtronIntent[routedKey("Ethernet0")] = map[string]string{
-		"operation": "configure-interface",
-		"state":     "actuated",
-		"vrf":       "Vrf_CUST1",
-	}
-	ctx := context.Background()
-
-	cs, err := intf.SetIP(ctx, "10.1.0.0/31")
-	if err != nil {
-		t.Fatalf("SetIP: %v", err)
-	}
-
-	// When VRF-bound, only the IP subentry is written (no enableIpRouting base entry).
-	// The base INTERFACE entry already exists with vrf_name; re-writing it with NULL
-	// disrupts intfmgrd on CiscoVS (RCA-037).
-	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeAdd)
-	if len(cs.Changes) != 1 {
-		t.Errorf("expected 1 change (IP only, no base entry), got %d", len(cs.Changes))
-	}
-}
-
-func TestSetIP_Invalid(t *testing.T) {
-	_, intf := testInterface()
-	ctx := context.Background()
-
-	_, err := intf.SetIP(ctx, "not-an-ip")
-	if err == nil {
-		t.Fatal("expected error for invalid IP")
-	}
-}
-
-func TestSetVRF(t *testing.T) {
-	d, intf := testInterface()
-	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
-	// VRF intent required for the VRFExists check (intent-first)
 	d.configDB.NewtronIntent["vrf|Vrf_CUST1"] = map[string]string{"op": "create-vrf", "name": "Vrf_CUST1"}
 	ctx := context.Background()
 
-	cs, err := intf.SetVRF(ctx, "Vrf_CUST1")
+	cs, err := intf.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_CUST1", IP: "10.1.0.0/31"})
 	if err != nil {
-		t.Fatalf("SetVRF: %v", err)
+		t.Fatalf("ConfigureInterface: %v", err)
 	}
 
-	c := assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeModify)
+	c := assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeAdd)
 	assertField(t, c, "vrf_name", "Vrf_CUST1")
+	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeAdd)
+	base := 0
+	for _, ch := range cs.Changes {
+		if ch.Table == "INTERFACE" && ch.Key == "Ethernet0" {
+			base++
+		}
+	}
+	if base != 1 {
+		t.Errorf("INTERFACE|Ethernet0 written %d times, want once (the VRF binding)", base)
+	}
 }
 
-func TestSetVRF_NotFound(t *testing.T) {
-	_, intf := testInterface()
+func TestConfigureInterface_RefusesBadInput(t *testing.T) {
 	ctx := context.Background()
-
-	_, err := intf.SetVRF(ctx, "NonExistentVRF")
-	if err == nil {
-		t.Fatal("expected error for nonexistent VRF")
+	tests := []struct {
+		name string
+		cfg  InterfaceConfig
+		want error
+	}{
+		{"invalid IP", InterfaceConfig{IP: "not-an-ip"}, &util.ValidationError{}},
+		{"nothing to configure", InterfaceConfig{}, &util.ValidationError{}},
+		{"routed and bridged", InterfaceConfig{IP: "10.1.0.0/31", VLAN: 100}, &util.ValidationError{}},
+		{"unknown VRF", InterfaceConfig{VRF: "NonExistentVRF"}, util.ErrPreconditionFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, intf := testInterface()
+			_, err := intf.ConfigureInterface(ctx, tt.cfg)
+			var verr *util.ValidationError
+			switch tt.want.(type) {
+			case *util.ValidationError:
+				if !errors.As(err, &verr) {
+					t.Errorf("err = %v, want a validation error", err)
+				}
+			default:
+				if !errors.Is(err, tt.want) {
+					t.Errorf("err = %v, want %v", err, tt.want)
+				}
+			}
+			if d.GetIntent("interface|Ethernet0") != nil {
+				t.Error("a refused configure-interface left an intent behind")
+			}
+		})
 	}
 }
 
@@ -483,8 +479,10 @@ func TestInterface_NotConnected(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"SetIP", func() error { _, err := intf.SetIP(ctx, "10.0.0.1/30"); return err }},
-		{"SetVRF", func() error { _, err := intf.SetVRF(ctx, "default"); return err }},
+		{"ConfigureInterface", func() error {
+			_, err := intf.ConfigureInterface(ctx, InterfaceConfig{IP: "10.0.0.1/30"})
+			return err
+		}},
 		{"BindACL", func() error { _, err := intf.BindACL(ctx, "ACL1", "ingress"); return err }},
 		{"AddBGPPeer", func() error {
 			_, err := intf.AddBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65000})
@@ -515,16 +513,11 @@ func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// SetIP should fail for PortChannel member
-	_, err := intf.SetIP(ctx, "10.0.0.1/30")
-	if err == nil {
-		t.Fatal("expected error for PortChannel member SetIP")
-	}
-
-	// SetVRF should fail for PortChannel member
-	_, err = intf.SetVRF(ctx, "default")
-	if err == nil {
-		t.Fatal("expected error for PortChannel member SetVRF")
+	for _, cfg := range []InterfaceConfig{{IP: "10.0.0.1/30"}, {VLAN: 100}} {
+		_, err := intf.ConfigureInterface(ctx, cfg)
+		if !errors.Is(err, util.ErrPreconditionFailed) {
+			t.Errorf("ConfigureInterface(%+v) on a PortChannel member: err = %v, want a precondition refusal", cfg, err)
+		}
 	}
 }
 

@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -113,7 +112,7 @@ func (i *Interface) UnbindQoS(ctx context.Context) (*ChangeSet, error) {
 	intentKey := qosBindingKey(i.name)
 	intent := n.GetIntent(intentKey)
 	if intent == nil {
-		return nil, fmt.Errorf("no QoS intent for %s", i.name)
+		return nil, i.refuseMissing(sonic.OpUnbindQoS, "QoS binding")
 	}
 	policyName := intent.Params[sonic.FieldQoSPolicy]
 

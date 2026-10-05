@@ -12,30 +12,15 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
-// isVLANMember reports whether intfName is a member of vlanID by an
-// authored membership — an untagged (configure-interface) or tagged
-// (add-trunk-vlan) membership record, interface|<name>|vlan|<id>.
-// The service binding also carries vlan_id, so it is excluded: this asks
-// "did someone put this port in the bridge domain?", which is the
-// membership operations' job, not the service's (irb-service-redesign.md
-// §5; VLAN_MEMBER has one writer).
+// isVLANMember reports whether intfName is a member of vlanID, tagged or
+// untagged — whether its membership record exists.
 func (n *Node) isVLANMember(intfName string, vlanID int) bool {
-	want := strconv.Itoa(vlanID)
-	for resource, intent := range n.IntentsByParam(sonic.FieldVLANID, want) {
-		if resourceInterfaceName(resource) != intfName {
-			continue
-		}
-		switch intent.Operation {
-		case sonic.OpConfigureInterface, sonic.OpAddTrunkVLAN:
-			return true
-		}
-	}
-	return false
+	return n.GetIntent(vlanMembershipKey(intfName, vlanID)) != nil
 }
 
-// vlanMemberPorts returns the access-port members of a VLAN — the interfaces an
-// operator joined via configure-interface (untagged) or add-trunk-vlan (tagged),
-// read from the membership intents. An irb service's per-member policy is bound
+// vlanMemberPorts returns the members of a VLAN — every interface with a
+// membership record in it, tagged or untagged, whether an operator or a bridged
+// service joined it. An irb service's per-member policy is bound
 // to exactly this set (§4): a member gets the policy iff a service is bound on
 // the VLAN's IRB AND the port is a member. The set is derived from the intent DB,
 // never recorded (§21), so it is correct whichever fact (membership or binding)
@@ -83,101 +68,6 @@ func (n *Node) InterfaceExists(name string) bool {
 	}
 }
 
-// ============================================================================
-// Interface Property Operations
-// ============================================================================
-
-// SetIP configures an IP address on this interface.
-func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
-	n := i.node
-
-	if err := n.precondition("set-ip", i.name).
-		RequireInterfaceCapabilities(i.name, CapabilityRouting).Result(); err != nil {
-		return nil, err
-	}
-	if !util.IsValidIPv4CIDR(ipAddr) {
-		return nil, fmt.Errorf("invalid IP address: %s", ipAddr)
-	}
-	if i.IsPortChannelMember() {
-		return nil, fmt.Errorf("cannot configure IP on PortChannel member")
-	}
-
-	// SONiC requires both the base interface entry and the IP entry.
-	// The base entry enables routing on the interface; the IP entry assigns the address.
-	// However, if the interface already has a VRF binding (INTERFACE|name with
-	// vrf_name set), the base entry already exists — re-writing it with NULL:NULL
-	// disrupts intfmgrd on CiscoVS (see RCA-037). Skip enableIpRouting in that case.
-	var entries []sonic.Entry
-	if i.VRF() == "" {
-		entries = append(enableIpRoutingConfig(i.name), assignIpAddressConfig(i.name, ipAddr)...)
-	} else {
-		entries = assignIpAddressConfig(i.name, ipAddr)
-	}
-	cs := buildChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
-
-	if err := n.render(cs); err != nil {
-		return nil, err
-	}
-	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
-	return cs, nil
-}
-
-// RemoveIP removes an IP address from this interface.
-func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
-	n := i.node
-
-	if err := n.precondition("remove-ip", i.name).Result(); err != nil {
-		return nil, err
-	}
-	if !util.IsValidIPv4CIDR(ipAddr) {
-		return nil, fmt.Errorf("invalid IP address: %s", ipAddr)
-	}
-
-	cs := NewChangeSet(n.Name(), "interface.remove-ip")
-	cs.Deletes(deleteInterfaceIPConfig(i.name, ipAddr))
-
-	// If no other IPs remain, remove the base INTERFACE entry too
-	remaining := 0
-	for _, addr := range i.IPAddresses() {
-		if addr != ipAddr {
-			remaining++
-		}
-	}
-	if remaining == 0 {
-		cs.Deletes(deleteInterfaceBaseConfig(i.name))
-	}
-
-	if err := n.render(cs); err != nil {
-		return nil, err
-	}
-	util.WithDevice(n.Name()).Infof("Removed IP %s from interface %s", ipAddr, i.name)
-	return cs, nil
-}
-
-// SetVRF binds this interface to a VRF.
-func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
-	n := i.node
-
-	if err := n.precondition("set-vrf", i.name).
-		RequireInterfaceCapabilities(i.name, CapabilityRouting).Result(); err != nil {
-		return nil, err
-	}
-	if vrfName != "" && vrfName != "default" && n.GetIntent("vrf|"+vrfName) == nil {
-		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
-	}
-	if i.IsPortChannelMember() {
-		return nil, fmt.Errorf("cannot bind PortChannel member to VRF")
-	}
-
-	cs := buildChangeSet(n.Name(), "interface.set-vrf", bindVrfConfig(i.name, vrfName), ChangeModify)
-
-	if err := n.render(cs); err != nil {
-		return nil, err
-	}
-	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
-	return cs, nil
-}
-
 // InterfaceConfig holds the combined configuration for ConfigureInterface.
 // Routed mode (VRF+IP) and bridged mode (VLAN) are mutually exclusive.
 type InterfaceConfig struct {
@@ -185,44 +75,6 @@ type InterfaceConfig struct {
 	IP     string // IP address in CIDR notation (routed mode)
 	VLAN   int    // VLAN ID (bridged mode)
 	Tagged bool   // Tagged membership (bridged mode)
-}
-
-// createAccessMembership makes this interface an untagged (access) member of
-// vlanID: the VLAN_MEMBER row plus the membership record
-// interface|<name>|vlan|<id> that isVLANMember / vlanMemberPorts read (§24). It is
-// the single owner of the access-membership write, shared by ConfigureInterface
-// (operator authoring) and the bridged / evpn-bridged composite (the service
-// authoring its L2 delivery point). It refuses a routed interface and a second
-// untagged VLAN. Its §15 reverse is destroyAccessMembership. The caller is
-// responsible for the trunk-eligibility gate and render.
-func (i *Interface) createAccessMembership(cs *ChangeSet, vlanID int) error {
-	if err := i.refuseRoutedJoin(vlanID); err != nil {
-		return err
-	}
-	if current := i.accessVLAN(); current != 0 && current != vlanID {
-		return util.NewPreconditionError(sonic.OpConfigureInterface, i.name,
-			"interface has at most one untagged VLAN",
-			fmt.Sprintf("%s is already an untagged member of VLAN %d; unconfigure it before joining VLAN %d untagged", i.name, current, vlanID))
-	}
-	if err := i.createInterfaceIntent(cs); err != nil {
-		return err
-	}
-	cs.Adds(createVlanMemberConfig(vlanID, i.name, false))
-	return i.node.writeIntent(cs, sonic.OpConfigureInterface, vlanMembershipKey(i.name, vlanID),
-		map[string]string{
-			sonic.FieldVLANID: strconv.Itoa(vlanID),
-			sonic.FieldTagged: "false",
-		}, []string{"interface|" + i.name, "vlan|" + strconv.Itoa(vlanID)})
-}
-
-// destroyAccessMembership is the §15 reverse of createAccessMembership: it removes
-// this interface's access membership — the VLAN_MEMBER row and the membership
-// record. The membership record has no children, so whatever else the port
-// carries (properties, ACL/QoS bindings) never blocks it. The interface's
-// identity record is left to its own reverse, destroyInterfaceIntent.
-func (i *Interface) destroyAccessMembership(cs *ChangeSet, vlanID int) error {
-	cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
-	return i.node.deleteIntent(cs, vlanMembershipKey(i.name, vlanID))
 }
 
 // vlanMembershipKey returns the intent resource key of an interface's membership
@@ -239,34 +91,6 @@ func vlanMembershipKey(intfName string, vlanID int) string {
 // the interface's identity record, and of vrf|<name> when a VRF is bound.
 func routedKey(intfName string) string {
 	return "interface|" + intfName + "|routed"
-}
-
-// accessVLAN returns the VLAN this interface is an untagged member of, or 0. An
-// interface has at most one.
-func (i *Interface) accessVLAN() int {
-	for _, intent := range i.node.IntentsByPrefix("interface|" + i.name + "|vlan|") {
-		if intent.Operation == sonic.OpConfigureInterface {
-			v, _ := strconv.Atoi(intent.Params[sonic.FieldVLANID])
-			return v
-		}
-	}
-	return 0
-}
-
-// refuseRoutedJoin refuses a VLAN join on a routed interface: an interface is
-// bridged or routed, never both.
-func (i *Interface) refuseRoutedJoin(vlanID int) error {
-	if i.node.GetIntent(routedKey(i.name)) == nil {
-		return nil
-	}
-	return util.NewPreconditionError(sonic.OpConfigureInterface, i.name,
-		"interface is not routed", fmt.Sprintf("%s is routed; unconfigure it before joining VLAN %d", i.name, vlanID))
-}
-
-// hasVLANMembership reports whether this interface is a member of any VLAN,
-// tagged or untagged.
-func (i *Interface) hasVLANMembership() bool {
-	return len(i.node.IntentsByPrefix("interface|"+i.name+"|vlan|")) > 0
 }
 
 // bindingKey returns the intent resource key for an interface's service
@@ -294,6 +118,24 @@ func resourceInterfaceName(resource string) string {
 	return strings.SplitN(rest, "|", 2)[0]
 }
 
+// accessVLAN returns the VLAN this interface is an untagged member of, or 0. An
+// interface has at most one.
+func (i *Interface) accessVLAN() int {
+	for _, intent := range i.node.IntentsByPrefix("interface|" + i.name + "|vlan|") {
+		if intent.Operation == sonic.OpConfigureInterface {
+			v, _ := strconv.Atoi(intent.Params[sonic.FieldVLANID])
+			return v
+		}
+	}
+	return 0
+}
+
+// hasVLANMembership reports whether this interface is a member of any VLAN,
+// tagged or untagged.
+func (i *Interface) hasVLANMembership() bool {
+	return len(i.node.IntentsByPrefix("interface|"+i.name+"|vlan|")) > 0
+}
+
 // createInterfaceIntent writes the interface|INTF identity intent if absent
 // (idempotent). It is the interface's intent-writer — the standalone equivalent of
 // the writeIntent every CreateVLAN / CreateVRF / CreatePortChannel does inline,
@@ -316,6 +158,13 @@ func (i *Interface) createInterfaceIntent(cs *ChangeSet) error {
 	return i.node.writeIntent(cs, sonic.OpInterfaceInit, resource, map[string]string{}, parents)
 }
 
+// refuseMissing refuses an operation on a record this interface does not hold — a
+// state the request needs and the device lacks, so a precondition failure (409),
+// like a missing VLAN or ACL table.
+func (i *Interface) refuseMissing(operation, record string) error {
+	return util.NewPreconditionError(operation, i.name, record+" exists", fmt.Sprintf("%s has no %s", i.name, record))
+}
+
 // destroyInterfaceIntent is the §15 reverse of createInterfaceIntent: it removes
 // the interface's identity record once nothing is left on the interface. Every
 // operation that removes a record from an interface calls it, so whichever
@@ -331,382 +180,146 @@ func (i *Interface) destroyInterfaceIntent(cs *ChangeSet) error {
 	return i.node.deleteIntent(cs, resource)
 }
 
-// ConfigureInterface sets forwarding mode on an interface. Routed mode (VRF+IP)
-// and bridged mode (VLAN membership) are mutually exclusive. This is the
-// intent-producing method that topology steps should use.
-func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
+// createVLANMembership makes this interface a member of vlanID, tagged or
+// untagged, and is the one owner of a VLAN join (§25): the VLAN_MEMBER row, the
+// membership record, the checks a join must pass, and the per-member policy a
+// member receives (§4). ConfigureInterface (operator authoring) and the bridged /
+// evpn-bridged composite (a service's L2 delivery point) both join through it. A
+// join that repeats an existing membership writes nothing. Its §15 reverse is
+// destroyVLANMembership. The caller renders.
+func (i *Interface) createVLANMembership(cs *ChangeSet, vlanID int, tagged bool) error {
 	n := i.node
-
-	// Capability gate, content-derived: bridged config needs VLAN
-	// membership, routed config needs an L3 identity the interface-op path
-	// authors (configure-interface declares nil registry Needs; this is
-	// its in-method half — see contentDerivedOps). On an IRB the routed
-	// case refuses with the configure-irb redirect.
-	var needs []InterfaceCapability
-	if cfg.VLAN > 0 {
-		needs = append(needs, CapabilityVLANMembership)
+	op := sonic.OpConfigureInterface
+	if tagged {
+		op = sonic.OpAddTrunkVLAN
 	}
-	if cfg.VRF != "" || cfg.IP != "" {
-		needs = append(needs, CapabilityRouting)
+	refuse := func(precondition, detail string) error {
+		return util.NewPreconditionError(sonic.OpConfigureInterface, i.name, precondition, detail)
 	}
-	if err := n.precondition(sonic.OpConfigureInterface, i.name).
-		RequireInterfaceCapabilities(i.name, needs...).Result(); err != nil {
-		return nil, err
-	}
-	if i.IsPortChannelMember() {
-		return nil, fmt.Errorf("cannot configure PortChannel member directly")
-	}
-
-	cs := NewChangeSet(n.Name(), "interface."+sonic.OpConfigureInterface)
-	configureIntentParams := map[string]string{}
-
-	// Bridged mode — VLAN membership
-	if cfg.VLAN > 0 {
-		if cfg.VRF != "" || cfg.IP != "" {
-			return nil, fmt.Errorf("cannot mix routed (VRF/IP) and bridged (VLAN) config")
+	key := vlanMembershipKey(i.name, vlanID)
+	if existing := n.GetIntent(key); existing != nil {
+		if existing.Operation != op {
+			return refuse("membership matches the requested tagging",
+				fmt.Sprintf("%s is already a member of VLAN %d with the other tagging; remove that membership first", i.name, vlanID))
 		}
-		if n.GetIntent(fmt.Sprintf("vlan|%d", cfg.VLAN)) == nil {
-			return nil, fmt.Errorf("VLAN %d does not exist", cfg.VLAN)
-		}
-		// One key per (interface, VLAN): the existing record, if any, is this
-		// VLAN's membership. A request that flips it between tagged and untagged is
-		// refused — that is a change of membership, not an idempotent repeat.
-		memberKey := vlanMembershipKey(i.name, cfg.VLAN)
-		if existing := n.GetIntent(memberKey); existing != nil {
-			wantOp := sonic.OpConfigureInterface
-			if cfg.Tagged {
-				wantOp = sonic.OpAddTrunkVLAN
-			}
-			if existing.Operation != wantOp {
-				return nil, util.NewPreconditionError(sonic.OpConfigureInterface, i.name,
-					"membership matches the requested tagging",
-					fmt.Sprintf("%s is already a member of VLAN %d with the other tagging; remove that membership first", i.name, cfg.VLAN))
-			}
-		}
-		// Single-VLAN-member gate (§7): refuse this join if it would make the port
-		// a trunk while it carries an irb service's per-member filter/QoS — that
-		// policy cannot be delivered correctly to a multi-VLAN member. Symmetric
-		// with the apply-service gate. Skipped during replay (enforced at author).
-		if !n.reconstructing {
-			if err := n.refuseUndeliverablePolicy(i.name, cfg.VLAN); err != nil {
-				return nil, err
-			}
-		}
-		// Each VLAN membership is its own record, a child of the interface identity
-		// and of the VLAN, so add/remove are reference-aware §15 mirrors and replay
-		// reconstructs every membership (#224, Intent Round-Trip Completeness).
-		if cfg.Tagged {
-			if err := i.refuseRoutedJoin(cfg.VLAN); err != nil {
-				return nil, err
-			}
-			if err := i.createInterfaceIntent(cs); err != nil {
-				return nil, err
-			}
-			if n.GetIntent(memberKey) != nil {
-				// Already a trunk member — idempotent no-op.
-				cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(cfg.VLAN)}
-				if err := n.render(cs); err != nil {
-					return nil, err
-				}
-				return cs, nil
-			}
-			cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, true))
-			trunkParams := map[string]string{
-				sonic.FieldVLANID: strconv.Itoa(cfg.VLAN),
-				sonic.FieldTagged: "true",
-			}
-			parents := []string{"interface|" + i.name, fmt.Sprintf("vlan|%d", cfg.VLAN)}
-			if err := n.writeIntent(cs, sonic.OpAddTrunkVLAN, memberKey, trunkParams, parents); err != nil {
-				return nil, err
-			}
-			cs.ReverseOp = "interface." + sonic.OpRemoveTrunkVLAN
-			cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(cfg.VLAN)}
-			// Per-member policy (§4): this port just joined a VLAN — if an irb service
-			// is bound on that VLAN's IRB, its policy now reaches this member. QoS
-			// to this now-joined member (§7; members are single-VLAN by the gate).
-			n.rebindMemberACLs(cs, cfg.VLAN)
-			n.bindMemberQoS(cs, cfg.VLAN)
-			if err := n.render(cs); err != nil {
-				return nil, err
-			}
-			util.WithDevice(n.Name()).Infof("Added trunk VLAN %d on %s", cfg.VLAN, i.name)
-			return cs, nil
-		}
-		// Access mode — the write, and its checks (not routed; at most one untagged
-		// VLAN), are shared with the bridged / evpn-bridged composite via
-		// createAccessMembership (§30: one owner of the access-membership write).
-		// Access carries no routed params, so this completes the op — return here
-		// rather than falling through the routed section below.
-		if err := i.createAccessMembership(cs, cfg.VLAN); err != nil {
-			return nil, err
-		}
-		cs.ReverseOp = "interface.unconfigure-interface"
-		cs.OperationParams = map[string]string{"interface": i.name}
-		// Per-member policy (§4): an access member just joined — fan any irb-service
-		// policy bound on this VLAN's IRB onto it (§7; members are single-VLAN).
-		n.rebindMemberACLs(cs, cfg.VLAN)
-		n.bindMemberQoS(cs, cfg.VLAN)
-		if err := n.render(cs); err != nil {
-			return nil, err
-		}
-		util.WithDevice(n.Name()).Infof("Configured interface %s access VLAN %d", i.name, cfg.VLAN)
-		return cs, nil
+		return nil
 	}
-
-	// Routed mode — VRF binding and/or IP address. An interface is routed or
-	// bridged, never both.
-	if i.hasVLANMembership() {
-		return nil, util.NewPreconditionError(sonic.OpConfigureInterface, i.name,
-			"interface is not a VLAN member", fmt.Sprintf("%s is a VLAN member; unconfigure it before routing it", i.name))
+	if n.GetIntent(routedKey(i.name)) != nil {
+		return refuse("interface is not routed",
+			fmt.Sprintf("%s is routed; unconfigure it before joining VLAN %d", i.name, vlanID))
 	}
-	if cfg.VRF != "" {
-		configureIntentParams[sonic.FieldVRF] = cfg.VRF
+	if current := i.accessVLAN(); !tagged && current != 0 {
+		return refuse("interface has at most one untagged VLAN",
+			fmt.Sprintf("%s is already an untagged member of VLAN %d; unconfigure it before joining VLAN %d untagged", i.name, current, vlanID))
 	}
-	if cfg.IP != "" {
-		configureIntentParams[sonic.FieldIntfIP] = cfg.IP
+	// Single-VLAN-member gate (§7): refuse a join that would make the port a trunk
+	// while it carries an irb service's per-member filter/QoS — that policy cannot
+	// be delivered correctly to a multi-VLAN member. Enforced when authored, not on
+	// replay.
+	if !n.reconstructing {
+		if err := n.refuseUndeliverablePolicy(i.name, vlanID); err != nil {
+			return err
+		}
 	}
-
 	if err := i.createInterfaceIntent(cs); err != nil {
-		return nil, err
+		return err
 	}
-	parents := []string{"interface|" + i.name}
-	if cfg.VRF != "" {
-		parents = append(parents, "vrf|"+cfg.VRF)
+	cs.Adds(createVlanMemberConfig(vlanID, i.name, tagged))
+	if err := n.writeIntent(cs, op, key, map[string]string{
+		sonic.FieldVLANID: strconv.Itoa(vlanID),
+		sonic.FieldTagged: strconv.FormatBool(tagged),
+	}, []string{"interface|" + i.name, "vlan|" + strconv.Itoa(vlanID)}); err != nil {
+		return err
 	}
-	// Within-mode field diff: when the parents match (writeIntent will
-	// accept) and a CONFIG_DB-sub-entry-owning field changes value or is
-	// dropped, the previous value's sub-entry would orphan in CONFIG_DB
-	// because the cs.Adds below only writes the NEW state. Read the
-	// existing record once and emit the corresponding cs.Deletes for
-	// any field that's about to change. A VRF change is a different
-	// association and is refused here. Issue #228.
-	if existing := n.GetIntent(routedKey(i.name)); existing != nil {
-		if oldVRF := existing.Params[sonic.FieldVRF]; oldVRF != cfg.VRF {
-			return nil, util.NewPreconditionError(sonic.OpConfigureInterface, i.name,
-				"routed interface keeps its VRF",
-				fmt.Sprintf("%s is routed in VRF %q; unconfigure it before routing it in VRF %q", i.name, oldVRF, cfg.VRF))
+	// Per-member policy (§4): an irb service bound on this VLAN reaches its new
+	// member.
+	n.rebindMemberACLs(cs, vlanID)
+	n.bindMemberQoS(cs, vlanID)
+	return nil
+}
+
+// destroyVLANMembership is the §15 reverse of createVLANMembership: it removes the
+// VLAN_MEMBER row and the membership record, then withdraws the per-member policy
+// the port received through this VLAN (§4). The membership record has no
+// children, so whatever else the port carries never blocks it. The identity
+// record is left to its own reverse, destroyInterfaceIntent.
+func (i *Interface) destroyVLANMembership(cs *ChangeSet, vlanID int) error {
+	n := i.node
+	cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
+	if err := n.deleteIntent(cs, vlanMembershipKey(i.name, vlanID)); err != nil {
+		return err
+	}
+	n.rebindMemberACLs(cs, vlanID)
+	n.unbindMemberQoS(cs, i.name, map[int]bool{vlanID: true})
+	return nil
+}
+
+// createRoutedAssociation routes this interface and is the one owner of that write
+// (§25): the routed record (IP, VRF) and the L3 rows it renders — the VRF binding,
+// or the routing base entry, and the address. Repeating it with a new IP moves the
+// address; a different VRF is a different association and is refused, as is
+// routing a VLAN member. Its §15 reverse is destroyRoutedAssociation. The caller
+// renders.
+func (i *Interface) createRoutedAssociation(cs *ChangeSet, vrf, ip string) error {
+	n := i.node
+	refuse := func(precondition, detail string) error {
+		return util.NewPreconditionError(sonic.OpConfigureInterface, i.name, precondition, detail)
+	}
+	if i.hasVLANMembership() {
+		return refuse("interface is not a VLAN member",
+			fmt.Sprintf("%s is a VLAN member; unconfigure it before routing it", i.name))
+	}
+	key := routedKey(i.name)
+	if existing := n.GetIntent(key); existing != nil {
+		if oldVRF := existing.Params[sonic.FieldVRF]; oldVRF != vrf {
+			return refuse("routed interface keeps its VRF",
+				fmt.Sprintf("%s is routed in VRF %q; unconfigure it before routing it in VRF %q", i.name, oldVRF, vrf))
 		}
-		oldIP := existing.Params[sonic.FieldIntfIP]
-		if oldIP != "" && oldIP != cfg.IP {
+		// The address is the sub-entry's key: a new one must not leave the old
+		// row behind (#228).
+		if oldIP := existing.Params[sonic.FieldIntfIP]; oldIP != "" && oldIP != ip {
 			cs.Deletes(deleteInterfaceIPConfig(i.name, oldIP))
 		}
 	}
-	if err := i.node.writeIntent(cs, sonic.OpConfigureInterface, routedKey(i.name), configureIntentParams, parents); err != nil {
-		return nil, err
+	if err := i.createInterfaceIntent(cs); err != nil {
+		return err
 	}
-
-	// VRF binding first (creates the INTERFACE base entry with vrf_name)
-	if cfg.VRF != "" {
-		if cfg.VRF != "default" && n.GetIntent("vrf|"+cfg.VRF) == nil {
-			return nil, fmt.Errorf("VRF '%s' does not exist", cfg.VRF)
-		}
-		cs.Adds(bindVrfConfig(i.name, cfg.VRF))
+	params := map[string]string{}
+	parents := []string{"interface|" + i.name}
+	if vrf != "" {
+		params[sonic.FieldVRF] = vrf
+		parents = append(parents, "vrf|"+vrf)
 	}
-
-	// IP address (requires base entry — either from VRF binding above or enableIpRouting)
-	if cfg.IP != "" {
-		if !util.IsValidIPv4CIDR(cfg.IP) {
-			return nil, fmt.Errorf("invalid IP address: %s", cfg.IP)
-		}
-		if cfg.VRF == "" && i.VRF() == "" {
-			// No VRF binding — need base INTERFACE entry for IP routing
-			cs.Adds(enableIpRoutingConfig(i.name))
-		}
-		cs.Adds(assignIpAddressConfig(i.name, cfg.IP))
+	if ip != "" {
+		params[sonic.FieldIntfIP] = ip
 	}
-
-	cs.ReverseOp = "interface.unconfigure-interface"
-	cs.OperationParams = map[string]string{"interface": i.name}
-	// Per-member policy (§4): an access member just joined — render any irb-service
-	// policy bound on this VLAN's IRB onto it (no-op for routed config, VLAN==0).
-	// Fan the service's per-member ACL/QoS to this member (§7).
-	n.rebindMemberACLs(cs, cfg.VLAN)
-	n.bindMemberQoS(cs, cfg.VLAN)
-	if err := n.render(cs); err != nil {
-		return nil, err
+	if err := n.writeIntent(cs, sonic.OpConfigureInterface, key, params, parents); err != nil {
+		return err
 	}
-	util.WithDevice(n.Name()).Infof("Configured interface %s (vrf=%s, ip=%s, vlan=%d)", i.name, cfg.VRF, cfg.IP, cfg.VLAN)
-	return cs, nil
+	// The VRF binding is the base entry the address needs; without a VRF the
+	// address needs the plain routing base entry.
+	switch {
+	case vrf != "":
+		cs.Adds(bindVrfConfig(i.name, vrf))
+	case ip != "":
+		cs.Adds(enableIpRoutingConfig(i.name))
+	}
+	if ip != "" {
+		cs.Adds(assignIpAddressConfig(i.name, ip))
+	}
+	return nil
 }
 
-// RemoveTrunkVLAN removes a single VLAN from this interface's trunk membership.
-// Atomic — only the named VLAN's `VLAN_MEMBER` entry and the matching
-// `interface|{name}|vlan|{vlan_id}` intent record are deleted. Other
-// trunk VLANs, the access VLAN (if any), VRF/IP bindings, BGP peers, QoS,
-// and ACL bindings on this interface are untouched.
-//
-// Reverse mirror of ConfigureInterface(tagged=true) per §15 — closes the
-// gap where the only previous removal path was the full-teardown
-// UnconfigureInterface (#224).
-func (i *Interface) RemoveTrunkVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	n := i.node
-	if err := n.precondition(sonic.OpRemoveTrunkVLAN, i.name).Result(); err != nil {
-		return nil, err
+// destroyRoutedAssociation is the §15 reverse of createRoutedAssociation: it
+// removes the address, then the VRF binding or the routing base entry, then the
+// routed record — leaving in place an address another record still carries (a
+// routed service's) and the base entry it needs.
+func (i *Interface) destroyRoutedAssociation(cs *ChangeSet) error {
+	key := routedKey(i.name)
+	routed := i.node.GetIntent(key)
+	if routed == nil {
+		return nil
 	}
-	if vlanID <= 0 {
-		return nil, fmt.Errorf("vlan_id must be positive")
-	}
-	resource := vlanMembershipKey(i.name, vlanID)
-	if member := n.GetIntent(resource); member == nil || member.Operation != sonic.OpAddTrunkVLAN {
-		return nil, fmt.Errorf("interface %s is not a trunk member of VLAN %d", i.name, vlanID)
-	}
-	cs := NewChangeSet(n.Name(), "interface."+sonic.OpRemoveTrunkVLAN)
-	cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
-	if err := n.deleteIntent(cs, resource); err != nil {
-		return nil, err
-	}
-	if err := i.destroyInterfaceIntent(cs); err != nil {
-		return nil, err
-	}
-	cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(vlanID)}
-	// Per-member policy (§4): the member left — its binding goes with it, so
-	// drop it from any irb-service ACL bound on this VLAN (the membership intent
-	// is already deleted, so aclPortsFromIntents no longer includes it), and
-	// remove its QoS rows unless another serviced VLAN still binds it.
-	n.rebindMemberACLs(cs, vlanID)
-	n.unbindMemberQoS(cs, i.name, map[int]bool{vlanID: true})
-	if err := n.render(cs); err != nil {
-		return nil, err
-	}
-	util.WithDevice(n.Name()).Infof("Removed trunk VLAN %d from %s", vlanID, i.name)
-	return cs, nil
-}
-
-// UnconfigureInterface is the reverse of ConfigureInterface, and more: it returns
-// the interface to unmanaged. It removes every record on the interface through its
-// own reverse — BGP peer, QoS and ACL bindings, properties — then its VLAN
-// memberships (tagged and untagged) or its routed association (IP, VRF binding),
-// then the identity record. Refused while a service is bound (remove-service owns
-// that teardown). Parameterless — the intent records are self-sufficient for
-// teardown.
-func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error) {
-	n := i.node
-
-	if err := n.precondition("unconfigure-interface", i.name).Result(); err != nil {
-		return nil, err
-	}
-
-	identity := n.GetIntent("interface|" + i.name)
-	if identity == nil {
-		return nil, fmt.Errorf("no configuration intent for %s", i.name)
-	}
-
-	cs := NewChangeSet(n.Name(), "interface.unconfigure-interface")
-
-	// Remove all sub-resources (children before parent, per I5).
-	// Snapshot the children list since removals mutate it.
-	children := make([]string, len(identity.Children))
-	copy(children, identity.Children)
-
-	// Per-member policy (§4): this interface is leaving every VLAN it belonged to.
-	// Collect them now (the intents still exist); after teardown removes the
-	// memberships, re-render each VLAN's irb-service ACLs so this port drops out of
-	// their ports-list.
-	leftVLANs := map[int]bool{}
-	for _, childKey := range children {
-		if ci := n.GetIntent(childKey); ci != nil && (ci.Operation == sonic.OpAddTrunkVLAN || ci.Operation == sonic.OpConfigureInterface) {
-			if v, _ := strconv.Atoi(ci.Params[sonic.FieldVLANID]); v > 0 {
-				leftVLANs[v] = true
-			}
-		}
-	}
-
-	// Attributes first, the VLAN/routed associations last: a BGP peer is also a
-	// child of the routed association that supplies its IP (I5).
-	sort.SliceStable(children, func(a, b int) bool {
-		return !isAssociationKey(i.name, children[a]) && isAssociationKey(i.name, children[b])
-	})
-	for _, childKey := range children {
-		childIntent := n.GetIntent(childKey)
-		if childIntent == nil {
-			continue
-		}
-		switch childIntent.Operation {
-		case sonic.OpAddBGPPeer:
-			subCS, err := i.RemoveBGPPeer(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("remove bgp-peer on %s: %w", i.name, err)
-			}
-			cs.Merge(subCS)
-
-		case sonic.OpBindQoS:
-			subCS, err := i.UnbindQoS(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("unbind qos on %s: %w", i.name, err)
-			}
-			cs.Merge(subCS)
-
-		case sonic.OpBindACL:
-			aclName := childIntent.Params[sonic.FieldACLName]
-			subCS, err := i.UnbindACL(ctx, aclName)
-			if err != nil {
-				return nil, fmt.Errorf("unbind acl %s on %s: %w", aclName, i.name, err)
-			}
-			cs.Merge(subCS)
-
-		case sonic.OpSetProperty:
-			// Properties are simple value overrides — just delete the intent.
-			// The CONFIG_DB field persists as device reality.
-			if err := n.deleteIntent(cs, childKey); err != nil {
-				return nil, err
-			}
-
-		case sonic.OpAddTrunkVLAN:
-			// Tagged membership — delete the VLAN_MEMBER entry and the membership
-			// record. The CONFIG_DB writes are added directly here rather than
-			// calling RemoveTrunkVLAN, which would render its own ChangeSet (we
-			// want a single merged ChangeSet for unconfigure).
-			if vlanID, _ := strconv.Atoi(childIntent.Params[sonic.FieldVLANID]); vlanID > 0 {
-				cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
-			}
-			if err := n.deleteIntent(cs, childKey); err != nil {
-				return nil, err
-			}
-
-		case sonic.OpConfigureInterface:
-			// The untagged membership or the routed association.
-			if childKey == routedKey(i.name) {
-				i.unassignRouting(cs, childIntent)
-				if err := n.deleteIntent(cs, childKey); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			if vlanID, _ := strconv.Atoi(childIntent.Params[sonic.FieldVLANID]); vlanID > 0 {
-				if err := i.destroyAccessMembership(cs, vlanID); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-
-	if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
-		return nil, err
-	}
-	// Now that every membership intent (access + trunk) is gone, re-render the
-	// irb-service ACLs of each VLAN this port left, and drop its QoS rows (the
-	// interface belongs to no serviced VLAN anymore) — §4.
-	for v := range leftVLANs {
-		n.rebindMemberACLs(cs, v)
-	}
-	n.unbindMemberQoS(cs, i.name, leftVLANs)
-	if err := n.render(cs); err != nil {
-		return nil, err
-	}
-	util.WithDevice(n.Name()).Infof("Unconfigured interface %s", i.name)
-	return cs, nil
-}
-
-// isAssociationKey reports whether resource is one of intfName's associations —
-// a VLAN membership or its routed association.
-func isAssociationKey(intfName, resource string) bool {
-	return resource == routedKey(intfName) || strings.HasPrefix(resource, "interface|"+intfName+"|vlan|")
-}
-
-// unassignRouting removes the CONFIG_DB state of a routed association — the IP,
-// then the VRF binding or the routing base entry — leaving any address another
-// record still carries (a routed service's) in place.
-func (i *Interface) unassignRouting(cs *ChangeSet, routed *sonic.Intent) {
 	ip := routed.Params[sonic.FieldIntfIP]
 	vrf := routed.Params[sonic.FieldVRF]
 	remaining := 0
@@ -724,6 +337,179 @@ func (i *Interface) unassignRouting(cs *ChangeSet, routed *sonic.Intent) {
 	case vrf != "":
 		cs.Adds(bindVrfConfig(i.name, ""))
 	}
+	return i.node.deleteIntent(cs, key)
+}
+
+// ConfigureInterface gives an interface its association: bridged (a VLAN
+// membership, tagged or untagged) or routed (a VRF and/or an IP address), never
+// both. This is the intent-producing method that topology steps should use.
+func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
+	n := i.node
+	routed := cfg.VRF != "" || cfg.IP != ""
+	switch {
+	case cfg.VLAN > 0 && routed:
+		return nil, util.NewValidationError("cannot mix routed (VRF/IP) and bridged (VLAN) config")
+	case cfg.VLAN <= 0 && !routed:
+		return nil, util.NewValidationError("configure-interface needs a VLAN, or a VRF and/or an IP address")
+	case cfg.IP != "" && !util.IsValidIPv4CIDR(cfg.IP):
+		return nil, util.NewValidationError(fmt.Sprintf("invalid IP address: %s", cfg.IP))
+	}
+
+	// Capability gate, content-derived: bridged config needs VLAN membership,
+	// routed config needs an L3 identity the interface-op path authors
+	// (configure-interface declares nil registry Needs; this is its in-method
+	// half — see contentDerivedOps). On an IRB the routed case refuses with the
+	// configure-irb redirect.
+	pc := n.precondition(sonic.OpConfigureInterface, i.name).RequireInterfaceNotPortChannelMember(i.name)
+	if cfg.VLAN > 0 {
+		pc.RequireInterfaceCapabilities(i.name, CapabilityVLANMembership).RequireVLANExists(cfg.VLAN)
+	} else {
+		pc.RequireInterfaceCapabilities(i.name, CapabilityRouting)
+		if cfg.VRF != "" {
+			pc.RequireVRFExists(cfg.VRF)
+		}
+	}
+	if err := pc.Result(); err != nil {
+		return nil, err
+	}
+
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpConfigureInterface)
+	cs.ReverseOp = "interface.unconfigure-interface"
+	cs.OperationParams = map[string]string{"interface": i.name}
+	if cfg.VLAN > 0 {
+		if err := i.createVLANMembership(cs, cfg.VLAN, cfg.Tagged); err != nil {
+			return nil, err
+		}
+		if cfg.Tagged {
+			cs.ReverseOp = "interface." + sonic.OpRemoveTrunkVLAN
+			cs.OperationParams["vlan_id"] = strconv.Itoa(cfg.VLAN)
+		}
+	} else if err := i.createRoutedAssociation(cs, cfg.VRF, cfg.IP); err != nil {
+		return nil, err
+	}
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.Name()).Infof("Configured interface %s (vrf=%s, ip=%s, vlan=%d, tagged=%t)", i.name, cfg.VRF, cfg.IP, cfg.VLAN, cfg.Tagged)
+	return cs, nil
+}
+
+// RemoveTrunkVLAN removes one tagged VLAN membership from this interface — the
+// §15 reverse of ConfigureInterface(tagged=true). Every other record on the
+// interface is untouched; the identity record goes only if this was the last.
+func (i *Interface) RemoveTrunkVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	n := i.node
+	if err := n.precondition(sonic.OpRemoveTrunkVLAN, i.name).Result(); err != nil {
+		return nil, err
+	}
+	if vlanID <= 0 {
+		return nil, util.NewValidationError("vlan_id must be positive")
+	}
+	if member := n.GetIntent(vlanMembershipKey(i.name, vlanID)); member == nil || member.Operation != sonic.OpAddTrunkVLAN {
+		return nil, i.refuseMissing(sonic.OpRemoveTrunkVLAN, fmt.Sprintf("tagged membership in VLAN %d", vlanID))
+	}
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpRemoveTrunkVLAN)
+	cs.OperationParams = map[string]string{"interface": i.name, "vlan_id": strconv.Itoa(vlanID)}
+	if err := i.destroyVLANMembership(cs, vlanID); err != nil {
+		return nil, err
+	}
+	if err := i.destroyInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.Name()).Infof("Removed trunk VLAN %d from %s", vlanID, i.name)
+	return cs, nil
+}
+
+// UnconfigureInterface returns the interface to unmanaged. It removes every record
+// on the interface through that record's own reverse, leaves first as the intent
+// DAG orders them — so a BGP peer goes before the routed association that supplies
+// its address — and then the identity record. An IRB keeps its identity, the
+// configure-irb record, which unconfigure-irb removes. Refused while a service is
+// bound (remove-service owns that teardown). Parameterless: the intent records are
+// self-sufficient for teardown.
+func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error) {
+	n := i.node
+	identityKey := "interface|" + i.name
+	if err := n.precondition("unconfigure-interface", i.name).
+		Check(n.GetIntent(bindingKey(i.name)) == nil, "no service is bound",
+			fmt.Sprintf("%s has a service bound; remove-service tears it down", i.name)).
+		Result(); err != nil {
+		return nil, err
+	}
+	if n.GetIntent(identityKey) == nil {
+		return nil, i.refuseMissing("unconfigure-interface", "configuration")
+	}
+
+	cs := NewChangeSet(n.Name(), "interface.unconfigure-interface")
+	for {
+		resource := i.nextLeafRecord()
+		if resource == "" {
+			break
+		}
+		record := n.GetIntent(resource)
+		var sub *ChangeSet
+		var err error
+		switch record.Operation {
+		case sonic.OpAddBGPPeer:
+			sub, err = i.RemoveBGPPeer(ctx)
+		case sonic.OpBindQoS:
+			sub, err = i.UnbindQoS(ctx)
+		case sonic.OpBindACL:
+			sub, err = i.UnbindACL(ctx, record.Params[sonic.FieldACLName])
+		case sonic.OpSetProperty:
+			sub, err = i.ClearProperty(ctx, record.Params[sonic.FieldProperty])
+		case sonic.OpAddTrunkVLAN, sonic.OpConfigureInterface:
+			// An association has no operation of its own to remove it; its owner's
+			// reverse does.
+			if resource == routedKey(i.name) {
+				err = i.destroyRoutedAssociation(cs)
+			} else {
+				vlanID, _ := strconv.Atoi(record.Params[sonic.FieldVLANID])
+				err = i.destroyVLANMembership(cs, vlanID)
+			}
+		default:
+			err = fmt.Errorf("unconfigure-interface: no reverse for %s (%s)", resource, record.Operation)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("unconfigure %s: %w", resource, err)
+		}
+		if sub != nil {
+			cs.Merge(sub)
+		}
+	}
+	if identity := n.GetIntent(identityKey); identity != nil && len(identity.Children) > 0 {
+		return nil, fmt.Errorf("unconfigure %s: no record in %v can be removed first", i.name, identity.Children)
+	}
+	if err := i.destroyInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.Name()).Infof("Unconfigured interface %s", i.name)
+	return cs, nil
+}
+
+// nextLeafRecord returns a record on this interface that nothing depends on — a
+// child of the identity record with no children of its own — or "" when the
+// identity has no children left. The choice among several leaves is by key, so
+// the teardown order is deterministic.
+func (i *Interface) nextLeafRecord() string {
+	identity := i.node.GetIntent("interface|" + i.name)
+	if identity == nil {
+		return ""
+	}
+	children := append([]string(nil), identity.Children...)
+	sort.Strings(children)
+	for _, child := range children {
+		if record := i.node.GetIntent(child); record != nil && len(record.Children) == 0 {
+			return child
+		}
+	}
+	return ""
 }
 
 // BindACL binds an ACL to this interface.
@@ -731,14 +517,12 @@ func (i *Interface) unassignRouting(cs *ChangeSet, routed *sonic.Intent) {
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition(sonic.OpBindACL, i.name).Result(); err != nil {
-		return nil, err
-	}
-	if n.GetIntent(aclKey(aclName)) == nil {
-		return nil, fmt.Errorf("ACL table '%s' does not exist", aclName)
-	}
 	if direction != "ingress" && direction != "egress" {
-		return nil, fmt.Errorf("direction must be 'ingress' or 'egress'")
+		return nil, util.NewValidationError("direction must be 'ingress' or 'egress'")
+	}
+	if err := n.precondition(sonic.OpBindACL, i.name).
+		RequireACLTableExists(aclName).Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpBindACL)
@@ -771,7 +555,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("unbind-acl", aclName).
+	if err := n.precondition("unbind-acl", i.name).
 		RequireACLTableExists(aclName).
 		Result(); err != nil {
 		return nil, err
@@ -789,7 +573,7 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 		}
 	}
 	if direction == "" {
-		return nil, fmt.Errorf("no ACL binding intent for %s on %s", aclName, i.name)
+		return nil, i.refuseMissing("unbind-acl", "binding of ACL "+aclName)
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.unbind-acl")
@@ -823,17 +607,15 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 func (i *Interface) SetProperty(ctx context.Context, property, value string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("set-property", i.name).Result(); err != nil {
-		return nil, err
-	}
-	if i.IsPortChannelMember() {
-		return nil, fmt.Errorf("cannot configure PortChannel member directly - configure the parent PortChannel")
-	}
-
 	// Per-property granularity within CapabilityPortProperties: speed and
 	// description exist only on the physical PORT row.
-	if _, known := propertyApplicability[property]; known && !propertyAppliesTo(property, i.Kind()) {
-		return nil, fmt.Errorf("property %q does not apply to a %s", property, i.Kind())
+	_, known := propertyApplicability[property]
+	if err := n.precondition(sonic.OpSetProperty, i.name).
+		RequireInterfaceNotPortChannelMember(i.name).
+		Check(!known || propertyAppliesTo(property, i.Kind()), "property applies to the interface kind",
+			fmt.Sprintf("property %q does not apply to a %s", property, i.Kind())).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	// The value is validated and rendered by spec.PortConfig — the one owner of
@@ -886,21 +668,15 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 	intentKey := "interface|" + i.name + "|" + property
 	intent := n.GetIntent(intentKey)
 	if intent == nil {
-		return nil, fmt.Errorf("no property intent for %s on %s", property, i.name)
+		return nil, i.refuseMissing(sonic.OpClearProperty, property+" override")
 	}
 
+	defaultSpeed := intent.Params[sonic.FieldDefaultSpeed]
+	if property == "speed" && defaultSpeed == "" {
+		return nil, fmt.Errorf("speed intent on %s records no default speed to revert to", i.name)
+	}
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpClearProperty)
-
-	switch property {
-	case "mtu", "speed", "admin-status", "admin_status", "description":
-		defaultSpeed := intent.Params[sonic.FieldDefaultSpeed]
-		if property == "speed" && defaultSpeed == "" {
-			return nil, fmt.Errorf("speed intent on %s records no default speed to revert to", i.name)
-		}
-		cs.Updates(clearPropertyConfig(propertyTable(i.name), i.name, property, defaultSpeed))
-	default:
-		return nil, fmt.Errorf("unknown property: %s", property)
-	}
+	cs.Updates(clearPropertyConfig(propertyTable(i.name), i.name, property, defaultSpeed))
 
 	if err := n.deleteIntent(cs, intentKey); err != nil {
 		return nil, err

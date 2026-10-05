@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/aldrin-isaac/newtron/pkg/util"
@@ -210,18 +211,8 @@ func (p *PreconditionChecker) Check(condition bool, precondition, details string
 	return p
 }
 
-// Result returns the first error or nil if all checks passed
+// Result returns nil if every check passed, else the refusals. Several are joined,
+// not recast: each stays a precondition failure (409), never a malformed request.
 func (p *PreconditionChecker) Result() error {
-	if len(p.errors) == 0 {
-		return nil
-	}
-	if len(p.errors) == 1 {
-		return p.errors[0]
-	}
-	// Combine errors
-	msgs := make([]string, len(p.errors))
-	for i, e := range p.errors {
-		msgs[i] = e.Error()
-	}
-	return util.NewValidationError(msgs...)
+	return errors.Join(p.errors...)
 }

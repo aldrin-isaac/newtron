@@ -71,35 +71,6 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 }
 
 // ============================================================================
-// VRF Interface Binding
-// ============================================================================
-
-// AddVRFInterface binds an interface to a VRF.
-// Resolves the interface name and delegates to Interface.SetVRF.
-func (n *Node) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	intfName = util.NormalizeInterfaceName(intfName)
-	if n.GetIntent("vrf|"+vrfName) == nil {
-		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
-	}
-	iface, err := n.GetInterface(intfName)
-	if err != nil {
-		return nil, err
-	}
-	return iface.SetVRF(ctx, vrfName)
-}
-
-// RemoveVRFInterface removes a VRF binding from an interface.
-// Resolves the interface name and delegates to Interface.SetVRF with empty VRF.
-func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	intfName = util.NormalizeInterfaceName(intfName)
-	iface, err := n.GetInterface(intfName)
-	if err != nil {
-		return nil, err
-	}
-	return iface.SetVRF(ctx, "")
-}
-
-// ============================================================================
 // IP-VPN Binding (L3VNI)
 // ============================================================================
 

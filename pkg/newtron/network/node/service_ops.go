@@ -685,12 +685,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// same last-consumer rule as the SVI/VRF/VLAN reaps. Gated by the trunk-
 	// eligibility check, like configure-interface (§7).
 	if canBridge && !isIRB && vlanID > 0 && !n.isVLANMember(i.name, vlanID) {
-		if !n.reconstructing {
-			if err := n.refuseUndeliverablePolicy(i.name, vlanID); err != nil {
-				return nil, err
-			}
-		}
-		if err := i.createAccessMembership(cs, vlanID); err != nil {
+		if err := i.createVLANMembership(cs, vlanID, false); err != nil {
 			return nil, err
 		}
 	}
@@ -1560,37 +1555,20 @@ func (i *Interface) removeService(ctx context.Context, deliveryOnly bool) (*Chan
 	//     overlapped — is reaped with the service (last consumer, no provenance,
 	//     the same rule the SVI and VRF reaps use). The membership is its own
 	//     record with no children, so whatever else the port carries never keeps
-	//     it. destroyAccessMembership is the reverse of the createAccessMembership
+	//     it. destroyVLANMembership is the reverse of the createVLANMembership
 	//     this teardown undoes.
 	// Then the interface identity goes if nothing else is left on it (§15).
 	if isIRB {
 		if identity := n.GetIntent("interface|" + i.name); identity != nil && len(identity.Children) == 0 &&
 			identity.Operation == sonic.OpConfigureIRB && !deliveryOnly {
-			sviVLAN := bindingInt(identity.Params[sonic.FieldVLANID])
-			if ip := identity.Params[sonic.FieldIPAddress]; ip != "" {
-				cs.Deletes(deleteSviIPConfig(sviVLAN, ip))
-			}
-			cs.Deletes(deleteSviBaseConfig(sviVLAN))
-			if identity.Params[sonic.FieldAnycastMAC] != "" {
-				otherSAG := false
-				for resource, irbIntent := range n.IntentsByOp(sonic.OpConfigureIRB) {
-					if resource != "interface|"+i.name && irbIntent.Params[sonic.FieldAnycastMAC] != "" {
-						otherSAG = true
-						break
-					}
-				}
-				if !otherSAG {
-					cs.Deletes(deleteSagGlobalConfig())
-				}
-			}
-			if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
+			if err := n.destroyIRB(cs, bindingInt(identity.Params[sonic.FieldVLANID])); err != nil {
 				return nil, err
 			}
 		}
 	} else {
 		if vlanID := bindingInt(b[sonic.FieldVLANID]); vlanID > 0 && !deliveryOnly {
 			if member := n.GetIntent(vlanMembershipKey(i.name, vlanID)); member != nil && member.Operation == sonic.OpConfigureInterface {
-				if err := i.destroyAccessMembership(cs, vlanID); err != nil {
+				if err := i.destroyVLANMembership(cs, vlanID); err != nil {
 					return nil, err
 				}
 			}

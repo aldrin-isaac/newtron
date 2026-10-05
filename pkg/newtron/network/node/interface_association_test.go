@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -225,4 +226,55 @@ func equalSet(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// unconfigure-interface removes every record through its own reverse, so a
+// property is cleared back to its default, not left behind unmanaged.
+func TestUnconfigure_ClearsProperties(t *testing.T) {
+	ctx := context.Background()
+	n := newTestAbstractNode()
+	i, _ := n.GetInterface("Ethernet0")
+	if _, err := i.SetProperty(ctx, "mtu", "9000"); err != nil {
+		t.Fatalf("SetProperty: %v", err)
+	}
+	cs, err := i.UnconfigureInterface(ctx)
+	if err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+	c := assertChange(t, cs, "PORT", "Ethernet0", ChangeModify)
+	if got := c.Fields["mtu"]; got != strconv.Itoa(spec.DefaultPortMTU) {
+		t.Errorf("PORT mtu after unconfigure = %q, want the default %d", got, spec.DefaultPortMTU)
+	}
+	if n.GetIntent("interface|Ethernet0") != nil {
+		t.Error("identity record survived unconfigure-interface")
+	}
+}
+
+// unconfigure-interface on an IRB removes the records on it but leaves its
+// configure-irb record — and so its SVI — to unconfigure-irb.
+func TestUnconfigure_IRBKeepsItsIdentity(t *testing.T) {
+	ctx := context.Background()
+	n := newTestAbstractNode()
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+		t.Fatal(err)
+	}
+	irb, _ := n.GetInterface("Vlan100")
+	if _, err := irb.AddBGPPeer(ctx, DirectBGPPeerConfig{NeighborIP: "10.1.100.2", RemoteAS: 65099}); err != nil {
+		t.Fatalf("AddBGPPeer: %v", err)
+	}
+	if _, err := irb.UnconfigureInterface(ctx); err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+	if n.GetIntent("interface|Vlan100|bgp-peer") != nil {
+		t.Error("BGP peer survived unconfigure-interface")
+	}
+	if n.GetIntent("interface|Vlan100") == nil {
+		t.Error("unconfigure-interface removed the IRB's configure-irb record; unconfigure-irb owns it")
+	}
+	if _, ok := n.ConfigDB().VLANInterface["Vlan100"]; !ok {
+		t.Error("the SVI base entry went without its record")
+	}
 }

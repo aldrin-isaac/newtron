@@ -45,7 +45,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 	// Interface must have an IP address
 	ipAddresses := i.IPAddresses()
 	if len(ipAddresses) == 0 {
-		return nil, fmt.Errorf("interface %s has no IP address configured", i.name)
+		return nil, i.refuseMissing(sonic.OpAddBGPPeer, "IP address for the peer to source from")
 	}
 
 	// Get the interface's IP address (use first one)
@@ -56,7 +56,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 	if neighborIP == "" {
 		derivedIP, err := util.DeriveNeighborIP(localIP)
 		if err != nil {
-			return nil, fmt.Errorf("cannot auto-derive neighbor IP from %s: %v (specify neighbor IP explicitly)", localIP, err)
+			return nil, util.NewValidationError(fmt.Sprintf("cannot auto-derive neighbor IP from %s: %v (specify neighbor IP explicitly)", localIP, err))
 		}
 		neighborIP = derivedIP
 	}
@@ -99,7 +99,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, "interface|"+i.name+"|bgp-peer", intentParams, i.bgpPeerParents()); err != nil {
 		return nil, err
 	}
-	cs.ReverseOp = "device.remove-bgp-peer"
+	cs.ReverseOp = "interface.remove-bgp-peer"
 	cs.OperationParams = map[string]string{"interface": i.name, "neighbor_ip": neighborIP}
 
 	if err := n.render(cs); err != nil {
@@ -138,7 +138,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) 
 	intentKey := "interface|" + i.name + "|bgp-peer"
 	existing := n.GetIntent(intentKey)
 	if existing == nil {
-		return nil, fmt.Errorf("no BGP peer intent for %s — use add-bgp-peer first", i.name)
+		return nil, i.refuseMissing(sonic.OpUpdateBGPPeer, "BGP peer")
 	}
 	neighborIP := existing.Params[sonic.FieldNeighborIP]
 	if neighborIP == "" {
@@ -148,7 +148,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) 
 	// Interface must still have an IP (used as update-source).
 	ipAddresses := i.IPAddresses()
 	if len(ipAddresses) == 0 {
-		return nil, fmt.Errorf("interface %s has no IP address configured", i.name)
+		return nil, i.refuseMissing(sonic.OpUpdateBGPPeer, "IP address for the peer to source from")
 	}
 	localIPOnly, _ := util.SplitIPMask(ipAddresses[0])
 
@@ -182,7 +182,7 @@ func (i *Interface) UpdateBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) 
 	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, intentKey, intentParams, i.bgpPeerParents()); err != nil {
 		return nil, err
 	}
-	cs.ReverseOp = "device.remove-bgp-peer"
+	cs.ReverseOp = "interface.remove-bgp-peer"
 	cs.OperationParams = map[string]string{"interface": i.name, "neighbor_ip": neighborIP}
 
 	if err := n.render(cs); err != nil {
@@ -206,7 +206,7 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	intentKey := "interface|" + i.name + "|bgp-peer"
 	intent := n.GetIntent(intentKey)
 	if intent == nil {
-		return nil, fmt.Errorf("no BGP peer intent for %s", i.name)
+		return nil, i.refuseMissing("remove-bgp-peer", "BGP peer")
 	}
 	neighborIP := intent.Params[sonic.FieldNeighborIP]
 	if neighborIP == "" {
@@ -217,9 +217,6 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	vrf := i.VRF()
 	config := DeleteBGPNeighborConfig(vrf, neighborIP)
 	cs := buildChangeSet(n.Name(), "interface.remove-bgp-peer", config, ChangeDelete)
-	if err := n.render(cs); err != nil {
-		return nil, err
-	}
 	// Delete the bgp-peer sub-resource intent, then the interface identity if
 	// the peer was the last record on the interface.
 	if err := n.deleteIntent(cs, intentKey); err != nil {
@@ -228,7 +225,10 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	if err := i.destroyInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.Name()).Infof("Removing direct BGP peer %s from interface %s", neighborIP, i.name)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.Name()).Infof("Removed direct BGP peer %s from interface %s", neighborIP, i.name)
 	return cs, nil
 }
 

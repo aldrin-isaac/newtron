@@ -732,7 +732,8 @@ properties, ACL/QoS bindings, BGP peer.
 The interface's membership in a VLAN — untagged (`configure-interface`,
 `tagged: false`) or tagged (`add-trunk-vlan`). One record per VLAN; at most one
 untagged VLAN per interface. The bridged / evpn-bridged service composite writes
-the untagged membership through the same function (`createAccessMembership`).
+its membership through the same function (`createVLANMembership`), which also owns
+the per-member policy a member receives from an irb service on the VLAN.
 
 | Field | Value |
 |-------|-------|
@@ -985,7 +986,7 @@ independently.
 | **Resource key** | `"interface|" + i.name + "\|" + property` |
 | **Operation** | `OpSetProperty` (`"set-property"`) |
 | **Created by** | `SetProperty()` in `interface_ops.go` |
-| **Deleted by** | `ClearProperty()` in `interface_ops.go`; `UnconfigureInterface()` cascade |
+| **Deleted by** | `ClearProperty()` in `interface_ops.go`, also when `UnconfigureInterface()` removes it |
 | **Reconstruct** | registry `Replay` (`op_registry.go`) → `iface.SetProperty(ctx, property, value)` |
 | **Side effect** | No |
 
