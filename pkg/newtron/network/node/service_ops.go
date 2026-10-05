@@ -199,8 +199,12 @@ func (n *Node) refuseUndeliverablePolicy(member string, joiningVLAN int) error {
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
 	n := i.node
 
-	// Validate preconditions
-	if err := n.precondition(sonic.OpApplyService, i.name).Result(); err != nil {
+	// Validate preconditions. A routed association owns the interface's L3
+	// config; a service is delivered on an interface that has none.
+	if err := n.precondition(sonic.OpApplyService, i.name).
+		Check(n.GetIntent(routedKey(i.name)) == nil, "interface is not routed",
+			fmt.Sprintf("%s is routed by configure-interface; unconfigure it before applying a service", i.name)).
+		Result(); err != nil {
 		return nil, err
 	}
 

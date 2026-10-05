@@ -761,7 +761,8 @@ while the interface is a member.
 #### `interface|{INTF}|routed` — configure-interface
 
 The interface's L3 association: IP address and optional VRF binding. An
-interface is routed or bridged, never both.
+interface is routed or bridged, never both, and its L3 config has one author: a
+routed association and a routed or evpn-routed service refuse each other.
 
 | Field | Value |
 |-------|-------|

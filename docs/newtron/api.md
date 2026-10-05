@@ -4191,6 +4191,10 @@ Apply a service definition to the interface. Creates all required CONFIG_DB
 infrastructure (VLANs, VRFs, VNI mappings, route policies, ACLs, QoS) based
 on the service type.
 
+Refused with 409 on an interface routed by `configure-interface`: the routed
+association and a service would both author the interface's L3 config. Call
+`unconfigure-interface` first.
+
 **Query parameters:** `dry_run`, `no_save`
 
 **Request body:**
@@ -4296,7 +4300,8 @@ VRF that does not exist is a 409.
 both; it has at most one untagged VLAN; it is a tagged or an untagged member of
 a VLAN, not both; and a routed interface keeps its VRF. A request that would
 break one of these (routed → VLAN, VLAN → routed, a second untagged VLAN, a
-tagged/untagged flip, routed VRF X → VRF Y) returns 409 with a precondition
+tagged/untagged flip, routed VRF X → VRF Y, routing an interface that carries a
+routed or evpn-routed service) returns 409 with a precondition
 error naming the current state. Call `unconfigure-interface` first, then
 configure-interface for the new mode. Settings already on the interface
 (properties, ACL/QoS bindings) do not affect any of this: they hang off the

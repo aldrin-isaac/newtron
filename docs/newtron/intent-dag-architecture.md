@@ -792,8 +792,10 @@ irb-service-redesign.md); `destroyVLANMembership` withdraws both.
 membership, so it can always be removed, whatever else the interface carries.
 
 An interface is bridged or routed, never both: joining a VLAN is refused while the
-interface has a routed association (§10.7.3), and routing is refused while it has
-any membership.
+interface has a routed association (§10.7.3) or a routed service, and routing is
+refused while it has any membership. Its L3 config has one author: a routed
+association and a routed or evpn-routed service refuse each other, since each would
+overwrite the other's base entry and address.
 
 ---
 

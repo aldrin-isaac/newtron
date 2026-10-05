@@ -130,6 +130,22 @@ func (i *Interface) accessVLAN() int {
 	return 0
 }
 
+// routedService returns the name of the routed or evpn-routed service bound on
+// this interface, or "". Such a service owns the interface's L3 config exactly as
+// a routed association does, so the two are never on one interface: each would
+// overwrite the other's base entry and address.
+func (i *Interface) routedService() string {
+	binding := i.node.GetIntent(bindingKey(i.name))
+	if binding == nil {
+		return ""
+	}
+	switch binding.Params[sonic.FieldServiceType] {
+	case spec.ServiceTypeRouted, spec.ServiceTypeEVPNRouted:
+		return binding.Params[sonic.FieldServiceName]
+	}
+	return ""
+}
+
 // hasVLANMembership reports whether this interface is a member of any VLAN,
 // tagged or untagged.
 func (i *Interface) hasVLANMembership() bool {
@@ -208,6 +224,10 @@ func (i *Interface) createVLANMembership(cs *ChangeSet, vlanID int, tagged bool)
 		return refuse("interface is not routed",
 			fmt.Sprintf("%s is routed; unconfigure it before joining VLAN %d", i.name, vlanID))
 	}
+	if svc := i.routedService(); svc != "" {
+		return refuse("interface is not routed",
+			fmt.Sprintf("%s carries routed service %s; remove it before joining VLAN %d", i.name, svc, vlanID))
+	}
 	if current := i.accessVLAN(); !tagged && current != 0 {
 		return refuse("interface has at most one untagged VLAN",
 			fmt.Sprintf("%s is already an untagged member of VLAN %d; unconfigure it before joining VLAN %d untagged", i.name, current, vlanID))
@@ -269,6 +289,10 @@ func (i *Interface) createRoutedAssociation(cs *ChangeSet, vrf, ip string) error
 		return refuse("interface is not a VLAN member",
 			fmt.Sprintf("%s is a VLAN member; unconfigure it before routing it", i.name))
 	}
+	if svc := i.routedService(); svc != "" {
+		return refuse("interface carries no routed service",
+			fmt.Sprintf("%s carries routed service %s, which owns its L3 config; remove it before routing the interface", i.name, svc))
+	}
 	key := routedKey(i.name)
 	if existing := n.GetIntent(key); existing != nil {
 		if oldVRF := existing.Params[sonic.FieldVRF]; oldVRF != vrf {
@@ -311,9 +335,10 @@ func (i *Interface) createRoutedAssociation(cs *ChangeSet, vrf, ip string) error
 }
 
 // destroyRoutedAssociation is the §15 reverse of createRoutedAssociation: it
-// removes the address, then the VRF binding or the routing base entry, then the
-// routed record — leaving in place an address another record still carries (a
-// routed service's) and the base entry it needs.
+// removes the address, then the base entry the VRF binding or routing created,
+// then the routed record. Nothing else on the interface writes L3 config — a
+// routed service is refused alongside it — so the base entry is this record's
+// alone.
 func (i *Interface) destroyRoutedAssociation(cs *ChangeSet) error {
 	key := routedKey(i.name)
 	routed := i.node.GetIntent(key)
@@ -321,21 +346,11 @@ func (i *Interface) destroyRoutedAssociation(cs *ChangeSet) error {
 		return nil
 	}
 	ip := routed.Params[sonic.FieldIntfIP]
-	vrf := routed.Params[sonic.FieldVRF]
-	remaining := 0
-	for _, addr := range i.IPAddresses() {
-		if addr != ip {
-			remaining++
-		}
-	}
 	if ip != "" {
 		cs.Deletes(deleteInterfaceIPConfig(i.name, ip))
 	}
-	switch {
-	case remaining == 0 && (vrf != "" || ip != ""):
+	if ip != "" || routed.Params[sonic.FieldVRF] != "" {
 		cs.Deletes(deleteInterfaceBaseConfig(i.name))
-	case vrf != "":
-		cs.Adds(bindVrfConfig(i.name, ""))
 	}
 	return i.node.deleteIntent(cs, key)
 }

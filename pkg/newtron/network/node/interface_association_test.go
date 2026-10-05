@@ -278,3 +278,55 @@ func TestUnconfigure_IRBKeepsItsIdentity(t *testing.T) {
 		t.Error("the SVI base entry went without its record")
 	}
 }
+
+// A routed association and a routed service both own an interface's L3 config,
+// so each refuses the other: whichever is there first is the interface's one
+// authority. A routed service also makes the interface routed for a VLAN join.
+func TestAssociation_RoutedConfigAndRoutedServiceExclude(t *testing.T) {
+	ctx := context.Background()
+	setup := func(t *testing.T) (*Node, *Interface) {
+		n := newTestAbstractNode()
+		n.SpecProvider.(*testSpecProvider).services["TRANSIT"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeRouted}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatal(err)
+		}
+		i, _ := n.GetInterface("Ethernet0")
+		return n, i
+	}
+	refused := func(t *testing.T, what string, err error) {
+		t.Helper()
+		if !errors.Is(err, util.ErrPreconditionFailed) {
+			t.Errorf("%s: err = %v, want a precondition refusal", what, err)
+		}
+	}
+	t.Run("routed config then service", func(t *testing.T) {
+		n, i := setup(t)
+		if _, err := i.ConfigureInterface(ctx, InterfaceConfig{IP: "10.1.0.0/31"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := i.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.2.0.0/31"})
+		refused(t, "apply-service on a routed interface", err)
+		if n.GetIntent(bindingKey("Ethernet0")) != nil {
+			t.Error("a refused apply-service left a binding")
+		}
+	})
+	t.Run("service then routed config", func(t *testing.T) {
+		n, i := setup(t)
+		if _, err := i.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.2.0.0/31"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := i.ConfigureInterface(ctx, InterfaceConfig{IP: "10.1.0.0/31"})
+		refused(t, "configure-interface (routed) under a routed service", err)
+		if n.GetIntent(routedKey("Ethernet0")) != nil {
+			t.Error("a refused configure-interface left a routed record")
+		}
+	})
+	t.Run("service then VLAN join", func(t *testing.T) {
+		_, i := setup(t)
+		if _, err := i.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.2.0.0/31"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := i.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true})
+		refused(t, "VLAN join under a routed service", err)
+	})
+}
