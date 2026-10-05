@@ -78,6 +78,13 @@ steps:
     url: /nodes/{{device}}/interfaces/Ethernet10/clear-property
     params: {property: description}
 
+  - name: clear-admin-status
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /nodes/{{device}}/interfaces/Ethernet10/clear-property
+    params: {property: admin_status}
+
   # The last record removed above takes the interface's identity record with it.
   - name: verify-ethernet10-identity-reaped
     action: newtron
