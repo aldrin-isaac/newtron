@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -225,4 +226,107 @@ func equalSet(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// unconfigure-interface removes every record through its own reverse, so a
+// property is cleared back to its default, not left behind unmanaged.
+func TestUnconfigure_ClearsProperties(t *testing.T) {
+	ctx := context.Background()
+	n := newTestAbstractNode()
+	i, _ := n.GetInterface("Ethernet0")
+	if _, err := i.SetProperty(ctx, "mtu", "9000"); err != nil {
+		t.Fatalf("SetProperty: %v", err)
+	}
+	cs, err := i.UnconfigureInterface(ctx)
+	if err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+	c := assertChange(t, cs, "PORT", "Ethernet0", ChangeModify)
+	if got := c.Fields["mtu"]; got != strconv.Itoa(spec.DefaultPortMTU) {
+		t.Errorf("PORT mtu after unconfigure = %q, want the default %d", got, spec.DefaultPortMTU)
+	}
+	if n.GetIntent("interface|Ethernet0") != nil {
+		t.Error("identity record survived unconfigure-interface")
+	}
+}
+
+// unconfigure-interface on an IRB removes the records on it but leaves its
+// configure-irb record — and so its SVI — to unconfigure-irb.
+func TestUnconfigure_IRBKeepsItsIdentity(t *testing.T) {
+	ctx := context.Background()
+	n := newTestAbstractNode()
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+		t.Fatal(err)
+	}
+	irb, _ := n.GetInterface("Vlan100")
+	if _, err := irb.AddBGPPeer(ctx, DirectBGPPeerConfig{NeighborIP: "10.1.100.2", RemoteAS: 65099}); err != nil {
+		t.Fatalf("AddBGPPeer: %v", err)
+	}
+	if _, err := irb.UnconfigureInterface(ctx); err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+	if n.GetIntent("interface|Vlan100|bgp-peer") != nil {
+		t.Error("BGP peer survived unconfigure-interface")
+	}
+	if n.GetIntent("interface|Vlan100") == nil {
+		t.Error("unconfigure-interface removed the IRB's configure-irb record; unconfigure-irb owns it")
+	}
+	if _, ok := n.ConfigDB().VLANInterface["Vlan100"]; !ok {
+		t.Error("the SVI base entry went without its record")
+	}
+}
+
+// A routed association and a routed service both own an interface's L3 config,
+// so each refuses the other: whichever is there first is the interface's one
+// authority. A routed service also makes the interface routed for a VLAN join.
+func TestAssociation_RoutedConfigAndRoutedServiceExclude(t *testing.T) {
+	ctx := context.Background()
+	setup := func(t *testing.T) (*Node, *Interface) {
+		n := newTestAbstractNode()
+		n.SpecProvider.(*testSpecProvider).services["TRANSIT"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeRouted}
+		if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+			t.Fatal(err)
+		}
+		i, _ := n.GetInterface("Ethernet0")
+		return n, i
+	}
+	refused := func(t *testing.T, what string, err error) {
+		t.Helper()
+		if !errors.Is(err, util.ErrPreconditionFailed) {
+			t.Errorf("%s: err = %v, want a precondition refusal", what, err)
+		}
+	}
+	t.Run("routed config then service", func(t *testing.T) {
+		n, i := setup(t)
+		if _, err := i.ConfigureInterface(ctx, InterfaceConfig{IP: "10.1.0.0/31"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := i.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.2.0.0/31"})
+		refused(t, "apply-service on a routed interface", err)
+		if n.GetIntent(bindingKey("Ethernet0")) != nil {
+			t.Error("a refused apply-service left a binding")
+		}
+	})
+	t.Run("service then routed config", func(t *testing.T) {
+		n, i := setup(t)
+		if _, err := i.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.2.0.0/31"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := i.ConfigureInterface(ctx, InterfaceConfig{IP: "10.1.0.0/31"})
+		refused(t, "configure-interface (routed) under a routed service", err)
+		if n.GetIntent(routedKey("Ethernet0")) != nil {
+			t.Error("a refused configure-interface left a routed record")
+		}
+	})
+	t.Run("service then VLAN join", func(t *testing.T) {
+		_, i := setup(t)
+		if _, err := i.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.2.0.0/31"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := i.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: true})
+		refused(t, "VLAN join under a routed service", err)
+	})
 }

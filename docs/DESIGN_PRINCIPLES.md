@@ -653,35 +653,35 @@ lives on Node because the node holds the device connection.
 definitions independent of any device.
 
 ```
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│                     Network                     │
-│                   owns: specs                   │
-│      GetService(), GetFilter(), GetZone()       │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│                                                │
+│                    Network                     │
+│                  owns: specs                   │
+│      GetService(), GetFilter(), GetZone()      │
+│                                                │
+└────────────────────────────────────────────────┘
   │
   │ parent ref
-  │ (spec lookup)
+  │ (SpecProvider)
   ▼
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│                      Node                       │
-│  owns: profile, resolved specs, Redis, ConfigDB │
-│   SetupDevice(), CreateVLAN(), CreateVRF()     │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│                                                │
+│                      Node                      │
+│ owns: profile, resolved specs, Redis, ConfigDB │
+│    SetupDevice(), CreateVLAN(), CreateVRF()    │
+│                                                │
+└────────────────────────────────────────────────┘
   │
   │ parent ref
   ▼
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│                    Interface                    │
-│  owns: interface identity (name + parent node)  │
-│   ApplyService(), RemoveService(), BindQoS()    │
-│    SetIP(), SetVRF(), BindACL(), UnbindACL()    │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│                                                │
+│                   Interface                    │
+│ owns: interface identity (name + parent node)  │
+│   ApplyService(), RemoveService(), BindQoS()   │
+│  ConfigureInterface(), BindACL(), UnbindACL()  │
+│                                                │
+└────────────────────────────────────────────────┘
 ```
 
 The general principle: **a method belongs to the smallest object that

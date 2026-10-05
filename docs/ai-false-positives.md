@@ -182,7 +182,7 @@ using 3 targeted agents (one per dimension) found all 7 violations.
 | `AddBGPPeer` | interface_bgp_ops.go | Missing `render(cs)` — BGP entries never in projection |
 | `TeardownVTEP` | evpn_ops.go | Missing `render(cs)` |
 | `RemoveBGPGlobals` | bgp_ops.go | Missing `render(cs)` |
-| `RemoveIP` | interface_ops.go | Missing `render(cs)` |
+| `RemoveIP` — since removed | interface_ops.go | Missing `render(cs)` |
 | `generateServiceEntries` (ingress ACL) — since removed | service_ops.go | Intent stored `{rules}` only; reconstruction needs `name`, `type`, `stage`, `ports`, `description` |
 | `generateServiceEntries` (egress ACL) — since removed | service_ops.go | Same as above |
 

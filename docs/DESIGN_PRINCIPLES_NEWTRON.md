@@ -521,8 +521,8 @@ the rest of this section is where the abstraction meets SONiC.
 
 Container membership is the one boundary on this isolation (universal
 §6). A PortChannel member cedes its L2/L3 configuration to the LAG —
-`SetIP` and `ConfigureInterface` on a member are refused with "configure
-the PortChannel instead". A member of a serviced VLAN cedes its
+configuring a member (`ConfigureInterface`, `SetProperty`) is refused;
+the PortChannel is configured instead. A member of a serviced VLAN cedes its
 service-derived policy rows to the VLAN's IRB binding: those rows are
 derived from the binding and the membership, owned by the IRB service
 and bound from it, not carried by the port
@@ -540,35 +540,35 @@ lives on ChangeSet (passing the Node for its Redis connection).
 definitions independent of any device.
 
 ```
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│                     Network                     │
-│                   owns: specs                   │
-│      GetService(), GetFilter(), GetZone()       │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│                                                │
+│                    Network                     │
+│                  owns: specs                   │
+│      GetService(), GetFilter(), GetZone()      │
+│                                                │
+└────────────────────────────────────────────────┘
   │
   │ parent ref
-  │ (spec lookup)
+  │ (SpecProvider)
   ▼
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│                      Node                       │
-│  owns: profile, resolved specs, Redis, ConfigDB │
-│   SetupDevice(), CreateVLAN(), CreateVRF()     │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│                                                │
+│                      Node                      │
+│ owns: profile, resolved specs, Redis, ConfigDB │
+│    SetupDevice(), CreateVLAN(), CreateVRF()    │
+│                                                │
+└────────────────────────────────────────────────┘
   │
   │ parent ref
   ▼
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│                    Interface                    │
-│  owns: interface identity (name + parent node)  │
-│   ApplyService(), RemoveService(), BindQoS()    │
-│    SetIP(), SetVRF(), BindACL(), UnbindACL()    │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│                                                │
+│                   Interface                    │
+│ owns: interface identity (name + parent node)  │
+│   ApplyService(), RemoveService(), BindQoS()   │
+│  ConfigureInterface(), BindACL(), UnbindACL()  │
+│                                                │
+└────────────────────────────────────────────────┘
 ```
 
 The general principle: **a method belongs to the smallest object that

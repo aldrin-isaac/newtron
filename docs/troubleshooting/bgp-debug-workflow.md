@@ -301,5 +301,4 @@ exists, err := node.ConfigDBEntryExists("BGP_NEIGHBOR", "default|10.0.0.2")
 
 - `docs/rca/019-*`: BGP local-as conflicts with router ASN
 - `docs/rca/020-*`: SONiC VPP port count must match NIC count
-- `docs/rca/021-*`: SetIP requires both base and IP entries
 - `docs/rca/022-*`: CiscoVS build issues and orchagent timeouts

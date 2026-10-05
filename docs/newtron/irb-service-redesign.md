@@ -290,7 +290,7 @@ than a Junos gateway filter. The `ingress_filter`/`qos_policy` tooltips name thi
 - **Bridged / evpn-bridged services are composites too — but deliver per-access-port.**
   A follow-up made them composites like the irb: `apply-service` assembles the L2
   bridge domain it delivers (the VLAN, the L2VNI overlay for evpn, and this port's
-  access membership) via the shared `createBridgeDomain` + `createAccessMembership`
+  access membership) via the shared `createBridgeDomain` + `createVLANMembership`
   primitives, then binds on the access port. An irb *integrates* routing and
   bridging, so it composes that same L2 domain and adds an SVI gateway on top;
   a bridged service composes it and stops at the membership — the two halves of

@@ -444,7 +444,7 @@ func buildOpRegistry() map[string]*OpSpec {
 		},
 
 		sonic.OpAddBGPPeer: {
-			Op: sonic.OpAddBGPPeer, Scope: ScopeInterface, Inverse: "device.remove-bgp-peer",
+			Op: sonic.OpAddBGPPeer, Scope: ScopeInterface, Inverse: "interface.remove-bgp-peer",
 			Needs: []InterfaceCapability{CapabilityBGPPeering},
 			Params: []ParamSpec{
 				required(sonic.FieldNeighborIP), required(sonic.FieldRemoteAS),

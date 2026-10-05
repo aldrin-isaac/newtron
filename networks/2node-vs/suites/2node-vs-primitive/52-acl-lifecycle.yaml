@@ -6,13 +6,6 @@ description: |
 requires: [setup-device]
 
 steps:
-  # Create interface intent (I4: parent must exist for ACL binding sub-resource)
-  - name: configure-ethernet40
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet40/configure-interface
-
   - name: create-acl-table
     action: newtron
     devices: [switch1]
@@ -131,9 +124,10 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # Cleanup: remove the interface configuration
-  - name: unconfigure-ethernet40
+  # The last record removed above takes the interface's identity record with it.
+  - name: verify-ethernet40-identity-reaped
     action: newtron
     devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet40/unconfigure-interface
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet40/exists
+    expect:
+      jq: '.exists == false'

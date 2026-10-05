@@ -2,18 +2,11 @@ name: interface-props
 description: |
   Self-contained interface property lifecycle on sw1:Ethernet40.
   Tests mtu, admin_status, and description set/verify primitives.
-  ConfigureInterface creates the interface intent anchor that property
-  sub-resources attach to (I4 enforcement).
+  The first property creates the interface's identity record and clearing
+  the last one removes it.
 requires: [setup-device]
 
 steps:
-  # Create interface intent anchor (parent for property sub-resources)
-  - name: configure-ethernet40
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet40/configure-interface
-
   - name: set-mtu-9100
     action: newtron
     devices: [switch1]
@@ -85,8 +78,17 @@ steps:
     url: /nodes/{{device}}/interfaces/Ethernet40/clear-property
     params: {property: description}
 
-  - name: unconfigure-ethernet40
+  - name: clear-admin-status
     action: newtron
     devices: [switch1]
     method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet40/unconfigure-interface
+    url: /nodes/{{device}}/interfaces/Ethernet40/clear-property
+    params: {property: admin_status}
+
+  # The last record removed above takes the interface's identity record with it.
+  - name: verify-ethernet40-identity-reaped
+    action: newtron
+    devices: [switch1]
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet40/exists
+    expect:
+      jq: '.exists == false'

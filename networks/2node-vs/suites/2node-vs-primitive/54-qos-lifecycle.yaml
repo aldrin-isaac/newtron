@@ -14,13 +14,6 @@ description: |
 requires: [setup-device]
 
 steps:
-  # Create interface intent (I4: parent must exist for QoS sub-resource)
-  - name: configure-ethernet44
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet44/configure-interface
-
   - name: bind-qos-ethernet44
     action: newtron
     devices: [switch1]
@@ -118,9 +111,10 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # Cleanup: remove the interface configuration
-  - name: unconfigure-ethernet44
+  # The last record removed above takes the interface's identity record with it.
+  - name: verify-ethernet44-identity-reaped
     action: newtron
     devices: [switch1]
-    method: POST
-    url: /nodes/{{device}}/interfaces/Ethernet44/unconfigure-interface
+    url: /nodes/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet44/exists
+    expect:
+      jq: '.exists == false'

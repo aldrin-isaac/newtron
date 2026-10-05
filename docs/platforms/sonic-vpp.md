@@ -82,7 +82,7 @@ docker restart bgp
 
 **Reference:** RCA-020
 
-### 5. SetIP Requires Base Entry
+### 5. An Interface IP Requires a Base Entry
 
 **Issue:** SONiC requires both base and IP entries in CONFIG_DB.
 
@@ -93,9 +93,10 @@ docker restart bgp
 "INTERFACE|Ethernet1|10.1.1.1/30": {}        // IP entry
 ```
 
-**Workaround:** newtron always writes base entry first in SetIP operation.
+**Workaround:** configure-interface writes the base entry (or the VRF binding,
+which is the base entry) before the IP entry.
 
-**Reference:** device-lld.md, SetIP implementation
+**Reference:** `createRoutedAssociation` in interface_ops.go
 
 ### 6. No ACL Support
 

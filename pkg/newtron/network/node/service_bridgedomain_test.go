@@ -880,3 +880,46 @@ func TestMemberPolicy_QoSBindPointGate(t *testing.T) {
 		}
 	})
 }
+
+// A bridged service's port is a VLAN member like any other: joining through the
+// service brings it the per-member policy of an irb service on that VLAN, and
+// removing the service withdraws it (§4). The service joins through the same
+// membership owner as configure-interface.
+func TestMemberPolicy_BridgedServiceMemberReceivesPolicy(t *testing.T) {
+	ctx := context.Background()
+	n, _ := testInterface()
+	sp := n.SpecProvider.(*testSpecProvider)
+	sp.services["CUST_IRB_ACL"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeIRB, IngressFilter: "FILTER1"}
+	sp.filterSpecs["FILTER1"] = &spec.FilterSpec{Type: "ipv4", Rules: []*spec.FilterRule{{Sequence: 10}}}
+	sp.macvpn["L2_100"] = &spec.MACVPNSpec{VlanID: 100}
+	sp.services["BRIDGED_100"] = &spec.ServiceSpec{ServiceType: spec.ServiceTypeBridged, MACVPN: "L2_100"}
+
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+	if _, err := n.ConfigureIRB(ctx, 100, IRBConfig{IPAddress: "10.1.100.1/24"}); err != nil {
+		t.Fatalf("ConfigureIRB: %v", err)
+	}
+	irb, _ := n.GetInterface("Vlan100")
+	if _, err := irb.ApplyService(ctx, "CUST_IRB_ACL", ApplyServiceOpts{VLAN: 100}); err != nil {
+		t.Fatalf("ApplyService(irb + filter): %v", err)
+	}
+	acl := n.GetIntent(bindingKey("Vlan100")).Params["ingress_acl"]
+
+	e4, err := n.GetInterface("Ethernet4")
+	if err != nil {
+		t.Fatalf("GetInterface Ethernet4: %v", err)
+	}
+	if _, err := e4.ApplyService(ctx, "BRIDGED_100", ApplyServiceOpts{}); err != nil {
+		t.Fatalf("ApplyService(bridged): %v", err)
+	}
+	if got := n.configDB.ACLTable[acl].Ports; got != "Ethernet4" {
+		t.Fatalf("bridged join: ACL ports = %q, want Ethernet4", got)
+	}
+	if _, err := e4.RemoveService(ctx); err != nil {
+		t.Fatalf("RemoveService(bridged): %v", err)
+	}
+	if got := n.configDB.ACLTable[acl].Ports; got != "" {
+		t.Fatalf("bridged leave: ACL ports = %q, want none", got)
+	}
+}

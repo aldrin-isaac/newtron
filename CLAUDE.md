@@ -526,6 +526,24 @@ Before making any change to `service_ops.go`, `*_ops.go`, or any shared code pat
 
 Tracking what was working (update this as test suites are validated):
 
+**Full-sweep 2026-10-05 (interface teardown cleanup, branch refactor/interface-teardown-graph)**:
+all 13 suites, both platforms, cold deploys for every lab-backed suite, auth suites under
+the enforced-auth server. **201 scenarios — 200 passed, 0 failed, 1 by-design skip
+(L2c-round-trip)**: 2node-vs-primitive 25/25, 2node-vs-service 7/7, 2node-vs-drift 7/7,
+2node-vs-drift-actuated 8/8, 2node-ngdp-primitive 22/22, simple-vrf-host 5/5,
+2node-ngdp-service 6/6, 3node-ngdp-dataplane 8/8, 1node-vs-basic 9/9,
+1node-vs-architecture 32/32, 1node-vs-config 29/29, 1node-vs-auth 36/37+1 skip,
+1node-vs-auth-deployed 3/3. Validates unconfigure-interface removing DAG leaves through
+each record's own reverse, the VLAN-membership and routed-association owners, the
+shared IRB teardown, typed refusals, and a routed association and a routed service
+refusing each other on one interface. Every failure on the way was a scenario, none the
+product: six primitive steps sent an empty configure-interface (now a 400) only to
+create the identity record that every operation now creates itself — dropped, and
+each scenario instead asserts the identity is reaped with its last record; that check
+then caught interface-props never clearing the admin_status it set, a leak the old
+trailing unconfigure-interface had hidden. **Process note:** the #535 sweep below ran 9
+of the 13 suites; a "sweep" in this ledger means all 13.
+
 **Interface association sweep 2026-10-04 (#535, branch feat/interface-association-model)**:
 `interface|<port>` is now the port's identity only; its VLAN membership
 (`interface|<port>|vlan|<id>`, untagged or tagged) and its routed association

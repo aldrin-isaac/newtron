@@ -244,10 +244,10 @@ When an operation calls `writeIntent`, it passes the `parents` parameter.
 The operation code determines its own parents from the arguments it received:
 
 ```go
-// createAccessMembership knows the membership depends on the interface and the VLAN
-resource := vlanMembershipKey(i.name, vlanID) // "interface|Ethernet0|vlan|100"
+// createVLANMembership knows the membership depends on the interface and the VLAN
+key := vlanMembershipKey(i.name, vlanID) // "interface|Ethernet0|vlan|100"
 parents := []string{"interface|" + i.name, "vlan|" + strconv.Itoa(vlanID)}
-n.writeIntent(cs, sonic.OpConfigureInterface, resource, params, parents)
+n.writeIntent(cs, op, key, params, parents)
 ```
 
 The parent does not participate in this decision.
@@ -279,7 +279,7 @@ it does not reach into the child's intent record.
 RemoveService (a bridged service on Ethernet0, VLAN 300) orchestrates:
   1. n.deleteIntent("interface|Ethernet0|service")  → the binding deletes itself,
                                                        deregisters from interface, service, VLAN
-  2. iface.destroyAccessMembership(300)  → interface|Ethernet0|vlan|300 deletes itself,
+  2. iface.destroyVLANMembership(300)    → interface|Ethernet0|vlan|300 deletes itself,
                                             deregisters from interface + VLAN
   3. iface.destroyInterfaceIntent()      → interface|Ethernet0 deletes itself if nothing
                                             else is on the port
@@ -736,9 +736,12 @@ hang off the same record. `interface-init` is a side-effect operation — it is 
 exported as a topology step; replaying any child re-creates it.
 
 **`unconfigure-interface` is a full wipe.** It removes every child through its own
-reverse — BGP peer, QoS and ACL bindings, properties — then the VLAN memberships or
-the routed association, then the identity, returning the interface to unmanaged.
-It is refused while a service is bound (`remove-service` owns that teardown).
+reverse, leaves first as the DAG orders them — a BGP peer before the routed
+association that supplies its IP — then the identity, returning the interface to
+unmanaged. A property is cleared back to its default (`clear-property`), not left
+behind. An IRB keeps its identity, the `configure-irb` record, which
+`unconfigure-irb` removes. It is refused while a service is bound (`remove-service`
+owns that teardown).
 
 ---
 
@@ -772,23 +775,27 @@ binding exists; RemoveService reaps composed infrastructure reference-aware (§9
 The interface's membership in VLAN `ID` — untagged (access) or tagged (trunk). One
 record per VLAN: an interface is a tagged or an untagged member of a VLAN, never
 both, and it has at most one untagged VLAN. The bridged / evpn-bridged service
-composite writes the access membership through the same function
-(`createAccessMembership`) and reaps it with the service.
+composite joins through the same function (`createVLANMembership`) and reaps the
+membership with the service. That function owns every join's checks and the
+per-member policy a member receives from an irb service on the VLAN (§4 of
+irb-service-redesign.md); `destroyVLANMembership` withdraws both.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create (untagged) | configure-interface `{vlan_id}` | `ConfigureInterface` → `createAccessMembership` | interface_ops.go |
-| Create (tagged) | add-trunk-vlan (configure-interface `{vlan_id, tagged: true}`) | `ConfigureInterface` | interface_ops.go |
-| Delete (tagged) | remove-trunk-vlan | `RemoveTrunkVLAN` | interface_ops.go |
-| Delete (any) | unconfigure-interface, remove-service (its own membership) | `UnconfigureInterface`, `destroyAccessMembership` | interface_ops.go |
+| Create (untagged) | configure-interface `{vlan_id}` | `ConfigureInterface` → `createVLANMembership` | interface_ops.go |
+| Create (tagged) | add-trunk-vlan (configure-interface `{vlan_id, tagged: true}`) | `ConfigureInterface` → `createVLANMembership` | interface_ops.go |
+| Delete (tagged) | remove-trunk-vlan | `RemoveTrunkVLAN` → `destroyVLANMembership` | interface_ops.go |
+| Delete (any) | unconfigure-interface, remove-service (its own membership) | `destroyVLANMembership` | interface_ops.go |
 
 **Parents**: `[interface|INTF, vlan|ID]`. The membership is a child of the VLAN, so
 `delete-vlan` is refused while any interface is a member (I5). Nothing parents to a
 membership, so it can always be removed, whatever else the interface carries.
 
 An interface is bridged or routed, never both: joining a VLAN is refused while the
-interface has a routed association (§10.7.3), and routing is refused while it has
-any membership.
+interface has a routed association (§10.7.3) or a routed service, and routing is
+refused while it has any membership. Its L3 config has one author: a routed
+association and a routed or evpn-routed service refuse each other, since each would
+overwrite the other's base entry and address.
 
 ---
 
@@ -798,8 +805,8 @@ The interface's L3 association: its IP address and, optionally, its VRF binding.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create / update in mode | configure-interface `{ip, vrf}` | `ConfigureInterface` | interface_ops.go |
-| Delete | unconfigure-interface | `UnconfigureInterface` | interface_ops.go |
+| Create / update in mode | configure-interface `{ip, vrf}` | `ConfigureInterface` → `createRoutedAssociation` | interface_ops.go |
+| Delete | unconfigure-interface | `UnconfigureInterface` → `destroyRoutedAssociation` | interface_ops.go |
 
 **Parents**: `[interface|INTF]`, plus `vrf|NAME` when a VRF is bound — so a VRF
 cannot be deleted while an interface is routed in it. Changing the VRF changes the
@@ -1710,5 +1717,5 @@ and VRF are parents of the associations, so neither can be deleted while an
 interface is in it.
 
 Teardown respects the tree: `UnconfigureInterface` removes every record through
-its own reverse, the association last, then the identity. The interface is both
+its own reverse, leaves first, then the identity. The interface is both
 the point of service and the anchor of every record on it.
