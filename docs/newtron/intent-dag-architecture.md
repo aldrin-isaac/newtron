@@ -355,12 +355,14 @@ Ties within the same topological level are broken by resource key
 manually maintained priority numbers are needed.
 
 Side-effect records (`interface-init`, `deploy-service`) are not steps — the
-first child that replays re-creates them — so they take no part in the sort. A
-record whose only parents are side-effect records is a root, ordered among the
-roots by key alone. Any order replay must honour therefore needs an edge between
-non-side-effect records: a BGP peer replays after the IP it uses because it is a
-child of the record that supplies that IP (§10.17), not merely of the interface
-identity.
+first child that replays re-creates them. Their dependencies still count: the sort
+passes through a side-effect record to its own parents, so a record parented on
+one is ordered after whatever that record depends on. A LAG's routed association
+hangs on the LAG's `interface-init` identity, which hangs on
+`portchannel|PortChannel1`; the pass-through is what replays the IP after the
+PortChannel exists. A dependency the identity does not carry still needs its own
+edge: a BGP peer replays after the IP it uses because it is a child of the record
+that supplies that IP (§10.17), not merely of the interface identity.
 
 ### 6.4 Order Enforcement Subsumed by the DAG
 

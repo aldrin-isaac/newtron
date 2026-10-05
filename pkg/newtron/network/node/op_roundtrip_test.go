@@ -176,6 +176,16 @@ var roundTripSequence = []opInvocation{
 		_, err := n.AddPortChannelMember(ctx, "PortChannel10", "Ethernet12")
 		return err
 	}},
+	{"configure-interface (routed LAG)", func(ctx context.Context, n *Node) error {
+		// The routed association hangs on the LAG's interface-init identity, a
+		// side effect replay skips; it must still replay after the PortChannel.
+		i, err := iface(n, "PortChannel10")
+		if err != nil {
+			return err
+		}
+		_, err = i.ConfigureInterface(ctx, InterfaceConfig{IP: "10.30.0.0/31"})
+		return err
+	}},
 	{"create-acl", func(ctx context.Context, n *Node) error {
 		_, err := n.CreateACL(ctx, "EDGE_IN", ACLConfig{
 			Type:        "L3",

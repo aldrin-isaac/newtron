@@ -1117,10 +1117,11 @@ Two operations are side effects:
 | `deploy-service` | the first `ApplyService` replay for the service |
 
 They exist on the device but are not steps: replaying them directly would
-conflict with their re-creation as a side effect. Because a side-effect record
-takes no part in the sort, a record whose only parents are side effects is a root
-— an order replay must honour needs an edge between non-side-effect records
-(a BGP peer's edge to the record supplying its IP, §7.6).
+conflict with their re-creation as a side effect. The sort passes through a
+side-effect record to its parents, so a LAG's routed association (parent: the
+LAG's `interface-init` identity, whose parent is the portchannel) replays after
+the PortChannel. A dependency the identity does not carry needs its own edge — a
+BGP peer's edge to the record supplying its IP (§7.6).
 
 ## 9. Worked Examples
 
